@@ -1,0 +1,39 @@
+{
+  "name": "@openadam/agent-host-suite",
+  "version": "0.1.0",
+  "description": "Install and operate a small, verified Agent-host execution stack.",
+  "license": "Apache-2.0",
+  "author": "openAdam",
+  "homepage": "https://github.com/tetracoralla/agent-host-suite",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tetracoralla/agent-host-suite.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": "^22.12.0"
+  },
+  "bin": {
+    "agent-host": "bin/agent-host.mjs"
+  },
+  "files": [
+    "bin/",
+    "catalog/",
+    "schemas/",
+    "src/",
+    "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.txt",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "npm run check:syntax && npm test && npm run check:repository && npm run check:package",
+    "check:package": "node scripts/check-package.mjs",
+    "check:repository": "node scripts/check-repository.mjs",
+    "check:syntax": "node --check bin/agent-host.mjs && node scripts/check-syntax.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "openadam.agent-host-profile.v0.1",
+  "id": "observability",
+  "extends": "standard",
+  "components": [
+    "agent-tool-observer",
+    "context-surface-analyzer"
+  ],
+  "requiresConsent": true
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.example/schemas/agent-host-state.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "suiteVersion", "channel", "profile", "installedAt", "updatedAt", "components", "hosts", "runtime", "observability"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-state.v0.1" },
+    "suiteVersion": { "type": "string", "minLength": 1 },
+    "channel": { "enum": ["development", "release"] },
+    "profile": { "type": "string", "minLength": 1 },
+    "installedAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "developmentRoot": { "type": "string", "minLength": 1 },
+    "components": { "type": "object" },
+    "hosts": { "type": "object" },
+    "runtime": { "type": "object" },
+    "observability": { "type": "object" },
+    "rolledBackFrom": { "type": "string" }
+  }
+}

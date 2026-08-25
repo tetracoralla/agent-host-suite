@@ -1,0 +1,39 @@
+import { readFile, readdir, stat } from 'node:fs/promises'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = fileURLToPath(new URL('../', import.meta.url))
+const required = [
+  'AGENTS.md', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'CHANGELOG.md',
+  'Package.swift', 'macos/Info.plist', 'docs/PRODUCT_MODEL.md', 'docs/ARCHITECTURE.md', 'docs/RELEASE.md', 'docs/REVIEW_CONTRACT.md',
+  '.github/workflows/ci.yml', '.github/workflows/codeql.yml', '.github/workflows/release.yml',
+]
+for (const path of required) {
+  if (!(await stat(join(root, path))).isFile()) throw new Error(`missing required public file: ${path}`)
+}
+
+async function files(directory) {
+  const output = []
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.build') continue
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) output.push(...await files(path))
+    else output.push(path)
+  }
+  return output
+}
+
+const publicFiles = await files(root)
+for (const path of publicFiles.filter((item) => item.endsWith('.json'))) JSON.parse(await readFile(path, 'utf8'))
+const forbidden = [
+  ['/Users', 'openadam', ''].join('/'),
+  ['BEGIN', 'PRIVATE', 'KEY'].join(' '),
+  ['APPLE', 'DEVELOPER', 'ID', 'P12', 'BASE64='].join('_'),
+]
+for (const path of publicFiles.filter((item) => /\.(?:md|mjs|json|toml|yml|yaml|swift|plist|sh|txt)$/u.test(item))) {
+  const text = await readFile(path, 'utf8')
+  for (const value of forbidden) if (text.includes(value)) throw new Error(`${relative(root, path)} contains forbidden tracked material: ${value}`)
+}
+const release = JSON.parse(await readFile(join(root, 'catalog/releases/draft-unbound.v0.1.json'), 'utf8'))
+if (release.status !== 'draft-unbound' || release.components.length !== 0) throw new Error('unbound release catalog must fail closed')
+console.log(`repository invariants passed for ${publicFiles.length} public files`)

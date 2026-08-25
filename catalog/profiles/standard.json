@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "openadam.agent-host-profile.v0.1",
+  "id": "standard",
+  "components": [
+    "direct-execution-runtime",
+    "math-anchor",
+    "migratory-time"
+  ]
+}

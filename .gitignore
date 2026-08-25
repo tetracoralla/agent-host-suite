@@ -1,0 +1,8 @@
+node_modules/
+.build/
+dist/
+.verify/
+.DS_Store
+*.log
+*.sock
+catalog/local/

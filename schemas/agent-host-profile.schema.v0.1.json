@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.example/schemas/agent-host-profile.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "components"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-profile.v0.1" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "extends": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "requiresConsent": { "type": "boolean" }
+  }
+}

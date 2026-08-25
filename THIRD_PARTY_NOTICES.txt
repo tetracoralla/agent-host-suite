@@ -1,0 +1,15 @@
+Agent Host Suite third-party notices
+
+The command-line package depends on @modelcontextprotocol/sdk and its transitive
+Node.js dependencies. The macOS app development bundle includes those packages
+under Contents/Resources/agent-host-suite/node_modules. Each package retains
+its own LICENSE or license metadata at that location.
+
+The generated SPDX software bill of materials is the authoritative inventory
+for exact package names and versions in one built app. The current dependency
+set uses MIT, ISC, BSD-2-Clause, or BSD-3-Clause terms. These third-party terms
+do not change Agent Host Suite's Apache-2.0 license.
+
+Primary dependency:
+
+- Model Context Protocol TypeScript SDK, Copyright Anthropic, PBC, MIT License
