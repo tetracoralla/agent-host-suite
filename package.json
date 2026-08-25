@@ -11,7 +11,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.16.0"
   },
   "bin": {
     "agent-host": "bin/agent-host.mjs"
