@@ -1,6 +1,7 @@
 {
   "schemaVersion": "openadam.agent-host-profile.v0.1",
   "id": "observability",
+  "displayName": "Standard + local monitoring",
   "extends": "standard",
   "components": [
     "agent-tool-observer",

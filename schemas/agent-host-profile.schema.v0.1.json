@@ -7,6 +7,7 @@
   "properties": {
     "schemaVersion": { "const": "openadam.agent-host-profile.v0.1" },
     "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
     "extends": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "components": {
       "type": "array",

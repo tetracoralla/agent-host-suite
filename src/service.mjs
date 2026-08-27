@@ -58,13 +58,54 @@ export function defaultLaunchAgentPath() {
   return join(userInfo().homedir, 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`)
 }
 
+export async function preflightServiceInstallation(runner = runFile, launchAgentPath = defaultLaunchAgentPath()) {
+  if (platform() !== 'darwin') {
+    throw new AgentHostError('SERVICE_PLATFORM_UNSUPPORTED', `Automatic service installation is not implemented on ${platform()}`)
+  }
+  try {
+    const info = await lstat(launchAgentPath)
+    if (info.isSymbolicLink() || !info.isFile()) {
+      throw new AgentHostError('SERVICE_PATH_UNSAFE', 'The local execution service path is not a regular file')
+    }
+    throw new AgentHostError('SERVICE_CONFLICT', 'Another local execution service is already configured', { launchAgentPath })
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  const domain = `gui/${process.getuid()}`
+  const loaded = await runner('/bin/launchctl', ['print', `${domain}/${SERVICE_LABEL}`], { allowFailure: true })
+  if (loaded.status === 0) {
+    throw new AgentHostError('SERVICE_CONFLICT', 'Another local execution service is already running')
+  }
+  return { supported: true, label: SERVICE_LABEL, launchAgentPath }
+}
+
 export async function inspectService(serviceState = null, runner = runFile) {
   if (platform() !== 'darwin') return { supported: false, platform: platform() }
+  if (serviceState === null || serviceState === undefined) {
+    return { supported: true, configured: false, loaded: false, launchAgentPath: null }
+  }
   const domain = `gui/${process.getuid()}`
   const result = await runner('/bin/launchctl', ['print', `${domain}/${SERVICE_LABEL}`], { allowFailure: true })
+  const loaded = result.status === 0
+  const running = loaded && /^\s*state = running\s*$/mu.test(result.stdout)
+  let socketPresent = null
+  if (typeof serviceState.socketPath === 'string') {
+    try {
+      socketPresent = (await lstat(serviceState.socketPath)).isSocket()
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+      socketPresent = false
+    }
+  }
+  const lastExitMatch = result.stdout.match(/^\s*last exit code = (-?\d+)\s*$/mu)
   return {
     supported: true,
-    loaded: result.status === 0,
+    configured: true,
+    loaded,
+    running,
+    socketPresent,
+    ready: loaded && running && socketPresent !== false,
+    lastExitCode: lastExitMatch === null ? null : Number(lastExitMatch[1]),
     launchAgentPath: serviceState?.launchAgentPath ?? defaultLaunchAgentPath(),
   }
 }
@@ -83,9 +124,9 @@ export async function installService(runtime, files, runner = runFile, existingS
     if (existingState === null) {
       const current = await readFile(launchAgentPath, 'utf8')
       if (!current.includes(`<string>${SERVICE_LABEL}</string>`)) {
-        throw new AgentHostError('SERVICE_CONFLICT', `LaunchAgent path already belongs to another service: ${launchAgentPath}`)
+        throw new AgentHostError('SERVICE_CONFLICT', 'The local execution service path belongs to another service', { launchAgentPath })
       }
-      throw new AgentHostError('SERVICE_CONFLICT', `An unmanaged ${SERVICE_LABEL} LaunchAgent already exists`)
+      throw new AgentHostError('SERVICE_CONFLICT', 'Another local execution service is already configured', { launchAgentPath })
     }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error

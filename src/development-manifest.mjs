@@ -119,7 +119,15 @@ export async function buildDevelopmentManifest(developmentRoot) {
     ['cli', 'src/cli.mjs'],
     ['runtime', 'src/runtime.mjs'],
     ['service', 'src/host-service.mjs'],
+    ['host-client', 'src/host-client.mjs'],
+    ['host-protocol', 'src/host-protocol.mjs'],
+    ['operation-projection', 'src/operation-projection.mjs'],
+    ['mcp-session', 'src/sessions/mcp-session.mjs'],
+    ['schema-loader', 'src/schema.mjs'],
     ['config-schema', 'schemas/provider-config.schema.json'],
+    ['work-order-schema', 'schemas/work-order.schema.json'],
+    ['selection-schema', 'schemas/contract-selection.schema.json'],
+    ['host-request-schema', 'schemas/host-request.schema.json'],
   ]
   const runtimeIdentity = []
   for (const [name, relative] of runtimeFiles) runtimeIdentity.push({ name, path: await requireFile(roots.runtime, relative, `Direct Runtime ${name}`) })

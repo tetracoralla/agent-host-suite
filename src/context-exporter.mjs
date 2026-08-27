@@ -7,7 +7,7 @@ async function listProviderTools(id, component) {
   const transport = new StdioClientTransport({
     command: component.command,
     args: component.args,
-    cwd: component.pluginRoot,
+    cwd: component.cwd ?? component.pluginRoot,
     stderr: 'pipe',
   })
   const client = new Client({ name: 'agent-host-context-exporter', version: '0.1.0' })
@@ -34,17 +34,16 @@ async function listProviderTools(id, component) {
 }
 
 export async function exportManagedCatalog(components) {
-  const providerComponents = [
-    ['math-anchor', components['math-anchor']],
-    ['migratory-time', components['migratory-time']],
-  ]
+  const providerComponents = Object.entries(components)
+    .filter(([, component]) => component.pluginRoot !== undefined && component.command !== undefined && Array.isArray(component.args))
+    .sort(([left], [right]) => left.localeCompare(right))
   const catalogs = []
   for (const [id, component] of providerComponents) catalogs.push(...await listProviderTools(id, component))
   const revisionObject = providerComponents.map(([id, component]) => ({ id, version: component.version, fingerprint: component.fingerprint }))
   return {
     format: 'context-surface.snapshot.v0.1',
     source: {
-      id: 'agent-host-suite:managed-standard-catalog',
+      id: `agent-host-suite:managed-${providerComponents.map(([id]) => id).join('+')}-catalog`,
       revision: sha256(canonicalJson(revisionObject)),
     },
     tools: catalogs,

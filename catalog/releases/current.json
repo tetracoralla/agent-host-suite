@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "openadam.agent-host-release.v0.2",
+  "releaseId": "unbound",
+  "suiteVersion": "0.1.0",
+  "status": "draft-unbound",
+  "createdAt": "2026-08-27T00:00:00.000Z",
+  "platforms": [
+    "darwin-arm64"
+  ],
+  "components": []
+}

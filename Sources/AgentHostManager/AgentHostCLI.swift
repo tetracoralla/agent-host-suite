@@ -31,6 +31,11 @@ struct AgentHostCLI: Sendable {
 
             let payload = process.terminationStatus == 0 ? output : errorOutput
             if process.terminationStatus != 0,
+               !output.isEmpty,
+               let diagnostic = try? JSONDecoder().decode(T.self, from: output) {
+                return diagnostic
+            }
+            if process.terminationStatus != 0,
                let failure = try? JSONDecoder().decode(PublicFailure.self, from: payload) {
                 throw CLIError.failed(code: failure.error.code, message: failure.error.message)
             }
@@ -51,6 +56,10 @@ struct AgentHostCLI: Sendable {
         if let resources = Bundle.main.resourceURL {
             let bundled = resources.appendingPathComponent("agent-host-suite/bin/agent-host.mjs").path
             if FileManager.default.isReadableFile(atPath: bundled) {
+                let bundledNode = resources.appendingPathComponent("agent-host-runtime/node").path
+                if FileManager.default.isExecutableFile(atPath: bundledNode) {
+                    return (bundledNode, [bundled])
+                }
                 for node in ["/opt/homebrew/opt/node@22/bin/node", "/opt/homebrew/bin/node", "/usr/local/bin/node"] where FileManager.default.isExecutableFile(atPath: node) {
                     return (node, [bundled])
                 }
@@ -68,7 +77,27 @@ enum CLIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case let .failed(_, message): message
+        case let .failed(code, message):
+            switch code {
+            case "RELEASE_UNBOUND":
+                "No verified Agent Host release is available yet."
+            case "COMPONENT_PACKAGE_UNAVAILABLE", "DEVELOPMENT_COMPONENT_INVALID":
+                "A required tool package is unavailable in this build. Install a verified release or repair the tool package, then try again."
+            case "CODEX_NOT_INSTALLED":
+                "Codex is not installed or cannot be found on this Mac."
+            case "CODEX_PLUGIN_CONFLICT", "CODEX_MARKETPLACE_CONFLICT":
+                "Codex has a conflicting tool installation that Agent Host left unchanged. Replace it with the managed installation to continue."
+            case "STATE_INVALID_JSON", "STATE_SCHEMA_UNSUPPORTED":
+                "The saved Agent Host state on this Mac is unreadable. Remove the previous installation, then set up again."
+            case "ROLLBACK_UNAVAILABLE", "ROLLBACK_BYTES_UNAVAILABLE":
+                "A complete previous version is not available to restore."
+            case "SERVICE_CONFLICT":
+                "Another Agent Host local execution service is already configured. Open that installation or remove it before setting up again."
+            case "SERVICE_PATH_UNSAFE":
+                "The local execution service cannot be installed safely. Remove the conflicting service entry, then try again."
+            default:
+                message
+            }
         }
     }
 }

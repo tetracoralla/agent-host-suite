@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "openadam.agent-host-profile.v0.1",
+  "id": "local-dogfood",
+  "displayName": "Standard + local tools",
+  "extends": "observability",
+  "components": [
+    "data-transformer",
+    "armorial",
+    "laniakea",
+    "projective",
+    "equatorium",
+    "file-vitals"
+  ]
+}

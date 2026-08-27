@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.example/schemas/agent-host-activity.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "occurredAt", "type", "summary"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-activity.v0.1" },
+    "id": { "type": "string", "format": "uuid" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "type": { "type": "string", "pattern": "^[a-z][a-z0-9.-]*$" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "detail": { "type": "object" }
+  }
+}

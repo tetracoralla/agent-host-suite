@@ -1,6 +1,7 @@
 {
   "schemaVersion": "openadam.agent-host-profile.v0.1",
   "id": "standard",
+  "displayName": "Standard tools",
   "components": [
     "direct-execution-runtime",
     "math-anchor",

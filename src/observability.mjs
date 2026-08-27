@@ -9,6 +9,7 @@ import { resolveStateRoot } from './paths.mjs'
 import { runFile } from './process.mjs'
 import { installMaintenance, uninstallMaintenance } from './maintenance-service.mjs'
 import { loadState, prepareStatePaths, saveState } from './state.mjs'
+import { recordActivity } from './activity.mjs'
 
 const OBSERVER_LABEL = 'com.openadam.agent-tool-observer'
 
@@ -86,6 +87,7 @@ function observerEnvironment(state) {
     ...process.env,
     ATO_STATE_DIR: state.observability.observer.stateDir,
     ATO_DIRECT_RUNTIME_LOGS: state.runtime.observationLog,
+    ATO_NODE_EXECUTABLE: state.components['node-runtime']?.command ?? state.components['agent-tool-observer'].command,
   }
 }
 
@@ -102,6 +104,7 @@ export function observabilitySummary(value) {
     },
     latest: value.latest === null || value.latest === undefined ? null : {
       refreshedAt: value.latest.refreshedAt,
+      deployment: value.latest.deployment ?? null,
       context: {
         catalog: value.latest.context.catalog,
         counts: value.latest.context.counts,
@@ -118,7 +121,8 @@ async function writeAnalysis(paths, state, runner) {
   const analysisPath = join(paths.context, 'managed-catalog.analysis.json')
   await writePrivateJson(snapshotPath, snapshot)
   const analyzer = state.components['context-surface-analyzer']
-  const outcome = await runner(analyzer.command, [...analyzer.args, 'analyze', snapshotPath], {
+  const invocation = contextAnalyzerInvocation(analyzer)
+  const outcome = await runner(invocation.command, [...invocation.args, 'analyze', snapshotPath], {
     cwd: analyzer.root,
     timeoutMs: 60_000,
     maxBuffer: 8 * 1024 * 1024,
@@ -134,6 +138,13 @@ async function writeAnalysis(paths, state, runner) {
   }
   await writePrivateJson(analysisPath, analysis)
   return { snapshot, snapshotPath, analysis, analysisPath }
+}
+
+export function contextAnalyzerInvocation(component) {
+  return {
+    command: component.cliCommand ?? component.command,
+    args: component.cliArgs ?? component.args,
+  }
 }
 
 async function refreshState(state, paths, runner) {
@@ -166,6 +177,12 @@ async function refreshState(state, paths, runner) {
     }))
   return {
     refreshedAt: new Date().toISOString(),
+    deployment: {
+      channel: state.channel,
+      suiteVersion: state.suiteVersion,
+      releaseId: state.releaseId ?? null,
+      components: Object.fromEntries(Object.entries(state.components).map(([id, component]) => [id, component.version])),
+    },
     collection: collected,
     context: {
       source: context.analysis.source,
@@ -214,10 +231,21 @@ export async function enableObservability(options, dependencies = {}) {
   const runner = dependencies.runner ?? runFile
   const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
   const current = await loadState(paths)
-  if (current === null) throw new AgentHostError('NOT_INSTALLED', 'Agent Host Suite is not configured')
+  if (current === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   if (current.observability?.enabled === true) throw new AgentHostError('OBSERVABILITY_ALREADY_ENABLED', 'Observability is already enabled')
-  if (current.channel !== 'development') throw new AgentHostError('OBSERVABILITY_CHANNEL_UNSUPPORTED', `Unsupported channel: ${current.channel}`)
-  const components = await buildDevelopmentObservabilityManifest(current.developmentRoot)
+  let components
+  if (current.channel === 'development') {
+    components = await buildDevelopmentObservabilityManifest(current.developmentRoot)
+  } else if (current.channel === 'release') {
+    components = Object.fromEntries(['agent-tool-observer', 'context-surface-analyzer']
+      .filter((id) => current.components[id] !== undefined)
+      .map((id) => [id, current.components[id]]))
+    if (Object.keys(components).length !== 2) {
+      throw new AgentHostError('OBSERVABILITY_RELEASE_COMPONENTS_MISSING', 'This release does not include local monitoring components')
+    }
+  } else {
+    throw new AgentHostError('OBSERVABILITY_CHANNEL_UNSUPPORTED', `Unsupported channel: ${current.channel}`)
+  }
   const priorLaunchAgent = await backupPriorLaunchAgent(paths, runner)
   const observer = components['agent-tool-observer']
   const candidate = {
@@ -243,6 +271,7 @@ export async function enableObservability(options, dependencies = {}) {
     candidate.observability.latest = await refreshState(candidate, paths, runner)
     candidate.updatedAt = new Date().toISOString()
     await saveState(paths, candidate, { retainCurrent: true })
+    await recordActivity(paths, 'monitoring.enabled', 'Local monitoring turned on')
     return { status: 'enabled', profile: candidate.profile, observability: observabilitySummary(candidate.observability) }
   } catch (error) {
     if (maintenance !== null) await uninstallMaintenance(maintenance, runner).catch(() => {})
@@ -256,7 +285,7 @@ export async function refreshObservability(options, dependencies = {}) {
   const runner = dependencies.runner ?? runFile
   const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
   const state = await loadState(paths)
-  if (state === null) throw new AgentHostError('NOT_INSTALLED', 'Agent Host Suite is not configured')
+  if (state === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   if (state.observability?.enabled !== true) throw new AgentHostError('OBSERVABILITY_DISABLED', 'Observability is not enabled')
   state.observability.latest = await refreshState(state, paths, runner)
   state.updatedAt = new Date().toISOString()
@@ -293,8 +322,11 @@ export async function disableObservability(options, dependencies = {}) {
   const runner = dependencies.runner ?? runFile
   const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
   const state = await loadState(paths)
-  if (state === null) throw new AgentHostError('NOT_INSTALLED', 'Agent Host Suite is not configured')
+  if (state === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   if (state.observability?.enabled !== true) return { status: 'disabled', changed: false }
+  if (state.profile === 'local-dogfood') {
+    throw new AgentHostError('OBSERVABILITY_PROFILE_REQUIRES_ENABLED', 'Switch to the Standard + local monitoring tool set before turning local monitoring off')
+  }
   const results = await teardownObservability(state, paths, runner)
   delete state.components['agent-tool-observer']
   delete state.components['context-surface-analyzer']
@@ -302,6 +334,7 @@ export async function disableObservability(options, dependencies = {}) {
   state.observability = { enabled: false, disabledAt: new Date().toISOString(), dataPreserved: true }
   state.updatedAt = new Date().toISOString()
   await saveState(paths, state, { retainCurrent: true })
+  await recordActivity(paths, 'monitoring.disabled', 'Local monitoring turned off')
   return { status: 'disabled', changed: true, results }
 }
 

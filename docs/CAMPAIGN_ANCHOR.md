@@ -6,49 +6,90 @@ all factual claims.
 
 ## Objective
 
-Reach a GitHub-ready Apache-2.0 Agent Host Suite that makes the current
-Agent-Host architecture work at high quality on this Mac, then prepare honest
-adapters and release automation for additional hosts and platforms.
+Operate this Mac as the primary stranger-equivalent dogfood environment. Keep
+Agent task access to `tools-dev` unrestricted while standard installed tools
+load only from immutable private packages. Preserve an honest boundary between
+local dogfood, whole-catalog isolation, and later public distribution.
 
 ## Current phase
 
-`M2 local product closure and public distribution preparation`
+`M5 P1 local product closure complete, pending owner review`
 
 ## Completion contract
 
-- independent provider repositories remain authoritative for provider code;
-- a strict compatibility manifest binds immutable installable artifacts;
-- standard setup works through official Codex extension points;
-- Direct Runtime runs Math Anchor and Migratory Time through one private local
-  service without a model;
-- update, rollback, uninstall, and opt-in observability have executable paths;
-- the macOS app exposes current state and recovery without protocol-heavy UI;
-- Claude is exercised on this Mac; unobserved platforms remain explicitly
-  pending;
-- source, installed runtime, binary distribution, and owner experience are
-  reported separately.
+- preserve the current uncommitted provider and suite work; do not commit,
+  push, publish, tag, or deploy without separate owner authorization;
+- make setup and uninstall preflight transactional before adding release work;
+- bind every standard component to a strict immutable manifest containing
+  version, platform, archive URL, SHA-256, license, legal material, entrypoint,
+  and identity inputs;
+- package a suite-owned Node runtime, Direct Runtime, Math Anchor, and
+  Migratory Time into locally reproducible immutable Beta artifacts;
+- install release bytes beneath the private suite root and make update,
+  rollback, doctor, repair, and full uninstall work without source checkouts;
+- package and exercise a self-contained ad-hoc-signed internal macOS Beta in an
+  isolated no-source environment;
+- treat Developer ID signing, Apple notarization, Gatekeeper acceptance, and a
+  physically separate clean Mac as externally blocked until the required
+  identity, credentials, and machine are available;
+- report development regression, installed Agent flow, human runtime, binary
+  distribution, and owner experience separately.
+- isolate execution provenance only; never add a `tools-dev` denylist or use
+  workspace restriction as a substitute for installed packaging;
+- keep public signing, notarization, tags, publishing, and remote mutations out
+  of scope until the owner separately authorizes them.
 
 ## Current facts to reacquire
 
-- the development-channel suite is installed on this Mac with Codex and Claude
-  host bindings, Direct Runtime, Observer, Analyzer, and two Provider pilots;
-- current deep doctor checks the installed files, both host bindings, service,
-  and exact Math/time results and is passing;
-- Codex plugin installation is current; a fresh-session natural-language Agent
-  routing check remains a separate acceptance lane;
-- Claude MCP bindings are healthy, but two print-mode model baselines stalled
-  before any API tokens were consumed, so Claude Agent routing is blocked by
-  the current external inference path;
-- the managed eight-tool catalog measures about 52 KB with no name collision;
-- the four core repositories still have dirty local compatibility work and no
-  immutable bound release set;
-- Math Anchor and Migratory Time are public but have no GitHub Release;
-- Math Anchor's runnable plugin runtime is generated and ignored by Git;
-- Migratory Time's plugin currently depends on a host Node 22 executable;
-- the complete Capability local-pilot check remains blocked by a missing
-  Projective adapter build product.
+- the active catalog binds `local-dogfood-20260827.4` and twelve components to
+  exact archive bytes, legal material, descriptors, and file digests;
+- the packaged app contains its own Node runtime and embedded release artifacts;
+  active standard-suite component, marketplace, MCP, runtime, and LaunchAgent
+  entries contain no `tools-dev` execution path;
+- release setup, update, rollback, doctor, keep-history uninstall, and purge are
+  transactional, and focused regressions cover partial host mutation, unsafe
+  purge ordering, managed marketplace rebind, release rollback, and service
+  ownership;
+- an isolated materialization probe starts all nine installed tool runtimes,
+  discovers 33 closed typed tool entries, and rejects any `tools-dev` execution
+  path before installation;
+- the real default Direct Runtime service uses a bounded private socket path,
+  and current projection, Math, native batch, and time-zone probes pass;
+- a valid temporary-profile fresh-task comparison keeps the base Codex config
+  unchanged; Local Math and Time adoption pass, both no-tool controls use zero
+  tools, and Standard Math exposes one current routing failure;
+- a real rollback from dogfood.4 to dogfood.3 and a forward update back to
+  dogfood.4 passed deep installed-runtime checks; the earlier dogfood.3 to
+  dogfood.2 rollback restored seven displaced source bindings before all nine
+  managed plugins returned to private release packages;
+- two consecutive dogfood.4 builds produced identical component archive
+  digests, and rebuilding an existing release ID now fails closed on drift;
+- the release Observer and Analyzer are installed components, and the Observer
+  LaunchAgent uses the release-owned Node rather than Homebrew or source;
+- the packaged App opened against the real current installation, reported
+  Ready with nine tools, two Agent apps, a running local service, and monitoring
+  on; Tools and Settings expose ownership, privacy, restore, removal, and a
+  preview-confirm profile reduction without applying it;
+- Direct Runtime now waits for the listening socket inode before securing it
+  and rejects Unix socket paths that macOS would silently truncate; both have
+  focused regressions;
+- the DMG remains ad-hoc signed, unstapled, and Gatekeeper-rejected by design;
+  this Mac exposes no valid Developer ID signing identity;
+- Agent Host Suite and several provider repositories retain intentional
+  uncommitted work. None was reset, committed, pushed, tagged, published, or
+  deployed;
+- the current enabled Codex catalog has no active plugin or marketplace path
+  beneath `tools-dev`; historical displaced paths remain recovery metadata;
+- the static profile comparison is 20,505 bytes and 8 tools for Standard versus
+  201,876 bytes and 33 tools for Local, with no hard name collision; Local
+  exceeds the harness's 65,536-byte reference budget and remains a concrete
+  context-cost optimization finding rather than a hidden green result.
 
 ## Next action
 
-Finish source-release checks and workflows, then bind immutable Provider and
-core releases before attempting the no-source clean-Mac acceptance run.
+Owner review is the next action. Treat the Standard Math routing failure and
+the Local file-task exploration as concrete feedback for the next optimization
+round, not as grounds for a universal tool-quality claim. Continue accumulating
+version-correlated observations under normal local work. Keep Developer ID
+signing, notarization, tags, public downloads, remote merges, and any future
+third-party tool specification pending separate owner authorization.
