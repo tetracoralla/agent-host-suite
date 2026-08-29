@@ -41,3 +41,38 @@ export async function probeMcpTools(component) {
     await transport.close().catch(() => {})
   }
 }
+
+export async function probeMcpToolsFirstAndRepeat(component, options = {}) {
+  const probe = options.probe ?? probeMcpTools
+  const now = options.now ?? Date.now
+  const repeatTimeoutMs = component.healthTimeoutMs ?? 10000
+  const firstLaunchTimeoutMs = Math.max(
+    repeatTimeoutMs,
+    options.minimumFirstLaunchTimeoutMs ?? 60000,
+  )
+
+  const firstStartedAt = now()
+  const first = await probe({ ...component, healthTimeoutMs: firstLaunchTimeoutMs })
+  const firstLaunchMs = Math.max(0, now() - firstStartedAt)
+  const repeatStartedAt = now()
+  const repeat = await probe({ ...component, healthTimeoutMs: repeatTimeoutMs })
+  const repeatLaunchMs = Math.max(0, now() - repeatStartedAt)
+  if (
+    JSON.stringify(first.tools) !== JSON.stringify(repeat.tools) ||
+    JSON.stringify(first.server) !== JSON.stringify(repeat.server)
+  ) {
+    throw new AgentHostError(
+      'TOOL_HEALTH_CATALOG_UNSTABLE',
+      `${component.displayName ?? 'Installed tool'} changed its tool catalog or server identity between first and repeat launch`,
+    )
+  }
+
+  return {
+    first,
+    repeat,
+    firstLaunchMs,
+    repeatLaunchMs,
+    firstLaunchTimeoutMs,
+    repeatTimeoutMs,
+  }
+}

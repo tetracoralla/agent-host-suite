@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { loadProfile } from '../src/profile.mjs'
 import { cleanupMaterializedRelease, materializeRelease } from '../src/release-artifacts.mjs'
 import { loadReleaseManifest } from '../src/release-manifest.mjs'
-import { probeMcpTools } from '../src/mcp-health.mjs'
+import { probeMcpToolsFirstAndRepeat } from '../src/mcp-health.mjs'
 import { prepareStatePaths } from '../src/state.mjs'
 
 const suiteRoot = fileURLToPath(new URL('../', import.meta.url))
@@ -28,8 +28,14 @@ try {
     }
     if (component.toolIntegrationSchema !== undefined) {
       try {
-        const probe = await probeMcpTools(component)
-        results.push({ id, version: component.version, tools: probe.tools })
+        const probe = await probeMcpToolsFirstAndRepeat(component)
+        results.push({
+          id,
+          version: component.version,
+          tools: probe.repeat.tools,
+          firstLaunchMs: probe.firstLaunchMs,
+          repeatLaunchMs: probe.repeatLaunchMs,
+        })
       } catch (error) {
         failures.push({ id, code: error.code ?? 'PROBE_FAILED', message: error.message, details: error.details ?? null })
       }
@@ -42,13 +48,19 @@ try {
   ]) {
     const component = components[id]
     try {
-      const probe = await probeMcpTools({
+      const probe = await probeMcpToolsFirstAndRepeat({
         ...component,
         cwd: component.root,
         expectedTools,
         healthTimeoutMs: 30000,
       })
-      results.push({ id, version: component.version, tools: probe.tools })
+      results.push({
+        id,
+        version: component.version,
+        tools: probe.repeat.tools,
+        firstLaunchMs: probe.firstLaunchMs,
+        repeatLaunchMs: probe.repeatLaunchMs,
+      })
     } catch (error) {
       failures.push({ id, code: error.code ?? 'PROBE_FAILED', message: error.message, details: error.details ?? null })
     }
