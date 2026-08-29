@@ -1,10 +1,12 @@
 {
-  "schemaVersion": "openadam.agent-host-profile.v0.1",
+  "schemaVersion": "openadam.agent-host-profile.v0.2",
   "id": "observability",
+  "displayName": "Standard + local monitoring",
   "extends": "standard",
   "components": [
     "agent-tool-observer",
     "context-surface-analyzer"
   ],
+  "agentComponents": [],
   "requiresConsent": true
 }

@@ -1,8 +1,13 @@
 {
-  "schemaVersion": "openadam.agent-host-profile.v0.1",
+  "schemaVersion": "openadam.agent-host-profile.v0.2",
   "id": "standard",
+  "displayName": "Standard tools",
   "components": [
     "direct-execution-runtime",
+    "math-anchor",
+    "migratory-time"
+  ],
+  "agentComponents": [
     "math-anchor",
     "migratory-time"
   ]

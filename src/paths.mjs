@@ -33,7 +33,16 @@ export async function ensurePrivateDirectory(path) {
 }
 
 export async function requireContainedRealPath(root, path, label) {
-  const [realRoot, realPath] = await Promise.all([realpath(root), realpath(path)])
+  let realRoot
+  let realPath
+  try {
+    [realRoot, realPath] = await Promise.all([realpath(root), realpath(path)])
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw new AgentHostError('COMPONENT_PACKAGE_UNAVAILABLE', `${label} is unavailable in the selected compatibility set`)
+    }
+    throw error
+  }
   if (realPath !== realRoot && !realPath.startsWith(`${realRoot}${sep}`)) {
     throw new AgentHostError('DEVELOPMENT_PATH_ESCAPE', `${label} resolves outside the development root`, { path: realPath })
   }

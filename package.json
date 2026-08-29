@@ -1,7 +1,7 @@
 {
   "name": "@openadam/agent-host-suite",
-  "version": "0.1.0",
-  "description": "Install and operate a small, verified Agent-host execution stack.",
+  "version": "0.1.1",
+  "description": "Install and manage one compatible local environment for Agent tools.",
   "license": "Apache-2.0",
   "author": "openAdam",
   "homepage": "https://github.com/tetracoralla/agent-host-suite",
@@ -13,6 +13,9 @@
   "engines": {
     "node": ">=22.16.0"
   },
+  "os": [
+    "darwin"
+  ],
   "bin": {
     "agent-host": "bin/agent-host.mjs"
   },
@@ -20,6 +23,7 @@
     "bin/",
     "catalog/",
     "schemas/",
+    "skills/",
     "src/",
     "LICENSE",
     "NOTICE",
@@ -27,6 +31,13 @@
     "README.md"
   ],
   "scripts": {
+    "build:app-icon": "scripts/build-app-icon.sh",
+    "build:internal-beta-artifacts": "node scripts/build-internal-beta-artifacts.mjs",
+    "check:internal-beta": "scripts/check-macos-distribution.sh internal-beta",
+    "package:internal-beta": "scripts/package-internal-beta.sh",
+    "probe:internal-beta-artifacts": "node scripts/probe-internal-beta-artifacts.mjs",
+    "measure:local-dogfood": "node scripts/run-local-dogfood-cost-experiment.mjs",
+    "measure:profile-catalogs": "node scripts/measure-profile-catalogs.mjs",
     "check": "npm run check:syntax && npm test && npm run check:repository && npm run check:package",
     "check:package": "node scripts/check-package.mjs",
     "check:repository": "node scripts/check-repository.mjs",
