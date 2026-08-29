@@ -13,6 +13,9 @@
   "engines": {
     "node": ">=22.16.0"
   },
+  "os": [
+    "darwin"
+  ],
   "bin": {
     "agent-host": "bin/agent-host.mjs"
   },
