@@ -94,7 +94,7 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
       files: [
         ['.agents/plugins/marketplace.json', ['{"name":"openadam"}\n', false]],
         ['plugins/math-anchor/.codex-plugin/plugin.json', ['{"name":"math-anchor","version":"0.4.0"}\n', false]],
-        ['plugins/math-anchor/.mcp.json', [`{"marker":"${marker}"}\n`, false]],
+        ['plugins/math-anchor/.mcp.json', [`{"marker":"${marker}","mcpServers":{"math-anchor":{"command":"./runtime/math-anchor-runtime/math-anchor-runtime","args":["mcp"],"cwd":"."}}}\n`, false]],
         ['plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime', ['#!/bin/sh\nexit 0\n', true]],
         ['plugins/math-anchor/runtime/math-anchor-runtime/.math-anchor-build-manifest.json', ['{"version":"0.4.0"}\n', false]],
         ['plugins/math-anchor/skills/calculate/SKILL.md', ['---\nname: calculate\n---\n', false]],
@@ -108,7 +108,7 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
       files: [
         ['.agents/plugins/marketplace.json', ['{"name":"migratory-time"}\n', false]],
         ['plugins/migratory-time/.codex-plugin/plugin.json', ['{"name":"migratory-time","version":"2.0.0"}\n', false]],
-        ['plugins/migratory-time/.mcp.json', [`{"marker":"${marker}"}\n`, false]],
+        ['plugins/migratory-time/.mcp.json', [`{"marker":"${marker}","mcpServers":{"migratory-time":{"command":"./server/index.mjs","args":[],"cwd":"."}}}\n`, false]],
         ['plugins/migratory-time/server/index.mjs', ['process.stdin.resume()\n', false]],
         ['plugins/migratory-time/runtime/node', ['#!/bin/sh\nexit 0\n', true]],
         ['plugins/migratory-time/skills/convert-time-zones/SKILL.md', ['---\nname: convert-time-zones\n---\n', false]],

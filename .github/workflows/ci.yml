@@ -33,6 +33,7 @@ jobs:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
+      - run: ./scripts/check-manager-models.sh
       - run: swift build
       - run: ./scripts/package-macos-app.sh debug
       - run: codesign --verify --deep --strict ".build/Agent Host.app"

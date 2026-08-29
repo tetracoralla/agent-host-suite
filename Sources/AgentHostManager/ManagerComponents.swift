@@ -62,6 +62,7 @@ struct ItemStatePill: View {
         case .ready: (.green, "checkmark.circle.fill")
         case .attention: (.orange, "exclamationmark.triangle.fill")
         case .unavailable: (.secondary, "circle.dashed")
+        case .inactive: (.secondary, "shippingbox")
         }
         Label(state.label, systemImage: value.1)
             .font(.caption.weight(.medium))

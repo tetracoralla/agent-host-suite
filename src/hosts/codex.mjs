@@ -19,16 +19,28 @@ export async function inspectCodex(manifest, runner = runFile, options = {}) {
   const entries = []
   for (const component of Object.values(manifest.components).filter((item) => item.plugin !== undefined)) {
     const managedEntry = options.managedState?.entries?.find((item) => item.selector === `${component.plugin}@${component.marketplace}`)
+    const expectedMarketplaceRoot = options.useManagedBindings === true && managedEntry?.marketplaceRoot !== undefined
+      ? managedEntry.marketplaceRoot
+      : component.marketplaceRoot
+    const expectedPluginRoot = options.useManagedBindings === true && managedEntry?.pluginRoot !== undefined
+      ? managedEntry.pluginRoot
+      : component.pluginRoot
+    const expectedIdentityRelativeFiles = options.useManagedBindings === true && managedEntry?.pluginIdentityRelativeFiles !== undefined
+      ? managedEntry.pluginIdentityRelativeFiles
+      : component.pluginIdentityRelativeFiles
+    const expectedIdentityFingerprint = options.useManagedBindings === true && managedEntry?.pluginIdentityFingerprint !== undefined
+      ? managedEntry.pluginIdentityFingerprint
+      : component.pluginIdentityFingerprint
     const existingMarketplace = marketplaces.marketplaces.find((item) => item.name === component.marketplace)
     const existingPlugin = plugins.installed.find((item) => item.pluginId === `${component.plugin}@${component.marketplace}`)
     const duplicatePlugins = plugins.installed.filter((item) => item.name === component.plugin && item.pluginId !== `${component.plugin}@${component.marketplace}` && item.installed === true && item.enabled === true)
     if (existingMarketplace !== undefined) {
       const existingSource = existingMarketplace.marketplaceSource?.source ?? existingMarketplace.root
-      if (existingSource !== component.marketplaceRoot && existingMarketplace.root !== component.marketplaceRoot) {
+      if (existingSource !== expectedMarketplaceRoot && existingMarketplace.root !== expectedMarketplaceRoot) {
         if (managedEntry?.marketplaceCreated !== true && options.replaceConflicts !== true) {
           throw new AgentHostError('CODEX_MARKETPLACE_CONFLICT', `Codex marketplace ${component.marketplace} already points elsewhere`, {
             current: existingSource,
-            requested: component.marketplaceRoot,
+            requested: expectedMarketplaceRoot,
           })
         }
       }
@@ -44,11 +56,11 @@ export async function inspectCodex(manifest, runner = runFile, options = {}) {
       }
       let duplicateFingerprint
       try {
-        duplicateFingerprint = await fingerprintRelativeFiles(sourcePath, component.pluginIdentityRelativeFiles)
+        duplicateFingerprint = await fingerprintRelativeFiles(sourcePath, expectedIdentityRelativeFiles)
       } catch (error) {
         throw new AgentHostError('CODEX_PLUGIN_CONFLICT', `Codex already enables ${duplicate.pluginId}, but its plugin bytes cannot be verified`, { message: error.message })
       }
-      if (duplicateFingerprint !== component.pluginIdentityFingerprint && options.replaceConflicts !== true) {
+      if (duplicateFingerprint !== expectedIdentityFingerprint && options.replaceConflicts !== true) {
         throw new AgentHostError('CODEX_PLUGIN_CONFLICT', `Codex already enables ${duplicate.pluginId} with different plugin bytes`)
       }
       migratableDuplicates.push({
@@ -56,15 +68,15 @@ export async function inspectCodex(manifest, runner = runFile, options = {}) {
         marketplace: duplicate.marketplaceName,
         version: duplicate.version,
         sourcePath,
-        identityMatched: duplicateFingerprint === component.pluginIdentityFingerprint,
+        identityMatched: duplicateFingerprint === expectedIdentityFingerprint,
       })
     }
     let installedIdentityMatched = false
     let installedIdentityError = null
     if (existingPlugin?.installed === true && typeof existingPlugin.source?.path === 'string') {
       try {
-        const installedFingerprint = await fingerprintRelativeFiles(existingPlugin.source.path, component.pluginIdentityRelativeFiles)
-        installedIdentityMatched = installedFingerprint === component.pluginIdentityFingerprint
+        const installedFingerprint = await fingerprintRelativeFiles(existingPlugin.source.path, expectedIdentityRelativeFiles)
+        installedIdentityMatched = installedFingerprint === expectedIdentityFingerprint
       } catch (error) {
         installedIdentityError = error.message
       }
@@ -72,13 +84,16 @@ export async function inspectCodex(manifest, runner = runFile, options = {}) {
     entries.push({
       component: component.plugin,
       marketplace: component.marketplace,
-      marketplaceRoot: component.marketplaceRoot,
+      marketplaceRoot: expectedMarketplaceRoot,
+      pluginRoot: expectedPluginRoot,
+      pluginIdentityRelativeFiles: expectedIdentityRelativeFiles,
+      pluginIdentityFingerprint: expectedIdentityFingerprint,
       selector: `${component.plugin}@${component.marketplace}`,
       marketplacePresent: existingMarketplace !== undefined,
       marketplaceSource: existingMarketplace?.marketplaceSource?.source ?? existingMarketplace?.root ?? null,
       marketplaceNeedsReplacement: existingMarketplace !== undefined &&
-        (existingMarketplace.marketplaceSource?.source ?? existingMarketplace.root) !== component.marketplaceRoot &&
-        existingMarketplace.root !== component.marketplaceRoot,
+        (existingMarketplace.marketplaceSource?.source ?? existingMarketplace.root) !== expectedMarketplaceRoot &&
+        existingMarketplace.root !== expectedMarketplaceRoot,
       pluginPresent: existingPlugin?.installed === true,
       pluginEnabled: existingPlugin?.enabled === true,
       installedVersion: existingPlugin?.version ?? null,
@@ -210,4 +225,22 @@ export async function uninstallCodex(hostState, runner = runFile) {
     }
   }
   return { kind: 'codex', removed }
+}
+
+export async function suspendCodex(hostState, runner = runFile) {
+  const executable = await resolveExecutable('codex', runner)
+  if (executable === null) throw new AgentHostError('CODEX_NOT_INSTALLED', 'Codex CLI is not installed or not on PATH')
+  const removed = []
+  for (const entry of [...hostState.entries].reverse()) {
+    if (entry.pluginCreated !== true) {
+      throw new AgentHostError('TOOL_SET_UNMANAGED_BINDING', `Agent Host cannot hide unmanaged Codex plugin ${entry.selector} without changing user-owned configuration`)
+    }
+    await runner(executable, ['plugin', 'remove', entry.selector, '--json'])
+    removed.push({ target: entry.selector, kind: 'plugin' })
+    if (entry.marketplaceCreated === true) {
+      await runner(executable, ['plugin', 'marketplace', 'remove', entry.marketplace, '--json'])
+      removed.push({ target: entry.marketplace, kind: 'marketplace' })
+    }
+  }
+  return { kind: 'codex', suspended: removed }
 }

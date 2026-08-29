@@ -18,6 +18,7 @@ test('development manifest binds runnable files and two different provider trans
   const config = createRuntimeConfig(manifest)
   assert.equal(config.limits.defaultTimeoutMs, 30000)
   assert.deepEqual(config.providers.map((item) => item.transport), ['mcp-stdio', 'capability-jsonl-v0.1'])
+  assert.deepEqual(config.providers.map((item) => item.lifecycle), ['per-call', 'per-call'])
   assert.deepEqual(config.providers[0].allowedTools, ['math.run', 'math.batch', 'math.describe'])
   assert.deepEqual(config.providers[0].operationProjections, [{
     toolName: 'math.run',

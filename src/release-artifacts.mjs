@@ -20,6 +20,7 @@ import {
   validateComponentDescriptor,
 } from './release-manifest.mjs'
 import { runFile } from './process.mjs'
+import { isToolIntegrationSchema, TOOL_INTEGRATION_SCHEMA_V2 } from './tool-integration.mjs'
 
 function fail(code, message, details) {
   throw new AgentHostError(code, message, details)
@@ -240,9 +241,11 @@ async function buildRuntimeManifest(release, installed) {
     })
   }
   for (const [id, item] of installed) {
-    if (item.descriptor.integration?.schemaVersion !== 'openadam.agent-host-tool-integration.v0.1') continue
+    if (!isToolIntegrationSchema(item.descriptor.integration?.schemaVersion)) continue
     const tool = item.descriptor.integration
     const pluginRoot = directoryPath(item.root, tool.codex.pluginRoot, `${tool.displayName} plugin root`)
+    const runtimeEntrypoint = containedComponentPath(item.root, tool.runtime.command, `${tool.displayName} runtime command`)
+    const usesSuiteNode = tool.schemaVersion === TOOL_INTEGRATION_SCHEMA_V2 && tool.runtime.executor === 'suite-node'
     const auxiliaryCli = id === 'context-surface-analyzer' && components[id] !== undefined
       ? { cliCommand: components[id].command, cliArgs: components[id].args }
       : {}
@@ -255,8 +258,8 @@ async function buildRuntimeManifest(release, installed) {
       plugin: tool.codex.plugin,
       pluginIdentityRelativeFiles: tool.codex.identityFiles,
       pluginIdentityFingerprint: await fingerprintRelativeFiles(pluginRoot, tool.codex.identityFiles),
-      command: containedComponentPath(item.root, tool.runtime.command, `${tool.displayName} runtime command`),
-      args: tool.runtime.args,
+      command: usesSuiteNode ? nodeCommand : runtimeEntrypoint,
+      args: usesSuiteNode ? [runtimeEntrypoint, ...tool.runtime.args] : tool.runtime.args,
       cwd: directoryPath(item.root, tool.runtime.cwd, `${tool.displayName} runtime directory`),
       workspaceEnvironment: tool.runtime.workspaceEnvironment ?? [],
       expectedTools: tool.runtime.expectedTools,

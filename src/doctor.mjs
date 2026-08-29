@@ -6,13 +6,16 @@ import { inspectService } from './service.mjs'
 import { mathProjectionSelection, semanticProbeOrder } from './runtime-config.mjs'
 import { verifyReleaseComponent } from './release-artifacts.mjs'
 import { probeMcpTools } from './mcp-health.mjs'
+import { agentFacingManifest } from './profile.mjs'
+import { inspectOperationsSkill } from './host-operations-skill.mjs'
 
 function check(id, status, message, detail = undefined) {
   return { id, status, message, ...(detail === undefined ? {} : { detail }) }
 }
 
-export async function doctor(state, { deep = false, runner = runFile, mcpProbe = probeMcpTools } = {}) {
+export async function doctor(state, { deep = false, runner = runFile, mcpProbe = probeMcpTools, contextAnalysis = null } = {}) {
   const checks = []
+  const agentManifest = agentFacingManifest({ components: state.components }, state.agentComponents ?? Object.keys(state.components))
   for (const [id, component] of Object.entries(state.components)) {
     try {
       if (state.channel === 'release') await verifyReleaseComponent(component)
@@ -24,9 +27,14 @@ export async function doctor(state, { deep = false, runner = runFile, mcpProbe =
   }
   if (state.hosts.codex !== undefined) {
     try {
-      const current = await inspectCodex({ components: state.components }, runner, { managedState: state.hosts.codex })
+      const current = await inspectCodex(agentManifest, runner, { managedState: state.hosts.codex, useManagedBindings: true })
       const missing = current.entries.filter((entry) => !entry.pluginPresent || !entry.pluginEnabled || entry.installedVersion !== entry.requestedVersion || !entry.installedIdentityMatched)
-      checks.push(check('host.codex', missing.length === 0 ? 'ok' : 'error', missing.length === 0 ? 'Codex plugins are installed and enabled' : 'One or more Codex plugins need attention', missing))
+      const operationsSkill = await inspectOperationsSkill(state.hosts.codex.operationsSkill, runner)
+      const ready = missing.length === 0 && operationsSkill.status === 'ok'
+      checks.push(check('host.codex', ready ? 'ok' : 'error', ready ? 'Codex plugins and Agent Host operations Skill are installed' : 'One or more Codex integrations need attention', {
+        plugins: missing,
+        operationsSkill,
+      }))
       for (const entry of current.entries) {
         const healthy = entry.pluginPresent && entry.pluginEnabled && entry.installedVersion === entry.requestedVersion && entry.installedIdentityMatched
         checks.push(check(
@@ -43,19 +51,26 @@ export async function doctor(state, { deep = false, runner = runFile, mcpProbe =
           },
         ))
       }
+      checks.push(check('host.codex.agent-host-operations', operationsSkill.status === 'ok' ? 'ok' : 'error', operationsSkill.status === 'ok' ? 'Agent Host operations Skill is ready in Codex' : 'Agent Host operations Skill needs attention in Codex', operationsSkill))
     } catch (error) {
       checks.push(check('host.codex', 'error', 'Codex host inspection failed', error.message))
     }
   }
   if (state.hosts.claude !== undefined) {
     try {
-      const current = await inspectClaude({ components: state.components }, runner, state.hosts.claude)
+      const current = await inspectClaude(agentManifest, runner, state.hosts.claude)
       const missing = current.entries.filter((entry) => !entry.present || !entry.identityMatched)
-      checks.push(check('host.claude', missing.length === 0 ? 'ok' : 'error', missing.length === 0 ? 'Claude Code MCP entries are present' : 'Claude Code MCP entries need attention', missing))
+      const operationsSkill = await inspectOperationsSkill(state.hosts.claude.operationsSkill, runner)
+      const ready = missing.length === 0 && operationsSkill.status === 'ok'
+      checks.push(check('host.claude', ready ? 'ok' : 'error', ready ? 'Claude Code MCP entries and Agent Host operations Skill are present' : 'Claude Code integrations need attention', {
+        entries: missing,
+        operationsSkill,
+      }))
       for (const entry of current.entries) {
         const healthy = entry.present && entry.identityMatched
         checks.push(check(`host.claude.${entry.component}`, healthy ? 'ok' : 'error', healthy ? `${entry.component} is ready in Claude Code` : `${entry.component} needs attention in Claude Code`))
       }
+      checks.push(check('host.claude.agent-host-operations', operationsSkill.status === 'ok' ? 'ok' : 'error', operationsSkill.status === 'ok' ? 'Agent Host operations Skill is ready in Claude Code' : 'Agent Host operations Skill needs attention in Claude Code', operationsSkill))
     } catch (error) {
       checks.push(check('host.claude', 'error', 'Claude Code host inspection failed', error.message))
     }
@@ -120,6 +135,17 @@ export async function doctor(state, { deep = false, runner = runFile, mcpProbe =
       if (state.components[id] === undefined) continue
       checks.push(check(`tool.${id}.direct`, 'error', `${id} direct readiness is unknown while the local execution service is not running`))
     }
+  }
+  if (state.observability?.enabled === true && Array.isArray(contextAnalysis?.budgetChecks) && contextAnalysis.budgetChecks.length > 0) {
+    const exceeded = contextAnalysis.budgetChecks.filter((item) => item?.status === 'exceeded')
+    checks.push(check(
+      'context.catalog',
+      exceeded.length === 0 ? 'ok' : 'warning',
+      exceeded.length === 0
+        ? 'The active tool catalog is within its declared context budgets'
+        : `The active tool catalog exceeds ${exceeded.length} declared context budget${exceeded.length === 1 ? '' : 's'}`,
+      { exceeded },
+    ))
   }
   const errors = checks.filter((item) => item.status === 'error').length
   const warnings = checks.filter((item) => item.status === 'warning').length

@@ -36,7 +36,7 @@ export function createRuntimeConfig(manifest) {
       {
         providerId: 'io.github.tetracoralla.math-anchor',
         transport: 'mcp-stdio',
-        lifecycle: 'persistent',
+        lifecycle: 'per-call',
         rootPath: math.pluginRoot,
         command: math.command,
         args: math.args,
@@ -60,7 +60,7 @@ export function createRuntimeConfig(manifest) {
       {
         providerId: 'io.github.tetracoralla.migratory-time',
         transport: 'capability-jsonl-v0.1',
-        lifecycle: 'persistent',
+        lifecycle: 'per-call',
         rootPath: time.root,
         profilePath: time.profilePath,
         manifestPath: time.manifestPath,

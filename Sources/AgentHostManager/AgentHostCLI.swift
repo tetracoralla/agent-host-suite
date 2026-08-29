@@ -1,10 +1,37 @@
 import Foundation
+import AgentHostBootstrap
 
 struct AgentHostCLI: Sendable {
     private let environment: [String: String]
+    private let timeoutSeconds: Int
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-        self.environment = environment
+    init(environment: [String: String] = ProcessInfo.processInfo.environment, timeoutSeconds: Int = 130) {
+        self.environment = Self.augmentedEnvironment(environment)
+        self.timeoutSeconds = timeoutSeconds
+    }
+
+    // A Finder-launched app inherits a minimal PATH (/usr/bin:/bin:...), so
+    // Homebrew-installed host CLIs are invisible to the CLI's `which` probe.
+    // Append the standard install locations before forwarding the environment.
+    static func augmentedEnvironment(_ environment: [String: String]) -> [String: String] {
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        let additions = [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "\(home)/.local/bin",
+            "\(home)/bin",
+        ]
+        var entries = (environment["PATH"] ?? "")
+            .split(separator: ":", omittingEmptySubsequences: true)
+            .map(String.init)
+        for directory in additions where !entries.contains(directory) {
+            entries.append(directory)
+        }
+        var augmented = environment
+        augmented["PATH"] = entries.joined(separator: ":")
+        return augmented
     }
 
     func run<T: Decodable & Sendable>(_ arguments: [String], as type: T.Type = T.self) async throws -> T {
@@ -12,7 +39,7 @@ struct AgentHostCLI: Sendable {
             let process = Process()
             let stdout = Pipe()
             let stderr = Pipe()
-            let target = self.command()
+            let target = try self.command()
             process.executableURL = URL(fileURLWithPath: target.executable)
             process.arguments = target.prefixArguments + arguments + ["--json"]
             process.environment = self.environment
@@ -23,9 +50,23 @@ struct AgentHostCLI: Sendable {
             let timeout = DispatchWorkItem {
                 if process.isRunning { process.terminate() }
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 130, execute: timeout)
-            let output = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errorOutput = stderr.fileHandleForReading.readDataToEndOfFile()
+            DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(self.timeoutSeconds), execute: timeout)
+            // Drain both pipes at once: reading stdout to completion first can
+            // deadlock when the child fills the bounded stderr pipe.
+            let group = DispatchGroup()
+            var output = Data()
+            var errorOutput = Data()
+            group.enter()
+            DispatchQueue.global().async {
+                output = stdout.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+            group.enter()
+            DispatchQueue.global().async {
+                errorOutput = stderr.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+            group.wait()
             process.waitUntilExit()
             timeout.cancel()
 
@@ -46,7 +87,7 @@ struct AgentHostCLI: Sendable {
         }.value
     }
 
-    private func command() -> (executable: String, prefixArguments: [String]) {
+    private func command() throws -> (executable: String, prefixArguments: [String]) {
         if let explicit = environment["AGENT_HOST_CLI"], !explicit.isEmpty {
             if explicit.hasSuffix(".mjs") {
                 return (environment["AGENT_HOST_NODE"] ?? "/usr/bin/env", environment["AGENT_HOST_NODE"] == nil ? ["node", explicit] : [explicit])
@@ -56,13 +97,14 @@ struct AgentHostCLI: Sendable {
         if let resources = Bundle.main.resourceURL {
             let bundled = resources.appendingPathComponent("agent-host-suite/bin/agent-host.mjs").path
             if FileManager.default.isReadableFile(atPath: bundled) {
-                let bundledNode = resources.appendingPathComponent("agent-host-runtime/node").path
-                if FileManager.default.isExecutableFile(atPath: bundledNode) {
-                    return (bundledNode, [bundled])
+                if let appExecutable = Bundle.main.executableURL {
+                    let shim = appExecutable.deletingLastPathComponent().appendingPathComponent("agent-host").path
+                    if FileManager.default.isExecutableFile(atPath: shim) {
+                        return (shim, [])
+                    }
                 }
-                for node in ["/opt/homebrew/opt/node@22/bin/node", "/opt/homebrew/bin/node", "/usr/local/bin/node"] where FileManager.default.isExecutableFile(atPath: node) {
-                    return (node, [bundled])
-                }
+                let target = try AgentHostCommandResolver.bundled(resources: resources, environment: environment)
+                return (target.executable, target.prefixArguments)
             }
         }
         for candidate in ["/opt/homebrew/bin/agent-host", "/usr/local/bin/agent-host"] where FileManager.default.isExecutableFile(atPath: candidate) {

@@ -3,7 +3,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { AgentHostError } from './errors.mjs'
 import { canonicalJson, sha256 } from './json.mjs'
 
-async function listProviderTools(id, component) {
+async function listProviderToolsOnce(id, component) {
   const transport = new StdioClientTransport({
     command: component.command,
     args: component.args,
@@ -12,8 +12,8 @@ async function listProviderTools(id, component) {
   })
   const client = new Client({ name: 'agent-host-context-exporter', version: '0.1.0' })
   try {
-    await client.connect(transport, { timeout: 30_000, maxTotalTimeout: 30_000 })
-    const result = await client.listTools(undefined, { timeout: 30_000, maxTotalTimeout: 30_000 })
+    await client.connect(transport, { timeout: 45_000, maxTotalTimeout: 45_000 })
+    const result = await client.listTools(undefined, { timeout: 45_000, maxTotalTimeout: 45_000 })
     if (!Array.isArray(result.tools) || result.tools.length > 128) {
       throw new AgentHostError('CATALOG_EXPORT_LIMIT', `${id} returned an invalid or oversized tool catalog`)
     }
@@ -33,14 +33,61 @@ async function listProviderTools(id, component) {
   }
 }
 
-export async function exportManagedCatalog(components) {
+export function retryableCatalogError(error) {
+  return error?.code === -32001 || /timed out|timeout/iu.test(error?.message ?? '')
+}
+
+function semanticToolKey(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]/gu, '')
+}
+
+export function validateManagedToolBindings(bindings) {
+  const observed = new Map()
+  for (const binding of bindings) {
+    for (const toolName of binding.toolNames ?? []) {
+      const key = semanticToolKey(toolName)
+      const prior = observed.get(key)
+      if (key.length === 0 || prior !== undefined) {
+        throw new AgentHostError('AGENT_TOOL_BINDING_CONFLICT', `Agent-visible tool bindings conflict before deployment observation: ${prior?.toolName ?? toolName} and ${toolName}`, {
+          semanticKey: key,
+          first: prior ?? null,
+          conflicting: { component: binding.id, toolName },
+        })
+      }
+      observed.set(key, { component: binding.id, toolName })
+    }
+  }
+  return bindings
+}
+
+async function listProviderTools(id, component) {
+  try {
+    return await listProviderToolsOnce(id, component)
+  } catch (error) {
+    if (!retryableCatalogError(error)) throw error
+    return await listProviderToolsOnce(id, component)
+  }
+}
+
+export async function exportManagedCatalogInventory(components) {
   const providerComponents = Object.entries(components)
     .filter(([, component]) => component.pluginRoot !== undefined && component.command !== undefined && Array.isArray(component.args))
     .sort(([left], [right]) => left.localeCompare(right))
   const catalogs = []
-  for (const [id, component] of providerComponents) catalogs.push(...await listProviderTools(id, component))
+  const bindings = []
+  for (const [id, component] of providerComponents) {
+    const tools = await listProviderTools(id, component)
+    catalogs.push(...tools)
+    bindings.push({
+      id,
+      version: component.version,
+      artifactSha256: component.releaseArtifact?.artifact?.sha256 ?? null,
+      toolNames: tools.map((tool) => tool.name),
+    })
+  }
+  validateManagedToolBindings(bindings)
   const revisionObject = providerComponents.map(([id, component]) => ({ id, version: component.version, fingerprint: component.fingerprint }))
-  return {
+  return { bindings, snapshot: {
     format: 'context-surface.snapshot.v0.1',
     source: {
       id: `agent-host-suite:managed-${providerComponents.map(([id]) => id).join('+')}-catalog`,
@@ -54,5 +101,9 @@ export async function exportManagedCatalog(components) {
       maxLargestToolUtf8Bytes: 40000,
       maxResultUtf8Bytes: 65536,
     },
-  }
+  } }
+}
+
+export async function exportManagedCatalog(components) {
+  return (await exportManagedCatalogInventory(components)).snapshot
 }

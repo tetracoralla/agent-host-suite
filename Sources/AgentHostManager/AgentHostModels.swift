@@ -30,9 +30,19 @@ struct SuiteStatus: Decodable, Equatable, Sendable {
     let profile: String?
     let installedAt: String?
     let updatedAt: String?
+    let availableAgentComponents: [String]?
+    let agentComponents: [String]?
     let components: [String: ComponentSummary]?
     let hosts: [String: HostSummary]?
     let service: ServiceSummary?
+}
+
+struct ToolSetChangeResult: Decodable, Equatable, Sendable {
+    let status: String
+    let changed: Bool
+    let activeAgentComponents: [String]
+    let inactiveAgentComponents: [String]
+    let restartRequired: Bool
 }
 
 struct HostStatusResult: Decodable, Equatable, Sendable {
@@ -116,8 +126,56 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
     let occurredAt: String
     let type: String
     let summary: String
+    let detail: [String: ActivityDetailValue]?
 
     var date: Date? { ISO8601DateFormatter.activity.date(from: occurredAt) }
+
+    var orderedDetail: [(key: String, value: String)] {
+        (detail ?? [:])
+            .sorted { $0.key < $1.key }
+            .map { (key: $0.key, value: $0.value.displayText) }
+    }
+}
+
+struct ActivityDetailValue: Decodable, Equatable, Sendable {
+    private static let maximumDisplayCharacters = 240
+    let displayText: String
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rendered: String
+        if container.decodeNil() {
+            rendered = "none"
+        } else if let text = try? container.decode(String.self) {
+            rendered = text
+        } else if let flag = try? container.decode(Bool.self) {
+            rendered = flag ? "yes" : "no"
+        } else if let number = try? container.decode(Int64.self) {
+            rendered = String(number)
+        } else if let number = try? container.decode(UInt64.self) {
+            rendered = String(number)
+        } else if let number = try? container.decode(Double.self) {
+            rendered = String(number)
+        } else if let values = try? container.decode([ActivityDetailValue].self) {
+            rendered = "[\(values.map(\.displayText).joined(separator: ", "))]"
+        } else if let values = try? container.decode([String: ActivityDetailValue].self) {
+            let items = values
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key): \($0.value.displayText)" }
+            rendered = "{\(items.joined(separator: ", "))}"
+        } else {
+            throw DecodingError.typeMismatch(
+                ActivityDetailValue.self,
+                .init(codingPath: decoder.codingPath, debugDescription: "Unsupported activity detail value")
+            )
+        }
+        displayText = Self.bounded(rendered)
+    }
+
+    private static func bounded(_ value: String) -> String {
+        guard value.count > maximumDisplayCharacters else { return value }
+        return String(value.prefix(maximumDisplayCharacters - 1)) + "…"
+    }
 }
 
 struct ActivityResult: Decodable, Equatable, Sendable {
@@ -171,10 +229,77 @@ struct ObserverStatus: Decodable, Equatable, Sendable {
 }
 
 struct ObservabilityStatus: Decodable, Equatable, Sendable {
+    struct Schedule: Decodable, Equatable, Sendable {
+        let intervalSeconds: Int?
+    }
+
     let configured: Bool
     let enabled: Bool
     let consentedAt: String?
+    let observer: Schedule?
+    let maintenance: Schedule?
     let latest: LatestObservability?
+}
+
+struct SnapshotCollectionSource: Decodable, Equatable, Sendable {
+    let source: String?
+    let status: String?
+    let errorCode: String?
+    let backlogSources: Int?
+    let skippedLines: Int?
+}
+
+struct SnapshotCollection: Decodable, Equatable, Sendable {
+    let status: String?
+    let providersOk: Int?
+    let providersPartial: Int?
+    let providersMissing: Int?
+    let providersError: Int?
+    let sources: [SnapshotCollectionSource]?
+}
+
+struct SnapshotBudgetCheck: Decodable, Equatable, Sendable {
+    let metric: String
+    let actual: Int
+    let limit: Int
+    let status: String
+
+    var exceeded: Bool { status == "exceeded" }
+}
+
+struct SnapshotCatalog: Decodable, Equatable, Sendable {
+    let canonicalUtf8Bytes: Int?
+    let largestToolUtf8Bytes: Int?
+    let tools: Int?
+    let schemas: Int?
+    let hardNameCollisions: Int?
+    let budgetChecks: [SnapshotBudgetCheck]?
+}
+
+struct SnapshotObservability: Decodable, Equatable, Sendable {
+    let enabled: Bool
+    let refreshedAt: String?
+    let collection: SnapshotCollection?
+    let catalog: SnapshotCatalog?
+}
+
+struct SnapshotStorage: Decodable, Equatable, Sendable {
+    let allocatedBytes: Int?
+    let apparentBytes: Int?
+}
+
+struct SnapshotProcesses: Decodable, Equatable, Sendable {
+    let sampledAt: String?
+    let processCount: Int?
+    let totalRssBytes: Int?
+}
+
+struct SuiteSnapshot: Decodable, Equatable, Sendable {
+    let configured: Bool
+    let generatedAt: String?
+    let observability: SnapshotObservability?
+    let storage: SnapshotStorage?
+    let processes: SnapshotProcesses?
 }
 
 struct DoctorCheck: Decodable, Equatable, Identifiable, Sendable {
@@ -210,6 +335,13 @@ enum ManagerHealth: Equatable {
     case ready
     case attention(String)
     case unavailable
+}
+
+struct ManagerHealthFacet: Equatable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let isHealthy: Bool
+    let detail: String
 }
 
 enum ManagerSection: String, CaseIterable, Identifiable {
@@ -248,6 +380,7 @@ struct ManagedTool: Identifiable, Equatable {
     let state: ManagedItemState
     let availability: String
     let ownership: String
+    let active: Bool
 }
 
 enum ManagedItemState: Equatable {
@@ -255,6 +388,7 @@ enum ManagedItemState: Equatable {
     case ready
     case attention
     case unavailable
+    case inactive
 
     var label: String {
         switch self {
@@ -262,6 +396,7 @@ enum ManagedItemState: Equatable {
         case .ready: "Ready"
         case .attention: "Needs attention"
         case .unavailable: "Unavailable"
+        case .inactive: "Installed"
         }
     }
 }

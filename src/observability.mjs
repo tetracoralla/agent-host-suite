@@ -3,13 +3,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { buildDevelopmentObservabilityManifest } from './development-manifest.mjs'
 import { AgentHostError } from './errors.mjs'
-import { exportManagedCatalog } from './context-exporter.mjs'
+import { exportManagedCatalogInventory } from './context-exporter.mjs'
 import { readJson, writePrivateJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { runFile } from './process.mjs'
 import { installMaintenance, uninstallMaintenance } from './maintenance-service.mjs'
 import { loadState, prepareStatePaths, saveState } from './state.mjs'
 import { recordActivity } from './activity.mjs'
+import { cleanupStorage } from './storage.mjs'
 
 const OBSERVER_LABEL = 'com.openadam.agent-tool-observer'
 
@@ -110,13 +111,16 @@ export function observabilitySummary(value) {
         counts: value.latest.context.counts,
         hardNameCollisions: value.latest.context.hardNameCollisions,
       },
+      freshSessionCorrelation: value.latest.report.freshSessionCorrelation ?? null,
       totals: value.latest.report.totals,
     },
   }
 }
 
 async function writeAnalysis(paths, state, runner) {
-  const snapshot = await exportManagedCatalog(state.components)
+  const active = new Set(state.agentComponents ?? Object.keys(state.components))
+  const activeComponents = Object.fromEntries(Object.entries(state.components).filter(([id]) => active.has(id)))
+  const { snapshot, bindings } = await exportManagedCatalogInventory(activeComponents)
   const snapshotPath = join(paths.context, 'managed-catalog.snapshot.json')
   const analysisPath = join(paths.context, 'managed-catalog.analysis.json')
   await writePrivateJson(snapshotPath, snapshot)
@@ -137,7 +141,43 @@ async function writeAnalysis(paths, state, runner) {
     throw new AgentHostError(analysis?.error?.code ?? 'CONTEXT_ANALYSIS_FAILED', analysis?.error?.message ?? 'Context Surface analysis failed')
   }
   await writePrivateJson(analysisPath, analysis)
-  return { snapshot, snapshotPath, analysis, analysisPath }
+  return { snapshot, bindings, snapshotPath, analysis, analysisPath }
+}
+
+function activationTime(state) {
+  const value = Date.parse(state.bindingsActivatedAt ?? state.releaseActivatedAt ?? state.updatedAt ?? state.installedAt ?? '')
+  return Number.isFinite(value) && value >= 0 ? Math.round(value) : Date.now()
+}
+
+async function writeDeploymentObservation(paths, state, context) {
+  const deploymentPath = join(paths.context, 'active-deployment.observation.json')
+  const deployment = {
+    schemaVersion: 'openadam.agent-host-deployment-observation.v0.1',
+    observedAtMs: Date.now(),
+    activatedAtMs: activationTime(state),
+    channel: state.channel,
+    releaseId: state.releaseId ?? null,
+    suiteVersion: state.suiteVersion,
+    profile: state.profile,
+    components: Object.entries(state.components).map(([id, component]) => {
+      const binding = context.bindings.find((item) => item.id === id)
+      return {
+        id,
+        version: component.version,
+        artifactSha256: component.releaseArtifact?.artifact?.sha256 ?? null,
+        toolNames: binding?.toolNames ?? [],
+      }
+    }),
+    context: {
+      sourceId: context.analysis.source.id,
+      sourceRevision: context.analysis.source.revision,
+      catalogSha256: context.analysis.catalog.sha256,
+      catalogBytes: context.analysis.catalog.canonicalUtf8Bytes,
+      toolCount: context.analysis.counts.tools,
+    },
+  }
+  await writePrivateJson(deploymentPath, deployment)
+  return { deployment, deploymentPath }
 }
 
 export function contextAnalyzerInvocation(component) {
@@ -154,15 +194,18 @@ async function refreshState(state, paths, runner) {
   const imported = await runJson(observer, ['ingest-context-surface', '--file', context.analysisPath, '--json'], runner, {
     env: observerEnvironment(state),
   })
+  const deployment = await writeDeploymentObservation(paths, state, context)
+  const deploymentImported = await runJson(observer, ['ingest-agent-host-deployment', '--file', deployment.deploymentPath, '--json'], runner, {
+    env: observerEnvironment(state),
+  })
   const status = await runJson(observer, ['status', '--json'], runner, { env: observerEnvironment(state) })
   const report = await runJson(observer, ['report', '--days', '30', '--json'], runner, { env: observerEnvironment(state) })
   const suiteExecutions = report.semanticExecutions.filter((item) => [
     'io.github.tetracoralla.math-anchor',
     'io.github.tetracoralla.migratory-time',
   ].includes(item.providerId))
-  const managedToolName = (name) => /(?:math[_-]anchor|migratory[_-]time)/iu.test(name)
   const suiteTools = report.tools
-    .filter((item) => item.openAdam === true && managedToolName(item.toolName))
+    .filter((item) => item.currentAgentHostDeployment?.componentId !== undefined)
     .sort((left, right) => right.calls - left.calls || left.toolName.localeCompare(right.toolName))
     .slice(0, 25)
     .map((item) => ({
@@ -174,7 +217,9 @@ async function refreshState(state, paths, runner) {
       turnAssociatedUsage: item.turnAssociatedUsage,
       firstObservedAtMs: item.firstObservedAtMs,
       lastObservedAtMs: item.lastObservedAtMs,
+      currentAgentHostDeployment: item.currentAgentHostDeployment,
     }))
+  const routingObservations = report.routingObservations ?? []
   return {
     refreshedAt: new Date().toISOString(),
     deployment: {
@@ -182,6 +227,7 @@ async function refreshState(state, paths, runner) {
       suiteVersion: state.suiteVersion,
       releaseId: state.releaseId ?? null,
       components: Object.fromEntries(Object.entries(state.components).map(([id, component]) => [id, component.version])),
+      observerIngestion: deploymentImported,
     },
     collection: collected,
     context: {
@@ -204,16 +250,21 @@ async function refreshState(state, paths, runner) {
       usage: report.usage,
       cost: report.cost,
       directRuntime: report.directRuntime,
+      freshSessionCorrelation: report.freshSessionCorrelation ?? null,
       suiteExecutions,
       suiteTools,
+      routingObservations,
       totals: {
         observedTools: report.tools.length,
         observedCalls: report.tools.reduce((total, item) => total + item.calls, 0),
         suiteToolCalls: suiteTools.reduce((total, item) => total + item.calls, 0),
+        freshSessionSuiteToolCalls: suiteTools.reduce((total, item) => total + (item.currentAgentHostDeployment.freshSessionCallsSinceActivation ?? 0), 0),
+        freshSessionRoutingObservationsReturned: routingObservations.length,
+        freshSessionRoutingObservationsTruncated: report.freshSessionCorrelation?.routing?.observationRecordsTruncated ?? null,
         procedureEvents: report.procedures.reduce((total, item) => total + item.runs, 0),
         capabilityEvents: report.capabilities.reduce((total, item) => total + item.executions, 0),
       },
-      assessmentBoundary: 'These are passive measurements and runtime observations, not correctness or retirement decisions.',
+      assessmentBoundary: 'Fresh-session counts are provider-scoped observations with explicit coverage and truncation; they are not adoption, opportunity, correctness, task-quality, or retirement decisions.',
     },
   }
 }
@@ -339,5 +390,25 @@ export async function disableObservability(options, dependencies = {}) {
 }
 
 export async function maintenance(options, dependencies = {}) {
-  return refreshObservability(options, dependencies)
+  const runner = dependencies.runner ?? runFile
+  const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  const state = await loadState(paths)
+  if (state === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
+  if (state.observability?.enabled !== true) throw new AgentHostError('OBSERVABILITY_DISABLED', 'Observability is not enabled')
+  state.observability.latest = await refreshState(state, paths, runner)
+  const observer = state.components['agent-tool-observer']
+  const observerMaintenance = await runJson(observer, ['maintain', '--json'], runner, { env: observerEnvironment(state), timeoutMs: 300_000 })
+  state.updatedAt = new Date().toISOString()
+  await saveState(paths, state)
+  const storage = await (dependencies.cleanupStorage ?? cleanupStorage)({ stateRoot: paths.root })
+  await recordActivity(paths, 'environment.maintained', 'Local observation and package storage maintained', {
+    observerRowsRemoved: Object.values(observerMaintenance.removed ?? {}).reduce((sum, value) => sum + value, 0),
+    storageBytesReclaimed: storage.reclaimedAllocatedBytes,
+  })
+  return {
+    status: 'maintained',
+    observability: observabilitySummary(state.observability),
+    observer: observerMaintenance,
+    storage,
+  }
 }

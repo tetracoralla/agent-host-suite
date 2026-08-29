@@ -12,12 +12,29 @@ admission and whole-machine gap rules.
 ## Internal macOS Beta
 
 The internal Beta channel is bound to twelve immutable local artifacts: Node,
-Direct Execution Runtime, Agent Tool Observer, and nine Agent tools. Each
-component declares its platform, version, archive location, byte length,
+Direct Execution Runtime, Agent Tool Observer, Context Surface Analyzer, and
+eight Agent-visible tools. Each component declares its platform, version,
+archive location, byte length,
 SHA-256, entrypoint, license, legal files, package descriptor, and per-file
 digests. Setup extracts those bytes into Agent Host's private versioned package
 root; active execution does not retain or execute paths from a `tools-dev`
 checkout.
+
+Codex receives a thin private host projection rather than a second copy of each
+provider runtime. The projection contains marketplace/plugin identity, Skill
+resources, small interface assets, and generated MCP configuration; its MCP
+command and working directory still point to the verified package. A profile
+that activates workspace-dependent tools must be installed or updated with an
+explicit `--workspace-root` grant.
+
+The ordinary App build stages only the selected release profile. The private
+dogfood build opts into the Local profile explicitly; this larger catalog is
+not the public default. The App contains a small native bootstrap and CLI shim,
+not a second uncompressed Node distribution. On first use the shim extracts
+and verifies the immutable Suite Node component into Agent Host's package
+store, then reuses that package. Tool integration schema v0.2 also lets
+eligible provider components select the same `suite-node` executor, while
+their independently distributed provider artifacts remain self-contained.
 
 Build and verify the current internal Beta with:
 
@@ -28,9 +45,19 @@ npm run package:internal-beta
 npm run check:internal-beta
 ```
 
-Archive creation normalizes file ownership, timestamps, ordering, and gzip
-metadata. Rebuilding an existing release ID must reproduce all component
-digests or stop without replacing that release catalog.
+The builder normally reads the sibling `calculator` checkout. When that
+development checkout is intentionally absent, a clean, exact-revision Math
+Anchor checkout can be supplied with `AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT`.
+The selected checkout revision and dirty state are still recorded in the
+component SBOM; this override does not turn an unbound source tree into a
+public compatibility release.
+
+Archive creation normalizes file ownership, component timestamps, ordering,
+gzip metadata, and component-level SBOM identity independently of the suite
+release ID. Unchanged component content therefore reuses one content-addressed
+package across later suite releases instead of consuming another rollback copy.
+Rebuilding an existing release ID must reproduce all component digests or stop
+without replacing that release catalog.
 
 The resulting DMG is deliberately ad-hoc signed and its adjacent distribution
 manifest records that it is neither Developer ID signed nor notarized. It is an

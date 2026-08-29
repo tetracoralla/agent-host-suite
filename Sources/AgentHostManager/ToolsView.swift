@@ -11,16 +11,33 @@ struct ToolsView: View {
                         .disabled(store.isBusy)
                 }
 
-                Panel {
-                    ForEach(Array(store.managedTools.enumerated()), id: \.element.id) { index, tool in
-                        ToolRow(tool: tool)
-                        if index < store.managedTools.count - 1 { Divider() }
+                if store.toolSetNeedsFreshTask {
+                    NoticeView(
+                        title: "Start a fresh Agent task",
+                        message: "New tasks load this tool selection. Tasks already open keep the tools they started with.",
+                        systemImage: "arrow.clockwise.circle",
+                        color: .blue
+                    )
+                }
+
+                if let catalog = store.catalogBudgetSummary {
+                    Panel {
+                        LabeledContent("Context cost", value: catalog)
+                            .accessibilityLabel("Context cost: \(catalog)")
                     }
                 }
 
-                Text("Agent Host keeps this tool set on compatible versions and preserves each tool's identity in Codex.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Panel {
+                    ForEach(Array(store.managedTools.enumerated()), id: \.element.id) { index, tool in
+                        ToolRow(
+                            tool: tool,
+                            isBusy: store.isBusy,
+                            canDeactivate: store.managedTools.filter(\.active).count > 1,
+                            onChange: { value in Task { await store.setTool(tool.id, active: value) } }
+                        )
+                        if index < store.managedTools.count - 1 { Divider() }
+                    }
+                }
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(32)
@@ -30,6 +47,9 @@ struct ToolsView: View {
 
 private struct ToolRow: View {
     let tool: ManagedTool
+    let isBusy: Bool
+    let canDeactivate: Bool
+    let onChange: (Bool) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -52,7 +72,17 @@ private struct ToolRow: View {
                 Text(tool.ownership).font(.caption).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 20)
-            ItemStatePill(state: tool.state)
+            VStack(alignment: .trailing, spacing: 8) {
+                ItemStatePill(state: tool.state)
+                Toggle("Available", isOn: Binding(
+                    get: { tool.active },
+                    set: onChange
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .disabled(isBusy || (tool.active && !canDeactivate))
+                .accessibilityLabel("Make \(tool.name) available in Agent apps")
+            }
         }
         .padding(.vertical, 3)
     }

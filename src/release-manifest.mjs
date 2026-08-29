@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'no
 import { fileURLToPath } from 'node:url'
 import { readJson } from './json.mjs'
 import { AgentHostError } from './errors.mjs'
-import { validateToolIntegration } from './tool-integration.mjs'
+import { isToolIntegrationSchema, validateToolIntegration } from './tool-integration.mjs'
 
 export const RELEASE_SCHEMA = 'openadam.agent-host-release.v0.2'
 export const COMPONENT_SCHEMA = 'openadam.agent-host-component.v0.1'
@@ -180,7 +180,7 @@ export function validateComponentDescriptor(descriptor, releaseComponent) {
   for (const [name, path] of Object.entries(descriptor.legal)) if (!paths.has(relativePath(path, `${descriptor.id} ${name}`))) fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} legal file is not in its file inventory: ${path}`)
   for (const path of releaseComponent.license.files) if (!paths.has(relativePath(path, `${descriptor.id} release license file`))) fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} release license file is not in its file inventory: ${path}`)
   if (descriptor.integration !== null && (typeof descriptor.integration !== 'object' || Array.isArray(descriptor.integration))) fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} integration metadata is invalid`)
-  if (descriptor.kind === 'agent-tool' || descriptor.integration?.schemaVersion === 'openadam.agent-host-tool-integration.v0.1') {
+  if (descriptor.kind === 'agent-tool' || isToolIntegrationSchema(descriptor.integration?.schemaVersion)) {
     validateToolIntegration(descriptor.integration, paths)
   }
   return descriptor

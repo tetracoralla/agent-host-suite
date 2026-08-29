@@ -12,14 +12,16 @@ if [[ "${release_catalog}" != ${suite_root}/.build/internal-beta/* || ! -f "${re
   exit 1
 fi
 suite_version="$(node -e 'const manifest=require(process.argv[1]); process.stdout.write(manifest.suiteVersion)' "${release_catalog}/current.json")"
-build_version="${AGENT_HOST_APP_BUILD_VERSION:-4}"
+build_version="${AGENT_HOST_APP_BUILD_VERSION:-23}"
 dmg_path="${distribution_root}/Agent-Host-${suite_version}-darwin-arm64.dmg"
 manifest_path="${distribution_root}/Agent-Host-${suite_version}-darwin-arm64.json"
 
-AGENT_HOST_RELEASE_CATALOG="${release_catalog}" AGENT_HOST_APP_BUILD_VERSION="${build_version}" "${script_dir}/package-macos-app.sh" release
+AGENT_HOST_RELEASE_CATALOG="${release_catalog}" AGENT_HOST_BUNDLED_PROFILE="local-dogfood" AGENT_HOST_APP_BUILD_VERSION="${build_version}" "${script_dir}/package-macos-app.sh" release
 app_path="${suite_root}/.build/Agent Host.app"
 codesign --verify --deep --strict --verbose=2 "${app_path}"
-"${app_path}/Contents/Resources/agent-host-runtime/node" "${app_path}/Contents/Resources/agent-host-suite/bin/agent-host.mjs" --help >/dev/null
+bootstrap_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-host-bootstrap-check.XXXXXX")"
+AGENT_HOST_BOOTSTRAP_ROOT="${bootstrap_root}" "${app_path}/Contents/MacOS/agent-host" --help >/dev/null
+rm -rf "${bootstrap_root}"
 
 rm -rf "${distribution_staging}"
 mkdir -p "${distribution_staging}" "${distribution_root}"

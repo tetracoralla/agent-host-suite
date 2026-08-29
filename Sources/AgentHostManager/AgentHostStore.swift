@@ -9,10 +9,12 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var suite: SuiteStatus?
     @Published private(set) var observations: ObservabilityStatus?
     @Published private(set) var doctor: DoctorResult?
+    @Published private(set) var snapshot: SuiteSnapshot?
     @Published private(set) var hostStatuses: [String: HostStatusResult] = [:]
     @Published private(set) var activity: [ActivityEntry] = []
     @Published private(set) var setupPlan: SetupPlan?
     @Published private(set) var environmentChangePlan: EnvironmentChangePlan?
+    @Published private(set) var toolSetNeedsFreshTask = false
     @Published private(set) var isBusy = false
     @Published private(set) var currentAction: String?
     @Published var errorMessage: String?
@@ -34,13 +36,126 @@ final class AgentHostStore: ObservableObject {
     var health: ManagerHealth {
         if isBusy && suite == nil { return .loading }
         guard let suite, suite.configured else { return .unavailable }
-        guard let doctor else { return isBusy ? .loading : .attention("Run a health check") }
-        if doctor.status != "ok" {
-            let labels = attentionLabels
-            if labels.count == 1, let label = labels.first { return .attention("\(label) needs attention") }
-            return .attention("\(labels.count) items need attention")
+        guard doctor != nil else { return isBusy ? .loading : .attention("Run a health check") }
+        let unhealthy = healthFacets.filter { !$0.isHealthy }
+        if unhealthy.isEmpty { return .ready }
+        let labels = attentionLabels
+        if labels.count == 1, let label = labels.first { return .attention("\(label) needs attention") }
+        if unhealthy.count == 1 { return .attention("\(unhealthy[0].name) needs attention") }
+        return .attention("\(unhealthy.count) items need attention")
+    }
+
+    // Independent health surfaces. No single "Ready" may hide an unhealthy
+    // facet: host bindings, installed tools, direct execution, monitoring
+    // completeness/freshness, and the context-catalog budget each report here.
+    var healthFacets: [ManagerHealthFacet] {
+        guard let doctor else { return [] }
+        var facets: [ManagerHealthFacet] = []
+
+        let hostProblems = doctor.checks.filter { $0.id.hasPrefix("host.") && $0.status == "error" }
+        facets.append(ManagerHealthFacet(
+            id: "agent-apps",
+            name: "Agent apps",
+            isHealthy: hostProblems.isEmpty,
+            detail: hostProblems.isEmpty ? "Connected apps have current bindings" : hostProblems[0].message
+        ))
+
+        let toolProblems = doctor.checks.filter {
+            ($0.id.hasPrefix("component.") || ($0.id.hasPrefix("tool.") && $0.id.hasSuffix(".installed"))) && $0.status == "error"
         }
-        return .ready
+        facets.append(ManagerHealthFacet(
+            id: "tools",
+            name: "Tools",
+            isHealthy: toolProblems.isEmpty,
+            detail: toolProblems.isEmpty ? "Installed tool runtimes are ready" : toolProblems[0].message
+        ))
+
+        let runtimeProblems = doctor.checks.filter {
+            ($0.id.hasPrefix("runtime.") || ($0.id.hasPrefix("tool.") && $0.id.hasSuffix(".direct"))) && $0.status == "error"
+        }
+        facets.append(ManagerHealthFacet(
+            id: "direct-execution",
+            name: "Direct execution",
+            isHealthy: runtimeProblems.isEmpty,
+            detail: runtimeProblems.isEmpty ? "The local execution service and direct probes are ready" : runtimeProblems[0].message
+        ))
+
+        facets.append(monitoringFacet)
+        facets.append(catalogFacet)
+        return facets
+    }
+
+    private var monitoringFacet: ManagerHealthFacet {
+        guard let observations else {
+            return ManagerHealthFacet(id: "monitoring", name: "Monitoring", isHealthy: true, detail: "Not configured")
+        }
+        guard observations.enabled else {
+            return ManagerHealthFacet(id: "monitoring", name: "Monitoring", isHealthy: true, detail: "Off")
+        }
+        guard let collection = snapshot?.observability?.collection else {
+            return ManagerHealthFacet(id: "monitoring", name: "Monitoring", isHealthy: false, detail: "On, but no collection result has been recorded")
+        }
+        return MonitoringHealthEvaluator.evaluate(
+            collection: collection,
+            refreshedAt: snapshot?.observability?.refreshedAt ?? observations.latest?.refreshedAt,
+            maintenanceIntervalSeconds: observations.maintenance?.intervalSeconds
+        )
+    }
+
+    private var catalogFacet: ManagerHealthFacet {
+        let catalog = snapshot?.observability?.catalog
+        guard let catalog, catalog.canonicalUtf8Bytes != nil else {
+            return ManagerHealthFacet(id: "catalog", name: "Tool catalog", isHealthy: true, detail: "No measurement (monitoring off or not refreshed)")
+        }
+        let exceeded = (catalog.budgetChecks ?? []).filter(\.exceeded)
+        guard !exceeded.isEmpty else {
+            return ManagerHealthFacet(id: "catalog", name: "Tool catalog", isHealthy: true, detail: "Within declared budgets")
+        }
+        let names = exceeded.map { budgetName($0.metric) }.joined(separator: ", ")
+        return ManagerHealthFacet(
+            id: "catalog",
+            name: "Tool catalog",
+            isHealthy: false,
+            detail: "Over budget: \(names)"
+        )
+    }
+
+    var catalogBudgetSummary: String? {
+        guard let catalog = snapshot?.observability?.catalog, let bytes = catalog.canonicalUtf8Bytes else { return nil }
+        var parts = [
+            "\(catalog.tools ?? 0) tools",
+            "\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary)) catalog",
+        ]
+        if let largest = catalog.largestToolUtf8Bytes {
+            parts.append("largest tool \(ByteCountFormatter.string(fromByteCount: Int64(largest), countStyle: .binary))")
+        }
+        let exceeded = (catalog.budgetChecks ?? []).filter(\.exceeded)
+        if let catalogBudget = (catalog.budgetChecks ?? []).first(where: { $0.metric == "catalog.canonicalUtf8Bytes" }) {
+            parts.append("budget \(ByteCountFormatter.string(fromByteCount: Int64(catalogBudget.limit), countStyle: .binary))")
+        }
+        if !exceeded.isEmpty {
+            parts.append("OVER BUDGET (\(exceeded.count))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var monitoringSummary: String {
+        guard let observations, observations.enabled else { return "Off" }
+        let facet = monitoringFacet
+        return facet.detail
+    }
+
+    var storageSummary: String? {
+        guard let bytes = snapshot?.storage?.allocatedBytes else { return nil }
+        var parts = [ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary)]
+        if let processes = snapshot?.processes, let count = processes.processCount {
+            var baseline = "\(count) live suite process\(count == 1 ? "" : "es")"
+            if let rss = processes.totalRssBytes {
+                baseline += " · \(ByteCountFormatter.string(fromByteCount: Int64(rss), countStyle: .binary)) resident"
+            }
+            parts.append(baseline)
+        }
+        return parts.joined(separator: " · ")
     }
 
     var managedTools: [ManagedTool] {
@@ -69,6 +184,7 @@ final class AgentHostStore: ObservableObject {
             async let codex = self.cli.run(["host", "status", "codex"], as: HostStatusResult.self)
             async let claude = self.cli.run(["host", "status", "claude"], as: HostStatusResult.self)
             async let activity = self.cli.run(["activity"], as: ActivityResult.self)
+            async let snapshot = self.cli.run(["snapshot"], as: SuiteSnapshot.self)
 
             if status.configured {
                 async let observations = self.cli.run(["observability", "status"], as: ObservabilityStatus.self)
@@ -83,6 +199,7 @@ final class AgentHostStore: ObservableObject {
             let hostValues = try await [codex, claude]
             self.hostStatuses = Dictionary(uniqueKeysWithValues: hostValues.map { ($0.host, $0) })
             self.activity = try await activity.entries
+            self.snapshot = try? await snapshot
         }
     }
 
@@ -164,6 +281,22 @@ final class AgentHostStore: ObservableObject {
         await action(["host", connected ? "add" : "remove", id], label: connected ? "Connecting Agent app" : "Disconnecting Agent app")
     }
 
+    func setTool(_ id: String, active: Bool) async {
+        let current = suite?.agentComponents ?? []
+        let next = active ? Array(Set(current + [id])).sorted(by: toolOrderIndex) : current.filter { $0 != id }
+        guard !next.isEmpty else { return }
+        await work(active ? "Making tool available" : "Removing tool from Agent apps") {
+            var arguments = ["tools", "set"]
+            for component in Self.toolOrder where next.contains(component) {
+                arguments += ["--tool", component]
+            }
+            let result = try await self.cli.run(arguments, as: ToolSetChangeResult.self)
+            self.toolSetNeedsFreshTask = result.restartRequired
+            self.doctor = nil
+            await self.reloadAll()
+        }
+    }
+
     func uninstall(purgeData: Bool = false) async {
         await action(purgeData ? ["uninstall", "--purge-data"] : ["uninstall"], label: "Removing Agent Host")
     }
@@ -203,6 +336,7 @@ final class AgentHostStore: ObservableObject {
         guard suite?.configured == true else {
             observations = nil
             doctor = nil
+            snapshot = nil
             hostStatuses = [:]
             activity = (try? await cli.run(["activity"], as: ActivityResult.self).entries) ?? []
             return
@@ -212,11 +346,13 @@ final class AgentHostStore: ObservableObject {
         async let codex = cli.run(["host", "status", "codex"], as: HostStatusResult.self)
         async let claude = cli.run(["host", "status", "claude"], as: HostStatusResult.self)
         async let activity = cli.run(["activity"], as: ActivityResult.self)
+        async let snapshot = cli.run(["snapshot"], as: SuiteSnapshot.self)
         self.observations = try? await observations
         self.doctor = try? await doctor
         let hosts = await [try? codex, try? claude].compactMap { $0 }
         self.hostStatuses = Dictionary(uniqueKeysWithValues: hosts.map { ($0.host, $0) })
         self.activity = (try? await activity.entries) ?? []
+        self.snapshot = try? await snapshot
     }
 
     private func reloadStatus() async {
@@ -246,8 +382,11 @@ final class AgentHostStore: ObservableObject {
         let hostFailed = doctor?.hasFailure(prefix: "host.codex.\(id)") == true || doctor?.hasFailure(prefix: "host.claude.\(id)") == true
         let runtimeFailed = doctor?.hasFailure(prefix: "tool.\(id).") == true
         let state: ManagedItemState
+        let active = suite?.agentComponents?.contains(id) ?? false
         if component == nil {
             state = .unavailable
+        } else if !active {
+            state = .inactive
         } else if doctor == nil {
             state = .checking
         } else if componentFailed || hostFailed || runtimeFailed {
@@ -260,7 +399,7 @@ final class AgentHostStore: ObservableObject {
             value.entries?.contains { $0.component == id } == true ? displayName(for: host) : nil
         }.sorted()
         let ownershipValues = (suite?.hosts ?? [:]).flatMap { $0.value.entries ?? [] }.filter { $0.component == id }.map(\.ownership)
-        let ownership = ownershipValues.contains("suite") ? "Managed by Agent Host" : ownershipValues.isEmpty ? "Not connected to an Agent app" : "Installed by you"
+        let ownership = ownershipValues.contains("suite") ? "Managed by Agent Host" : ownershipValues.isEmpty ? "Kept in this environment" : "Installed by you"
 
         return ManagedTool(
             id: id,
@@ -270,8 +409,13 @@ final class AgentHostStore: ObservableObject {
             version: component?.version,
             state: state,
             availability: availableHosts.isEmpty ? "Not available in an Agent app" : "Available in \(availableHosts.joined(separator: " and "))",
-            ownership: ownership
+            ownership: ownership,
+            active: active
         )
+    }
+
+    private func toolOrderIndex(_ left: String, _ right: String) -> Bool {
+        (Self.toolOrder.firstIndex(of: left) ?? Int.max) < (Self.toolOrder.firstIndex(of: right) ?? Int.max)
     }
 
     private func displayName(for host: String) -> String {
@@ -279,16 +423,27 @@ final class AgentHostStore: ObservableObject {
     }
 
     private var attentionLabels: [String] {
-        guard let doctor else { return [] }
-        let errors = doctor.checks.filter { $0.status == "error" }
         var labels = Set<String>()
-        if errors.contains(where: { $0.id.contains("math-anchor") }) { labels.insert("Math Anchor") }
-        if errors.contains(where: { $0.id.contains("migratory-time") }) { labels.insert("Migratory Time") }
-        if errors.contains(where: { $0.id == "runtime.service" }) { labels.insert("Local execution") }
-        if errors.contains(where: { $0.id == "host.codex" }) && !errors.contains(where: { $0.id.hasPrefix("host.codex.") }) { labels.insert("Codex") }
-        if errors.contains(where: { $0.id == "host.claude" }) && !errors.contains(where: { $0.id.hasPrefix("host.claude.") }) { labels.insert("Claude Code") }
-        if labels.isEmpty && !errors.isEmpty { labels.insert("Environment") }
+        if let doctor {
+            let errors = doctor.checks.filter { $0.status == "error" }
+            if errors.contains(where: { $0.id.contains("math-anchor") }) { labels.insert("Math Anchor") }
+            if errors.contains(where: { $0.id.contains("migratory-time") }) { labels.insert("Migratory Time") }
+            if errors.contains(where: { $0.id == "runtime.service" }) { labels.insert("Local execution") }
+            if errors.contains(where: { $0.id == "host.codex" }) && !errors.contains(where: { $0.id.hasPrefix("host.codex.") }) { labels.insert("Codex") }
+            if errors.contains(where: { $0.id == "host.claude" }) && !errors.contains(where: { $0.id.hasPrefix("host.claude.") }) { labels.insert("Claude Code") }
+        }
+        if !monitoringFacet.isHealthy { labels.insert("Monitoring") }
+        if !catalogFacet.isHealthy { labels.insert("Tool catalog") }
         return labels.sorted()
+    }
+
+    private func budgetName(_ metric: String) -> String {
+        switch metric {
+        case "catalog.canonicalUtf8Bytes": "total catalog bytes"
+        case "counts.tools": "tool count"
+        case "catalog.largestToolUtf8Bytes": "largest tool bytes"
+        default: metric
+        }
     }
 
     private static let toolOrder = [

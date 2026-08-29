@@ -17,7 +17,9 @@ export async function createDevelopmentWorkspace(root) {
   const runtime = join(root, 'direct-execution-runtime')
   const capability = join(root, 'capability-contracts')
   await json(join(math, 'plugins/math-anchor/.codex-plugin/plugin.json'), { name: 'math-anchor', version: '0.3.0' })
-  await json(join(math, 'plugins/math-anchor/.mcp.json'), { mcpServers: {} })
+  await json(join(math, 'plugins/math-anchor/.mcp.json'), {
+    mcpServers: { 'math-anchor': { command: './runtime/math-anchor-runtime/math-anchor-runtime', args: ['mcp'], cwd: '.' } },
+  })
   await write(join(math, 'plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime'), '#!/bin/sh\n', 0o700)
   await json(join(math, 'plugins/math-anchor/runtime/math-anchor-runtime/.math-anchor-build-manifest.json'), { version: '0.3.0' })
   await write(join(math, 'plugins/math-anchor/skills/calculate/SKILL.md'), '---\nname: calculate\n---\n')
@@ -25,7 +27,9 @@ export async function createDevelopmentWorkspace(root) {
   await json(join(math, '.agents/plugins/marketplace.json'), { name: 'math-anchor' })
 
   await json(join(time, 'plugins/migratory-time/.codex-plugin/plugin.json'), { name: 'migratory-time', version: '2.0.0' })
-  await json(join(time, 'plugins/migratory-time/.mcp.json'), { mcpServers: {} })
+  await json(join(time, 'plugins/migratory-time/.mcp.json'), {
+    mcpServers: { 'migratory-time': { command: './server/index.mjs', args: [], cwd: '.' } },
+  })
   await write(join(time, 'plugins/migratory-time/server/index.mjs'), 'process.stdin.resume()\n')
   await write(join(time, 'plugins/migratory-time/skills/convert-time-zones/SKILL.md'), '---\nname: convert-time-zones\n---\n')
   await json(join(time, 'capabilities/provider.json'), { schemaVersion: 'openadam.provider-manifest.v0.3' })
@@ -52,10 +56,10 @@ export async function createDevelopmentWorkspace(root) {
   return { root, math, time, runtime, capability }
 }
 
-export function createCodexRunner({ mathPresent = true, timePresent = false, legacyTimeRoot = null, mathVersion = '0.3.0', mathMarketplace = 'math-anchor' } = {}) {
+export function createCodexRunner({ mathPresent = true, timePresent = false, legacyTimeRoot = null, mathVersion = '0.3.0', mathMarketplace = 'math-anchor', mathMarketplaceRoot = null } = {}) {
   const calls = []
   const marketplaces = new Map()
-  if (mathPresent) marketplaces.set(mathMarketplace, null)
+  if (mathPresent) marketplaces.set(mathMarketplace, mathMarketplaceRoot)
   let plugins = new Map()
   if (mathPresent) plugins.set(`math-anchor@${mathMarketplace}`, { version: mathVersion, enabled: true })
   if (timePresent) plugins.set('migratory-time@migratory-time', { version: '2.0.0', enabled: true })

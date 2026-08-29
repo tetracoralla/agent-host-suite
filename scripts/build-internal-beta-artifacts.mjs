@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { access, chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
@@ -13,9 +13,16 @@ const outputRoot = join(suiteRoot, '.build', 'internal-beta', 'release-catalog')
 const outputStaging = `${outputRoot}.staging-${process.pid}`
 const artifactRoot = join(outputStaging, 'artifacts')
 const componentSchema = 'openadam.agent-host-component.v0.1'
-const releaseVersion = process.env.AGENT_HOST_SUITE_VERSION ?? '0.1.0-dogfood.4'
-const releaseId = process.env.AGENT_HOST_RELEASE_ID ?? 'local-dogfood-20260827.4'
-const releaseCreatedAt = process.env.AGENT_HOST_RELEASE_CREATED_AT ?? '2026-08-27T00:00:00.000Z'
+const releaseVersion = requiredEnvironment('AGENT_HOST_SUITE_VERSION')
+const releaseId = requiredEnvironment('AGENT_HOST_RELEASE_ID')
+const releaseCreatedAt = requiredEnvironment('AGENT_HOST_RELEASE_CREATED_AT')
+const componentCreatedAt = process.env.AGENT_HOST_COMPONENT_CREATED_AT ?? '2000-01-01T00:00:00.000Z'
+const reuseCatalogRoot = process.env.AGENT_HOST_REUSE_CATALOG_ROOT ?? null
+const reuseComponentIds = new Set((process.env.AGENT_HOST_REUSE_COMPONENTS ?? '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean))
+const reusedComponentIds = new Set()
 const platform = 'darwin-arm64'
 const nodeVersion = '22.22.1'
 const nodeArchiveName = `node-v${nodeVersion}-darwin-arm64.tar.gz`
@@ -23,7 +30,7 @@ const nodeUrl = `https://nodejs.org/dist/v${nodeVersion}/${nodeArchiveName}`
 const nodeUpstreamSha256 = 'sha256:679ad4966339e4ef4900f57996714864e4211b898825bb840c3086c419fbcef2'
 const sourceRoots = {
   runtime: join(workspaceRoot, 'direct-execution-runtime'),
-  math: join(workspaceRoot, 'calculator'),
+  math: process.env.AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT ?? join(workspaceRoot, 'calculator'),
   time: join(workspaceRoot, 'migratory-time'),
   capability: join(workspaceRoot, 'capability-contracts'),
   observer: join(workspaceRoot, 'agent-tool-observer'),
@@ -34,6 +41,14 @@ const sourceRoots = {
   projective: join(workspaceRoot, 'perspective-tool'),
   equatorium: join(workspaceRoot, 'standard-expression-interpreter'),
   fileVitals: join(workspaceRoot, 'universal-inspector'),
+}
+
+function requiredEnvironment(name) {
+  const value = process.env[name]
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`${name} is required for an immutable release build`)
+  }
+  return value.trim()
 }
 
 function command(file, args, options = {}) {
@@ -55,6 +70,34 @@ async function sha256(path) {
   const hash = createHash('sha256')
   await pipeline(createReadStream(path), hash)
   return `sha256:${hash.digest('hex')}`
+}
+
+let priorRelease = null
+
+async function reuseComponent(id) {
+  if (reuseCatalogRoot === null) throw new Error(`AGENT_HOST_REUSE_CATALOG_ROOT is required to reuse ${id}`)
+  if (priorRelease === null) {
+    priorRelease = JSON.parse(await readFile(join(reuseCatalogRoot, 'current.json'), 'utf8'))
+  }
+  const component = priorRelease.components?.find((item) => item.id === id)
+  if (component === undefined) throw new Error(`prior release does not contain reusable component ${id}`)
+  const artifactUrl = component.artifact?.url
+  if (typeof artifactUrl !== 'string' || artifactUrl !== `artifacts/${basename(artifactUrl)}`) {
+    throw new Error(`reusable component ${id} has an unsafe artifact URL`)
+  }
+  const source = join(reuseCatalogRoot, artifactUrl)
+  const info = await lstat(source)
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`reusable component ${id} artifact is not a regular file`)
+  if (info.size !== component.artifact.bytes) throw new Error(`reusable component ${id} artifact size drifted`)
+  if (await sha256(source) !== component.artifact.sha256) throw new Error(`reusable component ${id} artifact digest drifted`)
+  await copyPath(source, join(outputStaging, artifactUrl))
+  reusedComponentIds.add(id)
+  return component
+}
+
+async function buildOrReuse(id, builder) {
+  if (reuseComponentIds.has(id)) return reuseComponent(id)
+  return builder()
 }
 
 async function writeText(path, text, mode = 0o644) {
@@ -136,18 +179,19 @@ async function legalNotices(root, title) {
 }
 
 function sbom(name, version, license, source, packages = [], upstream = null) {
+  const sourceIdentity = source?.revision ?? upstream?.sha256?.slice(7) ?? 'unversioned'
   return {
     spdxVersion: 'SPDX-2.3',
     dataLicense: 'CC0-1.0',
     SPDXID: 'SPDXRef-DOCUMENT',
     name: `${name}-${version}-${platform}`,
-    documentNamespace: `https://openadam.dev/spdx/${releaseId}/${name}`,
-    creationInfo: { created: releaseCreatedAt, creators: ['Tool: Agent Host internal Beta builder'] },
+    documentNamespace: `https://openadam.dev/spdx/components/${encodeURIComponent(name)}/${encodeURIComponent(version)}/${platform}/${sourceIdentity}${source?.dirty === true ? '-dirty' : ''}`,
+    creationInfo: { created: componentCreatedAt, creators: ['Tool: Agent Host internal Beta builder'] },
     packages: [
       { SPDXID: 'SPDXRef-RootPackage', name, versionInfo: version, downloadLocation: upstream?.url ?? 'NOASSERTION', licenseConcluded: license, licenseDeclared: license, filesAnalyzed: false, ...(upstream === null ? {} : { checksums: [{ algorithm: 'SHA256', checksumValue: upstream.sha256.slice(7) }] }) },
       ...packages.map((item, index) => ({ SPDXID: `SPDXRef-Dependency-${index + 1}`, name: item.name, versionInfo: item.version, downloadLocation: 'NOASSERTION', licenseConcluded: item.license, licenseDeclared: item.license, filesAnalyzed: false })),
     ],
-    annotations: [{ annotationDate: releaseCreatedAt, annotationType: 'OTHER', annotator: 'Tool: Agent Host internal Beta builder', comment: `sourceRevision=${source?.revision ?? 'upstream'}; sourceDirty=${source?.dirty ?? false}` }],
+    annotations: [{ annotationDate: componentCreatedAt, annotationType: 'OTHER', annotator: 'Tool: Agent Host internal Beta builder', comment: `sourceRevision=${source?.revision ?? 'upstream'}; sourceDirty=${source?.dirty ?? false}` }],
   }
 }
 
@@ -190,7 +234,7 @@ async function finalizeComponent({ root, id, version, kind, identityFiles, entry
   const archivePath = join(artifactRoot, archiveFile)
   const archiveFiles = [...files.map((item) => item.path), 'component.json'].sort()
   if (archiveFiles.some((path) => path.includes('\n') || path.startsWith('-'))) throw new Error(`${id} contains an unsafe archive path`)
-  const fixedTime = new Date(releaseCreatedAt)
+  const fixedTime = new Date(componentCreatedAt)
   for (const path of archiveFiles) await utimes(join(root, path), fixedTime, fixedTime)
   const listPath = `${archivePath}.files`
   const uncompressedPath = `${archivePath}.tmp`
@@ -318,17 +362,14 @@ async function collectSkillFiles(pluginRoot) {
   return output.sort()
 }
 
-async function copyNodeIntoPlugin(workRoot, nodeComponent, pluginRoot) {
-  const extracted = join(workRoot, `node-for-plugin-${basename(pluginRoot)}`)
-  await mkdir(extracted, { recursive: true })
-  await command('/usr/bin/tar', ['-xzf', join(artifactRoot, basename(nodeComponent.artifact.url)), '-C', extracted, './bin/node'])
-  const relativePath = 'runtime/agent-host-node'
-  await copyPath(join(extracted, 'bin/node'), join(pluginRoot, relativePath))
-  await chmod(join(pluginRoot, relativePath), 0o755)
-  return relativePath
+function containedPluginPath(value, label) {
+  if (typeof value !== 'string' || value.length === 0 || value.includes('\\')) throw new Error(`${label} is invalid`)
+  const path = normalize(value.replace(/^\.\//u, ''))
+  if (isAbsolute(path) || path === '.' || path === '..' || path.startsWith(`..${sep}`)) throw new Error(`${label} must be a contained plugin path`)
+  return path
 }
 
-async function buildAgentTool(workRoot, nodeComponent, spec) {
+async function buildAgentTool(workRoot, spec) {
   const root = join(workRoot, spec.id)
   const marketplaceRoot = 'marketplace'
   const pluginRootRelative = `${marketplaceRoot}/plugins/${spec.plugin}`
@@ -351,16 +392,22 @@ async function buildAgentTool(workRoot, nodeComponent, spec) {
   if (serverEntries.length !== 1) throw new Error(`${spec.id} must declare exactly one MCP server`)
   const [serverName, server] = serverEntries[0]
   let runtimeCommandRelative
+  let runtimeArgs
+  let runtimeExecutor
   if (server.command === 'node') {
-    const nodePath = await copyNodeIntoPlugin(workRoot, nodeComponent, pluginRoot)
-    server.command = `./${nodePath}`
-    runtimeCommandRelative = `${pluginRootRelative}/${nodePath}`
+    const [script, ...args] = server.args ?? []
+    const relativeScript = containedPluginPath(script, `${spec.id} MCP script`)
+    const scriptPath = join(pluginRoot, relativeScript)
+    if (await existingFile([scriptPath]) === null) throw new Error(`${spec.id} MCP script is absent: ${relativeScript}`)
+    runtimeCommandRelative = `${pluginRootRelative}/${relativeScript}`
+    runtimeArgs = args
+    runtimeExecutor = 'suite-node'
   } else {
-    const relativeCommand = server.command.replace(/^\.\//u, '')
-    if (relativeCommand === server.command && server.command.startsWith('/')) throw new Error(`${spec.id} MCP command must be relative`)
+    const relativeCommand = containedPluginPath(server.command, `${spec.id} MCP command`)
     runtimeCommandRelative = `${pluginRootRelative}/${relativeCommand}`
+    runtimeArgs = server.args ?? []
+    runtimeExecutor = 'component'
   }
-  await writeJson(mcpPath, mcp)
 
   await writeJson(join(root, marketplaceRoot, '.agents/plugins/marketplace.json'), {
     name: spec.marketplace,
@@ -419,7 +466,7 @@ async function buildAgentTool(workRoot, nodeComponent, spec) {
     identityFiles,
     entrypoints: { mcp: runtimeCommandRelative, ...(spec.entrypoints ?? {}) },
     integration: {
-      schemaVersion: 'openadam.agent-host-tool-integration.v0.1',
+      schemaVersion: 'openadam.agent-host-tool-integration.v0.2',
       displayName: spec.displayName,
       summary: spec.summary,
       codex: {
@@ -431,8 +478,9 @@ async function buildAgentTool(workRoot, nodeComponent, spec) {
       },
       runtime: {
         transport: 'mcp-stdio',
+        executor: runtimeExecutor,
         command: runtimeCommandRelative,
-        args: server.args ?? [],
+        args: runtimeArgs,
         cwd: pluginRootRelative,
         workspaceEnvironment: spec.workspaceEnvironment ?? [],
         expectedTools: spec.expectedTools,
@@ -512,34 +560,27 @@ async function main() {
   await rm(outputStaging, { recursive: true, force: true })
   await mkdir(artifactRoot, { recursive: true })
   try {
-    const node = await buildNode(workRoot, cacheRoot)
+    const node = await buildOrReuse('node-runtime', () => buildNode(workRoot, cacheRoot))
     const components = [
       node,
-      await buildDirectRuntime(workRoot),
-      await buildMathAnchor(workRoot),
-      await buildMigratoryTime(workRoot, node),
-      await buildLocalNodeUtility(workRoot, {
+      await buildOrReuse('direct-execution-runtime', () => buildDirectRuntime(workRoot)),
+      await buildOrReuse('math-anchor', () => buildMathAnchor(workRoot)),
+      await buildOrReuse('migratory-time', () => buildMigratoryTime(workRoot, node)),
+      await buildOrReuse('agent-tool-observer', () => buildLocalNodeUtility(workRoot, {
         id: 'agent-tool-observer',
         kind: 'agent-tool-observer',
         title: 'Agent Tool Observer',
         sourceRoot: sourceRoots.observer,
         entrypoint: 'src/cli.mjs',
-      }),
-      await buildAgentTool(workRoot, node, {
+      })),
+      await buildOrReuse('context-surface-analyzer', () => buildLocalNodeUtility(workRoot, {
         id: 'context-surface-analyzer',
         kind: 'context-surface-analyzer',
-        displayName: 'Context Surface Analyzer',
-        summary: 'Measure and compare explicit Agent tool catalogs.',
-        marketplace: 'context-surface-analyzer',
-        plugin: 'context-surface-analyzer',
-        repositoryRoot: sourceRoots.analyzer,
-        pluginRoot: join(sourceRoots.analyzer, 'plugins/context-surface-analyzer'),
-        additionalPaths: ['package.json', 'package-lock.json', 'src'],
-        identityFiles: ['package.json', 'package-lock.json', 'src/cli.js'],
-        entrypoints: { cli: 'src/cli.js' },
-        expectedTools: ['context.analyze', 'context.diff'],
-      }),
-      await buildAgentTool(workRoot, node, {
+        title: 'Context Surface Analyzer',
+        sourceRoot: sourceRoots.analyzer,
+        entrypoint: 'src/cli.js',
+      })),
+      await buildOrReuse('data-transformer', () => buildAgentTool(workRoot, {
         id: 'data-transformer',
         displayName: 'BatchTicket',
         summary: 'Inspect, reshape, validate, and compare structured data.',
@@ -552,8 +593,8 @@ async function main() {
         expectedTools: ['data_diff', 'data_inspect', 'data_transform', 'data_validate'],
         workspaceEnvironment: ['ADT_WORKSPACE_ROOT'],
         timeoutMs: 30000,
-      }),
-      await buildAgentTool(workRoot, node, {
+      })),
+      await buildOrReuse('armorial', () => buildAgentTool(workRoot, {
         id: 'armorial',
         displayName: 'Armorial',
         summary: 'Choose project-aware icons without redrawing them.',
@@ -564,8 +605,8 @@ async function main() {
         pluginArchive: process.env.AGENT_HOST_ARMORIAL_PLUGIN_ARCHIVE ?? join(sourceRoots.armorial, '.release/armorial-0.5.0-codex-plugin-macos-arm64.tar.gz'),
         pluginArchiveRoot: 'armorial',
         expectedTools: ['browse_icons', 'choose_icon', 'get_icon', 'get_icons', 'resolve_icon', 'search_icons'],
-      }),
-      await buildAgentTool(workRoot, node, {
+      })),
+      await buildOrReuse('laniakea', () => buildAgentTool(workRoot, {
         id: 'laniakea',
         displayName: 'Laniakea',
         summary: 'Create, inspect, search, and revise Markdown mind maps.',
@@ -574,8 +615,8 @@ async function main() {
         repositoryRoot: sourceRoots.laniakea,
         pluginRoot: join(sourceRoots.laniakea, 'plugins/laniakea'),
         expectedTools: ['create_mind_map', 'read_mind_map', 'search_mind_map', 'update_mind_map'],
-      }),
-      await buildAgentTool(workRoot, node, {
+      })),
+      await buildOrReuse('projective', () => buildAgentTool(workRoot, {
         id: 'projective',
         displayName: 'Projective',
         summary: 'Compose, inspect, render, and emit explicit projective planes.',
@@ -587,8 +628,8 @@ async function main() {
         pluginArchiveRoot: 'projective',
         expectedTools: ['projective.compose', 'projective.css', 'projective.inspect', 'projective.render', 'projective.solve'],
         workspaceEnvironment: ['PROJECTIVE_WORKSPACE_ROOT'],
-      }),
-      await buildAgentTool(workRoot, node, {
+      })),
+      await buildOrReuse('equatorium', () => buildAgentTool(workRoot, {
         id: 'equatorium',
         displayName: 'Equatorium',
         summary: 'Interpret specification-dense standard expressions deterministically.',
@@ -597,8 +638,8 @@ async function main() {
         repositoryRoot: sourceRoots.equatorium,
         pluginRoot: join(sourceRoots.equatorium, 'plugins/equatorium'),
         expectedTools: ['sei_run'],
-      }),
-      await buildAgentTool(workRoot, node, {
+      })),
+      await buildOrReuse('file-vitals', () => buildAgentTool(workRoot, {
         id: 'file-vitals',
         displayName: 'File Vitals',
         summary: 'Inspect and inventory files before acting on them.',
@@ -608,8 +649,10 @@ async function main() {
         pluginRoot: process.env.AGENT_HOST_FILE_VITALS_PLUGIN_ROOT ?? join(sourceRoots.fileVitals, 'dist/plugin/file-vitals-0.3.2-darwin-arm64'),
         expectedTools: ['file_inspect', 'file_inspect_batch', 'workspace_inventory'],
         workspaceEnvironment: ['UFI_WORKSPACE_ROOT'],
-      }),
+      })),
     ]
+    const unreused = [...reuseComponentIds].filter((id) => !reusedComponentIds.has(id))
+    if (unreused.length > 0) throw new Error(`requested reusable components are unknown: ${unreused.join(', ')}`)
     const releaseManifest = {
       schemaVersion: 'openadam.agent-host-release.v0.2',
       releaseId,

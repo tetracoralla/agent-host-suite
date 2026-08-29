@@ -37,12 +37,13 @@ cleanup() {
 trap cleanup EXIT
 hdiutil attach -nobrowse -readonly -mountpoint "${mount_root}" "${dmg_path}" >/dev/null
 app_path="${mount_root}/Agent Host.app"
-bundled_node="${app_path}/Contents/Resources/agent-host-runtime/node"
-bundled_cli="${app_path}/Contents/Resources/agent-host-suite/bin/agent-host.mjs"
+bundled_launcher="${app_path}/Contents/MacOS/agent-host"
 bundled_icon="${app_path}/Contents/Resources/AgentHost.icns"
 
 codesign --verify --deep --strict --verbose=2 "${app_path}"
-"${bundled_node}" "${bundled_cli}" --help >/dev/null
+bootstrap_root="$(mktemp -d "${TMPDIR:-/tmp}/agent-host-bootstrap-check.XXXXXX")"
+AGENT_HOST_BOOTSTRAP_ROOT="${bootstrap_root}" "${bundled_launcher}" --help >/dev/null
+rm -rf "${bootstrap_root}"
 [[ -s "${bundled_icon}" ]] || { print -u2 "app icon is missing"; exit 1; }
 if rg -a -l '/(Users|home)/[^/]+/(Development/)?tools-dev/' "${app_path}" >/dev/null; then
   print -u2 "distribution contains a tools-dev source path"

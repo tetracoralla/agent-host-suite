@@ -38,6 +38,21 @@ test('tool integration accepts one closed immutable Codex and MCP binding', () =
   assert.equal(validateToolIntegration(fixture(), files).displayName, 'File Vitals')
 })
 
+test('tool integration v0.2 accepts a contained script executed by the shared Suite Node runtime', () => {
+  const value = fixture()
+  value.schemaVersion = 'openadam.agent-host-tool-integration.v0.2'
+  value.runtime.executor = 'suite-node'
+  value.runtime.command = 'marketplace/plugins/file-vitals/server/index.mjs'
+  const withScript = new Set([...files, value.runtime.command])
+  assert.equal(validateToolIntegration(value, withScript).runtime.executor, 'suite-node')
+})
+
+test('tool integration v0.1 rejects an undeclared executor', () => {
+  const value = fixture()
+  value.runtime.executor = 'suite-node'
+  assert.throws(() => validateToolIntegration(value, files), (error) => error.code === 'TOOL_INTEGRATION_INVALID')
+})
+
 test('tool integration rejects arbitrary commands, unknown fields, and weak ownership', () => {
   const commandEscape = fixture()
   commandEscape.runtime.command = '../bin/tool'

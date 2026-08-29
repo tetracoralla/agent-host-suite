@@ -1,6 +1,6 @@
 {
   "name": "@openadam/agent-host-suite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Install and manage one compatible local environment for Agent tools.",
   "license": "Apache-2.0",
   "author": "openAdam",
@@ -20,6 +20,7 @@
     "bin/",
     "catalog/",
     "schemas/",
+    "skills/",
     "src/",
     "LICENSE",
     "NOTICE",

@@ -43,6 +43,11 @@ private struct ActivityRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                ForEach(entry.orderedDetail, id: \.key) { item in
+                    Text("\(item.key): \(item.value)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(.vertical, 2)

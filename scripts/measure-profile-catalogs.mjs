@@ -31,7 +31,7 @@ try {
 
   for (const id of ['standard', 'local-dogfood']) {
     const profile = await loadProfile(id)
-    const components = Object.fromEntries(profile.components.filter((componentId) => preparation.manifest.components[componentId] !== undefined).map((componentId) => [componentId, preparation.manifest.components[componentId]]))
+    const components = Object.fromEntries(profile.agentComponents.filter((componentId) => preparation.manifest.components[componentId] !== undefined).map((componentId) => [componentId, preparation.manifest.components[componentId]]))
     const snapshot = await exportManagedCatalog(components)
     const snapshotPath = join(outputRoot, `catalog-${id}.json`)
     await writeFile(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`)

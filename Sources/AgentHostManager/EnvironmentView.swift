@@ -36,12 +36,37 @@ struct EnvironmentView: View {
                 }
 
                 Panel {
+                    Text("Health").font(.headline)
+                    ForEach(store.healthFacets) { facet in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: facet.isHealthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(facet.isHealthy ? .green : .orange)
+                                .frame(width: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(facet.name)
+                                Text(facet.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(facet.name): \(facet.detail)")
+                    }
+                }
+
+                Panel {
                     Text("Current environment").font(.headline)
                     LabeledContent("Tool set", value: toolSetName)
                     LabeledContent("Tools", value: store.managedTools.count.formatted())
                     LabeledContent("Agent apps", value: store.connectedAgentAppCount.formatted())
                     LabeledContent("Local execution", value: store.localExecutionStatus)
-                    LabeledContent("Monitoring", value: store.observations?.enabled == true ? "On" : "Off")
+                    LabeledContent("Monitoring", value: store.monitoringSummary)
+                    if let storage = store.storageSummary {
+                        LabeledContent("Storage · live processes", value: storage)
+                    }
+                    if let catalog = store.catalogBudgetSummary {
+                        LabeledContent("Tool catalog", value: catalog)
+                    }
                 }
 
                 HStack {
@@ -57,7 +82,8 @@ struct EnvironmentView: View {
     }
 
     private var firstFailure: String? {
-        store.doctor?.checks.first { $0.status == "error" }?.message
+        if let message = store.doctor?.checks.first(where: { $0.status == "error" })?.message { return message }
+        return store.healthFacets.first { !$0.isHealthy }?.detail
     }
 
     private var toolSetName: String {

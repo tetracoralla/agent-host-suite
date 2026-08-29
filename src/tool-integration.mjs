@@ -2,6 +2,11 @@ import { isAbsolute, normalize, sep } from 'node:path'
 import { AgentHostError } from './errors.mjs'
 
 export const TOOL_INTEGRATION_SCHEMA = 'openadam.agent-host-tool-integration.v0.1'
+export const TOOL_INTEGRATION_SCHEMA_V2 = 'openadam.agent-host-tool-integration.v0.2'
+
+export function isToolIntegrationSchema(value) {
+  return value === TOOL_INTEGRATION_SCHEMA || value === TOOL_INTEGRATION_SCHEMA_V2
+}
 
 function fail(message, details) {
   throw new AgentHostError('TOOL_INTEGRATION_INVALID', message, details)
@@ -41,7 +46,7 @@ function stringArray(value, label, minimum = 0) {
 
 export function validateToolIntegration(value, componentFiles = undefined) {
   exactKeys(value, ['schemaVersion', 'displayName', 'summary', 'codex', 'runtime', 'ownership'], 'tool integration')
-  if (value.schemaVersion !== TOOL_INTEGRATION_SCHEMA) fail(`Unsupported tool integration schema: ${value.schemaVersion ?? 'missing'}`)
+  if (!isToolIntegrationSchema(value.schemaVersion)) fail(`Unsupported tool integration schema: ${value.schemaVersion ?? 'missing'}`)
   string(value.displayName, 'tool display name', 80)
   string(value.summary, 'tool summary', 180)
 
@@ -52,8 +57,12 @@ export function validateToolIntegration(value, componentFiles = undefined) {
   identifier(value.codex.plugin, 'Codex plugin')
   const identityFiles = stringArray(value.codex.identityFiles, 'Codex identity files', 2).map((path) => integrationRelativePath(path, 'Codex identity file'))
 
-  exactKeys(value.runtime, ['transport', 'command', 'args', 'cwd', 'workspaceEnvironment', 'expectedTools', 'timeoutMs'], 'tool runtime')
+  const runtimeKeys = ['transport', 'command', 'args', 'cwd', 'workspaceEnvironment', 'expectedTools', 'timeoutMs']
+  if (value.schemaVersion === TOOL_INTEGRATION_SCHEMA_V2) runtimeKeys.push('executor')
+  exactKeys(value.runtime, runtimeKeys, 'tool runtime')
   if (value.runtime.transport !== 'mcp-stdio') fail('Tool runtime transport is unsupported')
+  const executor = value.schemaVersion === TOOL_INTEGRATION_SCHEMA_V2 ? value.runtime.executor : 'component'
+  if (!['component', 'suite-node'].includes(executor)) fail('Tool runtime executor is unsupported')
   const command = integrationRelativePath(value.runtime.command, 'tool runtime command')
   stringArray(value.runtime.args, 'tool runtime arguments')
   const cwd = integrationRelativePath(value.runtime.cwd, 'tool runtime working directory')

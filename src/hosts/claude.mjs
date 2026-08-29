@@ -6,7 +6,7 @@ function targets(manifest) {
   return [
     { name: 'math-anchor', aliases: ['math-anchor', 'math_anchor'], component: manifest.components['math-anchor'] },
     { name: 'migratory-time', aliases: ['migratory-time', 'migratory_time'], component: manifest.components['migratory-time'] },
-  ]
+  ].filter((target) => target.component !== undefined)
 }
 
 function parseEntry(name, output, expectedArgumentSets = []) {
@@ -122,4 +122,18 @@ export async function uninstallClaude(hostState, runner = runFile) {
     }
   }
   return { kind: 'claude', removed }
+}
+
+export async function suspendClaude(hostState, runner = runFile) {
+  const executable = await resolveExecutable('claude', runner)
+  if (executable === null) throw new AgentHostError('CLAUDE_NOT_INSTALLED', 'Claude Code is not installed or not on PATH')
+  const removed = []
+  for (const entry of [...hostState.entries].reverse()) {
+    if (entry.created !== true) {
+      throw new AgentHostError('TOOL_SET_UNMANAGED_BINDING', `Agent Host cannot hide unmanaged Claude Code MCP server ${entry.actualName} without changing user-owned configuration`)
+    }
+    await runner(executable, ['mcp', 'remove', '--scope', 'user', entry.actualName])
+    removed.push({ target: entry.actualName, kind: 'mcp' })
+  }
+  return { kind: 'claude', suspended: removed }
 }

@@ -6,7 +6,9 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const required = [
   'AGENTS.md', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'CHANGELOG.md',
   'Package.swift', 'macos/Info.plist', 'macos/AgentHostIcon.svg', 'macos/AgentHostMenuBar.svg', 'scripts/build-app-icon.sh', 'docs/PRODUCT_MODEL.md', 'docs/ARCHITECTURE.md', 'docs/TERMINOLOGY.md', 'docs/TOOL_INTEGRATION.md', 'docs/BRAND.md', 'docs/RELEASE.md', 'docs/REVIEW_CONTRACT.md',
+  'scripts/check-manager-models.sh', 'Tests/AgentHostManagerChecks/main.swift',
   'schemas/agent-host-activity.schema.v0.1.json',
+  'schemas/agent-host-tool-integration.schema.v0.1.json', 'schemas/agent-host-tool-integration.schema.v0.2.json',
   '.github/workflows/ci.yml', '.github/workflows/codeql.yml', '.github/workflows/release.yml',
 ]
 for (const path of required) {
@@ -39,4 +41,12 @@ const release = JSON.parse(await readFile(join(root, 'catalog/releases/draft-unb
 if (release.status !== 'draft-unbound' || release.components.length !== 0) throw new Error('unbound release catalog must fail closed')
 const infoPlist = await readFile(join(root, 'macos/Info.plist'), 'utf8')
 if (!infoPlist.includes('<key>CFBundleIconFile</key><string>AgentHost</string>')) throw new Error('macOS app icon is not bound in Info.plist')
+const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+const packageLock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'))
+if (packageLock.version !== packageJson.version || packageLock.packages?.['']?.version !== packageJson.version) {
+  throw new Error('package-lock root identity differs from package.json')
+}
+if (!infoPlist.includes(`<key>CFBundleShortVersionString</key><string>${packageJson.version}</string>`)) {
+  throw new Error('macOS app version differs from package.json')
+}
 console.log(`repository invariants passed for ${publicFiles.length} public files`)

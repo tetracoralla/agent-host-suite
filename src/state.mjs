@@ -17,6 +17,7 @@ export function statePaths(root) {
     backups: join(root, 'backups'),
     downloads: join(root, 'downloads'),
     packages: join(root, 'packages'),
+    hostProjections: join(root, 'host-projections'),
     activity: join(root, 'activity.jsonl'),
   }
 }
@@ -31,6 +32,7 @@ export async function prepareStatePaths(root) {
     ensurePrivateDirectory(paths.backups),
     ensurePrivateDirectory(paths.downloads),
     ensurePrivateDirectory(paths.packages),
+    ensurePrivateDirectory(paths.hostProjections),
   ])
   return paths
 }

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { homedir } from 'node:os'
 import { AgentHostError } from './errors.mjs'
 
 export async function runFile(command, args = [], options = {}) {
@@ -71,8 +72,32 @@ export async function runFile(command, args = [], options = {}) {
   })
 }
 
+const STANDARD_TOOL_DIRECTORIES = [
+  '/opt/homebrew/bin',
+  '/opt/homebrew/sbin',
+  '/usr/local/bin',
+  '/usr/local/sbin',
+]
+
+// A GUI-launched process inherits a minimal PATH (/usr/bin:/bin:...), so
+// Homebrew-installed host CLIs look "not installed" to `which`. Append the
+// standard install locations instead of trusting the inherited PATH alone.
+export function toolSearchPath(currentPath = process.env.PATH ?? '', home = homedir()) {
+  const entries = currentPath.split(':').filter((entry) => entry !== '')
+  const additions = [
+    ...STANDARD_TOOL_DIRECTORIES,
+    `${home}/.local/bin`,
+    `${home}/bin`,
+  ]
+  for (const directory of additions) {
+    if (!entries.includes(directory)) entries.push(directory)
+  }
+  return entries.join(':')
+}
+
 export async function resolveExecutable(name, runner = runFile) {
-  const result = await runner('/usr/bin/env', ['which', name], { allowFailure: true, timeoutMs: 5_000 })
+  const env = { ...process.env, PATH: toolSearchPath(process.env.PATH) }
+  const result = await runner('/usr/bin/env', ['which', name], { allowFailure: true, timeoutMs: 5_000, env })
   if (result.status !== 0 || result.stdout.trim() === '') return null
   return result.stdout.trim().split('\n')[0]
 }

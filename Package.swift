@@ -4,8 +4,13 @@ import PackageDescription
 let package = Package(
     name: "AgentHostManager",
     platforms: [.macOS(.v14)],
-    products: [.executable(name: "AgentHostManager", targets: ["AgentHostManager"])],
+    products: [
+        .executable(name: "AgentHostManager", targets: ["AgentHostManager"]),
+        .executable(name: "AgentHostCLIShim", targets: ["AgentHostCLIShim"]),
+    ],
     targets: [
-        .executableTarget(name: "AgentHostManager", path: "Sources/AgentHostManager"),
+        .target(name: "AgentHostBootstrap", path: "Sources/AgentHostBootstrap"),
+        .executableTarget(name: "AgentHostManager", dependencies: ["AgentHostBootstrap"], path: "Sources/AgentHostManager"),
+        .executableTarget(name: "AgentHostCLIShim", dependencies: ["AgentHostBootstrap"], path: "Sources/AgentHostCLIShim"),
     ]
 )
