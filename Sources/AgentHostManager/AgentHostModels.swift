@@ -128,7 +128,11 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
     let summary: String
     let detail: [String: ActivityDetailValue]?
 
-    var date: Date? { ISO8601DateFormatter.activity.date(from: occurredAt) }
+    var date: Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: occurredAt)
+    }
 
     var orderedDetail: [(key: String, value: String)] {
         (detail ?? [:])
@@ -399,12 +403,4 @@ enum ManagedItemState: Equatable {
         case .inactive: "Installed"
         }
     }
-}
-
-private extension ISO8601DateFormatter {
-    static let activity: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
 }

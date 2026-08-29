@@ -1,6 +1,23 @@
 import Foundation
 import AgentHostBootstrap
 
+private final class LockedData: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = Data()
+
+    func replace(with data: Data) {
+        lock.lock()
+        storage = data
+        lock.unlock()
+    }
+
+    var value: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+}
+
 struct AgentHostCLI: Sendable {
     private let environment: [String: String]
     private let timeoutSeconds: Int
@@ -36,55 +53,61 @@ struct AgentHostCLI: Sendable {
 
     func run<T: Decodable & Sendable>(_ arguments: [String], as type: T.Type = T.self) async throws -> T {
         try await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            let stdout = Pipe()
-            let stderr = Pipe()
-            let target = try self.command()
-            process.executableURL = URL(fileURLWithPath: target.executable)
-            process.arguments = target.prefixArguments + arguments + ["--json"]
-            process.environment = self.environment
-            process.standardOutput = stdout
-            process.standardError = stderr
-            try process.run()
-
-            let timeout = DispatchWorkItem {
-                if process.isRunning { process.terminate() }
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(self.timeoutSeconds), execute: timeout)
-            // Drain both pipes at once: reading stdout to completion first can
-            // deadlock when the child fills the bounded stderr pipe.
-            let group = DispatchGroup()
-            var output = Data()
-            var errorOutput = Data()
-            group.enter()
-            DispatchQueue.global().async {
-                output = stdout.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-            group.enter()
-            DispatchQueue.global().async {
-                errorOutput = stderr.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-            group.wait()
-            process.waitUntilExit()
-            timeout.cancel()
-
-            let payload = process.terminationStatus == 0 ? output : errorOutput
-            if process.terminationStatus != 0,
-               !output.isEmpty,
-               let diagnostic = try? JSONDecoder().decode(T.self, from: output) {
-                return diagnostic
-            }
-            if process.terminationStatus != 0,
-               let failure = try? JSONDecoder().decode(PublicFailure.self, from: payload) {
-                throw CLIError.failed(code: failure.error.code, message: failure.error.message)
-            }
-            guard process.terminationStatus == 0 else {
-                throw CLIError.failed(code: "COMMAND_FAILED", message: String(data: payload, encoding: .utf8) ?? "Agent Host did not complete the action.")
-            }
-            return try JSONDecoder().decode(T.self, from: output)
+            try self.runSynchronously(arguments, as: type)
         }.value
+    }
+
+    private func runSynchronously<T: Decodable>(_ arguments: [String], as type: T.Type) throws -> T {
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        let target = try command()
+        process.executableURL = URL(fileURLWithPath: target.executable)
+        process.arguments = target.prefixArguments + arguments + ["--json"]
+        process.environment = environment
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+
+        let timeout = DispatchWorkItem {
+            if process.isRunning { process.terminate() }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(timeoutSeconds), execute: timeout)
+        // Drain both pipes at once: reading stdout to completion first can
+        // deadlock when the child fills the bounded stderr pipe.
+        let group = DispatchGroup()
+        let outputDrain = LockedData()
+        let errorDrain = LockedData()
+        group.enter()
+        DispatchQueue.global().async {
+            outputDrain.replace(with: stdout.fileHandleForReading.readDataToEndOfFile())
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global().async {
+            errorDrain.replace(with: stderr.fileHandleForReading.readDataToEndOfFile())
+            group.leave()
+        }
+        group.wait()
+        process.waitUntilExit()
+        timeout.cancel()
+
+        let output = outputDrain.value
+        let errorOutput = errorDrain.value
+        let payload = process.terminationStatus == 0 ? output : errorOutput
+        if process.terminationStatus != 0,
+           !output.isEmpty,
+           let diagnostic = try? JSONDecoder().decode(T.self, from: output) {
+            return diagnostic
+        }
+        if process.terminationStatus != 0,
+           let failure = try? JSONDecoder().decode(PublicFailure.self, from: payload) {
+            throw CLIError.failed(code: failure.error.code, message: failure.error.message)
+        }
+        guard process.terminationStatus == 0 else {
+            throw CLIError.failed(code: "COMMAND_FAILED", message: String(data: payload, encoding: .utf8) ?? "Agent Host did not complete the action.")
+        }
+        return try JSONDecoder().decode(T.self, from: output)
     }
 
     private func command() throws -> (executable: String, prefixArguments: [String]) {

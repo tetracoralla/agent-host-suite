@@ -30,7 +30,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: ./scripts/check-manager-models.sh
-      - run: swift build
+      - run: ./scripts/check-swift-concurrency.sh
       - name: Create a bound packaging fixture
         run: >-
           node --input-type=module -e
