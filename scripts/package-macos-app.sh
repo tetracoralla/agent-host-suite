@@ -12,8 +12,8 @@ if [[ "${configuration}" != "debug" && "${configuration}" != "release" ]]; then
 fi
 
 cd "${suite_root}"
-swift build -c "${configuration}" --product AgentHostManager
-swift build -c "${configuration}" --product AgentHostCLIShim
+swift build -c "${configuration}" -Xswiftc -warnings-as-errors --product AgentHostManager
+swift build -c "${configuration}" -Xswiftc -warnings-as-errors --product AgentHostCLIShim
 binary_path="$(swift build -c "${configuration}" --show-bin-path)/AgentHostManager"
 shim_path="$(swift build -c "${configuration}" --show-bin-path)/AgentHostCLIShim"
 app_path="${suite_root}/.build/Agent Host.app"

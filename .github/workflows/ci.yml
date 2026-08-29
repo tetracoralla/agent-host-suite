@@ -30,7 +30,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: ./scripts/check-manager-models.sh
-      - run: swift build
+      - run: swift build --scratch-path .build/swift6-check -Xswiftc -swift-version -Xswiftc 6 -Xswiftc -warnings-as-errors
       - name: Create a bound packaging fixture
         run: >-
           node --input-type=module -e

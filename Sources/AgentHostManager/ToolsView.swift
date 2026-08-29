@@ -49,7 +49,7 @@ private struct ToolRow: View {
     let tool: ManagedTool
     let isBusy: Bool
     let canDeactivate: Bool
-    let onChange: (Bool) -> Void
+    let onChange: @Sendable (Bool) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
