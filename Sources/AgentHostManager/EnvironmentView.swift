@@ -6,7 +6,7 @@ struct EnvironmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Agent environment", subtitle: "Standard tools on this Mac") {
+                PageHeader(title: "Agent environment", subtitle: "\(toolSetName) on this Mac") {
                     HealthPill(health: store.health)
                 }
 
@@ -27,8 +27,10 @@ struct EnvironmentView: View {
                 } else if store.health == .ready {
                     Panel {
                         NoticeView(
-                            title: "Your environment is ready",
-                            message: "Open a fresh Codex task to use the installed tools.",
+                            title: store.agentAppsVerified ? "Your environment is ready" : "Your local environment is ready",
+                            message: store.agentAppsVerified
+                                ? "Open a fresh task in a connected Agent app to use the installed tools."
+                                : "Connected Agent apps are configured. Run Full Check when you want to verify their current bindings.",
                             systemImage: "checkmark.circle.fill",
                             color: .green
                         )
@@ -61,6 +63,13 @@ struct EnvironmentView: View {
                     LabeledContent("Agent apps", value: store.connectedAgentAppCount.formatted())
                     LabeledContent("Local execution", value: store.localExecutionStatus)
                     LabeledContent("Monitoring", value: store.monitoringSummary)
+                    if store.isRefreshing {
+                        LabeledContent("Status checked", value: "Refreshing…")
+                    } else if let refreshedAt = store.lastSuccessfulRefreshAt {
+                        LabeledContent("Status checked") {
+                            Text(refreshedAt, format: .relative(presentation: .named))
+                        }
+                    }
                     if let storage = store.storageSummary {
                         LabeledContent("Storage · live processes", value: storage)
                     }

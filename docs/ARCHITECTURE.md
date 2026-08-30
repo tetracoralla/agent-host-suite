@@ -24,6 +24,12 @@ owned by those public mechanisms. An Agent-app update may require a fresh
 compatibility check, but it cannot overwrite a patched runtime because Agent
 Host never patches the Agent app.
 
+Claude Code integrations are owned at user scope. Agent Host invokes its
+documented management command with `setting-sources=user` and disables Skills
+and Chrome integration for that subprocess. It does not ask the host command to
+load project or local settings merely to inspect or change a Suite-owned user
+binding.
+
 ## No central Agent tool
 
 The model continues to see provider-specific domain tools. It never receives a
@@ -87,6 +93,32 @@ maintenance; Agent Host must not overwrite that CLI with its Codex MCP carrier.
 This record is an admission seam for current products. It is not a registry,
 universal installer, third-party marketplace, or permission to invent future
 provider fields without a current consumer.
+
+## Private component import
+
+The optional local import path reuses that same component descriptor and tool
+integration seam; it introduces no provider-neutral schema and no discovery
+catalog. The CLI accepts one explicit absolute path to a sealed `tar.gz`
+artifact. Preview observes its current archive SHA-256 and byte length,
+descriptor SHA-256, id, version, platform, file count, expanded bytes, and live
+typed MCP catalog. The owner supplies the SPDX expression. Import requires an
+exact binding object containing those facts, so a changed package cannot reuse
+an earlier approval. Live catalog inspection starts the selected component in a
+temporary package root. It persists no Agent Host state, but is not a sandbox
+and cannot establish absence of effects outside Agent Host state. Recording a
+syntactically valid owner-supplied SPDX expression does not verify ownership,
+license compatibility, or redistribution rights.
+
+Only `kind: agent-tool` is accepted. Runtime commands, plugin identities, and
+working directories come from the already-validated contained integration;
+the CLI exposes no command or arguments option. `suite-node` resolves to the
+environment's verified Node component. The package enters immutable private
+storage, is inactive by default, and can be projected to Codex only through the
+existing content-addressed thin projection and Suite-owned binding lifecycle.
+One previous private version or removal is retained for rollback. Source
+directories, links, special files, unbounded inventories, implicit activation,
+Claude expansion, model calls, and generic Agent-visible invocation remain out
+of scope.
 
 ## Private state
 

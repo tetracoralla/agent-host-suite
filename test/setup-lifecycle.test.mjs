@@ -3,7 +3,7 @@ import { access, mkdtemp, rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { hostStateOutsideManifest, safePurgeRoot, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation, rollbackInstallation } from '../src/lifecycle.mjs'
+import { hostStateOutsideManifest, hostStatus, safePurgeRoot, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation, rollbackInstallation } from '../src/lifecycle.mjs'
 import { setup } from '../src/setup.mjs'
 import { loadState, prepareStatePaths } from '../src/state.mjs'
 import { listActivity } from '../src/activity.mjs'
@@ -38,6 +38,22 @@ test('public setup fails closed while the release catalog is unbound', async () 
     setup({ profile: 'standard', hosts: [], noService: true, dryRun: true, enableObservability: false }),
     (error) => error.code === 'RELEASE_UNBOUND',
   )
+})
+
+test('quick host status detects the executable without starting the Agent app CLI', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-quick-status-workspace-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-quick-status-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  await setup({ profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false }, { runner: fake.runner, hostSkillHome: join(stateRoot, 'host-home') })
+  const before = fake.calls.length
+  const result = await hostStatus({ stateRoot, target: 'codex', quick: true }, { runner: fake.runner })
+  const quickCalls = fake.calls.slice(before)
+  assert.equal(result.status, 'ok')
+  assert.equal(result.managed, true)
+  assert.equal(result.healthy, null)
+  assert.deepEqual(quickCalls.map((call) => [call.command, ...call.args]), [['/usr/bin/env', 'which', 'codex']])
 })
 
 test('purge-data removes the private state root for a deep state root', async (t) => {

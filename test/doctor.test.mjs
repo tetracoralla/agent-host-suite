@@ -72,6 +72,27 @@ test('deep doctor probes generic installed tools through their MCP binding contr
   assert.equal(result.checks.find((item) => item.id === 'tool.file-vitals.installed')?.status, 'ok')
 })
 
+test('deep local doctor does not launch Agent app CLIs', async () => {
+  const calls = []
+  const state = {
+    channel: 'development',
+    components: {},
+    hosts: { codex: { entries: [] }, claude: { entries: [] } },
+    runtime: { service: null },
+  }
+  const result = await doctor(state, {
+    deep: true,
+    inspectAgentApps: false,
+    runner: async (command, args = []) => {
+      calls.push([command, ...args])
+      return { status: 0, stdout: '', stderr: '' }
+    },
+  })
+  assert.equal(result.checks.find((item) => item.id === 'runtime.service')?.status, 'error')
+  assert.equal(result.checks.some((item) => item.id.startsWith('host.')), false)
+  assert.equal(calls.some((call) => call.includes('codex') || call.includes('claude')), false)
+})
+
 test('doctor warns when the active catalog exceeds its declared context budget', async () => {
   const state = {
     channel: 'development',

@@ -51,6 +51,40 @@ Tool success is not task success. Product-specific Skills keep the remaining
 judgment and routing method; Agent Host owns only installation, compatibility,
 health, recovery, and removal.
 
+## Owner-selected private import
+
+`agent-host component preview` and `agent-host component import` apply this
+same admission contract to one explicit local artifact. They do not infer that
+a Skill should become a tool and do not create a component. That semantic and
+engineering work belongs to the user's Agent and the provider build that emits
+the sealed archive.
+
+Preview persists no Agent Host state. It does start the explicitly selected
+component to reacquire its typed MCP catalog; dry-run does not establish or
+contain effects outside Agent Host state. Preview rejects a directory,
+relative artifact path, link, special file, unsafe archive path, non-`agent-tool` descriptor,
+unsupported or incomplete integration, inventory above the declared local
+bounds, file or descriptor digest mismatch, and an MCP catalog without closed
+input and output schemas. The returned binding contains archive SHA-256 and
+bytes, descriptor SHA-256, component id and version, current platform, and the
+owner-supplied SPDX expression. Import accepts that exact binding from an
+absolute JSON file and fails if any fact changed. Agent Host records that
+expression but does not establish ownership, license compatibility, or
+redistribution rights.
+
+Import dry-run reports the proposed component version with `installed: false`,
+`active: false`, and no import timestamp or rollback record. Planned activation
+details remain in the dry-run transition; they are not reported as current
+installed state.
+
+An imported tool is inactive by default. `--activate` opts into the existing
+Codex projection and ownership flow; `tools set` can change availability later.
+`--replace` retains the current imported component as the one component-level
+rollback target. `component remove` removes the Suite-owned binding but keeps
+the sealed package for `component rollback`. Storage cleanup treats current
+and private rollback packages as referenced. No private import command is
+exposed by the Agent Host operations Skill or an MCP server.
+
 The `suite-node` executor exists only in the Agent Host compatibility artifact.
 It does not change a provider's standalone plugin or source release: those
 remain independently runnable and self-contained according to their own

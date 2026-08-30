@@ -2,6 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { inspectClaude, installClaude, uninstallClaude } from '../src/hosts/claude.mjs'
 
+const userConfigPrefix = ['--disable-slash-commands', '--no-chrome', '--setting-sources', 'user']
+
+function userConfigCommand(args) {
+  assert.deepEqual(args.slice(0, userConfigPrefix.length), userConfigPrefix)
+  return args.slice(userConfigPrefix.length)
+}
+
 function fixture() {
   const manifest = {
     components: {
@@ -12,13 +19,14 @@ function fixture() {
   const mutations = []
   const runner = async (command, args, options = {}) => {
     if (command === '/usr/bin/env' && args[0] === 'which') return { status: 0, stdout: '/usr/bin/claude\n', stderr: '' }
-    if (args[0] === '--version') return { status: 0, stdout: '2.1.233\n', stderr: '' }
-    if (args[0] === 'mcp' && args[1] === 'get') {
-      if (args[2] === 'math-anchor') return { status: 0, stdout: `Command: ${process.execPath}\nArgs: mcp\n`, stderr: '' }
-      if (args[2] === 'migratory_time') return { status: 0, stdout: `Command: ${process.execPath}\nArgs: /provider/time.mjs\n`, stderr: '' }
-      return { status: 1, stdout: `No MCP server named "${args[2]}".\n`, stderr: '' }
+    const commandArgs = userConfigCommand(args)
+    if (commandArgs[0] === '--version') return { status: 0, stdout: '2.1.233\n', stderr: '' }
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get') {
+      if (commandArgs[2] === 'math-anchor') return { status: 0, stdout: `Command: ${process.execPath}\nArgs: mcp\n`, stderr: '' }
+      if (commandArgs[2] === 'migratory_time') return { status: 0, stdout: `Command: ${process.execPath}\nArgs: /provider/time.mjs\n`, stderr: '' }
+      return { status: 1, stdout: `No MCP server named "${commandArgs[2]}".\n`, stderr: '' }
     }
-    mutations.push([command, args, options])
+    mutations.push([command, commandArgs, options])
     return { status: 0, stdout: '', stderr: '' }
   }
   return { manifest, mutations, runner }
@@ -39,7 +47,8 @@ test('Claude adapter refuses a different unmanaged binding', async () => {
   const fake = fixture()
   const base = fake.runner
   fake.runner = async (command, args, options) => {
-    if (args[0] === 'mcp' && args[1] === 'get' && args[2] === 'math-anchor') {
+    const commandArgs = command === '/usr/bin/claude' ? userConfigCommand(args) : args
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get' && commandArgs[2] === 'math-anchor') {
       return { status: 0, stdout: 'Command: /different/math\nArgs: mcp\n', stderr: '' }
     }
     return base(command, args, options)
@@ -51,7 +60,8 @@ test('Claude adapter does not mistake an inspection failure for an absent server
   const fake = fixture()
   const base = fake.runner
   fake.runner = async (command, args, options) => {
-    if (args[0] === 'mcp' && args[1] === 'get' && args[2] === 'math-anchor') {
+    const commandArgs = command === '/usr/bin/claude' ? userConfigCommand(args) : args
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get' && commandArgs[2] === 'math-anchor') {
       return { status: 1, stdout: '', stderr: 'temporary configuration failure' }
     }
     return base(command, args, options)
@@ -64,11 +74,12 @@ test('Claude adapter restores a removed binding when replacement fails', async (
   const fake = fixture()
   const base = fake.runner
   fake.runner = async (command, args, options = {}) => {
-    if (args[0] === 'mcp' && args[1] === 'get' && args[2] === 'math-anchor') {
+    const commandArgs = command === '/usr/bin/claude' ? userConfigCommand(args) : args
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get' && commandArgs[2] === 'math-anchor') {
       return { status: 0, stdout: 'Command: /previous/math\nArgs: mcp\n', stderr: '' }
     }
-    if (args[0] === 'mcp' && args[1] === 'add' && args[4] === 'math-anchor' && args[6] === process.execPath) {
-      fake.mutations.push([command, args, options])
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'add' && commandArgs[4] === 'math-anchor' && commandArgs[6] === process.execPath) {
+      fake.mutations.push([command, commandArgs, options])
       throw new Error('replacement failed')
     }
     return base(command, args, options)
@@ -90,7 +101,8 @@ test('Claude adapter preserves an expected single argument containing spaces', a
   fake.manifest.components['migratory-time'].args = [path]
   const base = fake.runner
   fake.runner = async (command, args, options) => {
-    if (args[0] === 'mcp' && args[1] === 'get' && args[2] === 'migratory_time') {
+    const commandArgs = command === '/usr/bin/claude' ? userConfigCommand(args) : args
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get' && commandArgs[2] === 'migratory_time') {
       return { status: 0, stdout: `Command: ${process.execPath}\nArgs: ${path}\n`, stderr: '' }
     }
     return base(command, args, options)
@@ -107,7 +119,8 @@ test('Claude adapter preserves the previous managed argument containing spaces d
   fake.manifest.components['migratory-time'].args = [nextPath]
   const base = fake.runner
   fake.runner = async (command, args, options) => {
-    if (args[0] === 'mcp' && args[1] === 'get' && args[2] === 'migratory_time') {
+    const commandArgs = command === '/usr/bin/claude' ? userConfigCommand(args) : args
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get' && commandArgs[2] === 'migratory_time') {
       return { status: 0, stdout: `Command: ${process.execPath}\nArgs: ${previousPath}\n`, stderr: '' }
     }
     return base(command, args, options)

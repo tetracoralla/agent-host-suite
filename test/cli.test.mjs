@@ -1,6 +1,27 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { human } from '../src/cli.mjs'
+
+const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
+
+test('CLI rejects known options that do not belong to the selected operation', () => {
+  const cases = [
+    [['status', '--deep'], 'status does not accept --deep'],
+    [['status', '--quick'], 'status does not accept --quick'],
+    [['doctor', '--quick'], 'doctor does not accept --quick'],
+    [['host', 'status', 'codex', '--skip-agent-apps'], 'host status does not accept --skip-agent-apps'],
+    [['component', 'list', '--artifact', '/tmp/private.tar.gz'], 'component list does not accept --artifact'],
+    [['component', 'remove', 'private-fixture', '--activate'], 'component remove does not accept --activate'],
+    [['uninstall', '--dry-run'], 'uninstall does not accept --dry-run'],
+  ]
+  for (const [arguments_, expected] of cases) {
+    const result = spawnSync(process.execPath, [cliPath, ...arguments_], { encoding: 'utf8' })
+    assert.equal(result.status, 2)
+    assert.equal(result.stderr.trim(), `CLI_USAGE: ${expected}`)
+  }
+})
 
 test('human storage status reports the current footprint and cleanup candidates', () => {
   const usage = (allocatedBytes, apparentBytes = allocatedBytes) => ({ allocatedBytes, apparentBytes, files: 0, directories: 0 })
@@ -51,4 +72,28 @@ test('human observability status renders monitoring state instead of crashing on
   assert.equal(disabled, 'Observability disabled · local data preserved.')
   const notInstalled = human({ status: 'ok', configured: false, enabled: false, privacy: {} })
   assert.equal(notInstalled, 'Observability off · no Agent environment installed.')
+})
+
+test('human private component result surfaces a post-commit activity warning without reporting failure', () => {
+  const output = human({
+    status: 'imported',
+    component: { id: 'private-fixture', version: '0.1.0', installed: true, active: false },
+    warnings: [{
+      code: 'ACTIVITY_LOG_WRITE_FAILED',
+      message: 'The private component change succeeded, but its activity entry could not be recorded.',
+    }],
+  })
+  assert.equal(output, 'private-fixture 0.1.0 · imported · activity log unavailable')
+})
+
+test('human private component result surfaces pending projection cleanup without reporting failure', () => {
+  const output = human({
+    status: 'removed',
+    component: { id: 'private-fixture', version: null, installed: false, active: false },
+    warnings: [{
+      code: 'CODEX_PROJECTION_CLEANUP_FAILED',
+      message: 'The private component change succeeded, but stale Codex projection cleanup could not be completed.',
+    }],
+  })
+  assert.equal(output, 'private-fixture removed · removed · stale projection cleanup pending')
 })

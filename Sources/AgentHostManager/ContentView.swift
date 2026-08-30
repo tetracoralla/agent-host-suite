@@ -55,7 +55,7 @@ struct ContentView: View {
             }
         }
         .overlay {
-            if store.isBusy {
+            if store.isBlockingWork {
                 BusyOverlay(label: store.currentAction ?? "Working")
             }
         }

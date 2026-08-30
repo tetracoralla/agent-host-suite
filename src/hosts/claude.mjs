@@ -2,6 +2,16 @@ import { AgentHostError } from '../errors.mjs'
 import { resolveExecutable, runFile } from '../process.mjs'
 import { realpath } from 'node:fs/promises'
 
+export const CLAUDE_USER_CONFIG_ARGUMENTS = Object.freeze([
+  '--disable-slash-commands',
+  '--no-chrome',
+  '--setting-sources', 'user',
+])
+
+function userConfigArguments(...args) {
+  return [...CLAUDE_USER_CONFIG_ARGUMENTS, ...args]
+}
+
 function targets(manifest) {
   return [
     { name: 'math-anchor', aliases: ['math-anchor', 'math_anchor'], component: manifest.components['math-anchor'] },
@@ -23,7 +33,7 @@ function parseEntry(name, output, expectedArgumentSets = []) {
 async function existingAliases(executable, target, runner, managedEntry = null) {
   const values = []
   for (const alias of target.aliases) {
-    const result = await runner(executable, ['mcp', 'get', alias], { allowFailure: true, timeoutMs: 8_000 })
+    const result = await runner(executable, userConfigArguments('mcp', 'get', alias), { allowFailure: true, timeoutMs: 8_000 })
     if (result.status === 0) {
       values.push(parseEntry(alias, result.stdout, [target.component.args, managedEntry?.args]))
       continue
@@ -51,7 +61,7 @@ async function sameBinding(existing, target) {
 export async function inspectClaude(manifest, runner = runFile, managedState = null, options = {}) {
   const executable = await resolveExecutable('claude', runner)
   if (executable === null) throw new AgentHostError('CLAUDE_NOT_INSTALLED', 'Claude Code is not installed or not on PATH')
-  const versionResult = await runner(executable, ['--version'])
+  const versionResult = await runner(executable, userConfigArguments('--version'))
   const entries = []
   for (const target of targets(manifest)) {
     const managedEntry = managedState?.entries?.find((entry) => entry.component === target.name)
@@ -87,17 +97,17 @@ export async function installClaude(manifest, runner = runFile, managedState = n
     let displaced = null
     if (entry.present) {
       if (!entry.owned) displaced = { name: entry.actualName, command: entry.existingBinding.command, args: entry.existingBinding.args, identityMatched: entry.identityMatched }
-      await runner(inspection.executable, ['mcp', 'remove', '--scope', 'user', entry.actualName])
+      await runner(inspection.executable, userConfigArguments('mcp', 'remove', '--scope', 'user', entry.actualName))
     }
     try {
-      await runner(inspection.executable, [
+      await runner(inspection.executable, userConfigArguments(
         'mcp', 'add', '--scope', 'user', entry.name, '--', entry.command, ...entry.args,
-      ])
+      ))
     } catch (error) {
       if (entry.present) {
-        await runner(inspection.executable, [
+        await runner(inspection.executable, userConfigArguments(
           'mcp', 'add', '--scope', 'user', entry.actualName, '--', entry.existingBinding.command, ...entry.existingBinding.args,
-        ], { allowFailure: true })
+        ), { allowFailure: true })
       }
       throw error
     }
@@ -112,12 +122,12 @@ export async function uninstallClaude(hostState, runner = runFile) {
   const removed = []
   for (const entry of [...hostState.entries].reverse()) {
     if (entry.created) {
-      const result = await runner(executable, ['mcp', 'remove', '--scope', 'user', entry.actualName], { allowFailure: true })
+      const result = await runner(executable, userConfigArguments('mcp', 'remove', '--scope', 'user', entry.actualName), { allowFailure: true })
       removed.push({ target: entry.actualName, kind: 'mcp', status: result.status })
     }
     if (entry.displaced !== null && entry.displaced !== undefined) {
       const displaced = entry.displaced
-      const result = await runner(executable, ['mcp', 'add', '--scope', 'user', displaced.name, '--', displaced.command, ...displaced.args], { allowFailure: true })
+      const result = await runner(executable, userConfigArguments('mcp', 'add', '--scope', 'user', displaced.name, '--', displaced.command, ...displaced.args), { allowFailure: true })
       removed.push({ target: displaced.name, kind: 'restored-mcp', status: result.status })
     }
   }
@@ -132,7 +142,7 @@ export async function suspendClaude(hostState, runner = runFile) {
     if (entry.created !== true) {
       throw new AgentHostError('TOOL_SET_UNMANAGED_BINDING', `Agent Host cannot hide unmanaged Claude Code MCP server ${entry.actualName} without changing user-owned configuration`)
     }
-    await runner(executable, ['mcp', 'remove', '--scope', 'user', entry.actualName])
+    await runner(executable, userConfigArguments('mcp', 'remove', '--scope', 'user', entry.actualName))
     removed.push({ target: entry.actualName, kind: 'mcp' })
   }
   return { kind: 'claude', suspended: removed }

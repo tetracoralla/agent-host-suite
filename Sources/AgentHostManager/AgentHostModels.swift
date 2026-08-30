@@ -37,6 +37,28 @@ struct SuiteStatus: Decodable, Equatable, Sendable {
     let service: ServiceSummary?
 }
 
+enum ManagerToolPolicy {
+    static func visibleToolIDs(
+        components: [String: ComponentSummary]?,
+        availableAgentComponents: [String]?,
+        activeAgentComponents: [String]?,
+        orderedIDs: [String]
+    ) -> [String] {
+        guard let components else { return [] }
+        let available = Set(availableAgentComponents ?? activeAgentComponents ?? [])
+        return orderedIDs.filter { available.contains($0) && components[$0] != nil }
+    }
+}
+
+enum ManagerCheckPolicy {
+    static let foregroundDoctorArguments = ["doctor", "--deep", "--skip-agent-apps"]
+    static let fullDoctorArguments = ["doctor", "--deep"]
+
+    static func quickHostStatusArguments(_ id: String) -> [String] {
+        ["host", "status", id, "--quick"]
+    }
+}
+
 struct ToolSetChangeResult: Decodable, Equatable, Sendable {
     let status: String
     let changed: Bool
@@ -138,6 +160,93 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
         (detail ?? [:])
             .sorted { $0.key < $1.key }
             .map { (key: $0.key, value: $0.value.displayText) }
+    }
+
+    func humanDetail(componentNames: [String: String]) -> [(label: String, value: String)] {
+        let values = detail ?? [:]
+        var output: [(label: String, value: String)] = []
+        if let active = list(values["activeAgentComponents"]), !active.isEmpty {
+            output.append(("Available tools", names(active, componentNames: componentNames)))
+        }
+        if let inactive = list(values["inactiveAgentComponents"]), !inactive.isEmpty {
+            output.append(("Kept installed", names(inactive, componentNames: componentNames)))
+        }
+        if let changed = list(values["changed"]), !changed.isEmpty {
+            output.append(("Updated", names(changed, componentNames: componentNames)))
+        }
+        if let hosts = list(values["hosts"]), !hosts.isEmpty {
+            output.append(("Agent apps", hosts.map(Self.agentAppName).joined(separator: ", ")))
+        }
+        if let host = values["host"]?.displayText {
+            output.append(("Agent app", Self.agentAppName(host)))
+        }
+        if let component = values["component"]?.displayText {
+            output.append(("Tool", displayName(component, componentNames: componentNames)))
+        }
+        if let profile = values["profile"]?.displayText {
+            output.append(("Tool set", profile.replacingOccurrences(of: "-", with: " ").localizedCapitalized))
+        }
+        if let version = values["suiteVersion"]?.displayText ?? values["version"]?.displayText {
+            output.append(("Version", version))
+        }
+        if let previousVersion = values["rolledBackFrom"]?.displayText {
+            output.append(("Replaced version", previousVersion))
+        }
+        if let active = values["active"]?.displayText {
+            output.append(("Availability", active == "yes" ? "Available in connected Agent apps" : "Kept installed"))
+        }
+        if let purgeData = values["purgeData"]?.displayText {
+            output.append(("Local data", purgeData == "yes" ? "Removed" : "Preserved"))
+        }
+        if let retained = values["packageRetainedForRollback"]?.displayText, retained == "yes" {
+            output.append(("Recovery copy", "Preserved"))
+        }
+        if let removed = values["observerRowsRemoved"]?.displayText {
+            output.append(("Old monitoring records removed", removed))
+        }
+        if let reclaimed = values["storageBytesReclaimed"]?.displayText, let bytes = Int64(reclaimed) {
+            output.append(("Storage recovered", ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)))
+        }
+        return output
+    }
+
+    private func list(_ value: ActivityDetailValue?) -> [String]? {
+        guard let text = value?.displayText, text.first == "[", text.last == "]" else { return nil }
+        let body = text.dropFirst().dropLast()
+        if body.isEmpty { return [] }
+        return body.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func names(_ ids: [String], componentNames: [String: String]) -> String {
+        ids.map { displayName($0, componentNames: componentNames) }.joined(separator: ", ")
+    }
+
+    private func displayName(_ id: String, componentNames: [String: String]) -> String {
+        if let name = componentNames[id], name != id { return name }
+        switch id {
+        case "agent-catalog": return "Agent tool availability"
+        case "workspace-grant": return "Workspace access"
+        case "direct-execution-runtime": return "Direct Runtime"
+        case "agent-tool-observer": return "Local monitoring"
+        case "context-surface-analyzer": return "Catalog measurement"
+        case "math-anchor": return "Math Anchor"
+        case "migratory-time": return "Migratory Time"
+        case "data-transformer": return "BatchTicket"
+        case "armorial": return "Armorial"
+        case "laniakea": return "Laniakea"
+        case "projective": return "Projective"
+        case "equatorium": return "Equatorium"
+        case "file-vitals": return "File Vitals"
+        default: return id.replacingOccurrences(of: "-", with: " ").localizedCapitalized
+        }
+    }
+
+    private static func agentAppName(_ id: String) -> String {
+        switch id {
+        case "codex": return "Codex"
+        case "claude": return "Claude Code"
+        default: return id.localizedCapitalized
+        }
     }
 }
 

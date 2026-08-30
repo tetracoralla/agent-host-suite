@@ -148,3 +148,59 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
   })
   return manifestPath
 }
+
+export async function createToolComponentFixture(root, { id = 'private-fixture', version = '0.1.0', marker = 'private' } = {}) {
+  const catalogRoot = join(root, 'catalog')
+  await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
+  const pluginRoot = `marketplace/plugins/${id}`
+  const identityFiles = ['.codex-plugin/plugin.json', '.mcp.json', 'skills/use-private-fixture/SKILL.md']
+  const releaseComponent = await component(catalogRoot, root, {
+    id,
+    version,
+    kind: 'agent-tool',
+    files: [
+      ['marketplace/.agents/plugins/marketplace.json', [`{"name":"${id}-local"}\n`, false]],
+      [`${pluginRoot}/.codex-plugin/plugin.json`, [`{"name":"${id}","version":"${version}"}\n`, false]],
+      [`${pluginRoot}/.mcp.json`, [`{"mcpServers":{"${id}":{"command":"./server.mjs","args":[],"cwd":"."}}}\n`, false]],
+      [`${pluginRoot}/skills/use-private-fixture/SKILL.md`, ['---\nname: use-private-fixture\n---\n', false]],
+      [`${pluginRoot}/server.mjs`, [`// ${marker}\nprocess.stdin.resume()\n`, false]],
+    ],
+    identityFiles: ['marketplace/.agents/plugins/marketplace.json', ...identityFiles.map((path) => `${pluginRoot}/${path}`)],
+    entrypoints: { server: `${pluginRoot}/server.mjs` },
+    integration: {
+      schemaVersion: 'openadam.agent-host-tool-integration.v0.2',
+      displayName: 'Private Fixture',
+      summary: 'Run one deterministic private fixture operation.',
+      codex: {
+        marketplaceRoot: 'marketplace',
+        marketplace: `${id}-local`,
+        pluginRoot,
+        plugin: id,
+        identityFiles,
+      },
+      runtime: {
+        transport: 'mcp-stdio',
+        executor: 'suite-node',
+        command: `${pluginRoot}/server.mjs`,
+        args: [],
+        cwd: pluginRoot,
+        workspaceEnvironment: [],
+        expectedTools: ['private_fixture.run'],
+        timeoutMs: 5000,
+      },
+      ownership: { uninstall: 'agent-host-created-only' },
+    },
+  }, marker)
+  return {
+    artifactPath: join(catalogRoot, releaseComponent.artifact.url),
+    binding: {
+      archiveSha256: releaseComponent.artifact.sha256,
+      archiveBytes: releaseComponent.artifact.bytes,
+      descriptorSha256: releaseComponent.descriptorSha256,
+      id,
+      version,
+      platform: 'darwin-arm64',
+      spdx: 'Apache-2.0',
+    },
+  }
+}

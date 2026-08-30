@@ -8,7 +8,7 @@ export async function probeMcpTools(component) {
   }
   const timeoutMs = component.healthTimeoutMs ?? 10000
   const env = getDefaultEnvironment()
-  for (const name of component.workspaceEnvironment ?? []) env[name] = component.cwd
+  for (const name of component.workspaceEnvironment ?? []) env[name] = component.healthWorkspaceRoot ?? component.cwd
   const transport = new StdioClientTransport({
     command: component.command,
     args: component.args,

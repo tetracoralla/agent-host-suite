@@ -106,11 +106,21 @@ async function rollbackState(paths) {
   return target === undefined ? null : await readJson(target)
 }
 
+function retainedStateComponents(state) {
+  const entries = Object.entries(state?.components ?? {})
+  for (const [id, record] of Object.entries(state?.privateComponents ?? {})) {
+    for (const [slot, value] of [['current', record?.current], ['private-rollback', record?.rollback]]) {
+      if (value?.component?.root !== undefined) entries.push([`${id}:${slot}`, value.component])
+    }
+  }
+  return entries
+}
+
 async function retainedPackageRoots(paths, states) {
   const packageRoot = await realpath(paths.packages)
   const retained = new Map()
   for (const [reason, state] of states) {
-    for (const [id, component] of Object.entries(state?.components ?? {})) {
+    for (const [id, component] of retainedStateComponents(state)) {
       if (typeof component.root !== 'string') continue
       let root
       try {
@@ -129,8 +139,8 @@ async function retainedPackageRoots(paths, states) {
 
 async function verifyRetainedStates(states) {
   for (const [reason, state] of states) {
-    if (state?.channel !== 'release') continue
-    for (const [id, component] of Object.entries(state.components ?? {})) {
+    for (const [id, component] of retainedStateComponents(state)) {
+      if (state?.channel !== 'release' && component.releaseArtifact === undefined) continue
       try {
         await verifyReleaseComponent(component)
       } catch (error) {

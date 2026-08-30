@@ -13,7 +13,7 @@ function check(id, status, message, detail = undefined) {
   return { id, status, message, ...(detail === undefined ? {} : { detail }) }
 }
 
-export async function doctor(state, { deep = false, runner = runFile, mcpProbe = probeMcpTools, contextAnalysis = null } = {}) {
+export async function doctor(state, { deep = false, inspectAgentApps = true, runner = runFile, mcpProbe = probeMcpTools, contextAnalysis = null } = {}) {
   const checks = []
   const agentManifest = agentFacingManifest({ components: state.components }, state.agentComponents ?? Object.keys(state.components))
   for (const [id, component] of Object.entries(state.components)) {
@@ -25,7 +25,7 @@ export async function doctor(state, { deep = false, runner = runFile, mcpProbe =
       checks.push(check(`component.${id}`, 'error', `${id} installed files are unavailable`, error.message))
     }
   }
-  if (state.hosts.codex !== undefined) {
+  if (inspectAgentApps && state.hosts.codex !== undefined) {
     try {
       const current = await inspectCodex(agentManifest, runner, { managedState: state.hosts.codex, useManagedBindings: true })
       const missing = current.entries.filter((entry) => !entry.pluginPresent || !entry.pluginEnabled || entry.installedVersion !== entry.requestedVersion || !entry.installedIdentityMatched)
@@ -56,7 +56,7 @@ export async function doctor(state, { deep = false, runner = runFile, mcpProbe =
       checks.push(check('host.codex', 'error', 'Codex host inspection failed', error.message))
     }
   }
-  if (state.hosts.claude !== undefined) {
+  if (inspectAgentApps && state.hosts.claude !== undefined) {
     try {
       const current = await inspectClaude(agentManifest, runner, state.hosts.claude)
       const missing = current.entries.filter((entry) => !entry.present || !entry.identityMatched)

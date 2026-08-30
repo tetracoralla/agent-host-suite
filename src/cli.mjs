@@ -9,30 +9,75 @@ import { setup } from './setup.mjs'
 import { listActivity } from './activity.mjs'
 import { cleanupStorage, storageStatus } from './storage.mjs'
 import { operationsSnapshot } from './operations-snapshot.mjs'
-import { join } from 'node:path'
+import { importLocalComponent, localComponentStatus, previewLocalComponent, removeLocalComponent, rollbackLocalComponent } from './local-components.mjs'
+import { isAbsolute, join } from 'node:path'
 
 const USAGE = `Usage:
-  agent-host setup [--profile standard|observability|local-dogfood] [--tool COMPONENT] [--host codex|claude] [--workspace-root PATH] [--release-manifest PATH | --development-root PATH] [--enable-observability] [--no-service] [--dry-run] [--json]
+  agent-host setup [--profile standard|observability|local-dogfood] [--tool COMPONENT] [--host codex|claude] [--workspace-root PATH] [--release-manifest PATH | --development-root PATH] [--enable-observability] [--replace-host-conflicts] [--no-service] [--dry-run] [--state-root PATH] [--json]
   agent-host status [--state-root PATH] [--json]
   agent-host snapshot [--state-root PATH] [--json]
   agent-host activity [--state-root PATH] [--json]
   agent-host storage [--state-root PATH] [--json]
   agent-host cleanup [--dry-run] [--state-root PATH] [--json]
-  agent-host doctor [--deep] [--state-root PATH] [--json]
-  agent-host update [--profile standard|observability|local-dogfood] [--tool COMPONENT] [--workspace-root PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host doctor [--deep] [--skip-agent-apps] [--state-root PATH] [--json]
+  agent-host update [--profile standard|observability|local-dogfood] [--tool COMPONENT] [--workspace-root PATH] [--release-manifest PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools status [--state-root PATH] [--json]
   agent-host tools set --tool COMPONENT [--tool COMPONENT] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools reset [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
-  agent-host rollback [--dry-run] [--state-root PATH] [--json]
+  agent-host component preview --artifact PATH --license-spdx EXPRESSION [--workspace-root PATH] [--state-root PATH] [--json]
+  agent-host component import --artifact PATH --binding PATH [--activate] [--replace] [--workspace-root PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host component list [--state-root PATH] [--json]
+  agent-host component status COMPONENT [--state-root PATH] [--json]
+  agent-host component remove COMPONENT [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host component rollback COMPONENT [--workspace-root PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host rollback [--workspace-root PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host observability enable|disable|refresh|status [--state-root PATH] [--json]
-  agent-host host add|remove|status codex|claude [--state-root PATH] [--json]
+  agent-host host add codex|claude [--workspace-root PATH] [--replace-host-conflicts] [--state-root PATH] [--json]
+  agent-host host remove codex|claude [--state-root PATH] [--json]
+  agent-host host status codex|claude [--quick] [--state-root PATH] [--json]
   agent-host uninstall [--purge-data] [--state-root PATH] [--json]`
+
+const ROUTE_ARGUMENTS = Object.freeze({
+  setup: ['--profile', '--host', '--tool', '--workspace-root', '--development-root', '--release-manifest', '--state-root', '--enable-observability', '--replace-host-conflicts', '--no-service', '--dry-run', '--json'],
+  status: ['--state-root', '--json'],
+  snapshot: ['--state-root', '--json'],
+  activity: ['--state-root', '--json'],
+  storage: ['--state-root', '--json'],
+  cleanup: ['--state-root', '--dry-run', '--json'],
+  doctor: ['--state-root', '--deep', '--skip-agent-apps', '--json'],
+  update: ['--profile', '--tool', '--workspace-root', '--release-manifest', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  rollback: ['--workspace-root', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  uninstall: ['--purge-data', '--state-root', '--json'],
+  maintenance: ['--state-root', '--json'],
+  'tools status': ['--state-root', '--json'],
+  'tools set': ['--tool', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  'tools reset': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  'component preview': ['--artifact', '--license-spdx', '--workspace-root', '--state-root', '--json'],
+  'component import': ['--artifact', '--binding', '--activate', '--replace', '--workspace-root', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  'component list': ['--state-root', '--json'],
+  'component status': ['--state-root', '--json'],
+  'component remove': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  'component rollback': ['--workspace-root', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  'observability enable': ['--state-root', '--json'],
+  'observability disable': ['--state-root', '--json'],
+  'observability refresh': ['--state-root', '--json'],
+  'observability status': ['--state-root', '--json'],
+  'host add': ['--workspace-root', '--replace-host-conflicts', '--state-root', '--json'],
+  'host remove': ['--state-root', '--json'],
+  'host status': ['--state-root', '--quick', '--json'],
+})
+
+function routeName(options) {
+  return ['observability', 'host', 'tools', 'component'].includes(options.command)
+    ? `${options.command} ${options.action ?? ''}`.trim()
+    : options.command
+}
 
 function parseArgs(argv) {
   if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) return { command: 'help', json: false }
   const options = {
     command: argv[0],
-    action: ['observability', 'host', 'tools'].includes(argv[0]) ? argv[1] : undefined,
+    action: ['observability', 'host', 'tools', 'component'].includes(argv[0]) ? argv[1] : undefined,
     target: argv[0] === 'host' ? argv[2] : undefined,
     profile: argv[0] === 'setup' ? 'standard' : undefined,
     hosts: [],
@@ -44,18 +89,30 @@ function parseArgs(argv) {
     enableObservability: false,
     purgeData: false,
     replaceHostConflicts: false,
+    activate: false,
+    replace: false,
+    skipAgentApps: false,
+    quick: false,
   }
-  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--development-root', '--release-manifest', '--state-root'])
+  if (options.command === 'component' && ['status', 'remove', 'rollback'].includes(options.action) && argv[2] !== undefined && !argv[2].startsWith('--')) options.target = argv[2]
+  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx'])
   const booleans = new Map([
     ['--json', 'json'], ['--deep', 'deep'], ['--dry-run', 'dryRun'], ['--no-service', 'noService'],
     ['--enable-observability', 'enableObservability'], ['--purge-data', 'purgeData'],
     ['--replace-host-conflicts', 'replaceHostConflicts'],
+    ['--activate', 'activate'], ['--replace', 'replace'],
+    ['--skip-agent-apps', 'skipAgentApps'], ['--quick', 'quick'],
   ])
-  const start = options.command === 'host' ? 3 : ['observability', 'tools'].includes(options.command) ? 2 : 1
-  if (['observability', 'host', 'tools'].includes(options.command) && options.action === undefined) throw new AgentHostError('CLI_USAGE', `${options.command} requires an action`)
+  const start = options.command === 'host' ? 3 : options.command === 'component' && options.target !== undefined ? 3 : ['observability', 'tools', 'component'].includes(options.command) ? 2 : 1
+  if (['observability', 'host', 'tools', 'component'].includes(options.command) && options.action === undefined) throw new AgentHostError('CLI_USAGE', `${options.command} requires an action`)
   if (options.command === 'host' && options.target === undefined) throw new AgentHostError('CLI_USAGE', 'host requires codex or claude')
+  const route = routeName(options)
+  const allowed = new Set(ROUTE_ARGUMENTS[route] ?? ['--json'])
   for (let index = start; index < argv.length; index += 1) {
     const arg = argv[index]
+    if ((booleans.has(arg) || values.has(arg)) && !allowed.has(arg)) {
+      throw new AgentHostError('CLI_USAGE', `${route} does not accept ${arg}`)
+    }
     if (booleans.has(arg)) {
       options[booleans.get(arg)] = true
       continue
@@ -70,6 +127,9 @@ function parseArgs(argv) {
       else if (arg === '--development-root') options.developmentRoot = value
       else if (arg === '--release-manifest') options.releaseManifest = value
       else if (arg === '--state-root') options.stateRoot = value
+      else if (arg === '--artifact') options.artifact = value
+      else if (arg === '--binding') options.bindingPath = value
+      else if (arg === '--license-spdx') options.licenseSpdx = value
       else options.profile = value
       continue
     }
@@ -107,6 +167,23 @@ function storageSummary(result) {
 }
 
 export function human(result) {
+  if (Array.isArray(result.components) && result.components.every((item) => item.id !== undefined && item.installed !== undefined)) {
+    if (result.components.length === 0) return 'No private Agent tools are imported.'
+    return result.components.map((item) => `${item.id} ${item.version ?? 'removed'} · ${item.active ? 'active' : item.installed ? 'inactive' : 'removed'}`).join('\n')
+  }
+  if (result.component?.id !== undefined && result.component?.installed !== undefined) {
+    const suffix = result.restartRequired === true ? ' · start a fresh Agent task' : ''
+    const activityWarning = result.warnings?.some((warning) => warning.code === 'ACTIVITY_LOG_WRITE_FAILED') === true
+      ? ' · activity log unavailable'
+      : ''
+    const cleanupWarning = result.warnings?.some((warning) => warning.code === 'CODEX_PROJECTION_CLEANUP_FAILED') === true
+      ? ' · stale projection cleanup pending'
+      : ''
+    return `${result.component.id} ${result.component.version ?? 'removed'} · ${result.status}${suffix}${activityWarning}${cleanupWarning}`
+  }
+  if (result.schemaVersion === 'openadam.agent-host-local-component-preview.v0.1') {
+    return `${result.component.id} ${result.component.version} · package structure and MCP catalog ready for explicit import approval`
+  }
   if (result.schemaVersion === 'openadam.agent-host-tool-set.v0.1') {
     const active = result.activeAgentComponents?.length ?? 0
     const available = result.availableAgentComponents?.length ?? active + (result.inactiveAgentComponents?.length ?? 0)
@@ -157,6 +234,7 @@ async function status(options) {
     bindingsActivatedAt: state.bindingsActivatedAt ?? state.releaseActivatedAt ?? null,
     components: Object.fromEntries(Object.entries(state.components).map(([id, component]) => [id, {
       version: component.version,
+      private: state.privateComponents?.[id]?.current?.component !== undefined,
       ...(component.displayName === undefined ? {} : { displayName: component.displayName, summary: component.summary }),
     }])),
     hosts: Object.fromEntries(Object.entries(state.hosts).map(([id, host]) => [id, {
@@ -184,6 +262,34 @@ async function run(options) {
   }
   if (options.command === 'storage') return storageStatus(options)
   if (options.command === 'cleanup') return cleanupStorage(options)
+  if (options.command === 'component') {
+    if (options.action === 'preview') {
+      if (options.artifact === undefined || options.licenseSpdx === undefined) throw new AgentHostError('CLI_USAGE', 'component preview requires --artifact and --license-spdx')
+      return previewLocalComponent(options)
+    }
+    if (options.action === 'import') {
+      if (options.artifact === undefined || options.bindingPath === undefined) throw new AgentHostError('CLI_USAGE', 'component import requires --artifact and --binding')
+      if (!isAbsolute(options.bindingPath)) throw new AgentHostError('CLI_USAGE', 'component import --binding must be an absolute file path')
+      const bindingFile = await readJson(options.bindingPath)
+      if (bindingFile === null) throw new AgentHostError('LOCAL_COMPONENT_BINDING_UNAVAILABLE', 'The local component binding file is unavailable')
+      const binding = bindingFile.schemaVersion === 'openadam.agent-host-local-component-preview.v0.1' ? bindingFile.binding : bindingFile
+      return importLocalComponent({ ...options, binding })
+    }
+    if (options.action === 'list') return localComponentStatus(options)
+    if (options.action === 'status') {
+      if (options.target === undefined) throw new AgentHostError('CLI_USAGE', 'component status requires a component id')
+      return localComponentStatus(options)
+    }
+    if (options.action === 'remove') {
+      if (options.target === undefined) throw new AgentHostError('CLI_USAGE', 'component remove requires a component id')
+      return removeLocalComponent(options)
+    }
+    if (options.action === 'rollback') {
+      if (options.target === undefined) throw new AgentHostError('CLI_USAGE', 'component rollback requires a component id')
+      return rollbackLocalComponent(options)
+    }
+    throw new AgentHostError('CLI_USAGE', `Unknown component action: ${options.action}`)
+  }
   if (options.command === 'tools') {
     if (options.action === 'status') return toolSetStatus(options)
     if (options.action === 'set') {
@@ -217,7 +323,7 @@ async function run(options) {
     const contextAnalysis = state.observability?.enabled === true
       ? await readJson(join(paths.context, 'managed-catalog.analysis.json')).catch(() => null)
       : null
-    return doctor(state, { deep: options.deep, contextAnalysis })
+    return doctor(state, { deep: options.deep, inspectAgentApps: !options.skipAgentApps, contextAnalysis })
   }
   throw new AgentHostError('CLI_USAGE', `Unknown command: ${options.command}`)
 }

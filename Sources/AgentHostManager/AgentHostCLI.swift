@@ -1,5 +1,6 @@
 import Foundation
 import AgentHostBootstrap
+import Darwin
 
 private final class LockedData: @unchecked Sendable {
     private let lock = NSLock()
@@ -12,6 +13,23 @@ private final class LockedData: @unchecked Sendable {
     }
 
     var value: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = false
+
+    func set() {
+        lock.lock()
+        storage = true
+        lock.unlock()
+    }
+
+    var value: Bool {
         lock.lock()
         defer { lock.unlock() }
         return storage
@@ -69,8 +87,14 @@ struct AgentHostCLI: Sendable {
         process.standardError = stderr
         try process.run()
 
+        let timedOut = LockedFlag()
         let timeout = DispatchWorkItem {
-            if process.isRunning { process.terminate() }
+            guard process.isRunning else { return }
+            timedOut.set()
+            process.terminate()
+            DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(2)) {
+                if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
+            }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(timeoutSeconds), execute: timeout)
         // Drain both pipes at once: reading stdout to completion first can
@@ -91,6 +115,10 @@ struct AgentHostCLI: Sendable {
         group.wait()
         process.waitUntilExit()
         timeout.cancel()
+
+        if timedOut.value {
+            throw CLIError.failed(code: "COMMAND_TIMEOUT", message: "Agent Host took too long to complete this action.")
+        }
 
         let output = outputDrain.value
         let errorOutput = errorDrain.value
@@ -152,14 +180,16 @@ enum CLIError: LocalizedError {
                 "Codex is not installed or cannot be found on this Mac."
             case "CODEX_PLUGIN_CONFLICT", "CODEX_MARKETPLACE_CONFLICT":
                 "Codex has a conflicting tool installation that Agent Host left unchanged. Replace it with the managed installation to continue."
-            case "STATE_INVALID_JSON", "STATE_SCHEMA_UNSUPPORTED":
-                "The saved Agent Host state on this Mac is unreadable. Remove the previous installation, then set up again."
+            case "STATE_INVALID_JSON", "STATE_SCHEMA_INVALID", "STATE_SCHEMA_UNSUPPORTED":
+                "The saved Agent Host state is unreadable, so Agent Host left the environment unchanged. Restore a known-good Agent Host backup before trying again."
             case "ROLLBACK_UNAVAILABLE", "ROLLBACK_BYTES_UNAVAILABLE":
                 "A complete previous version is not available to restore."
             case "SERVICE_CONFLICT":
                 "Another Agent Host local execution service is already configured. Open that installation or remove it before setting up again."
             case "SERVICE_PATH_UNSAFE":
                 "The local execution service cannot be installed safely. Remove the conflicting service entry, then try again."
+            case "COMMAND_TIMEOUT":
+                "Agent Host took too long to complete this action. Try again; if it repeats, run a full check."
             default:
                 message
             }
