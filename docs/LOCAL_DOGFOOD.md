@@ -40,7 +40,7 @@ provenance, not Agent workspace access.
 
 ## Active installation
 
-`local-dogfood-20260831.30` / `0.1.2-dogfood.30` is active, with dogfood.29 as
+`local-dogfood-20260831.31` / `0.1.2-dogfood.31` is active, with dogfood.30 as
 the rollback release. Twelve components are installed; eight are available
 Agent tools. The current active set is Math Anchor, BatchTicket, and
 Equatorium. Observer and Context Surface Analyzer remain backstage.
@@ -51,9 +51,12 @@ Agent Host derives Procedure and Capability totals only from Direct Runtime
 semantic observations. Legacy private database rows are not deleted during
 the update and remain outside the current input/report contract. Dogfood.30
 reuses all component artifacts and makes the Suite reject malformed semantic
-summary target kinds, negative counts, and non-integer counts.
+summary target kinds, negative counts, and non-integer counts. Dogfood.31
+changes only Direct Execution Runtime. It prevents an abandoned cold MCP
+startup from publishing a child process after session close has already taken
+ownership of an empty session.
 
-The installed Agent Host 0.1.2 build 30 and internal Beta DMG passed ad-hoc
+The installed Agent Host 0.1.2 build 31 and internal Beta DMG passed ad-hoc
 signature, embedded-catalog, bootstrap, checksum, and distribution checks. A
 deep installed doctor passed all 25 current package, MCP, Direct Runtime,
 semantic, and catalog checks while intentionally skipping external Agent-app
@@ -74,11 +77,11 @@ bounds, and unknown opportunity/task quality explicitly.
 
 ## Storage and distribution boundary
 
-At the dogfood.30 snapshot, private state uses 722,935,808 allocated bytes and
+At the dogfood.31 snapshot, private state uses 749,789,184 allocated bytes and
 the installed App uses 192,745,472 bytes. Eight unreferenced package versions
 are cleanup candidates totaling 197,271,552 allocated bytes. Cleanup is a
-separate verified action; dogfood.29 and the replaced App remain recoverable
-until owner acceptance.
+separate verified action; dogfood.30 and the original 0.1.1 App remain
+recoverable until owner acceptance.
 
 The internal DMG is ad-hoc signed. Public download, Developer ID signing,
 notarization, clean-machine distribution, tags, Releases, and owner
