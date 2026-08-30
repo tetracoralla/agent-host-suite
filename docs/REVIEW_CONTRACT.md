@@ -15,11 +15,36 @@ completing every lane cannot by itself end the review.
 
 - syntax, tests, manifest/schema validation, package contents, legal files;
 - fail-closed handling for unknown fields, hash mismatch, unsafe paths, host
-  conflicts, partial setup, and state corruption;
+  conflicts, partial setup, and state corruption; known CLI options that do
+  not belong to the selected operation are rejected rather than ignored;
 - normalized Agent-visible tool-name conflicts fail in Agent Host before a
   deployment observation is written, using the same exact semantic key as the
   Observer contract;
 - update and rollback retain one recoverable complete set;
+- private component preview is read-only and binds archive digest and bytes,
+  descriptor digest, id, version, platform, and SPDX; import accepts only an
+  explicit absolute archive plus the exact binding, admits only a contained
+  `agent-tool`, probes the real typed MCP catalog, defaults inactive, and never
+  accepts a source directory or caller-supplied runtime command; preview
+  rejects malformed SPDX syntax, repeated or control-character archive paths,
+  undeclared files, and undeclared empty directories before extraction;
+  archive inventory and extraction occur once per exact admission attempt; the
+  preview records that it starts the selected component, changes no Agent Host
+  state, and cannot establish absence of effects outside that state;
+- private component activation uses immutable package bytes and the Codex thin
+  projection, preserves Suite-only ownership, retains one component rollback,
+  survives compatibility updates without entering the release profile, and
+  remove/rollback cannot restore or delete unrelated user entries; import
+  dry-run removes its newly created package version and empty component parent,
+  while rollback verifies the retained content-addressed package, exact binding,
+  descriptor, full file inventory, and current typed MCP health before any
+  state or host transition;
+- private component import, remove, and component rollback do not add snapshots
+  to compatibility-release history; a post-commit activity-log failure returns
+  the successful authoritative state transition with a stable warning and does
+  not delete package bytes referenced by that state; post-commit stale
+  projection cleanup failure has the same authoritative-success boundary and
+  a distinct visible warning;
 - storage cleanup dry-run names exact eligible package/download bytes; actual
   cleanup verifies the active release and one complete rollback, preserves
   recent or staging artifacts, and removes no path outside private suite state;
@@ -58,8 +83,19 @@ completing every lane cannot by itself end the review.
   with both MCP and maintenance CLI routes preserves both entrypoints;
 - host inspection failure cannot be mistaken for an absent entry, and a failed
   managed replacement restores the prior Claude binding;
+- Claude inspection and mutation commands stay at user setting scope with
+  Skills and Chrome integration disabled; they do not intentionally load
+  project or local settings while managing a Suite-owned user binding;
 - lifecycle activity is bounded and contains actions and state, not prompts or
-  tool inputs or results;
+  tool inputs or results; the Manager translates known detail into product
+  names and human labels while keeping raw state identifiers in CLI JSON;
+- every Manager CLI action has a bounded termination path even if a child
+  ignores graceful termination, and timeout leaves the interface recoverable;
+- Manager startup and foreground refresh resolve connected Agent apps without
+  launching their CLIs, retain deep installed-tool and direct semantic probes,
+  and label bindings as configured but unverified until explicit Full Check;
+  opening the Manager must not request access to an unrelated protected folder
+  through project-scoped Agent-app configuration;
 - Observer retention is not shorter than its report lookback, preserves current
   deployment/catalog correlation, checkpoints the WAL, and releases deleted
   database pages;
@@ -101,11 +137,20 @@ completing every lane cannot by itself end the review.
 
 - complete setup, Environment, Tools, Agent Apps, Activity, doctor, update,
   rollback, observability-disable, and uninstall flows in the built macOS app;
+- leave the Manager open across an environment change, return it to the
+  foreground, and verify stale catalog/health data is replaced and the visible
+  status-check time advances without duplicating a just-completed refresh;
+- verify the Manager's Tools and Environment counts exclude backstage
+  observation components while context cost separately counts Agent-callable
+  operations;
 - change one Tool availability switch, verify a fresh-task notice and the
   corresponding installed-versus-active state, then restore it without
   exposing a displaced source plugin;
 - verify the default manager refresh detects a broken direct route instead of
   promoting file/host presence to overall readiness;
+- verify startup performs no Codex or Claude binding subprocess inspection and
+  produces no Documents-folder request, while explicit Full Check still
+  detects a broken Agent-app binding;
 - verify error recovery and keyboard/accessibility paths;
 - inspect the current rendered surface separately from build results.
 

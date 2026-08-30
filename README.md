@@ -47,6 +47,7 @@ agent-host setup --profile standard --host codex
 agent-host setup --profile local-dogfood --host codex --workspace-root /absolute/workspace
 agent-host snapshot
 agent-host doctor --deep
+agent-host doctor --deep --skip-agent-apps
 agent-host status
 agent-host activity
 agent-host storage
@@ -55,6 +56,11 @@ agent-host cleanup
 agent-host tools status
 agent-host tools set --tool file-vitals
 agent-host tools reset
+agent-host component preview --artifact /absolute/private-tool.tar.gz --license-spdx Apache-2.0 --json
+agent-host component import --artifact /absolute/private-tool.tar.gz --binding /absolute/preview-binding.json --activate
+agent-host component list
+agent-host component remove private-tool --dry-run
+agent-host component rollback private-tool
 agent-host host add claude
 agent-host observability enable
 agent-host observability refresh
@@ -62,6 +68,12 @@ agent-host update
 agent-host rollback
 agent-host uninstall
 ```
+
+`doctor --deep --skip-agent-apps` verifies installed packages, live tool
+contracts, Direct Runtime, semantic probes, and catalog budgets without
+starting Codex or Claude Code. The Manager uses that route for startup and
+foreground refresh. An explicit **Run Full Check** additionally asks each
+connected Agent app to verify its current bindings.
 
 Uninstall preserves both Agent Host history and the Observer database by
 default. `--purge-data` removes only Agent Host's private state; it never erases a
@@ -79,6 +91,18 @@ The active tool set can be narrowed without uninstalling packages. Agent Host
 keeps displaced user plugins suspended during that temporary reduction, so a
 source-checkout route cannot silently replace an inactive managed tool. A fresh
 Agent task is required after every binding change.
+
+An owner may also import one already-built private Agent tool without turning
+Agent Host into a registry. The input must be a self-contained component
+archive with the existing component v0.1 descriptor and tool integration v0.1
+or v0.2. Preview validates bounded sealed bytes and the live typed MCP catalog,
+then returns exact binding facts; import requires those unchanged facts from an
+absolute JSON file. Imported tools default inactive, use immutable package
+storage and the Codex thin projection, and retain one component-level rollback.
+This route never accepts a source checkout or caller-supplied command and is not
+available as an Agent-facing management tool. Preview does start the selected
+component to list its MCP tools; it persists no Agent Host state, but it is not
+a sandbox and does not establish that the component caused no external effect.
 
 `agent-host storage` prints the combined Manager App plus private installed
 footprint, their split, storage classes including package bytes and thin host

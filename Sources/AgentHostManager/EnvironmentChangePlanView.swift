@@ -90,12 +90,14 @@ struct EnvironmentChangePlanView: View {
 
     private func displayName(_ id: String) -> String {
         switch id {
-        case "direct-execution-runtime": "Local service"
+        case "direct-execution-runtime": "Local execution"
         case "math-anchor": "Math Anchor"
         case "migratory-time": "Migratory Time"
         case "data-transformer": "BatchTicket"
-        case "context-surface-analyzer": "Context Surface Analyzer"
+        case "context-surface-analyzer": "Catalog measurement"
         case "file-vitals": "File Vitals"
+        case "agent-catalog": "Agent tool availability"
+        case "workspace-grant": "Workspace access"
         default: id.split(separator: "-").map { $0.capitalized }.joined(separator: " ")
         }
     }

@@ -4,18 +4,24 @@ set -euo pipefail
 script_dir="${0:A:h}"
 suite_root="${script_dir:h}"
 configuration="${1:-release}"
+target_architecture="${AGENT_HOST_TARGET_ARCHITECTURE:-$(uname -m)}"
 release_catalog="${AGENT_HOST_RELEASE_CATALOG:-${suite_root}/.build/internal-beta/release-catalog}"
 bundled_profile="${AGENT_HOST_BUNDLED_PROFILE:-standard}"
 if [[ "${configuration}" != "debug" && "${configuration}" != "release" ]]; then
   print -u2 "configuration must be debug or release"
   exit 2
 fi
+if [[ "${target_architecture}" != "arm64" && "${target_architecture}" != "x86_64" ]]; then
+  print -u2 "AGENT_HOST_TARGET_ARCHITECTURE must be arm64 or x86_64"
+  exit 2
+fi
+build_triple="${target_architecture}-apple-macosx14.0"
 
 cd "${suite_root}"
-swift build -c "${configuration}" -Xswiftc -warnings-as-errors --product AgentHostManager
-swift build -c "${configuration}" -Xswiftc -warnings-as-errors --product AgentHostCLIShim
-binary_path="$(swift build -c "${configuration}" --show-bin-path)/AgentHostManager"
-shim_path="$(swift build -c "${configuration}" --show-bin-path)/AgentHostCLIShim"
+swift build --triple "${build_triple}" -c "${configuration}" -Xswiftc -warnings-as-errors --product AgentHostManager
+swift build --triple "${build_triple}" -c "${configuration}" -Xswiftc -warnings-as-errors --product AgentHostCLIShim
+binary_path="$(swift build --triple "${build_triple}" -c "${configuration}" --show-bin-path)/AgentHostManager"
+shim_path="$(swift build --triple "${build_triple}" -c "${configuration}" --show-bin-path)/AgentHostCLIShim"
 app_path="${suite_root}/.build/Agent Host.app"
 staging_path="${suite_root}/.build/Agent Host.app.staging-${$}"
 bundled_catalog="${staging_path}.catalog"

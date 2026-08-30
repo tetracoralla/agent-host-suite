@@ -31,6 +31,10 @@ do {
     expect(details["inactiveAgentComponents"] == "[]", "empty activity arrays must decode")
     expect(details["metadata"] == "{changed: yes, reason: none}", "activity objects and null must decode")
     expect(details["count"] == "9223372036854775807", "large integers must remain exact")
+    let humanDetails = Dictionary(uniqueKeysWithValues: result.entries[0].humanDetail(componentNames: [:]).map { ($0.label, $0.value) })
+    expect(humanDetails["Available tools"] == "Math Anchor, Migratory Time", "activity must translate component ids into product names")
+    expect(humanDetails["Kept installed"] == nil, "empty activity groups must stay out of the primary interface")
+    expect(humanDetails["metadata"] == nil && humanDetails["count"] == nil, "raw diagnostic fields must stay out of the primary interface")
 
     let longPayload = Data("\"\(String(repeating: "x", count: 400))\"".utf8)
     let longValue = try JSONDecoder().decode(ActivityDetailValue.self, from: longPayload)
@@ -83,7 +87,68 @@ do {
     expect(stale.detail.hasPrefix("Stale"), "stale monitoring must be labeled")
     expect(stale.detail.contains("15d ago"), "stale age must be visible")
 
-    print("manager model checks passed: activity JSON, bounds, monitoring counts, freshness")
+    let refreshNow = Date(timeIntervalSince1970: 3_000_000)
+    expect(
+        ManagerRefreshPolicy.shouldRefresh(lastSuccessfulRefreshAt: nil, now: refreshNow),
+        "a manager without a successful refresh must load current state"
+    )
+    expect(
+        !ManagerRefreshPolicy.shouldRefresh(
+            lastSuccessfulRefreshAt: refreshNow.addingTimeInterval(-30),
+            now: refreshNow,
+            maxAge: 60
+        ),
+        "returning to the foreground must not duplicate a recent refresh"
+    )
+    expect(
+        ManagerRefreshPolicy.shouldRefresh(
+            lastSuccessfulRefreshAt: refreshNow.addingTimeInterval(-61),
+            now: refreshNow,
+            maxAge: 60
+        ),
+        "returning to the foreground must replace stale in-memory state"
+    )
+    expect(
+        ManagerRefreshPolicy.shouldRefresh(
+            lastSuccessfulRefreshAt: refreshNow.addingTimeInterval(600),
+            now: refreshNow,
+            maxAge: 60
+        ),
+        "a future refresh timestamp must fail open to a current refresh"
+    )
+
+    let toolComponents = [
+        "math-anchor": ComponentSummary(version: "0.4.0", displayName: "Math Anchor", summary: nil),
+        "context-surface-analyzer": ComponentSummary(
+            version: "0.1.2",
+            displayName: "Context Surface Analyzer",
+            summary: nil
+        ),
+    ]
+    let visibleToolIDs = ManagerToolPolicy.visibleToolIDs(
+        components: toolComponents,
+        availableAgentComponents: ["math-anchor"],
+        activeAgentComponents: ["math-anchor"],
+        orderedIDs: ["math-anchor", "context-surface-analyzer"]
+    )
+    expect(
+        visibleToolIDs == ["math-anchor"],
+        "backstage observation components must not appear as Agent tools"
+    )
+    expect(
+        ManagerCheckPolicy.foregroundDoctorArguments == ["doctor", "--deep", "--skip-agent-apps"],
+        "foreground refresh must keep deep local probes without launching Agent apps"
+    )
+    expect(
+        ManagerCheckPolicy.quickHostStatusArguments("claude") == ["host", "status", "claude", "--quick"],
+        "foreground Agent-app detection must not inspect project-scoped bindings"
+    )
+    expect(
+        ManagerCheckPolicy.fullDoctorArguments == ["doctor", "--deep"],
+        "an explicit full check must retain Agent-app binding inspection"
+    )
+
+    print("manager model checks passed: activity JSON, bounds, monitoring counts, freshness, foreground privacy, tool visibility")
 } catch {
     FileHandle.standardError.write(Data("manager model check failed: \(error)\n".utf8))
     exit(1)

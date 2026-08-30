@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { access, chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
@@ -14,6 +15,7 @@ import {
   COMPONENT_SCHEMA,
   REQUIRED_RELEASE_COMPONENTS,
   containedComponentPath,
+  currentReleasePlatform,
   installDirectoryName,
   resolveArtifactUrl,
   selectedReleaseComponents,
@@ -21,10 +23,16 @@ import {
 } from './release-manifest.mjs'
 import { runFile } from './process.mjs'
 import { isToolIntegrationSchema, TOOL_INTEGRATION_SCHEMA_V2 } from './tool-integration.mjs'
+import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
 
 function fail(code, message, details) {
   throw new AgentHostError(code, message, details)
 }
+
+const MAX_LOCAL_COMPONENT_ARCHIVE_BYTES = 512 * 1024 * 1024
+const MAX_LOCAL_COMPONENT_FILES = 20_000
+const MAX_LOCAL_COMPONENT_EXPANDED_BYTES = 1024 * 1024 * 1024
+const MAX_COMPONENT_DESCRIPTOR_BYTES = 1024 * 1024
 
 async function digestFile(path) {
   const hash = createHash('sha256')
@@ -76,9 +84,25 @@ async function acquireArtifact(component, manifestPath, paths) {
 function safeArchiveEntry(raw) {
   const value = raw.replace(/^\.\//u, '').replace(/\/$/u, '')
   if (value === '') return true
-  if (value.includes('\\') || isAbsolute(value)) return false
+  if (/[\u0000-\u001f\u007f]/u.test(value) || value.includes('\\') || isAbsolute(value)) return false
   const parts = value.split('/')
   return !parts.includes('..') && !parts.includes('')
+}
+
+function archiveEntryName(raw) {
+  return raw.replace(/^\.\//u, '').replace(/\/$/u, '')
+}
+
+function expectedArchiveDirectories(files) {
+  const directories = new Set()
+  for (const file of files) {
+    let directory = dirname(file)
+    while (directory !== '.') {
+      directories.add(directory)
+      directory = dirname(directory)
+    }
+  }
+  return directories
 }
 
 async function inspectArchive(path, runner) {
@@ -87,8 +111,190 @@ async function inspectArchive(path, runner) {
   if (entries.length === 0 || !entries.some((entry) => entry.replace(/^\.\//u, '') === 'component.json')) fail('RELEASE_ARCHIVE_INVALID', 'Release archive does not contain component.json')
   for (const entry of entries) if (!safeArchiveEntry(entry)) fail('RELEASE_ARCHIVE_UNSAFE', `Release archive contains an unsafe path: ${entry}`)
   const verbose = await runner('/usr/bin/tar', ['-tvzf', path])
-  for (const line of verbose.stdout.split('\n').filter(Boolean)) {
+  const verboseLines = verbose.stdout.split('\n').filter(Boolean)
+  for (const line of verboseLines) {
     if (!['-', 'd'].includes(line[0])) fail('RELEASE_ARCHIVE_UNSAFE', 'Release archives cannot contain links or special files')
+  }
+  return { entries, verboseLines }
+}
+
+function localArchiveSizes(verboseLines) {
+  const sizes = []
+  for (const line of verboseLines.filter((value) => value[0] === '-')) {
+    const match = line.match(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+/u)
+    if (match === null) fail('LOCAL_COMPONENT_ARCHIVE_INVALID', 'The local component archive inventory could not be bounded before extraction')
+    const value = Number(match[1])
+    if (!Number.isSafeInteger(value) || value < 0) fail('LOCAL_COMPONENT_ARCHIVE_INVALID', 'The local component archive contains an invalid file size')
+    sizes.push(value)
+  }
+  return sizes
+}
+
+function digestBytes(value) {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`
+}
+
+async function localArtifactObservation(path, runner) {
+  const absolute = resolve(path)
+  if (!isAbsolute(path)) fail('LOCAL_COMPONENT_PATH_INVALID', 'The local component artifact path must be absolute')
+  const info = await lstat(absolute).catch((error) => {
+    if (error.code === 'ENOENT') return null
+    throw error
+  })
+  if (info === null || info.isSymbolicLink() || !info.isFile()) {
+    fail('LOCAL_COMPONENT_PATH_INVALID', 'The local component artifact must be one real tar.gz file')
+  }
+  if (info.size <= 0 || info.size > MAX_LOCAL_COMPONENT_ARCHIVE_BYTES) {
+    fail('LOCAL_COMPONENT_ARCHIVE_BOUNDS', 'The local component artifact exceeds the supported archive size', {
+      maximumBytes: MAX_LOCAL_COMPONENT_ARCHIVE_BYTES,
+      actualBytes: info.size,
+    })
+  }
+  const artifactPath = await realpath(absolute)
+  const archive = await inspectArchive(artifactPath, runner)
+  const descriptorResult = await runner('/usr/bin/tar', ['-xOzf', artifactPath, './component.json'], {
+    maxBuffer: MAX_COMPONENT_DESCRIPTOR_BYTES,
+  }).catch(async (error) => {
+    if (error.code !== 'HOST_COMMAND_FAILED') throw error
+    return runner('/usr/bin/tar', ['-xOzf', artifactPath, 'component.json'], { maxBuffer: MAX_COMPONENT_DESCRIPTOR_BYTES })
+  })
+  let descriptor
+  try {
+    descriptor = JSON.parse(descriptorResult.stdout)
+  } catch (error) {
+    fail('COMPONENT_DESCRIPTOR_INVALID', `The local component descriptor is invalid JSON: ${error.message}`)
+  }
+  const releaseComponent = {
+    id: descriptor?.id,
+    version: descriptor?.version,
+    platform: 'local',
+    artifact: {
+      url: new URL(`file://${artifactPath.split(sep).map(encodeURIComponent).join('/')}`).href,
+      sha256: await digestFile(artifactPath),
+      bytes: info.size,
+      format: 'tar.gz',
+    },
+    descriptorSha256: digestBytes(descriptorResult.stdout),
+    license: {
+      spdx: 'NOASSERTION',
+      files: descriptor?.legal === null || typeof descriptor?.legal !== 'object'
+        ? []
+        : [...new Set([descriptor.legal.license, descriptor.legal.notice, descriptor.legal.thirdPartyNotices].filter((value) => typeof value === 'string'))],
+    },
+  }
+  validateComponentDescriptor(descriptor, releaseComponent)
+  const expandedBytes = descriptor.files.reduce((sum, file) => sum + file.bytes, 0)
+  const normalizedEntries = archive.entries.map(archiveEntryName).filter((entry) => entry !== '')
+  const normalizedEntrySet = new Set(normalizedEntries)
+  if (normalizedEntrySet.size !== normalizedEntries.length) {
+    fail('LOCAL_COMPONENT_FILE_SET_MISMATCH', 'The local component archive repeats a normalized path')
+  }
+  const archiveFiles = archive.entries
+    .filter((entry) => !entry.endsWith('/'))
+    .map(archiveEntryName)
+    .filter((entry) => entry !== '')
+  const archiveFileSet = new Set(archiveFiles)
+  const expectedFileSet = new Set(['component.json', ...descriptor.files.map((file) => file.path)])
+  const expectedDirectorySet = expectedArchiveDirectories(expectedFileSet)
+  const unexpectedDirectories = archive.entries
+    .filter((entry) => entry.endsWith('/'))
+    .map(archiveEntryName)
+    .filter((entry) => entry !== '' && !expectedDirectorySet.has(entry))
+  const fileSetMismatch = archiveFileSet.size !== archiveFiles.length || archiveFileSet.size !== expectedFileSet.size || [...archiveFileSet].some((path) => !expectedFileSet.has(path))
+  const archiveSizes = localArchiveSizes(archive.verboseLines)
+  const archiveExpandedBytes = archiveSizes.reduce((sum, value) => sum + value, 0)
+  if (fileSetMismatch || unexpectedDirectories.length > 0 || archiveSizes.length !== archiveFiles.length) {
+    fail('LOCAL_COMPONENT_FILE_SET_MISMATCH', 'The local component archive inventory differs from its descriptor')
+  }
+  if (descriptor.files.length > MAX_LOCAL_COMPONENT_FILES || expandedBytes > MAX_LOCAL_COMPONENT_EXPANDED_BYTES || archiveExpandedBytes > MAX_LOCAL_COMPONENT_EXPANDED_BYTES + MAX_COMPONENT_DESCRIPTOR_BYTES) {
+    fail('LOCAL_COMPONENT_FILE_BOUNDS', 'The local component file inventory exceeds the supported bounds', {
+      maximumFiles: MAX_LOCAL_COMPONENT_FILES,
+      maximumExpandedBytes: MAX_LOCAL_COMPONENT_EXPANDED_BYTES,
+      actualFiles: descriptor.files.length,
+      actualExpandedBytes: expandedBytes,
+      actualArchiveExpandedBytes: archiveExpandedBytes,
+    })
+  }
+  return {
+    artifactPath,
+    releaseComponent,
+    descriptor,
+    limits: {
+      maximumArchiveBytes: MAX_LOCAL_COMPONENT_ARCHIVE_BYTES,
+      maximumFiles: MAX_LOCAL_COMPONENT_FILES,
+      maximumExpandedBytes: MAX_LOCAL_COMPONENT_EXPANDED_BYTES,
+    },
+    observed: {
+      archiveSha256: releaseComponent.artifact.sha256,
+      archiveBytes: releaseComponent.artifact.bytes,
+      descriptorSha256: releaseComponent.descriptorSha256,
+      fileCount: descriptor.files.length,
+      expandedBytes,
+    },
+  }
+}
+
+export async function observeLocalComponentArtifact(path, dependencies = {}) {
+  return localArtifactObservation(path, dependencies.runner ?? runFile)
+}
+
+export async function previewLocalComponentArtifact(path, dependencies = {}) {
+  const runner = dependencies.runner ?? runFile
+  const observation = await localArtifactObservation(path, runner)
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'agent-host-component-preview-'))
+  try {
+    const boundArchive = join(temporaryRoot, 'component.tar.gz')
+    await copyFile(observation.artifactPath, boundArchive)
+    if (!(await verifyArchive(boundArchive, observation.releaseComponent))) {
+      fail('LOCAL_COMPONENT_BINDING_MISMATCH', 'The local component artifact changed while it was being previewed')
+    }
+    await installArtifact(observation.releaseComponent, boundArchive, { packages: temporaryRoot }, runner)
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
+  return observation
+}
+
+function requireLocalBinding(binding, observation) {
+  const expectedKeys = ['archiveSha256', 'archiveBytes', 'descriptorSha256', 'id', 'version', 'platform', 'spdx']
+  if (binding === null || typeof binding !== 'object' || Array.isArray(binding)) {
+    fail('LOCAL_COMPONENT_BINDING_REQUIRED', 'Import requires the exact facts returned by component preview')
+  }
+  const unsupported = Object.keys(binding).filter((key) => !expectedKeys.includes(key))
+  if (unsupported.length > 0 || expectedKeys.some((key) => binding[key] === undefined)) {
+    fail('LOCAL_COMPONENT_BINDING_INVALID', 'The local component binding is incomplete or contains unsupported fields', { fields: unsupported })
+  }
+  const actual = {
+    archiveSha256: observation.releaseComponent.artifact.sha256,
+    archiveBytes: observation.releaseComponent.artifact.bytes,
+    descriptorSha256: observation.releaseComponent.descriptorSha256,
+    id: observation.descriptor.id,
+    version: observation.descriptor.version,
+    platform: currentReleasePlatform(),
+  }
+  const mismatches = Object.entries(actual).filter(([key, value]) => binding[key] !== value).map(([key]) => key)
+  if (!isSpdxExpressionSyntax(binding.spdx)) mismatches.push('spdx')
+  if (mismatches.length > 0) {
+    fail('LOCAL_COMPONENT_BINDING_MISMATCH', 'The local component artifact differs from its approved preview facts', { fields: [...new Set(mismatches)] })
+  }
+  return { ...observation.releaseComponent, platform: actual.platform, license: { ...observation.releaseComponent.license, spdx: binding.spdx } }
+}
+
+export async function materializeLocalComponentArtifact(path, binding, paths, dependencies = {}) {
+  const runner = dependencies.runner ?? runFile
+  const observation = await localArtifactObservation(path, runner)
+  const releaseComponent = requireLocalBinding(binding, observation)
+  const temporaryRoot = await mkdtemp(join(paths.downloads ?? tmpdir(), 'agent-host-local-component-'))
+  try {
+    const boundArchive = join(temporaryRoot, 'component.tar.gz')
+    await copyFile(observation.artifactPath, boundArchive)
+    if (!(await verifyArchive(boundArchive, releaseComponent))) {
+      fail('LOCAL_COMPONENT_BINDING_MISMATCH', 'The local component artifact changed while it was being imported')
+    }
+    const installed = await installArtifact(releaseComponent, boundArchive, paths, runner)
+    return { ...observation, releaseComponent, installed }
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
   }
 }
 

@@ -3,12 +3,17 @@ import SwiftUI
 @main
 struct AgentHostManagerApp: App {
     @StateObject private var store = AgentHostStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup("Agent Host") {
             ContentView(store: store)
                 .frame(minWidth: 760, minHeight: 580)
-                .task { await store.refresh() }
+                .task { await store.refreshIfNeeded() }
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active else { return }
+                    Task { await store.refreshIfNeeded() }
+                }
         }
         .defaultSize(width: 940, height: 700)
         .windowResizability(.contentMinSize)

@@ -17,6 +17,7 @@ struct AgentAppsView: View {
                         name: "Codex",
                         systemImage: "bubble.left.and.bubble.right.fill",
                         status: store.hostStatuses["codex"],
+                        verifiedHealth: store.verifiedAgentAppHealth("codex"),
                         isManaged: store.suite?.hosts?["codex"]?.installed == true,
                         isBusy: store.isBusy,
                         connect: { Task { await store.setHost("codex", connected: true) } },
@@ -28,6 +29,7 @@ struct AgentAppsView: View {
                         name: "Claude Code",
                         systemImage: "terminal.fill",
                         status: store.hostStatuses["claude"],
+                        verifiedHealth: store.verifiedAgentAppHealth("claude"),
                         isManaged: store.suite?.hosts?["claude"]?.installed == true,
                         isBusy: store.isBusy,
                         connect: { Task { await store.setHost("claude", connected: true) } },
@@ -66,6 +68,7 @@ private struct AgentAppRow: View {
     let name: String
     let systemImage: String
     let status: HostStatusResult?
+    let verifiedHealth: Bool?
     let isManaged: Bool
     let isBusy: Bool
     let connect: () -> Void
@@ -104,8 +107,9 @@ private struct AgentAppRow: View {
         if status == nil { return "Checking this Mac" }
         if let message = status?.error?.message { return message }
         if status?.appInstalled == false { return "Install \(name) before connecting it" }
-        if isManaged && status?.healthy == false { return "Connected · needs attention" }
-        if isManaged { return "Connected to Standard tools" }
+        if isManaged && verifiedHealth == false { return "Connected · needs attention" }
+        if isManaged && verifiedHealth == true { return "Connected · bindings verified" }
+        if isManaged { return "Connected · run Full Check to verify bindings" }
         return "Detected on this Mac"
     }
 }

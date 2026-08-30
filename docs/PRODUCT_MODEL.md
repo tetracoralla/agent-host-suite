@@ -68,6 +68,17 @@ Agent catalog.
 `developer` accepts explicit local source roots and is not a public end-user
 release channel.
 
+An installed environment may also carry a small, owner-selected set of
+**private Agent tools** outside the profile release. This is a local overlay,
+not another profile, registry, marketplace, or discovery channel. Agent Host
+accepts only one self-contained `agent-tool` archive at a time through the
+human CLI. It never accepts a source checkout, runtime command, or model-facing
+generic invocation request. A preview reacquires the archive and descriptor
+digests, file and expanded-byte bounds, an owner-supplied SPDX expression, the
+contained v0.1/v0.2 integration, and the live typed MCP catalog. Import
+requires those exact preview facts before immutable storage or host bindings
+can change.
+
 ## Dominant flows
 
 1. Setup preflights the selected profile, artifacts, host conflicts, private
@@ -83,7 +94,9 @@ release channel.
    provider processes close after each selected structured request.
 4. Doctor reacquires installed plugin state, service state, live provider
    contracts, and optionally projects one selected Math contract and runs
-   bounded single, native-batch, and time-zone semantic probes.
+   bounded single, native-batch, and time-zone semantic probes. The Manager's
+   automatic refresh uses the deep local route without starting Agent-app
+   CLIs; explicit Full Check adds current Codex and Claude binding inspection.
 5. Update retains the prior complete compatibility set until the new set is
    installed and checked. Rollback reactivates that retained set.
 6. Storage inventory separates the Manager App from private state, then splits
@@ -108,6 +121,30 @@ release channel.
    `--purge-data` removes the suite's private snapshots, history, and retained
    state. Observer's shared local database remains owned by Observer and needs
    a separate explicit removal action so pre-existing history is never erased.
+10. Private component preview leaves Agent Host state unchanged, but it does
+    start the owner-selected component to inspect the live MCP catalog; effects
+    outside Agent Host state remain the component's responsibility and are not
+    established by dry-run status. Explicit import keeps the package inactive
+    unless `--activate` is selected, uses the same content-addressed
+    package store and Codex thin projection as release tools, and preserves one
+    prior imported version or removal as a byte-verifiable rollback target.
+    Import dry-run removes every package directory it created and reports the
+    proposed component as not installed and inactive. Component
+    rollback revalidates the retained content-addressed root, approved binding,
+    descriptor and every declared file, then repeats the live typed MCP health
+    probe before changing state or host bindings.
+    These overlay transitions do not enter compatibility-release rollback
+    history. If the authoritative state and host transition commits but the
+    append-only activity entry or stale projection cleanup cannot complete, the
+    command reports success with a structured warning instead of claiming the
+    component change failed.
+    Status is path-free. Removal disconnects only Suite-owned bindings and
+    retains the sealed package until the rollback target changes or verified
+    storage cleanup makes it unreferenced. Removal is an explicit rollback
+    state, so every component rollback returns to the immediately preceding
+    installed-or-removed state instead of skipping over the latest user action.
+    Current private import connects to
+    Codex only; it does not broaden the closed Claude integration set.
 
 Before a deployment observation is written, Agent Host normalizes every
 Agent-visible tool name with the same exact semantic key used by Observer's
@@ -145,20 +182,34 @@ durable objects:
   monitoring, check, repair, rollback, and removal;
 - **Tools** — installed version, current health, an availability switch for the
   active Agent-app set, and whether an entry is suite-owned or preserved user
-  configuration;
+  configuration; this list is derived from the environment's declared
+  Agent-visible components and excludes backstage observation components;
 - **Agent Apps** — detected Codex and Claude installations, connected state,
   health, and explicit connect/disconnect actions;
 - **Activity** — bounded local lifecycle history for setup, connection changes,
-  update, rollback, monitoring, and removal.
+  update, rollback, monitoring, and removal, translated into product names and
+  human labels rather than raw state-field identifiers.
 
 Before installation, the same app presents one setup path: selected standard
 tools, detected Agent app, preflight review, then installation. Recoverable
 errors use product language and one next action; raw paths and protocol detail
 remain outside the primary interface.
 
+The Manager refreshes an outdated in-memory environment when it returns to the
+foreground and shows when the visible status was last checked. A long-running
+window must not present a pre-update catalog or health result as current. The
+initial load blocks incomplete actions; a later foreground refresh keeps the
+existing pages navigable, disables mutations, and labels the status as
+refreshing until the current local check completes.
+
 The manager's default health refresh includes the bounded direct semantic
 probes. It must not report the environment or an individual tool as ready when
 only its files and Agent-app entries are present but the direct route is broken.
+It resolves Agent-app executables without launching them and labels their
+bindings as configured but unverified. This prevents a host CLI from loading
+unrelated project-scoped configuration or requesting protected-folder access
+merely because the Manager opened. Full Check is the explicit current binding
+verification route.
 
 It does not show MCP schemas, Agent reasoning, Capability catalogs, protocol
 metadata, prompts, or marketing explanations in the primary interface.

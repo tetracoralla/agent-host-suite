@@ -6,7 +6,7 @@ import { buildDevelopmentManifest, buildDevelopmentObservabilityManifest, finger
 import { AgentHostError } from './errors.mjs'
 import { inspectCodex, installCodex, suspendCodex, uninstallCodex } from './hosts/codex.mjs'
 import { materializeCodexProjections, pruneCodexProjections, resolveWorkspaceRoot } from './hosts/codex-projection.mjs'
-import { inspectClaude, installClaude, suspendClaude, uninstallClaude } from './hosts/claude.mjs'
+import { CLAUDE_USER_CONFIG_ARGUMENTS, inspectClaude, installClaude, suspendClaude, uninstallClaude } from './hosts/claude.mjs'
 import { readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { resolveExecutable, runFile } from './process.mjs'
@@ -32,9 +32,9 @@ function activeManifest(manifest) {
   return agentFacingManifest(manifest, manifest.agentComponents ?? Object.keys(manifest.components))
 }
 
-async function pruneStateCodexProjections(paths, state) {
+async function pruneStateCodexProjections(paths, state, prune = pruneCodexProjections) {
   const active = (state.hosts.codex?.entries ?? []).map((entry) => entry.marketplaceRoot)
-  return pruneCodexProjections(join(paths.hostProjections, 'codex'), active)
+  return prune(join(paths.hostProjections, 'codex'), active)
 }
 
 function mergeHostOwnership(previous, next) {
@@ -210,13 +210,28 @@ export async function hostStatus(options, dependencies = {}) {
   const state = await loadState(paths)
   if (!['codex', 'claude'].includes(options.target)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported host: ${options.target}`)
   const executable = await resolveExecutable(options.target, runner)
-  let version = null
-  if (executable !== null) {
-    const versionResult = await runner(executable, ['--version'], { allowFailure: true, timeoutMs: 5_000 })
+  const managed = state?.hosts?.[options.target]
+  if (options.quick === true) {
+    return {
+      status: executable === null ? 'error' : 'ok',
+      configured: state !== null,
+      host: options.target,
+      appInstalled: executable !== null,
+      managed: managed !== undefined,
+      installed: managed !== undefined,
+      healthy: null,
+      version: managed?.version ?? null,
+    }
+  }
+  let version = managed?.version ?? null
+  if (executable !== null && managed === undefined) {
+    const versionArguments = options.target === 'claude'
+      ? [...CLAUDE_USER_CONFIG_ARGUMENTS, '--version']
+      : ['--version']
+    const versionResult = await runner(executable, versionArguments, { allowFailure: true, timeoutMs: 5_000 })
     if (versionResult.status === 0) version = versionResult.stdout.trim()
   }
   if (state === null) return { status: 'ok', configured: false, host: options.target, appInstalled: executable !== null, managed: false, version }
-  const managed = state.hosts[options.target]
   if (managed === undefined) return { status: 'ok', configured: true, host: options.target, appInstalled: executable !== null, managed: false, installed: false, version }
   try {
     const inspection = options.target === 'codex'
@@ -282,6 +297,27 @@ async function activateHostsOnly(paths, previous, manifest, runner, options, wor
     const availableKeys = hostManifestKeys(id, { components: previous.components })
     const activeToSuspend = (prior.entries ?? []).filter((entry) => !activeKeys.has(hostEntryKey(id, entry)))
     if (activeToSuspend.length > 0) await suspendHost(id, { ...prior, entries: activeToSuspend }, runner)
+    const installed = await installHost(id, id === 'codex' ? codexAgents : agents, complete, paths, runner, options, dependencies)
+    hosts[id] = { ...installed, inactiveEntries: inactiveEntriesFor(id, complete, activeKeys, availableKeys) }
+  }
+  return hosts
+}
+
+async function activateHostsForInventory(paths, previous, manifest, runner, options, workspaceRoot, dependencies = {}) {
+  const agents = activeManifest(manifest)
+  const codexAgents = previous.hosts.codex === undefined
+    ? agents
+    : await materializeCodexProjections(agents, join(paths.hostProjections, 'codex'), workspaceRoot)
+  const hosts = {}
+  for (const id of Object.keys(previous.hosts)) {
+    const prior = previous.hosts[id]
+    const complete = completeHostState(prior)
+    const activeKeys = hostManifestKeys(id, agents)
+    const availableKeys = hostManifestKeys(id, { components: manifest.components })
+    const activeToSuspend = (prior.entries ?? []).filter((entry) => availableKeys.has(hostEntryKey(id, entry)) && !activeKeys.has(hostEntryKey(id, entry)))
+    if (activeToSuspend.length > 0) await suspendHost(id, { ...prior, entries: activeToSuspend }, runner)
+    const removedFromInventory = complete.entries.filter((entry) => !availableKeys.has(hostEntryKey(id, entry)))
+    if (removedFromInventory.length > 0) await uninstallHost(id, { ...prior, entries: removedFromInventory, inactiveEntries: [], operationsSkill: undefined }, runner)
     const installed = await installHost(id, id === 'codex' ? codexAgents : agents, complete, paths, runner, options, dependencies)
     hosts[id] = { ...installed, inactiveEntries: inactiveEntriesFor(id, complete, activeKeys, availableKeys) }
   }
@@ -359,11 +395,22 @@ export async function updateInstallation(options, dependencies = {}) {
       throw new AgentHostError('OBSERVABILITY_RELEASE_COMPONENTS_MISSING', 'The selected release cannot preserve local monitoring', { components: missing })
     }
   }
+  const privateComponents = Object.entries(previous.privateComponents ?? {})
+    .filter(([, record]) => record?.current?.component !== undefined && record.current.component !== null)
+  for (const [id, record] of privateComponents) {
+    if (manifest.components[id] !== undefined) {
+      await cleanupMaterializedRelease(releasePreparation)
+      throw new AgentHostError('LOCAL_COMPONENT_ID_RESERVED', `The selected compatibility release now owns private component id ${id}; remove the private component before updating`)
+    }
+    manifest.components[id] = record.current.component
+  }
+  const availableAgentComponents = [...new Set([...profile.agentComponents, ...privateComponents.map(([id]) => id)])]
+  const activePrivateComponents = (previous.agentComponents ?? []).filter((id) => privateComponents.some(([privateId]) => privateId === id))
   const activeAgentComponents = options.tools !== undefined
-    ? selectAgentComponents(profile.agentComponents, options.tools)
+    ? selectAgentComponents(availableAgentComponents, options.tools)
     : options.profile !== undefined && options.profile !== previous.profile
-      ? profile.agentComponents
-      : selectAgentComponents(profile.agentComponents, (previous.agentComponents ?? profile.agentComponents).filter((id) => profile.agentComponents.includes(id)))
+      ? [...profile.agentComponents, ...activePrivateComponents]
+      : selectAgentComponents(availableAgentComponents, (previous.agentComponents ?? availableAgentComponents).filter((id) => availableAgentComponents.includes(id)))
   manifest.agentComponents = activeAgentComponents
   const changed = [...new Set([
     ...Object.entries(manifest.components).filter(([id, component]) => component.fingerprint !== previous.components[id]?.fingerprint).map(([id]) => id),
@@ -402,7 +449,7 @@ export async function updateInstallation(options, dependencies = {}) {
       channel: manifest.channel,
       profile: profile.id,
       components: manifest.components,
-      availableAgentComponents: profile.agentComponents,
+      availableAgentComponents,
       agentComponents: activeAgentComponents,
       hosts: activated.hosts,
       runtime: activated.runtime,
@@ -454,7 +501,8 @@ async function verifyStateBytes(state) {
   const mismatches = []
   for (const [id, component] of Object.entries(state.components)) {
     try {
-      if (state.channel === 'release') await verifyReleaseComponent(component)
+      if (component.releaseArtifact !== undefined) await verifyReleaseComponent(component)
+      else if (state.channel === 'release') await verifyReleaseComponent(component)
       else if (await fingerprintIdentityFiles(component.identityFiles) !== component.fingerprint) mismatches.push(id)
     } catch {
       mismatches.push(id)
@@ -522,6 +570,7 @@ export async function toolSetStatus(options = {}) {
       version: state.components[id]?.version ?? null,
       displayName: state.components[id]?.displayName ?? id,
       summary: state.components[id]?.summary ?? null,
+      private: state.privateComponents?.[id]?.current?.component !== undefined,
       active: active.includes(id),
     })),
     freshSession: {
@@ -587,6 +636,94 @@ export async function setActiveTools(options, dependencies = {}) {
     restartRequired: Object.keys(previous.hosts).length > 0,
     projectionCleanup,
   }
+}
+
+export async function transitionComponentInventory(options, inventory, dependencies = {}) {
+  const runner = dependencies.runner ?? runFile
+  const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  const previous = await loadState(paths)
+  if (previous === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
+  const available = [...inventory.availableAgentComponents]
+  const active = selectAgentComponents(available, inventory.agentComponents)
+  const missing = Object.keys(inventory.components).filter((id) => inventory.components[id]?.root === undefined)
+  if (missing.length > 0 || available.some((id) => inventory.components[id] === undefined)) {
+    throw new AgentHostError('COMPONENT_INVENTORY_INVALID', 'The proposed component inventory is incomplete', { components: missing })
+  }
+  const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
+  const manifest = { components: inventory.components, agentComponents: active }
+  if (options.dryRun === true) {
+    return {
+      status: 'ready',
+      dryRun: true,
+      activation: await inspectActivation(previous, manifest, runner, options, workspaceRoot, dependencies),
+      availableAgentComponents: available,
+      activeAgentComponents: active,
+      restartRequired: Object.keys(previous.hosts).length > 0,
+    }
+  }
+  const rebind = dependencies.rebindObservability ?? rebindObservabilityState
+  let nextHosts = null
+  let next = null
+  try {
+    nextHosts = await activateHostsForInventory(paths, previous, manifest, runner, options, workspaceRoot, dependencies)
+    const activatedAt = new Date().toISOString()
+    next = {
+      ...previous,
+      components: inventory.components,
+      availableAgentComponents: available,
+      agentComponents: active,
+      privateComponents: inventory.privateComponents,
+      hosts: nextHosts,
+      updatedAt: activatedAt,
+      bindingsActivatedAt: activatedAt,
+      workspaceRoot,
+    }
+    if (next.observability?.enabled === true) await rebind(next, paths, runner)
+    // Private component rollback is carried by `privateComponents[*].rollback`.
+    // Retaining this overlay transition in the compatibility history would let
+    // `agent-host rollback` select a same-release private-component snapshot
+    // instead of the previous complete compatibility set.
+    await saveState(paths, next)
+  } catch (error) {
+    let rollbackError = null
+    try {
+      await activateHostsForInventory(
+        paths,
+        { ...previous, hosts: nextHosts ?? previous.hosts },
+        { components: previous.components, agentComponents: previous.agentComponents ?? availableAgentComponents(previous) },
+        runner,
+        options,
+        previous.workspaceRoot ?? null,
+        dependencies,
+      )
+      if (previous.observability?.enabled === true) await rebind(previous, paths, runner)
+    } catch (failure) {
+      rollbackError = failure
+    }
+    if (rollbackError !== null) {
+      throw new AgentHostError('COMPONENT_CHANGE_ROLLBACK_FAILED', 'The private component change failed and the previous Agent environment could not be fully restored', {
+        change: error.message,
+        rollback: rollbackError.message,
+      })
+    }
+    throw error
+  }
+  let projectionCleanup
+  let warnings = []
+  try {
+    projectionCleanup = await pruneStateCodexProjections(paths, next, dependencies.pruneCodexProjections)
+  } catch {
+    // Projection pruning removes only now-unreferenced Suite copies. Once the
+    // host binding and state commit, a cleanup failure must not roll back the
+    // host while leaving the committed state in place or report the component
+    // transition itself as failed.
+    projectionCleanup = { status: 'not-completed', removed: 0 }
+    warnings = [{
+      code: 'CODEX_PROJECTION_CLEANUP_FAILED',
+      message: 'The private component change succeeded, but stale Codex projection cleanup could not be completed.',
+    }]
+  }
+  return { next, projectionCleanup, warnings, restartRequired: Object.keys(previous.hosts).length > 0 }
 }
 
 export function safePurgeRoot(root) {

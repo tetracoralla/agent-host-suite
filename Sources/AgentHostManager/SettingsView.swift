@@ -35,7 +35,7 @@ struct SettingsView: View {
                     Button("Review Local Tool Set…") { Task { await store.prepareUpdate(profile: "local-dogfood") } }
                         .disabled(store.observations?.enabled != true)
                     if store.observations?.enabled != true {
-                        Text("Turn on local monitoring first so this dogfood tool set can produce useful local usage measurements.")
+                        Text("Turn on local monitoring first so this expanded local tool set can measure reliability and usage on this Mac.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

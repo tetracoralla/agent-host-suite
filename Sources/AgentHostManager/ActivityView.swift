@@ -16,7 +16,12 @@ struct ActivityView: View {
                 } else {
                     Panel {
                         ForEach(Array(store.activity.enumerated()), id: \.element.id) { index, entry in
-                            ActivityRow(entry: entry)
+                            ActivityRow(
+                                entry: entry,
+                                componentNames: Dictionary(uniqueKeysWithValues: (store.suite?.components ?? [:]).map {
+                                    ($0.key, $0.value.displayName ?? $0.key)
+                                })
+                            )
                             if index < store.activity.count - 1 { Divider() }
                         }
                     }
@@ -30,6 +35,7 @@ struct ActivityView: View {
 
 private struct ActivityRow: View {
     let entry: ActivityEntry
+    let componentNames: [String: String]
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -43,8 +49,8 @@ private struct ActivityRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(entry.orderedDetail, id: \.key) { item in
-                    Text("\(item.key): \(item.value)")
+                ForEach(Array(entry.humanDetail(componentNames: componentNames).enumerated()), id: \.offset) { _, item in
+                    Text("\(item.label): \(item.value)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }

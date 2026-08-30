@@ -1,5 +1,17 @@
 import Foundation
 
+enum ManagerRefreshPolicy {
+    static func shouldRefresh(
+        lastSuccessfulRefreshAt: Date?,
+        now: Date = Date(),
+        maxAge: TimeInterval = 60
+    ) -> Bool {
+        guard let lastSuccessfulRefreshAt else { return true }
+        let age = now.timeIntervalSince(lastSuccessfulRefreshAt)
+        return age < 0 || age >= max(0, maxAge)
+    }
+}
+
 enum MonitoringHealthEvaluator {
     private static let futureTolerance: TimeInterval = 300
 
