@@ -86,3 +86,6 @@ All notable release changes will be recorded here.
   project-scoped configuration while inspecting or changing its user binding.
 - Keep foreground refreshes navigable with an explicit refreshing label while
   mutations remain disabled.
+- Consume Observer report v0.5, derive Procedure and Capability totals only
+  from Direct Runtime semantic executions, and stop depending on retired
+  pre-release receipt projections.
