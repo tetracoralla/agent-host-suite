@@ -13,7 +13,7 @@ stranger use.
 
 ## Current phase
 
-`Dogfood.30 installed and verified; source review and GitHub merge in progress`
+`Dogfood.31 installed and verified; six public core repositories merged and locally clean`
 
 ## Standing boundaries
 
@@ -28,13 +28,15 @@ stranger use.
 
 ## Current facts to reacquire
 
-- Installed release: `local-dogfood-20260831.30`, suite
-  `0.1.2-dogfood.30`; rollback: dogfood.29. Dogfood.29 changed only
-  `agent-tool-observer`, from 0.1.1 to 0.2.0. Dogfood.30 reuses all twelve
-  component artifacts and adds fail-closed validation of Observer semantic
-  summary kinds and counts in the Suite consumer.
-- Installed App: Agent Host 0.1.2 build 30. Its manager executable SHA-256 is
-  `61ae84ccd109988f099e37003f33fa69bd6d1137e40112c302e48aa43983d160`.
+- Installed release: `local-dogfood-20260831.31`, suite
+  `0.1.2-dogfood.31`; rollback: dogfood.30. Dogfood.31 changes only
+  `direct-execution-runtime`, retaining version 0.2.0 with artifact SHA-256
+  `a77ae7b5499f20b556a37f973f24efbd15da94b1bc2a58b3c8681c0e8a7416d0`.
+  It closes the abandoned cold MCP startup ownership race found by the Linux
+  review CI. Dogfood.30 added fail-closed Observer summary validation and
+  dogfood.29 upgraded Observer to 0.2.0.
+- Installed App: Agent Host 0.1.2 build 31. Its manager executable SHA-256 is
+  `c27b2d6e049c58bd8ae0139db4d59da83054809046cf7d0898285373f2fc9e4e`.
   The replaced 0.1.1 App remains at the explicitly named backup path until
   owner acceptance.
 - Twelve components are installed. Eight are available Agent tools; the
@@ -50,7 +52,7 @@ stranger use.
   tables remain non-destructively readable for migration and ordinary
   retention only. Current Procedure and Capability totals derive from Direct
   Runtime semantic metadata; the latest snapshot reports 236 Procedure and
-  412 Capability executions in the 30-day window.
+  413 Capability executions in the 30-day window.
 - Deep installed doctor passed all 25 current checks: twelve immutable
   components, six packaged MCP tools, Direct Runtime service and projection,
   Math single/native-batch execution, time-zone Capability execution, metadata
@@ -59,7 +61,7 @@ stranger use.
 - The internal Beta component probe, App/DMG build, ad-hoc signature checks,
   DMG checksum, embedded catalog, bootstrap, and distribution checks passed.
   The DMG is intentionally not Developer ID signed or notarized.
-- Current snapshot storage is 722,935,808 allocated bytes in private state and
+- Current snapshot storage is 749,789,184 allocated bytes in private state and
   192,745,472 bytes for the installed App. Product cleanup currently identifies
   eight unreferenced package versions totaling 197,271,552 allocated bytes;
   cleanup remains separate from release correctness and owner acceptance.
@@ -96,10 +98,10 @@ external Agent CLI; opening or foregrounding Manager must not do so.
 
 ## Next action
 
-Finish local diff review, commit each independent repository once, push one PR
-per repository, wait for current-SHA checks, and merge. Then reacquire remote
-default SHAs and local cleanliness. Keep the App backup and dogfood.29 rollback
-until owner acceptance; do not publish the internal ad-hoc DMG as a public
-binary. Use ordinary fresh tasks to evaluate tool routing, and keep the active
-set within its declared context budget rather than treating installation as a
-reason to expose every available tool simultaneously.
+Use ordinary fresh tasks to evaluate current-release routing and keep the
+active set within its declared context budget rather than treating installation
+as a reason to expose every available tool simultaneously. Track the current
+fresh-install cold-start baselines for BatchTicket and Math Anchor without
+turning the 30-second health bound into experience acceptance. Keep the
+original App backup and dogfood.30 rollback until owner acceptance; do not
+publish the internal ad-hoc DMG as a public binary.
