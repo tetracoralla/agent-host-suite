@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { contextAnalyzerInvocation, disableObservability, observabilitySummary } from '../src/observability.mjs'
+import { contextAnalyzerInvocation, disableObservability, observabilitySummary, semanticExecutionTotals } from '../src/observability.mjs'
 import { retryableCatalogError, validateManagedToolBindings } from '../src/context-exporter.mjs'
 import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 
@@ -84,4 +84,19 @@ test('observability summary preserves provider coverage and bounded-routing disc
   assert.deepEqual(summary.latest.freshSessionCorrelation, correlation)
   assert.equal(summary.latest.totals.freshSessionRoutingObservationsReturned, 100)
   assert.equal('freshSessionRoutingTurns' in summary.latest.totals, false)
+})
+
+test('semantic totals come from current Direct Runtime observations, not retired receipt projections', () => {
+  assert.deepEqual(semanticExecutionTotals([
+    { target: { kind: 'procedure' }, executions: 3 },
+    { target: { kind: 'capability' }, executions: 5 },
+    { target: { kind: 'mcp-operation' }, executions: 8 },
+  ]), { procedureEvents: 3, capabilityEvents: 5 })
+  assert.deepEqual(semanticExecutionTotals(undefined), { procedureEvents: 0, capabilityEvents: 0 })
+  assert.throws(() => semanticExecutionTotals([
+    { target: { kind: 'procedure' }, executions: -1 },
+  ]), (error) => error.code === 'OBSERVABILITY_REPORT_UNSUPPORTED')
+  assert.throws(() => semanticExecutionTotals([
+    { target: { kind: 'future-semantic-kind' }, executions: 1 },
+  ]), (error) => error.code === 'OBSERVABILITY_REPORT_UNSUPPORTED')
 })

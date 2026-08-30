@@ -13,6 +13,11 @@ import { recordActivity } from './activity.mjs'
 import { cleanupStorage } from './storage.mjs'
 
 const OBSERVER_LABEL = 'com.openadam.agent-tool-observer'
+const SUPPORTED_OBSERVER_REPORTS = new Set([
+  'openadam.agent-tool-observer.report.v0.4',
+  'openadam.agent-tool-observer.report.v0.5',
+])
+const SEMANTIC_TARGET_KINDS = new Set(['procedure', 'capability', 'mcp-tool', 'mcp-operation'])
 
 function observerStateDir() {
   return join(homedir(), 'Library', 'Application Support', 'OpenAdam', 'Agent Tool Observer')
@@ -117,6 +122,22 @@ export function observabilitySummary(value) {
   }
 }
 
+export function semanticExecutionTotals(executions) {
+  const values = Array.isArray(executions) ? executions : []
+  const totals = { procedureEvents: 0, capabilityEvents: 0 }
+  for (const item of values) {
+    const kind = item?.target?.kind
+    if (!SEMANTIC_TARGET_KINDS.has(kind)
+      || !Number.isSafeInteger(item.executions)
+      || item.executions < 0) {
+      throw new AgentHostError('OBSERVABILITY_REPORT_UNSUPPORTED', 'Observer returned an invalid semantic execution summary')
+    }
+    if (kind === 'procedure') totals.procedureEvents += item.executions
+    if (kind === 'capability') totals.capabilityEvents += item.executions
+  }
+  return totals
+}
+
 async function writeAnalysis(paths, state, runner) {
   const active = new Set(state.agentComponents ?? Object.keys(state.components))
   const activeComponents = Object.fromEntries(Object.entries(state.components).filter(([id]) => active.has(id)))
@@ -200,6 +221,10 @@ async function refreshState(state, paths, runner) {
   })
   const status = await runJson(observer, ['status', '--json'], runner, { env: observerEnvironment(state) })
   const report = await runJson(observer, ['report', '--days', '30', '--json'], runner, { env: observerEnvironment(state) })
+  if (!SUPPORTED_OBSERVER_REPORTS.has(report.schemaVersion) || !Array.isArray(report.semanticExecutions)) {
+    throw new AgentHostError('OBSERVABILITY_REPORT_UNSUPPORTED', 'Observer returned an unsupported report contract')
+  }
+  const semanticTotals = semanticExecutionTotals(report.semanticExecutions)
   const suiteExecutions = report.semanticExecutions.filter((item) => [
     'io.github.tetracoralla.math-anchor',
     'io.github.tetracoralla.migratory-time',
@@ -261,8 +286,7 @@ async function refreshState(state, paths, runner) {
         freshSessionSuiteToolCalls: suiteTools.reduce((total, item) => total + (item.currentAgentHostDeployment.freshSessionCallsSinceActivation ?? 0), 0),
         freshSessionRoutingObservationsReturned: routingObservations.length,
         freshSessionRoutingObservationsTruncated: report.freshSessionCorrelation?.routing?.observationRecordsTruncated ?? null,
-        procedureEvents: report.procedures.reduce((total, item) => total + item.runs, 0),
-        capabilityEvents: report.capabilities.reduce((total, item) => total + item.executions, 0),
+        ...semanticTotals,
       },
       assessmentBoundary: 'Fresh-session counts are provider-scoped observations with explicit coverage and truncation; they are not adoption, opportunity, correctness, task-quality, or retirement decisions.',
     },

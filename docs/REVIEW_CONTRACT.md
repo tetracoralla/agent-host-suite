@@ -1,170 +1,141 @@
 # Review contract
 
-Review the suite as one installation and lifecycle product.
+Review the suite as one installation, lifecycle, direct-host, observability,
+and management product. This contract records durable public boundaries and
+reproduced high-risk seams; it is minimum coverage, not a feature inventory,
+fixed test script, or completion runway.
 
-The lanes below are minimum coverage, not a completion runway. Reconstruct the
-current environment, profiles, release channel, host bindings, service, and
-manager surfaces from source and runtime before following them, keep at least
-one discovery route that is not copied from these headings or the changed-file
-list, and report out-of-contract findings and still-untested compositions;
-completing every lane cannot by itself end the review.
+Before applying the named checks, reconstruct the current environment,
+profiles, release channel, component descriptors, host bindings, service,
+catalog, and Manager surfaces from source and runtime. Perform and report at
+least one independent discovery route derived from that model rather than from
+this file, test names, prior findings, or the changed-file list. Completing
+every item below cannot by itself end the review.
 
-## Required lanes
+## Durable invariants
 
-### Development regression
+1. **Release and artifact authority.** Every component is independently
+   released and admitted by exact archive bytes and digest, descriptor identity,
+   version, platform, SPDX expression, complete inventory, and current typed
+   entrypoints. Unknown fields, unsafe paths, malformed archives, undeclared
+   files or directories, digest drift, and incomplete operation schemas fail
+   before state mutation.
+2. **Private component boundary.** Preview accepts one explicit absolute archive
+   and exact binding, starts only the selected contained component, changes no
+   Agent Host state, and discloses that it cannot rule out effects outside that
+   state. Import stores immutable bytes, defaults inactive, never accepts a
+   source directory or caller-supplied runtime command, and preserves Suite-only
+   ownership. Tests own the exact archive/parser edge-case matrix.
+3. **Atomic lifecycle.** Setup, import, activation, tool-set changes, update,
+   rollback, remove, cleanup, and uninstall preflight the complete target state.
+   Failure before commit restores the prior state; post-commit activity or stale
+   projection cleanup failure returns authoritative success with a stable
+   warning rather than deleting referenced package bytes.
+4. **Recovery ownership.** One complete rollback is retained and reverified by
+   content, descriptor, inventory, binding, and typed MCP health before
+   transition. Remove, rollback, cleanup, and uninstall cannot restore or delete
+   unrelated user entries. Deliberately displaced entries are restored only
+   when Suite ownership ends and later user changes are preserved.
+5. **Profile and tool truth.** Installed components, Agent-visible components,
+   and the smaller active tool set remain distinct. Backstage observation
+   components never enter the callable catalog or spawn Agent-session MCP
+   processes. Normalized tool-name conflicts fail before deployment observation
+   using the same semantic key as Observer.
+6. **Thin host projection.** Host projections contain identity and invocation
+   only, never provider runtime. Workspace-dependent tools require one explicit
+   absolute grant whose variables all bind to that canonical root. Package-backed
+   commands, component/Skill identity, lifecycle ownership, and auxiliary CLI
+   entrypoints survive update, rollback, and uninstall.
+7. **Host inspection and mutation.** Absence, unverified configuration, and
+   failed inspection remain distinct. Claude management stays at user setting
+   scope with Skills and Chrome integration disabled and without project/local
+   settings. A failed managed replacement restores the prior binding.
+8. **Default inspection effect budget.** Manager startup and foreground refresh
+   resolve Agent apps without launching their CLIs, retain deep local package,
+   catalog, and direct semantic probes, and label Agent bindings configured but
+   unverified. Opening the Manager must not trigger access to an unrelated
+   protected folder; explicit Full Check owns deep Agent-app binding inspection.
+9. **Bounded management surface.** Every Manager CLI action has a termination
+   path even when a child ignores graceful termination. Activity contains
+   bounded actions and state, never prompts, tool inputs, or results. Human copy
+   uses product labels while CLI JSON retains stable identifiers.
+10. **Observability boundary.** Observer retention is not shorter than report
+    lookback, preserves current deployment/catalog correlation, and performs WAL
+    checkpoint and compaction. Reports preserve provider session-start bases,
+    current-release separation, routing bounds, and uncertainty. Current
+    Procedure/Capability execution totals derive from Direct Runtime metadata,
+    not retired receipt projections.
+11. **Snapshot and storage economy.** `snapshot --json` is path-free, bounded to
+    16 KiB serialized output, limits recent activity, preserves freshness and
+    provider coverage, and states its assessment boundary. Storage reports total
+    and sectional allocated bytes plus exact cleanup candidates; cleanup retains
+    active and rollback packages, recent/staging artifacts, and all paths outside
+    private Suite state.
+12. **Update and uninstall safety.** A compatibility update cannot silently add
+    a private component to a release profile. Uninstall preserves pre-existing
+    host entries and user data while removing Suite-created entries. A host's
+    fresh-session requirement is policy after binding change, never evidence
+    that an open process reloaded or remained stale.
 
-- syntax, tests, manifest/schema validation, package contents, legal files;
-- fail-closed handling for unknown fields, hash mismatch, unsafe paths, host
-  conflicts, partial setup, and state corruption; known CLI options that do
-  not belong to the selected operation are rejected rather than ignored;
-- normalized Agent-visible tool-name conflicts fail in Agent Host before a
-  deployment observation is written, using the same exact semantic key as the
-  Observer contract;
-- update and rollback retain one recoverable complete set;
-- private component preview is read-only and binds archive digest and bytes,
-  descriptor digest, id, version, platform, and SPDX; import accepts only an
-  explicit absolute archive plus the exact binding, admits only a contained
-  `agent-tool`, probes the real typed MCP catalog, defaults inactive, and never
-  accepts a source directory or caller-supplied runtime command; preview
-  rejects malformed SPDX syntax, repeated or control-character archive paths,
-  undeclared files, and undeclared empty directories before extraction;
-  archive inventory and extraction occur once per exact admission attempt; the
-  preview records that it starts the selected component, changes no Agent Host
-  state, and cannot establish absence of effects outside that state;
-- private component activation uses immutable package bytes and the Codex thin
-  projection, preserves Suite-only ownership, retains one component rollback,
-  survives compatibility updates without entering the release profile, and
-  remove/rollback cannot restore or delete unrelated user entries; import
-  dry-run removes its newly created package version and empty component parent,
-  while rollback verifies the retained content-addressed package, exact binding,
-  descriptor, full file inventory, and current typed MCP health before any
-  state or host transition;
-- private component import, remove, and component rollback do not add snapshots
-  to compatibility-release history; a post-commit activity-log failure returns
-  the successful authoritative state transition with a stable warning and does
-  not delete package bytes referenced by that state; post-commit stale
-  projection cleanup failure has the same authoritative-success boundary and
-  a distinct visible warning;
-- storage cleanup dry-run names exact eligible package/download bytes; actual
-  cleanup verifies the active release and one complete rollback, preserves
-  recent or staging artifacts, and removes no path outside private suite state;
-- non-JSON `agent-host storage` output reports total and sectional allocated
-  bytes plus exact cleanup candidates instead of only `ok`;
-- `agent-host snapshot --json` remains path-free and within its 16 KiB final
-  serialized budget, limits recent activity, preserves observation freshness
-  and provider coverage, and states that it cannot establish causation,
-  adoption, routing/task quality, user value, or an operational decision;
-- a host's fresh-session requirement is reported as post-binding-change policy,
-  never as evidence that a currently open process is stale; current session
-  uptake remains `not-observed` until a real fresh host flow is exercised;
-- the packaged operations Skill uses only published Agent Host routes. Codex
-  carries it in a Skill-only plugin with no MCP server; Claude carries one
-  immutable linked projection. Install/update fail closed on conflicts,
-  uninstall restores deliberately displaced entries, and later user changes
-  are preserved;
-- active tool-set reduction removes only suite-created bindings outside the
-  target set, keeps displaced user/source bindings suspended, preserves enough
-  ownership to reactivate the managed package, and restores user bindings only
-  on profile removal, host disconnect, or uninstall;
-- installed and Agent-visible profile components remain distinct; backstage
-  observation components do not enter the active catalog or spawn Agent-session
-  MCP processes;
-- v0.2 `suite-node` integrations run their contained script with the one
-  verified Suite Node component, preserve provider Skill/plugin identity, and
-  do not weaken v0.1 component-executable validation;
-- workspace-dependent Codex tools fail setup without an explicit absolute
-  workspace grant; their thin projections contain no provider runtime, bind
-  every declared workspace variable to the canonical grant, and preserve
-  package-backed commands, host ownership, update, rollback, and uninstall;
-- storage inventory includes Suite-owned host projections, while current Codex
-  cache measurements distinguish small Skill/identity copies from immutable
-  package bytes;
-- every admitted MCP tool has a closed input and output schema, and a component
-  with both MCP and maintenance CLI routes preserves both entrypoints;
-- host inspection failure cannot be mistaken for an absent entry, and a failed
-  managed replacement restores the prior Claude binding;
-- Claude inspection and mutation commands stay at user setting scope with
-  Skills and Chrome integration disabled; they do not intentionally load
-  project or local settings while managing a Suite-owned user binding;
-- lifecycle activity is bounded and contains actions and state, not prompts or
-  tool inputs or results; the Manager translates known detail into product
-  names and human labels while keeping raw state identifiers in CLI JSON;
-- every Manager CLI action has a bounded termination path even if a child
-  ignores graceful termination, and timeout leaves the interface recoverable;
-- Manager startup and foreground refresh resolve connected Agent apps without
-  launching their CLIs, retain deep installed-tool and direct semantic probes,
-  and label bindings as configured but unverified until explicit Full Check;
-  opening the Manager must not request access to an unrelated protected folder
-  through project-scoped Agent-app configuration;
-- Observer retention is not shorter than its report lookback, preserves current
-  deployment/catalog correlation, checkpoints the WAL, and releases deleted
-  database pages;
-- observability summaries preserve Codex, Claude, and ZCode session-start
-  coverage and identify bounded routing records and truncation without calling
-  the returned record count total turns or an adoption result;
-- uninstall preserves pre-existing host entries and removes suite-created
-  entries.
+## Installed Agent flow
 
-### Installed Agent flow
-
-- use a fresh host session after install or update;
-- ask an ordinary system-status question and verify the host discovers the
-  packaged `agent-host-operations` Skill, calls `snapshot --json` before larger
-  reports, does not read Agent Host/Observer source or private storage, and
-  labels any resulting judgment as an external-Agent inference;
-- reacquire the installed plugin path, version, and live tool registry;
-- run ordinary Math Anchor and Migratory Time prompts plus one task relevant to
-  a local-dogfood tool, and record selected tools, calls, retries, and fallbacks;
-- for a workspace-dependent tool, verify the live Codex MCP entry has the
-  configured workspace grant and a package-backed command, then call it from a
-  nested implementation repository without a source or shell fallback;
+- start a fresh supported Agent session after installation or binding change;
+- ask an ordinary system-status question and verify the packaged
+  `agent-host-operations` Skill calls `snapshot --json` before larger reports,
+  avoids private storage/source, and labels any judgment as external-Agent
+  inference;
+- reacquire installed plugin/Skill paths, component versions, and live tool
+  registry, then run ordinary prompts for current default tools plus one
+  local-dogfood tool and record calls, retries, and generic fallbacks;
+- for a workspace-dependent tool, verify the live host entry carries the
+  explicit grant and package-backed command, then call it from a nested
+  repository without source or shell fallback;
 - report Codex and Claude independently.
 
-### Direct runtime flow
+## Direct runtime flow
 
-- reacquire provider schemas and bindings from installed artifacts;
-- project one selected Math operation through its declared live schema lookup
-  and verify the returned contract contains only that operation;
-- run one selected Math operation, one two-item native Math batch, and one
+- reacquire provider schemas and bindings from installed immutable artifacts;
+- project and run one selected Math operation, one native Math batch, and one
   time-zone work order through the local service;
-- exercise timeout/cancellation, replacement, overload, shutdown, and restart;
-- after warmed probes, verify per-call provider processes have exited while the
-  host service remains ready; report cold-call latency separately from idle
-  resource cost;
-- verify observations do not contain inputs or results.
+- exercise timeout/cancellation, overload/fairness, replacement, shutdown, and
+  recovery, then verify per-call provider processes exited while the service
+  remains ready;
+- report cold latency, warm/idle resources, and zero-model execution separately;
+- verify observations contain no input, result, or provider error message.
 
-### Human runtime flow
+## Human runtime flow
 
-- complete setup, Environment, Tools, Agent Apps, Activity, doctor, update,
-  rollback, observability-disable, and uninstall flows in the built macOS app;
-- leave the Manager open across an environment change, return it to the
-  foreground, and verify stale catalog/health data is replaced and the visible
-  status-check time advances without duplicating a just-completed refresh;
-- verify the Manager's Tools and Environment counts exclude backstage
-  observation components while context cost separately counts Agent-callable
-  operations;
-- change one Tool availability switch, verify a fresh-task notice and the
-  corresponding installed-versus-active state, then restore it without
-  exposing a displaced source plugin;
-- verify the default manager refresh detects a broken direct route instead of
-  promoting file/host presence to overall readiness;
+- complete the current primary setup and environment inspection path, one tool
+  availability change and restoration, explicit Full Check, update/rollback,
+  error recovery, and the non-destructive observability-disable/uninstall
+  previews relevant to the reviewed change;
+- keep the Manager open across one environment change and foreground return;
+  verify freshness advances without a duplicate just-completed refresh;
+- verify visible Environment and Tools counts exclude backstage components while
+  context cost counts only Agent-callable operations;
+- verify default refresh detects a broken direct route rather than promoting
+  file or binding presence to overall readiness;
 - verify startup performs no Codex or Claude binding subprocess inspection and
-  produces no Documents-folder request, while explicit Full Check still
-  detects a broken Agent-app binding;
-- verify error recovery and keyboard/accessibility paths;
-- inspect the current rendered surface separately from build results.
+  produces no protected-folder request, while Full Check still detects a broken
+  Agent-app binding;
+- exercise keyboard/accessibility and inspect the rendered surface separately
+  from build results.
 
-### Distribution
+## Distribution
 
-- install on a clean supported machine from release artifacts, not sibling
-  source checkouts;
-- verify every detached digest, nested license, notice, SBOM, code signature,
-  notarization ticket, and Gatekeeper assessment;
-- distinguish macOS arm64, macOS x86_64, Linux, and Windows results.
+When a binary or installer release is in scope, install on a clean supported
+machine from the declared artifacts rather than sibling source. Verify detached
+digests, nested licenses/notices, SBOM, signature, notarization, Gatekeeper, and
+each claimed platform separately. Record intentionally absent signed or
+cross-platform artifacts rather than treating silence as parity.
 
-## Claim boundary
+## Claim boundary and reporting
 
-Passing this repository's checks does not establish that provider semantics are
-correct, that an Agent-app vendor adopted the standards, that every Agent will
-select the tools, or that another device works. Report each observed host,
-artifact, and flow exactly.
+Passing repository checks does not establish provider semantic correctness,
+Agent-app vendor adoption, natural tool selection, another device, or owner
+experience acceptance. Report development regression, installed Agent flow,
+direct runtime, human runtime, distribution, and owner acceptance separately.
+Every PASS names the current command or flow and observable. End with
+`tools-dev workspace escalations`, including shared ABI/schema/error drift,
+installed-host conflict, adjacent dependency, and aggregate catalog or resource
+risk.
