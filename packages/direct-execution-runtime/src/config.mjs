@@ -1,5 +1,5 @@
 import { access, constants, readFile, realpath, stat } from 'node:fs/promises'
-import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path'
+import { delimiter, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { HostError } from './errors.mjs'
 import {
@@ -189,7 +189,7 @@ async function identityDigests(rootPath, paths, label) {
   for (const path of paths) {
     const resolved = await realContainedPath(rootPath, path, label)
     identities.push({
-      path: relative(rootPath, resolved) || '.',
+      path: relative(rootPath, resolved).split(sep).join('/') || '.',
       digest: await digestFile(resolved),
     })
   }

@@ -124,7 +124,7 @@ try {
       input: { value: 'remote-boundary-observed' },
     }],
   })
-  assert.equal(result.status, 'ok')
+  assert.equal(result.status, 'ok', JSON.stringify(result))
   assert.deepEqual(result.calls[0].result, { value: 'remote-boundary-observed' })
   assert.equal(result.execution.modelCalls, 0)
   assert.equal(runtime.providers.sessionSnapshots()[0].present, false)

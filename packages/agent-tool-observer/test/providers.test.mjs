@@ -213,6 +213,7 @@ test("ZCode adapter reports schema drift before attempting partial ingestion", (
 });
 
 test("Codex incremental runs keep one usage rollup per session and complete calls by real name", () => {
+  let database;
   const root = temporaryRoot();
   try {
     const { config, paths } = fixtureConfig(root);
@@ -222,7 +223,7 @@ test("Codex incremental runs keep one usage rollup per session and complete call
       line({ timestamp: "2026-08-21T10:00:00.000Z", type: "session_meta", payload: { id: "session-secret" } })
       + line({ timestamp: "2026-08-21T10:00:01.000Z", type: "response_item", payload: { type: "custom_tool_call", call_id: "c1", name: "exec", status: "in_progress", input: "" } })
       + line({ timestamp: "2026-08-21T10:00:02.000Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110 } } } }));
-    const database = openStateDatabase(config);
+    database = openStateDatabase(config);
     const budget = { remainingBytes: 64 * 1024 * 1024, remainingLines: 250_000, deadlineMs: Date.now() + 60_000 };
     const first = scanCodex({ database, config, minimumMtimeMs: 0, scannedAtMs: 1, budget });
     assert.equal(first.status, "ok");
@@ -250,11 +251,13 @@ test("Codex incremental runs keep one usage rollup per session and complete call
     assert.equal(database.prepare("SELECT count(*) AS n FROM tool_event").get().n, 2);
     database.close();
   } finally {
+    if (database?.isOpen) database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("Codex incremental scan fails closed when bounded prefix cannot recover session context", () => {
+  let database;
   const root = temporaryRoot();
   try {
     const { config, paths } = fixtureConfig(root);
@@ -269,7 +272,7 @@ test("Codex incremental scan fails closed when bounded prefix cannot recover ses
       prefix
       + line({ timestamp: "2026-08-21T10:00:10.000Z", type: "session_meta", payload: { id: "session-secret" } })
       + line({ timestamp: "2026-08-21T10:00:11.000Z", type: "response_item", payload: { type: "function_call", call_id: "c1", name: "Read", status: "in_progress" } }));
-    const database = openStateDatabase(config);
+    database = openStateDatabase(config);
     const firstBudget = { remainingBytes: 1024 * 1024, remainingLines: 100, deadlineMs: Date.now() + 60_000 };
     const first = scanCodex({ database, config, minimumMtimeMs: 0, scannedAtMs: 1, budget: firstBudget });
     assert.equal(first.status, "ok");
@@ -285,6 +288,7 @@ test("Codex incremental scan fails closed when bounded prefix cannot recover ses
     assert.equal(database.prepare("SELECT status FROM tool_event").get().status, "observed");
     database.close();
   } finally {
+    if (database?.isOpen) database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

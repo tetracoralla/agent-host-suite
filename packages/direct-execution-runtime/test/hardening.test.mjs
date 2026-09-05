@@ -150,7 +150,8 @@ test('runtime close waits for in-flight JSONL and MCP launch snapshots without s
   const snapshotDirectory = resolve(parent, 'snapshots')
   const jsonlRoot = resolve(parent, 'jsonl-provider')
   const mcpRoot = resolve(parent, 'mcp-provider')
-  const previousTmpdir = process.env.TMPDIR
+  const temporaryEnvironmentKey = process.platform === 'win32' ? 'TEMP' : 'TMPDIR'
+  const previousTmpdir = process.env[temporaryEnvironmentKey]
   let runtime
   try {
     await mkdir(snapshotDirectory, { mode: 0o700 })
@@ -175,7 +176,7 @@ test('runtime close waits for in-flight JSONL and MCP launch snapshots without s
       rootPath: mcpRoot,
       identityFiles: [mcpServer, mcpSlowIdentity],
     }))
-    process.env.TMPDIR = snapshotDirectory
+    process.env[temporaryEnvironmentKey] = snapshotDirectory
     assert.equal(tmpdir(), snapshotDirectory)
 
     for (const scenario of [
@@ -204,8 +205,8 @@ test('runtime close waits for in-flight JSONL and MCP launch snapshots without s
     }
   } finally {
     await runtime?.close()
-    if (previousTmpdir === undefined) delete process.env.TMPDIR
-    else process.env.TMPDIR = previousTmpdir
+    if (previousTmpdir === undefined) delete process.env[temporaryEnvironmentKey]
+    else process.env[temporaryEnvironmentKey] = previousTmpdir
     await rm(parent, { recursive: true, force: true })
   }
 })
@@ -272,7 +273,7 @@ test('provider sessions execute private frozen command and identity bytes, then 
         fakeCall('path', { value: '__execution_path__' }),
         fakeCall('cwd', { value: '__execution_cwd__' }),
       ]))
-      assert.match(jsonl.calls[0].result.value, /openadam-direct-launch-.+\/filesystem\//u)
+      assert.match(jsonl.calls[0].result.value, /openadam-direct-launch-.+[\/\\]filesystem[\/\\]/u)
       assert.notEqual(jsonl.calls[0].result.value, resolve(fakeRoot, 'adapter.mjs'))
       assert.equal(jsonl.calls[1].result.value, fakeRoot)
     } finally {
@@ -285,7 +286,7 @@ test('provider sessions execute private frozen command and identity bytes, then 
         fakeMcpCall('path', { value: '__execution_path__' }),
         fakeMcpCall('cwd', { value: '__execution_cwd__' }),
       ]))
-      assert.match(mcp.calls[0].result.value, /openadam-direct-launch-.+\/filesystem\//u)
+      assert.match(mcp.calls[0].result.value, /openadam-direct-launch-.+[\/\\]filesystem[\/\\]/u)
       assert.notEqual(mcp.calls[0].result.value, resolve(fakeMcpRoot, 'server.mjs'))
       assert.equal(mcp.calls[1].result.value, fakeMcpRoot)
     } finally {
@@ -426,10 +427,11 @@ test('runtime configuration snapshot rejects non-ordinary data without reads or 
 
 test('prepared configuration owns frozen arguments and a non-mutable provider registry', async () => {
   const source = fakeMcpConfig({ args: ['--startup-delay=5'] })
+  const expectedArguments = [...source.providers[0].args]
   const prepared = await prepareRuntimeConfig(source)
   const binding = prepared.providers.get('test.fake-mcp')
   source.providers[0].args.push('--narrow-schema')
-  assert.deepEqual(binding.args, ['--startup-delay=5'])
+  assert.deepEqual(binding.args, expectedArguments)
   assert.equal(Object.isFrozen(binding.args), true)
   assert.equal(Object.isFrozen(binding), true)
   assert.equal(prepared.providers.set, undefined)

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 export function testSocketPath(directory, name = 'runtime.sock') {
   if (process.platform !== 'win32') return resolve(directory, name)
   const id = createHash('sha256').update(resolve(directory, name)).digest('hex').slice(0, 24)
-  return `\\.\pipe\openadam-test-${id}`
+  return String.raw`\\.\pipe\openadam-test-${id}`
 }
 export async function assertEndpointAbsent(socketPath) {
   if (process.platform !== 'win32') {

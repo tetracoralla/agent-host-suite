@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { chmod, cp, lstat, mkdtemp, mkdir, open, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { delimiter, resolve } from 'node:path'
+import { delimiter, resolve, sep } from 'node:path'
 import { resolveProviderExecutable } from '../src/config.mjs'
 import { digestFile } from '../src/json.mjs'
 import { fakeRoot } from './helpers.mjs'
@@ -18,7 +18,7 @@ import { copyVerifiedProviderArtifact } from '../scripts/structured-data-procedu
 async function componentFiles(root, current = root, output = []) {
   for (const entry of await readdir(current, { withFileTypes: true })) {
     const path = resolve(current, entry.name)
-    const relativePath = path.slice(root.length + 1)
+    const relativePath = path.slice(root.length + 1).split(sep).join('/')
     if (relativePath === 'component.json') continue
     const info = await lstat(path)
     if (info.isDirectory()) await componentFiles(root, path, output)

@@ -294,6 +294,7 @@ test("ZCode trace shares a constrained scan across older and newer files", () =>
 });
 
 test("Gemini CLI OTel file projection parses concatenated objects and drops all content-bearing attributes", () => {
+  let database;
   const root = temporaryRoot();
   try {
     const { config } = fixtureConfig(root);
@@ -314,7 +315,7 @@ test("Gemini CLI OTel file projection parses concatenated objects and drops all 
         prompt_id: "prompt-one", function_name: "Bash", success: true, function_args: secret
       })
     ], "\n");
-    const database = openStateDatabase(config);
+    database = openStateDatabase(config);
     const first = scanGeminiTelemetry({ database, config, scannedAtMs: Date.parse("2026-09-02T10:01:00.000Z"), budget: budget(config) });
     assert.equal(first[0].status, "partial");
     assert.equal(first[0].errorCode, "TRACE_SOURCE_CONTENT_POLICY_FILTERED");
@@ -329,11 +330,13 @@ test("Gemini CLI OTel file projection parses concatenated objects and drops all 
     assert.deepEqual(scanGeminiTelemetry({ database, config, scannedAtMs: Date.parse("2026-09-02T10:02:00.000Z"), budget: budget(config) }), []);
     database.close();
   } finally {
+    if (database?.isOpen) database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("Gemini CLI OTel cursor waits at an incomplete JSON object and resumes exactly once", () => {
+  let database;
   const root = temporaryRoot();
   try {
     const { config } = fixtureConfig(root);
@@ -343,7 +346,7 @@ test("Gemini CLI OTel cursor waits at an incomplete JSON object and resumes exac
     }), null, 2);
     fs.mkdirSync(path.dirname(source), { recursive: true });
     fs.writeFileSync(source, serialized.slice(0, -1), { mode: 0o600 });
-    const database = openStateDatabase(config);
+    database = openStateDatabase(config);
     const first = scanGeminiTelemetry({ database, config, scannedAtMs: 2_000, budget: budget(config) });
     assert.equal(first[0].status, "partial");
     assert.equal(first[0].eventsWritten, 0);
@@ -355,6 +358,7 @@ test("Gemini CLI OTel cursor waits at an incomplete JSON object and resumes exac
     assert.deepEqual(scanGeminiTelemetry({ database, config, scannedAtMs: 4_000, budget: budget(config) }), []);
     database.close();
   } finally {
+    if (database?.isOpen) database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -972,12 +976,13 @@ test("DeepSeek Harness bridge writes asynchronously, owns one output, and drains
 });
 
 test("trace bridge ingestion is atomic, idempotent, and exposes invalid first-record health", () => {
+  let database;
   const root = temporaryRoot();
   try {
     const { config } = fixtureConfig(root);
     const source = config.traceBridgeLogs.find((candidate) => candidate.endsWith("deepseek-harness.jsonl"));
     const secret = "BRIDGE-RAW-CONTENT";
-    const database = openStateDatabase(config);
+    database = openStateDatabase(config);
     writeJsonl(source, deepSeekRecords(secret));
     const first = scanTraceBridges({ database, config, scannedAtMs: 2_000, budget: budget(config) });
     assert.equal(first[0].status, "ok");
@@ -996,6 +1001,7 @@ test("trace bridge ingestion is atomic, idempotent, and exposes invalid first-re
     assert.equal(database.prepare("SELECT count(*) AS n FROM trace_model_step").get().n, 1);
     database.close();
   } finally {
+    if (database?.isOpen) database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
