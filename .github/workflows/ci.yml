@@ -79,6 +79,9 @@ jobs:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
+      - name: Verify the installed Direct Runtime consumer
+        if: matrix.workspace == 'direct-execution-runtime'
+        run: npm run check:package --workspace @openadam/direct-execution-runtime
       - run: npm run check --workspace @openadam/${{ matrix.workspace }}
 
   windows-packaging:

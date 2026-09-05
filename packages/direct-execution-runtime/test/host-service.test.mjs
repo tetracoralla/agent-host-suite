@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { inspect } from 'node:util'
 import { prepareRuntimeConfig } from '../src/config.mjs'
 import { requestDirectHost } from '../src/host-client.mjs'
 import { HOST_REQUEST_VERSION, HOST_RESPONSE_VERSION } from '../src/host-protocol.mjs'
@@ -22,7 +23,12 @@ async function withService(task, config = fakeConfig(), serviceOptions = {}) {
     const ready = await service.start()
     return await task({ directory, runtime, service, socketPath, ready })
   } finally {
-    await service.close()
+    try {
+      await service.close()
+    } catch (error) {
+      process.stderr.write(`Service cleanup failure: ${inspect(error, { depth: 8 })}\n`)
+      throw error
+    }
     await rm(directory, { recursive: true, force: true })
   }
 }
@@ -391,6 +397,11 @@ test('disconnect before a complete request line starts no work and preserves a c
 
 test('reader abandonment after request-line transfer cannot corrupt work or admission', async () => {
   await withService(async ({ runtime, socketPath }) => {
+    const warmed = await requestDirectHost({
+      socketPath, action: 'run',
+      workOrder: workOrder('disconnect-warmup', [fakeCall('ready', { value: 'ready' })]),
+    })
+    assert.equal(warmed.calls[0].status, 'ok', JSON.stringify(warmed))
     const request = {
       schemaVersion: HOST_REQUEST_VERSION,
       id: 'disconnect-client',
@@ -405,10 +416,8 @@ test('reader abandonment after request-line transfer cannot corrupt work or admi
       socket.once('error', reject)
     })
     socket.end(`${JSON.stringify(request)}\n`)
-    // A full parallel test run can delay the adapter's cold start well beyond
-    // the 500 ms provider delay. This assertion is about lifecycle cleanup,
-    // not a two-second performance contract, so retain a bounded but realistic
-    // allowance for the admitted call to start and settle.
+    // Startup was verified above. Abandon an admitted request while its
+    // existing Provider is doing work; cold-start cancellation has separate tests.
     await waitFor(() => runtime.admissionSnapshot().active === 1, 5000)
     socket.destroy()
     await waitFor(() => runtime.admissionSnapshot().active === 0, 5000)
@@ -426,12 +435,17 @@ test('reader abandonment after request-line transfer cannot corrupt work or admi
 
 test('host shutdown aborts active work and reaps the owned provider process', async () => {
   await withService(async ({ runtime, service, socketPath }) => {
+    const warmed = await requestDirectHost({
+      socketPath, action: 'run',
+      workOrder: workOrder('shutdown-warmup', [fakeCall('ready', { value: 'ready' })]),
+    })
+    assert.equal(warmed.calls[0].status, 'ok', JSON.stringify(warmed))
     const request = requestDirectHost({
       socketPath,
       action: 'run',
       workOrder: workOrder('shutdown-active', [fakeCall('slow', { value: 'late', delayMs: 5000 })]),
     }).catch((error) => error)
-    await waitFor(() => Number.isInteger(runtime.sessionSnapshot()[0].pid), 20000)
+    await waitFor(() => runtime.admissionSnapshot().active === 1)
     const pid = runtime.sessionSnapshot()[0].pid
 
     await service.close()

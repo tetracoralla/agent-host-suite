@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { HostError } from './errors.mjs'
 
-const COPY_BUFFER_BYTES = 64 * 1024
+// Bound memory while avoiding thousands of small Windows file operations for
+// executable snapshots. The digest still covers exactly the bytes written.
+const COPY_BUFFER_BYTES = 1024 * 1024
 
 function addDirectoryAndParents(paths, path) {
   let current = path

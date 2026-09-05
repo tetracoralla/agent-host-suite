@@ -39,6 +39,7 @@ test('CLI validates and runs one stdin work order without persisting it', async 
     assert.equal(JSON.parse(validated.stdout).status, 'valid')
     const ran = await runCli(['run', '--config', configPath, '--work-order', '-'], order)
     assert.equal(ran.code, 0, ran.stderr)
+    assert.equal(JSON.parse(ran.stdout).calls[0].status, 'ok', ran.stdout)
     assert.equal(JSON.parse(ran.stdout).calls[0].result.value, 'cli-ok')
     const selection = JSON.stringify({
       schemaVersion: 'openadam.direct-contract-selection.v0.1',
@@ -113,6 +114,7 @@ test('CLI serve and socket client keep a provider warm across processes', async 
     const firstOrder = JSON.stringify(workOrder('service-first', [fakeCall('one', { value: 'one' })]))
     const first = await runCli(['run', '--socket', socketPath, '--work-order', '-'], firstOrder)
     assert.equal(first.code, 0, first.stderr)
+    assert.equal(JSON.parse(first.stdout).calls[0].status, 'ok', first.stdout)
     assert.equal(JSON.parse(first.stdout).calls[0].session, 'cold')
     const secondOrder = JSON.stringify(workOrder('service-second', [fakeCall('two', { value: 'two' })]))
     const second = await runCli(['run', '--socket', socketPath, '--work-order', '-'], secondOrder)
