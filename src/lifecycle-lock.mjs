@@ -370,28 +370,39 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
     }
     if (!elected) throw new AgentHostError('LIFECYCLE_RECOVERY_BUSY', 'Another process is still choosing a stale Agent Host lifecycle recovery ticket')
 
-    const current = await readJson(join(lockPath, OWNER_FILE)).catch(() => null)
-    if (!validOwner(current)) {
-      throw new AgentHostError('LIFECYCLE_LOCK_INVALID', 'The Agent Host lifecycle lock changed while stale recovery was being elected')
-    }
-    if (current.token !== retained.token) {
-      // This claim may have landed inside a later live lock. Its distinct owner
-      // token prevents the elected reaper from retiring that replacement.
-      throw lifecycleBusy(current, 'The Agent Host lifecycle owner changed while stale recovery was being elected')
-    }
-    if (await ownerProcessMatches(current)) {
-      throw lifecycleBusy(current, 'The Agent Host lifecycle owner became live while stale recovery was being elected')
-    }
-
-    // Bakery-style immutable tickets give every late contender a ticket greater
-    // than already-published contenders. Equal tickets use the immutable random
-    // token as a total order. Only the elected claimant can reach this rename.
+    // Election authority is retained across transient Windows sharing failures.
+    // Re-read the owner before every atomic rename: retrying the fixed path
+    // blindly could retire a replacement lease published between attempts.
     const stalePath = join(existingRoot, `.lifecycle-lock-stale-${randomUUID()}`)
-    try {
-      await rename(lockPath, stalePath)
-    } catch (error) {
-      if (error?.code === 'ENOENT') return false
-      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The elected stale Agent Host lifecycle lock changed before retirement', { causeCode: error?.code ?? null })
+    const retirementDeadline = Date.now() + 2000
+    while (true) {
+      const current = await readJson(join(lockPath, OWNER_FILE)).catch((error) => {
+        if (error?.code === 'ENOENT') return null
+        throw error
+      })
+      if (current === null) return false
+      if (!validOwner(current)) {
+        throw new AgentHostError('LIFECYCLE_LOCK_INVALID', 'The Agent Host lifecycle lock changed while stale recovery was being elected')
+      }
+      if (current.token !== retained.token) {
+        throw lifecycleBusy(current, 'The Agent Host lifecycle owner changed while stale recovery was being elected')
+      }
+      if (await ownerProcessMatches(current)) {
+        throw lifecycleBusy(current, 'The Agent Host lifecycle owner became live while stale recovery was being elected')
+      }
+      // Immutable bakery tickets order later contenders after this claimant.
+      // No failed rename removes the source or grants mutation authority.
+      try {
+        await (dependencies.renameLifecycleLock ?? rename)(lockPath, stalePath)
+        break
+      } catch (error) {
+        if (error?.code === 'ENOENT') return false
+        if (['EPERM', 'EACCES', 'EBUSY'].includes(error?.code) && Date.now() < retirementDeadline) {
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, 25))
+          continue
+        }
+        throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The elected stale Agent Host lifecycle lock could not be retired', { causeCode: error?.code ?? null })
+      }
     }
     try {
       await rm(stalePath, { recursive: true, force: false })

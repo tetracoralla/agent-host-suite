@@ -1,4 +1,5 @@
 import test from 'node:test'
+import { inspect } from 'node:util'
 import assert from 'node:assert/strict'
 import { readFile, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -27,7 +28,12 @@ async function withRuntime(config, task) {
   try {
     return await task(runtime)
   } finally {
-    await runtime.close()
+    try {
+      await runtime.close()
+    } catch (error) {
+      process.stderr.write(`Runtime cleanup failure: ${inspect(error, { depth: 8 })}\n`)
+      throw error
+    }
   }
 }
 
@@ -112,7 +118,7 @@ test('observation failure is visible but cannot change provider execution semant
   })
   try {
     const result = await runtime.runWorkOrder(workOrder('sink-failure', [fakeCall('call', { value: 'ok' })]))
-    assert.equal(result.status, 'ok')
+    assert.equal(result.status, 'ok', JSON.stringify(result))
     assert.equal(result.calls[0].result.value, 'ok')
     assert.deepEqual(result.execution.observation, {
       enabled: true,
@@ -142,7 +148,7 @@ test('observation sink rejects symlinks and reports a full bounded log without c
     })
     try {
       const result = await runtime.runWorkOrder(workOrder('bounded-log', [fakeCall('call', { value: 'ok' })]))
-      assert.equal(result.status, 'ok')
+      assert.equal(result.status, 'ok', JSON.stringify(result))
       assert.equal(result.calls[0].result.value, 'ok')
       assert.equal(result.execution.observation.failed, 1)
       assert.equal(result.execution.observation.lastErrorCode, 'HOST_OBSERVATION_LOG_FULL')

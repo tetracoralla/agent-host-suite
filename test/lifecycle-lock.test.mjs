@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -126,6 +126,49 @@ test('lifecycle mutation lock reclaims only a lock whose recorded process is gon
   })}\n`)
   await withLifecycleMutation({ root }, 'test.recovery', {}, async () => {})
   await assert.rejects(() => access(lock), (error) => error.code === 'ENOENT')
+})
+
+test('stale retirement retries sharing failures and rechecks owner identity before retry', async (t) => {
+  for (const replaceOwner of [false, true]) {
+    const root = await temporaryStateRoot(t)
+    const lock = join(root, '.lifecycle-lock')
+    const owner = {
+      schemaVersion: 'openadam.agent-host-lifecycle-lock.v0.1',
+      token: 'stale-owner', pid: 2_147_483_647,
+      processStartedAt: '2026-01-01T00:00:00.000Z',
+      operation: 'test.crashed', acquiredAt: '2026-01-01T00:00:00.000Z',
+    }
+    await mkdir(lock)
+    await writeFile(join(lock, 'owner.json'), JSON.stringify(owner))
+    let attempts = 0
+    let entered = false
+    const recovering = withLifecycleMutation({ root }, 'test.retry-retirement', {
+      renameLifecycleLock: async (source, destination) => {
+        attempts += 1
+        if (attempts === 1) {
+          if (replaceOwner) {
+            await writeFile(join(lock, 'owner.json'), JSON.stringify({
+              ...owner, token: 'replacement-owner', pid: process.pid,
+              processStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+            }))
+          }
+          throw Object.assign(new Error('sharing violation'), { code: 'EPERM' })
+        }
+        await rename(source, destination)
+      },
+    }, async () => { entered = true })
+    if (replaceOwner) {
+      await assert.rejects(recovering, { code: 'LIFECYCLE_BUSY' })
+      assert.equal(attempts, 1)
+      assert.equal(entered, false)
+      assert.equal(JSON.parse(await readFile(join(lock, 'owner.json'), 'utf8')).token, 'replacement-owner')
+    } else {
+      await recovering
+      assert.equal(attempts, 2)
+      assert.equal(entered, true)
+      await assert.rejects(access(lock), { code: 'ENOENT' })
+    }
+  }
 })
 
 test('lifecycle mutation lock rejects a reused live PID whose recorded start identity does not match', async (t) => {
