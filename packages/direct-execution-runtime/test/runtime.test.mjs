@@ -1,5 +1,4 @@
 import test from 'node:test'
-import { inspect } from 'node:util'
 import assert from 'node:assert/strict'
 import { readFile, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -28,12 +27,7 @@ async function withRuntime(config, task) {
   try {
     return await task(runtime)
   } finally {
-    try {
-      await runtime.close()
-    } catch (error) {
-      process.stderr.write(`Runtime cleanup failure: ${inspect(error, { depth: 8 })}\n`)
-      throw error
-    }
+    await runtime.close()
   }
 }
 

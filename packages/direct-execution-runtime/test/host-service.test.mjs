@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { inspect } from 'node:util'
 import { prepareRuntimeConfig } from '../src/config.mjs'
 import { requestDirectHost } from '../src/host-client.mjs'
 import { HOST_REQUEST_VERSION, HOST_RESPONSE_VERSION } from '../src/host-protocol.mjs'
@@ -23,12 +22,7 @@ async function withService(task, config = fakeConfig(), serviceOptions = {}) {
     const ready = await service.start()
     return await task({ directory, runtime, service, socketPath, ready })
   } finally {
-    try {
-      await service.close()
-    } catch (error) {
-      process.stderr.write(`Service cleanup failure: ${inspect(error, { depth: 8 })}\n`)
-      throw error
-    }
+    await service.close()
     await rm(directory, { recursive: true, force: true })
   }
 }
