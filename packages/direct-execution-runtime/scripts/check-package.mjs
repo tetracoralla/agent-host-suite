@@ -256,6 +256,7 @@ try {
   let first
   let second
   let descendants = []
+  let flowError
   try {
     ready = await waitForJsonLine(service)
     const firstRun = await execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', firstOrderPath])
@@ -270,13 +271,24 @@ try {
     }
     descendants = await windowsDescendants(service.pid)
     if (process.platform === 'win32' && descendants.length < 2) throw new Error('packaged Host did not retain its Windows guardian and Provider')
-  } finally {
-    if (service.exitCode === null && service.signalCode === null) service.kill('SIGTERM')
+  } catch (error) {
+    flowError = error
+  }
+  try {
+    if (process.platform === 'win32' && descendants.length === 0) descendants = await windowsDescendants(service.pid)
+    const terminating = service.exitCode === null && service.signalCode === null
+    if (terminating) service.kill('SIGTERM')
     const exited = await serviceExit
     if (exited.error !== undefined) throw exited.error
-    if (exited.code !== 0 && !(process.platform === 'win32' && exited.code === 1)) throw new Error(`packaged service exit was unexpected: ${exited.code ?? exited.signal}`)
+    const expectedWindowsTermination = process.platform === 'win32' && terminating
+      && (exited.signal === 'SIGTERM' || exited.code === 1)
+    if (exited.code !== 0 && !expectedWindowsTermination) throw new Error(`packaged service exit was unexpected: ${exited.code ?? exited.signal}`)
     await assertProcessesExited(descendants)
+  } catch (cleanupError) {
+    if (flowError !== undefined) throw new AggregateError([flowError, cleanupError], 'Packaged execution and cleanup both failed')
+    throw cleanupError
   }
+  if (flowError !== undefined) throw flowError
   await assertEndpointAbsent(socketPath)
   const socketAfterClose = process.platform === 'win32' ? undefined : await lstat(socketPath).catch((error) => {
     if (error?.code === 'ENOENT') return undefined
