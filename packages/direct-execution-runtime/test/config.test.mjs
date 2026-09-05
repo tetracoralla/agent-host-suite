@@ -39,7 +39,9 @@ test('current Profile semantics, manifest binding, annotations, and schema diges
 })
 
 test('service preparation is explicit and defaults to lazy for library consumers', async () => {
-  const lazy = await prepareRuntimeConfig(fakeConfig())
+  const unconfigured = fakeConfig()
+  delete unconfigured.limits.defaultTimeoutMs
+  const lazy = await prepareRuntimeConfig(unconfigured)
   assert.deepEqual(lazy.servicePreparation, { mode: 'lazy', totalTimeoutMs: 10000, providerIds: [] })
 
   const configured = fakeConfig()
