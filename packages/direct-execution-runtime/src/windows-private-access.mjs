@@ -74,9 +74,31 @@ function decode(text, count) {
   if (!Array.isArray(values) || values.length !== count) throw new Error('Invalid Windows access-list response')
   return values
 }
+function helperTimedOut(error) {
+  return error?.code === 'ETIMEDOUT' || (error?.killed === true && error?.signal === 'SIGTERM')
+}
+
 export function windowsAccessListsSync(requests) {
   const [args, options] = invocation(requests)
-  return decode(execFileSync('powershell.exe', args, options), requests.length)
+  let output
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try { output = execFileSync('powershell.exe', args, options); break } catch (error) {
+      if (attempt !== 0 || !helperTimedOut(error)) throw error
+    }
+  }
+  return decode(output, requests.length)
+}
+
+async function executeAccessLists(args, options) {
+  // Retry a timed-out native helper once (at most 20s total), with exactly
+  // the same request and a fresh result instead of a cached security decision.
+  // Inspection remains read-only and ensuring an ACL is idempotent. Denied
+  // access, unsafe results and malformed output are never retry conditions.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try { return await execFileAsync('powershell.exe', args, options) } catch (error) {
+      if (attempt !== 0 || !helperTimedOut(error)) throw error
+    }
+  }
 }
 let queue = []
 let scheduled = false
@@ -94,7 +116,7 @@ export function windowsAccessList(path, ensure = false) {
         const batch = entries.slice(offset, offset + 64)
         try {
           const [args, options] = invocation(batch.map(({ path, ensure }) => ({ path, ensure })))
-          const result = await execFileAsync('powershell.exe', args, options)
+          const result = await executeAccessLists(args, options)
           const values = decode(result.stdout, batch.length)
           batch.forEach((entry, index) => entry.resolve(values[index]))
         } catch (error) { batch.forEach((entry) => entry.reject(error)) }

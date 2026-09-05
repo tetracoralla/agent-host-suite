@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
+import childProcess, { execFile } from 'node:child_process'
+import { syncBuiltinESMExports } from 'node:module'
+import { windowsAccessListsSync } from '../src/windows-private-access.mjs'
 import { chmod, lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -33,4 +35,38 @@ test('private state rejects a shared directory without repairing it during a rea
   await ensurePrivateDirectory(root)
   await assertPrivateAccess(root, await lstat(root))
   assert.equal(await readFile(file, 'utf8'), '{"retained":true}\n')
+})
+
+
+test('Windows access inspection retries only one helper timeout with the same request', (t) => {
+  const calls = []
+  const mock = t.mock.method(childProcess, 'execFileSync', (...args) => {
+    calls.push(args)
+    if (calls.length === 1) throw Object.assign(new Error('helper startup expired'), { code: 'ETIMEDOUT' })
+    return '[{"status":"private"}]'
+  })
+  syncBuiltinESMExports()
+  try {
+    assert.deepEqual(windowsAccessListsSync([{ path: 'C:\\owned\\state', ensure: false }]), [{ status: 'private' }])
+    assert.equal(calls.length, 2)
+    assert.deepEqual(calls[0], calls[1])
+    assert.equal(JSON.parse(calls[1][2].env.OPENADAM_PRIVATE_REQUESTS)[0].ensure, false)
+  } finally { mock.mock.restore(); syncBuiltinESMExports() }
+})
+
+test('Windows access inspection does not retry denied access or malformed output and bounds repeated timeouts', (t) => {
+  for (const mode of ['denied', 'malformed', 'timeout', 'signal-timeout', 'cancelled']) {
+    let calls = 0
+    const mock = t.mock.method(childProcess, 'execFileSync', () => {
+      calls += 1
+      if (mode === 'malformed') return 'not-json'
+      if (mode === 'signal-timeout' || mode === 'cancelled') throw Object.assign(new Error(mode), { killed: true, signal: mode === 'cancelled' ? 'SIGKILL' : 'SIGTERM' })
+      throw Object.assign(new Error(mode), { code: mode === 'timeout' ? 'ETIMEDOUT' : 'EACCES' })
+    })
+    syncBuiltinESMExports()
+    try {
+      assert.throws(() => windowsAccessListsSync([{ path: 'C:\\owned\\state', ensure: false }]))
+      assert.equal(calls, ['timeout', 'signal-timeout'].includes(mode) ? 2 : 1)
+    } finally { mock.mock.restore(); syncBuiltinESMExports() }
+  }
 })
