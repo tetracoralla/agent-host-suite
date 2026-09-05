@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { platform } from 'node:os'
 import { HostError } from './errors.mjs'
@@ -15,6 +16,20 @@ export function managedProviderSpawnOptions(platformName = platform()) {
     detached: platformName !== 'win32',
     windowsHide: true,
   }
+}
+
+const guardedWindowsChildren = new WeakSet()
+const windowsGuardian = fileURLToPath(new URL('./windows-provider-runner.ps1', import.meta.url))
+
+export function spawnManagedProvider(command, args, options) {
+  if (platform() !== 'win32') return spawn(command, args, options)
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsGuardian], {
+    ...options,
+    env: { ...options.env, OPENADAM_PROVIDER_LAUNCH: JSON.stringify({ command, args, cwd: options.cwd }) },
+    shell: false,
+  })
+  guardedWindowsChildren.add(child)
+  return child
 }
 
 function posixGroupAlive(pid, signalProcess = process.kill) {
@@ -121,14 +136,19 @@ export async function runWindowsProviderTreeKiller(pid, spawnProcess = spawn) {
 /**
  * Terminate a Provider process tree and return only after the owning OS route
  * confirms it is gone. On POSIX the process group remains authoritative after
- * the root exits. On Windows taskkill /T must succeed before root close counts.
+ * the root exits. Windows guarded children own a kill-on-close Job; unguarded children
+ * still require successful taskkill /T before root close counts.
  */
 export async function closeProviderProcessTree(child, options = {}) {
   if (child?.pid === undefined) return
   const platformName = options.platformName ?? platform()
   if (platformName === 'win32') {
+    const guarded = guardedWindowsChildren.has(child)
+    // The guardian either never admitted the Provider or owns a kill-on-close
+    // Job. A naturally closed guardian has already retired that entire Job.
+    if (guarded && (child.exitCode !== null || child.signalCode !== null)) return
     const result = await (options.windowsTreeKiller ?? runWindowsProviderTreeKiller)(child.pid)
-    if (result?.status !== 0) {
+    if (result?.status !== 0 && !(guarded && await waitForChildExit(child, options.killWaitMs ?? 1500))) {
       throw new HostError('HOST_CLEANUP_FAILED', 'Windows could not confirm termination of the Provider process tree')
     }
     if (!(await waitForChildExit(child, options.killWaitMs ?? 1_500))) {

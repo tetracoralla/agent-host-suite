@@ -347,7 +347,7 @@ test('incomplete and delayed extra requests cannot retain admission or race the 
       const socket = connect({ path: socketPath })
       socket.once('connect', () => {
         socket.write(`${JSON.stringify(first)}\n`)
-        setTimeout(() => socket.end(`${JSON.stringify(second)}\n`), 10)
+        setTimeout(() => socket.write(`${JSON.stringify(second)}\n`), 10)
       })
       socket.on('data', (chunk) => chunks.push(chunk))
       socket.once('error', reject)

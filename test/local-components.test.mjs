@@ -131,7 +131,7 @@ test('private component import locks preview facts, activates through Codex proj
   assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), false)
   const removedState = await loadState(await prepareStatePaths(stateRoot))
   assert.equal(removedState.components['private-fixture'], undefined)
-  assert.equal(removedState.privateComponents['private-fixture'].rollback.component.root.includes(join(stateRoot, 'packages')), true)
+  assert.equal(removedState.privateComponents['private-fixture'].rollback.component.root.includes(join(await realpath(stateRoot), 'packages')), true)
 
   const restored = await rollbackLocalComponent({ stateRoot, target: 'private-fixture', dryRun: false }, dependencies)
   assert.equal(restored.status, 'rolled-back')

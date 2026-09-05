@@ -341,3 +341,11 @@ Unrelated files at a drive root are not copied. This does not add an execution
 sandbox or extend the declared identity set. Windows native command lookup
 recognizes `.exe` and `.com` on the validated PATH and never starts an implicit
 command shell for `.cmd` or `.bat` files.
+
+Windows Provider processes run inside an unnamed OS Job with kill-on-close.
+A small PowerShell guardian creates each root suspended, assigns it to the Job,
+then resumes it while preserving the native standard streams. It terminates and
+verifies the remaining Job members when the root exits; forced guardian cleanup
+closes the Job handle and retires its descendants. No generic shell executes the
+Provider command. This closes the gap where `taskkill /T` alone cannot identify
+descendants after their root has already exited.

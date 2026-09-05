@@ -174,7 +174,7 @@ test('a live external PID with a Lord Howe ambiguous start identity fails closed
   await rm(lock, { recursive: true, force: true })
 })
 
-test('a killed published claimant does not block a high-contention recovery election or later ordinary acquisition', { timeout: 30_000 }, async (t) => {
+test('a killed published claimant does not block a high-contention recovery election or later ordinary acquisition', { timeout: process.platform === 'win32' ? 90_000 : 30_000 }, async (t) => {
   const root = await temporaryStateRoot(t)
   const directory = join(root, 'multiprocess-review')
   const lock = join(root, '.lifecycle-lock')

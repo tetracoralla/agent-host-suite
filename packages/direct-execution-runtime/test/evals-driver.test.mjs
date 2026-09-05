@@ -16,7 +16,7 @@ const driverPath = resolve(repositoryRoot, 'src/evals-driver.mjs')
 
 function runDriver(args, request) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(driverPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [driverPath, ...args], { stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8') })

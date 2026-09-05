@@ -1,10 +1,9 @@
-import { spawn } from 'node:child_process'
 import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { revalidatePreparedBinding } from '../config.mjs'
 import { boundedMessage, HostError } from '../errors.mjs'
 import { decodeUtf8Strict, jsonBytes, parseStrictJson } from '../json.mjs'
 import { createLaunchSnapshot } from '../launch-snapshot.mjs'
-import { closeProviderProcessTree, managedProviderSpawnOptions } from '../process-tree.mjs'
+import { closeProviderProcessTree, managedProviderSpawnOptions, spawnManagedProvider } from '../process-tree.mjs'
 import { assertSchema } from '../schema.mjs'
 
 async function awaitWithDeadline(promise, { signal, deadlineAt } = {}) {
@@ -140,7 +139,7 @@ export class JsonlSession {
           OPENADAM_CAPABILITY_WORKSPACE_ROOT: this.binding.workspaceRoot,
         }),
       })
-      child = spawn(launchSnapshot.command, launchSnapshot.args, {
+      child = spawnManagedProvider(launchSnapshot.command, launchSnapshot.args, {
         cwd: launchSnapshot.cwd,
         env: environment,
         stdio: ['pipe', 'pipe', 'pipe'],

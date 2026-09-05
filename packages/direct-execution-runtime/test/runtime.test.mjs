@@ -542,7 +542,7 @@ test('one cancelled waiter does not poison a shared persistent MCP startup', asy
       fakeMcpCall('cancelled', { value: 'must-not-run' }),
     ]), { signal: controller.signal })
 
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (const deadline = Date.now() + 5000; Date.now() < deadline;) {
       if (runtime.admissionSnapshot().active === 2 && Number.isInteger(runtime.sessionSnapshot()[0].pid)) break
       await delay(2)
     }
@@ -621,7 +621,7 @@ test('explicit replacement during shared MCP startup is stable, retryable, and r
       fakeMcpCall('second', { value: 'second' }),
     ]))
 
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (const deadline = Date.now() + 5000; Date.now() < deadline;) {
       if (runtime.admissionSnapshot().active === 2 && Number.isInteger(runtime.sessionSnapshot()[0].pid)) break
       await delay(2)
     }

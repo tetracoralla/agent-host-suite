@@ -1,10 +1,9 @@
-import { spawn } from 'node:child_process'
 import { PassThrough } from 'node:stream'
 import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js'
 import { HostError } from './errors.mjs'
 import { decodeUtf8Strict, parseStrictJson, snapshotJsonValue } from './json.mjs'
-import { closeProviderProcessTree, managedProviderSpawnOptions } from './process-tree.mjs'
+import { closeProviderProcessTree, managedProviderSpawnOptions, spawnManagedProvider } from './process-tree.mjs'
 
 /**
  * MCP's stock stdio transport decodes with Buffer.toString(), which replaces
@@ -46,7 +45,7 @@ export class StrictMcpStdioTransport {
     if (this.#process !== undefined) throw new Error('MCP stdio transport is already started')
     this.#closed = false
     this.#buffer = Buffer.alloc(0)
-    const child = spawn(this.#server.command, this.#server.args, {
+    const child = spawnManagedProvider(this.#server.command, this.#server.args, {
       cwd: this.#server.cwd,
       env: this.#server.env ?? { ...getDefaultEnvironment(), PWD: this.#server.cwd },
       stdio: ['pipe', 'pipe', this.#stderrStream === undefined ? 'inherit' : 'pipe'],
