@@ -57,7 +57,11 @@ jobs:
       - name: Verify real private Windows access lists
         run: node --test --test-timeout=60000 test/private-permissions.test.mjs
       - name: Verify interrupted lifecycle recovery under contention
-        run: node --test --test-name-pattern='killed published claimant' test/lifecycle-lock.test.mjs
+        run: |
+          foreach ($attempt in 1..3) {
+            node --test --test-name-pattern='killed published claimant' test/lifecycle-lock.test.mjs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Verify Host source and installed package
         # The timeout covers a whole test file, including many installer lifecycles
         # and real ACL subprocesses; it is not a per-operation latency fence.

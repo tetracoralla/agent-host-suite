@@ -296,7 +296,7 @@ test('a killed published claimant does not block a high-contention recovery elec
   const outcomes = results.map((result) => result.stdout.match(/RESULT ([A-Z0-9_]+|ok)/u)?.[1])
   assert.equal(outcomes.filter((outcome) => outcome === 'ok').length, 1, JSON.stringify(outcomes))
   assert.equal(outcomes.some((outcome) => ['LIFECYCLE_LOCK_LOST', 'LIFECYCLE_LOCK_INVALID'].includes(outcome)), false, JSON.stringify(outcomes))
-  assert.equal(outcomes.every((outcome) => ['ok', 'LIFECYCLE_BUSY', 'LIFECYCLE_RECOVERY_BUSY'].includes(outcome)), true, JSON.stringify(results.filter((result) => result.stdout.includes('RECOVERY_FAILED'))))
+  assert.equal(outcomes.every((outcome) => ['ok', 'LIFECYCLE_BUSY', 'LIFECYCLE_RECOVERY_BUSY'].includes(outcome)), true, JSON.stringify(results.filter((result, index) => !['ok', 'LIFECYCLE_BUSY', 'LIFECYCLE_RECOVERY_BUSY'].includes(outcomes[index]))))
 
   const events = (await readFile(eventsPath, 'utf8')).trim().split('\n')
   let active = 0
