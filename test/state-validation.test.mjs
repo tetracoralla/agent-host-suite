@@ -1,5 +1,6 @@
+import { writePrivateJson } from '../src/json.mjs'
 import assert from 'node:assert/strict'
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -62,4 +63,19 @@ test('concurrent private state writes in one process do not collide on temporary
   const loaded = await loadState(paths)
   assert.equal(versions.includes(loaded.suiteVersion), true)
   assert.deepEqual((await readdir(paths.root)).filter((name) => name.includes('.tmp-')), [])
+})
+
+
+test('failed atomic state replacement preserves the destination and leaves subsequent writes usable', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-state-recovery-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const destination = join(root, 'state.json')
+  await mkdir(destination)
+  await writeFile(join(destination, 'keep.txt'), 'retained')
+  await assert.rejects(writePrivateJson(destination, { revision: 1 }))
+  assert.equal(await readFile(join(destination, 'keep.txt'), 'utf8'), 'retained')
+  assert.deepEqual((await readdir(root)).filter((name) => name.includes('.tmp-')), [])
+  await rm(destination, { recursive: true })
+  await writePrivateJson(destination, { revision: 2 })
+  assert.deepEqual(JSON.parse(await readFile(destination, 'utf8')), { revision: 2 })
 })

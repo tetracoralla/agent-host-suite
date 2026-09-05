@@ -1,3 +1,4 @@
+import { runSkillLauncher } from './launcher-helpers.mjs'
 import assert from 'node:assert/strict'
 import { chmod, mkdtemp, readFile, readdir, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -404,10 +405,9 @@ test('an inactive v0.3 private Provider remains discoverable as a Skill-only Cod
   const plugin = JSON.parse(await readFile(join(pluginRoot, '.codex-plugin/plugin.json'), 'utf8'))
   assert.equal('mcpServers' in plugin, false)
   await assert.rejects(readFile(join(pluginRoot, '.mcp.json')), (error) => error.code === 'ENOENT')
-  assert.equal((await import('node:child_process')).execFileSync(
-    join(pluginRoot, 'skills/use-private-fixture/scripts/private-fixture'),
+  assert.equal(runSkillLauncher(
+    join(pluginRoot, `skills/use-private-fixture/scripts/private-fixture${process.platform === 'win32' ? '.cmd' : ''}`),
     ['--version'],
-    { encoding: 'utf8' },
   ).trim(), '0.1.0')
 })
 

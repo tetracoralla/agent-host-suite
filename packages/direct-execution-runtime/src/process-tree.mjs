@@ -11,8 +11,8 @@ function delay(milliseconds) {
 export function managedProviderSpawnOptions(platformName = platform()) {
   return {
     // A detached POSIX child owns a process group whose descendants remain
-    // addressable after the direct child exits. Windows cleanup uses taskkill
-    // /T and intentionally does not rely on POSIX-style detached semantics.
+    // addressable after the direct child exits. Windows Providers use a kill-on-close Job
+    // and intentionally do not rely on POSIX-style detached semantics.
     detached: platformName !== 'win32',
     windowsHide: true,
   }
@@ -146,9 +146,19 @@ export async function closeProviderProcessTree(child, options = {}) {
     const guarded = guardedWindowsChildren.has(child)
     // The guardian either never admitted the Provider or owns a kill-on-close
     // Job. A naturally closed guardian has already retired that entire Job.
-    if (guarded && (child.exitCode !== null || child.signalCode !== null)) return
+    if (guarded) {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      // Terminate the owned guardian handle directly. Its sole Job handle
+      // closes and retires descendants without taskkill's parent/child race.
+      let cause
+      try { child.kill('SIGKILL') } catch (error) { cause = error }
+      if (!(await waitForChildExit(child, options.killWaitMs ?? 5000))) {
+        throw new HostError('HOST_CLEANUP_FAILED', 'The Windows Provider Job guardian did not close', { cause })
+      }
+      return
+    }
     const result = await (options.windowsTreeKiller ?? runWindowsProviderTreeKiller)(child.pid)
-    if (result?.status !== 0 && !(guarded && await waitForChildExit(child, options.killWaitMs ?? 1500))) {
+    if (result?.status !== 0) {
       throw new HostError('HOST_CLEANUP_FAILED', 'Windows could not confirm termination of the Provider process tree')
     }
     if (!(await waitForChildExit(child, options.killWaitMs ?? 1_500))) {

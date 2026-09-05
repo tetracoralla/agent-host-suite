@@ -1,3 +1,4 @@
+import { runSkillLauncher } from './launcher-helpers.mjs'
 import assert from 'node:assert/strict'
 import { access, lstat, mkdtemp, readFile, readdir, realpath, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -517,7 +518,7 @@ test('developer profile installs a Skill-only Codex plugin without enlarging the
   assert.equal(fake.plugins.has('agent-tool-development-kit@openadam-developer-tools'), true)
   const entry = state.hosts.codex.entries.find((item) => item.selector === 'agent-tool-development-kit@openadam-developer-tools')
   await assert.rejects(readFile(join(entry.pluginRoot, '.mcp.json')), (error) => error.code === 'ENOENT')
-  assert.match(await readFile(join(entry.pluginRoot, 'skills', 'build-openadam-agent-tools', 'scripts', 'openadam-dev'), 'utf8'), /^#!\/bin\/sh\nexec /u)
+  assert.match(await readFile(join(entry.pluginRoot, 'skills', 'build-openadam-agent-tools', 'scripts', process.platform === 'win32' ? 'openadam-dev.cmd' : 'openadam-dev'), 'utf8'), process.platform === 'win32' ? /^@echo off/u : /^#!\/bin\/sh\nexec /u)
   await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner })
   assert.equal(fake.plugins.has('agent-tool-development-kit@openadam-developer-tools'), false)
 })
@@ -538,7 +539,7 @@ test('developer profile gives a fresh Claude home an owned Skill launcher withou
   const state = await loadState(await prepareStatePaths(stateRoot))
   const developerSkill = state.hosts.claude.developerSkill
   assert.equal((await lstat(developerSkill.exposurePath)).isSymbolicLink(), true)
-  const version = JSON.parse((await import('node:child_process')).execFileSync(developerSkill.launcherPath, developerSkill.versionArguments, { encoding: 'utf8' }))
+  const version = JSON.parse(runSkillLauncher(developerSkill.launcherPath, developerSkill.versionArguments))
   assert.equal(version.version, '0.1.0')
   assert.deepEqual([...fake.entries.keys()], [])
   await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner })
@@ -567,11 +568,12 @@ test('standard release gives ZCode immutable MCP bindings and a packaged operati
   assert.equal(state.hosts.zcode.operationsSkill.kind, 'zcode-skill-link')
   assert.equal((await lstat(state.hosts.zcode.operationsSkill.exposurePath)).isSymbolicLink(), true)
   assert.deepEqual(state.hosts.zcode.productSkills.map((skill) => skill.id).sort(), ['calculate', 'convert-time-zones'])
-  assert.equal(state.hosts.zcode.productSkills.every((skill) => skill.projectionRoot.includes(join(stateRoot, 'host-projections', 'product-skills', 'zcode'))), true)
+  const canonicalStateRoot = await realpath(stateRoot)
+  assert.equal(state.hosts.zcode.productSkills.every((skill) => skill.projectionRoot.includes(join(canonicalStateRoot, 'host-projections', 'product-skills', 'zcode'))), true)
   assert.equal(state.hosts.zcode.productSkills.every((skill) => !skill.projectionRoot.includes('tools-dev')), true)
   const config = JSON.parse(await readFile(zcodeConfigPath, 'utf8'))
   assert.deepEqual(Object.keys(config.mcp.servers).sort(), ['math-anchor', 'migratory-time'])
-  assert.equal(Object.values(config.mcp.servers).every((entry) => entry.command.includes(join(stateRoot, 'packages'))), true)
+  assert.equal(Object.values(config.mcp.servers).every((entry) => entry.command.includes(join(canonicalStateRoot, 'packages'))), true)
   assert.equal(Object.values(config.mcp.servers).every((entry) => !entry.command.includes('tools-dev')), true)
   await uninstallInstallation({ stateRoot, purgeData: true }, { runner })
   assert.deepEqual(JSON.parse(await readFile(zcodeConfigPath, 'utf8')).mcp.servers, {})
@@ -679,9 +681,10 @@ test('storage cleanup retains an old immutable package while a live Agent sessio
   await updateInstallation({ stateRoot, releaseManifest: manifests[2], dryRun: false }, releaseDependencies(fake))
 
   const liveRunner = async (command, args) => {
-    assert.equal(command, '/bin/ps')
-    assert.deepEqual(args, ['axo', 'pid=,rss=,command='])
-    return { status: 0, signal: null, stdout: `123 456 /agent ${firstMathRoot}/bin/provider mcp\n`, stderr: '', timedOut: false, overflowed: false }
+    assert.equal(command, process.platform === 'win32' ? 'powershell.exe' : '/bin/ps')
+    if (process.platform !== 'win32') assert.deepEqual(args, ['axo', 'pid=,rss=,command='])
+    const stdout = process.platform === 'win32' ? JSON.stringify([{ ProcessId: 123, WorkingSetSize: 456 * 1024, CommandLine: `/agent ${firstMathRoot}/bin/provider mcp` }]) : `123 456 /agent ${firstMathRoot}/bin/provider mcp\n`
+    return { status: 0, signal: null, stdout, stderr: '', timedOut: false, overflowed: false }
   }
   const preview = await cleanupStorage({ stateRoot, dryRun: true }, { runner: liveRunner })
   assert.equal(preview.plan.packageVersions, 3)

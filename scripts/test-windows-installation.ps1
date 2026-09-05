@@ -17,3 +17,6 @@ try {
 } finally {
   Remove-Item -LiteralPath $root -Recurse -Force
 }
+
+# Expected rejected child commands must not become the enclosing CI exit status.
+exit 0
