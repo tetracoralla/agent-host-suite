@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { prepareRuntimeConfig } from '../src/config.mjs'
+import { createLaunchSnapshot } from '../src/launch-snapshot.mjs'
+import { fakeConfig } from './helpers.mjs'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnManagedProvider, closeProviderProcessTree, managedProviderSpawnOptions } from '../src/process-tree.mjs'
@@ -88,4 +92,32 @@ test('Windows Provider Job retires even when its creating Host is forcibly termi
   host.kill('SIGKILL')
   await closed
   await Promise.all([waitForExit(providerPid), waitForExit(guardianPid)])
+})
+
+
+test('Windows launch snapshot removal waits for a temporary exclusive file handle', {
+  skip: process.platform !== 'win32', timeout: 45000,
+}, async (t) => {
+  const config = await prepareRuntimeConfig(fakeConfig())
+  const snapshot = await createLaunchSnapshot(config.providers.get('test.fake-capability'))
+  t.after(() => snapshot.dispose())
+  const holder = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', [
+    '$file = [System.IO.File]::Open($env:OPENADAM_LOCKED_SNAPSHOT, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)',
+    "try { [Console]::Out.WriteLine('HELD'); [Console]::Out.Flush(); [System.Threading.Thread]::Sleep(350) } finally { $file.Dispose() }",
+  ].join('; ')], {
+    env: { ...process.env, OPENADAM_LOCKED_SNAPSHOT: snapshot.command },
+    stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+  })
+  t.after(() => { if (holder.exitCode === null) holder.kill('SIGKILL') })
+  let stderr = ''
+  holder.stderr.on('data', (bytes) => { stderr += bytes })
+  const closed = new Promise((resolve, reject) => { holder.once('close', resolve); holder.once('error', reject) })
+  await new Promise((resolve, reject) => {
+    let text = ''
+    holder.stdout.on('data', (bytes) => { text += bytes; if (text.includes('HELD')) resolve() })
+    closed.then((code) => reject(new Error(`File holder exited before readiness (${code}): ${stderr}`)), reject)
+  })
+  await snapshot.dispose()
+  assert.equal(await closed, 0, stderr)
+  await assert.rejects(access(snapshot.rootPath), { code: 'ENOENT' })
 })

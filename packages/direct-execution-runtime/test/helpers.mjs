@@ -25,7 +25,10 @@ export function fakeConfig(overrides = {}) {
     maxResultBytes: 262144,
     maxProtocolLineBytes: 1048576,
     maxStderrBytes: 4096,
-    defaultTimeoutMs: 10000,
+    // Match Agent Host's 30s call allowance on Windows, where a cold executable
+    // copy and Job guardian can exceed the library's general 10s default.
+    // Tests of deadlines and cancellation keep their explicit shorter limits.
+    defaultTimeoutMs: process.platform === 'win32' ? 30000 : 10000,
     circuitBreakerFailureThreshold: 3,
     circuitBreakerCooldownMs: 50,
     ...(overrides.limits ?? {}),

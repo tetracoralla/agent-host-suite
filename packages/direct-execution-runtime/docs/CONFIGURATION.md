@@ -161,6 +161,17 @@ existing protocol already supports it.
 to a local ignored location and replace every `/opt/provider/...` value with an
 installed path. Do not commit machine-specific availability or credentials.
 
+## Cold startup and deadlines
+
+The library's default whole-call deadline is 10 seconds. Agent Host configures
+30 seconds per call and a separate 60-second total service-preparation budget.
+A Windows cold start includes a verified executable copy and a Job guardian;
+file scanning and first-start overhead can exceed 10 seconds. Direct CLI or
+library consumers on Windows should set `limits.defaultTimeoutMs` explicitly
+for their workload, for example `30000`, and use persistent sessions for repeated
+calls. This is a bounded allowance, not a latency guarantee. Caller-selected
+shorter deadlines and cancellation still terminate the admitted work.
+
 ## Local service configuration
 
 The service has no tracked configuration beyond the provider file and command

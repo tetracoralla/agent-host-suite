@@ -18,7 +18,7 @@ export function managedProviderSpawnOptions(platformName = platform()) {
   }
 }
 
-const guardedWindowsChildren = new WeakSet()
+const guardedWindowsChildren = new WeakMap()
 const windowsGuardian = fileURLToPath(new URL('./windows-provider-runner.ps1', import.meta.url))
 
 export function spawnManagedProvider(command, args, options) {
@@ -28,7 +28,12 @@ export function spawnManagedProvider(command, args, options) {
     env: { ...options.env, OPENADAM_PROVIDER_LAUNCH: JSON.stringify({ command, args, cwd: options.cwd, ownerPid: process.pid }) },
     shell: false,
   })
-  guardedWindowsChildren.add(child)
+  const state = { closed: false }
+  state.completion = new Promise((resolve) => child.once('close', () => {
+    state.closed = true
+    resolve()
+  }))
+  guardedWindowsChildren.set(child, state)
   return child
 }
 
@@ -143,17 +148,28 @@ export async function closeProviderProcessTree(child, options = {}) {
   if (child?.pid === undefined) return
   const platformName = options.platformName ?? platform()
   if (platformName === 'win32') {
-    const guarded = guardedWindowsChildren.has(child)
+    const guarded = guardedWindowsChildren.get(child)
     // The guardian either never admitted the Provider or owns a kill-on-close
     // Job. A naturally closed guardian has already retired that entire Job.
     if (guarded) {
-      if (child.exitCode !== null || child.signalCode !== null) return
+      if (guarded.closed) return
       // Terminate the owned guardian handle directly. Its sole Job handle
       // closes and retires descendants without taskkill's parent/child race.
       let cause
-      try { child.kill('SIGKILL') } catch (error) { cause = error }
-      if (!(await waitForChildExit(child, options.killWaitMs ?? 5000))) {
-        throw new HostError('HOST_CLEANUP_FAILED', 'The Windows Provider Job guardian did not close', { cause })
+      if (child.exitCode === null && child.signalCode === null) {
+        try { child.kill('SIGKILL') } catch (error) { cause = error }
+      }
+      // An exit code precedes stdio close. Keep the owned ChildProcess identity
+      // until its close event instead of racing cleanup against open pipes.
+      let timer
+      try {
+        const closed = await Promise.race([
+          guarded.completion.then(() => true),
+          new Promise((resolve) => { timer = setTimeout(() => resolve(false), options.killWaitMs ?? 5000) }),
+        ])
+        if (!closed) throw new HostError('HOST_CLEANUP_FAILED', 'The Windows Provider Job guardian did not close', { cause })
+      } finally {
+        clearTimeout(timer)
       }
       return
     }

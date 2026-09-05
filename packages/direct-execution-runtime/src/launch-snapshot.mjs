@@ -196,7 +196,13 @@ export async function createLaunchSnapshot(binding) {
   let disposal
   const dispose = async () => {
     if (disposal === undefined) {
-      const pending = rm(temporaryRoot, { recursive: true, force: true })
+      // Windows can retain executable mappings briefly after the owning
+      // process closes. Retry only this uniquely owned staging tree, and
+      // report success only after removal completes.
+      const pending = rm(temporaryRoot, {
+        recursive: true, force: true,
+        maxRetries: process.platform === 'win32' ? 8 : 0, retryDelay: 50,
+      })
       disposal = pending
       pending.catch(() => {
         if (disposal === pending) disposal = undefined

@@ -85,11 +85,9 @@ function packagedProviderConfig(fakeRoot) {
       maxResultBytes: 262144,
       maxProtocolLineBytes: 1048576,
       maxStderrBytes: 4096,
-      // Packaging is an integrity/consumer-flow check, not a cold-start latency
-      // benchmark. Keep the same bounded allowance as the runtime fixtures so
-      // transient host load cannot turn a valid cold launch into a false
-      // package failure.
-      defaultTimeoutMs: 10000,
+      // Exercise the actual Agent Host consumer allowance. The general library
+      // default and explicit short-deadline regression cases are unchanged.
+      defaultTimeoutMs: 30000,
       circuitBreakerFailureThreshold: 3,
       circuitBreakerCooldownMs: 50,
     },
