@@ -1,3 +1,4 @@
+import { assertPrivateAccess } from '../src/private-permissions.mjs'
 import assert from 'node:assert/strict'
 import { execFile, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -545,8 +546,8 @@ try {
   const recoveryReference = failure.details.recovery
   const bundleDirectory = join(recoveryRoot, recoveryIdentity)
   assert.deepEqual((await readdir(bundleDirectory)).sort(), ['launch-agent.plist', 'manifest.json'])
-  assert.equal((await lstat(recoveryRoot)).mode & 0o077, 0)
-  assert.equal((await lstat(bundleDirectory)).mode & 0o077, 0)
+  await assertPrivateAccess(recoveryRoot, await lstat(recoveryRoot))
+  await assertPrivateAccess(bundleDirectory, await lstat(bundleDirectory))
   assert.match(await readFile(launchAgentPath, 'utf8'), /<key>Label<\/key>/u)
   const failedReplacementDescriptor = await readFile(launchAgentPath)
   const retainedBundle = await loadServiceRecoveryBundle(recoveryRoot, recoveryIdentity)

@@ -111,7 +111,7 @@ test('maintenance inspection rejects a source-checkout command and accepts the i
 
   await writeFile(plistPath, maintenancePlist(stateRoot, {
     executable: join(stateRoot, 'packages', 'node-runtime', 'fixture', 'bin', 'node'),
-    prefixArguments: ['/Applications/Agent Host.app/Contents/Resources/agent-host-suite/bin/agent-host.mjs'],
+    prefixArguments: [join(carrier.root, 'Contents', 'Resources', 'agent-host-suite', 'bin', 'agent-host.mjs')],
   }))
   assert.deepEqual(await inspectMaintenance(stateRoot, { plistPath }, {
     platformName: 'darwin', applicationCarrier: carrier,

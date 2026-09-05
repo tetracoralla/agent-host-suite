@@ -24,7 +24,7 @@ async function inventory(root, current = root, output = []) {
     const path = join(current, entry.name)
     if (entry.isSymbolicLink()) throw new AgentHostError('HOST_SKILL_SOURCE_INVALID', `Agent Host Skill contains a symbolic link: ${path}`)
     if (entry.isDirectory()) await inventory(root, path, output)
-    else if (entry.isFile()) output.push(relative(root, path))
+    else if (entry.isFile()) output.push(relative(root, path).split(sep).join('/'))
     else throw new AgentHostError('HOST_SKILL_SOURCE_INVALID', `Agent Host Skill contains a special file: ${path}`)
   }
   return output.sort()

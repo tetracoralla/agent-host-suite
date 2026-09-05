@@ -33,12 +33,12 @@ function command(file, args, options = {}) {
 }
 
 export async function observeGitSource(root, runner = command) {
-  const repositoryRoot = (await runner('/usr/bin/git', ['rev-parse', '--show-toplevel'], { cwd: root })).trim()
-  const revision = (await runner('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).trim()
-  const dirty = (await runner('/usr/bin/git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: repositoryRoot })).trim().length > 0
+  const repositoryRoot = (await runner((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['rev-parse', '--show-toplevel'], { cwd: root })).trim()
+  const revision = (await runner((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).trim()
+  const dirty = (await runner((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: repositoryRoot })).trim().length > 0
   let repository = null
   try {
-    repository = normalizeRepositoryUrl((await runner('/usr/bin/git', ['remote', 'get-url', 'origin'], { cwd: repositoryRoot })).trim())
+    repository = normalizeRepositoryUrl((await runner((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['remote', 'get-url', 'origin'], { cwd: repositoryRoot })).trim())
   } catch {
     repository = null
   }
@@ -46,7 +46,7 @@ export async function observeGitSource(root, runner = command) {
 }
 
 async function resolveRemoteRevision(repository, ref, runner = command) {
-  const output = await runner('/usr/bin/git', ['ls-remote', repository, ref, `${ref}^{}`])
+  const output = await runner((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['ls-remote', repository, ref, `${ref}^{}`])
   const rows = output.trim().split('\n').filter(Boolean).map((line) => line.split(/\s+/u))
   const peeled = rows.find(([, name]) => name === `${ref}^{}`)?.[0]
   const direct = rows.find(([, name]) => name === ref)?.[0]
@@ -128,8 +128,8 @@ export async function materializeGitSourceSnapshots(sourceRoots, observations, d
     const archive = join(destination, `${id}.tar`)
     await mkdir(snapshot, { recursive: true })
     try {
-      await runner('/usr/bin/git', ['archive', '--format=tar', '--output', archive, expected.revision], { cwd: current.repositoryRoot })
-      await runner('/usr/bin/tar', ['-xf', archive, '-C', snapshot])
+      await runner((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['archive', '--format=tar', '--output', archive, expected.revision], { cwd: current.repositoryRoot })
+      await runner((process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar'), ['-xf', archive, '-C', snapshot])
     } finally {
       await rm(archive, { force: true })
     }

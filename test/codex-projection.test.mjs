@@ -125,9 +125,15 @@ test('Codex projection exposes a Developer Kit Skill with a version-locked CLI a
   assert.equal(basename(dirname(result.marketplaceRoot)), expectedDigest)
   await assert.rejects(readFile(join(result.pluginRoot, '.mcp.json')), (error) => error.code === 'ENOENT')
   const launcher = await readFile(result.developerSkill.launcherPath, 'utf8')
-  assert.match(launcher, /^#!\/bin\/sh\nexec '\/private\/runtime\/node' '\/private\/package\/openadam-dev\.mjs' "\$@"\n$/u)
-  assert.equal((await stat(result.developerSkill.launcherPath)).mode & 0o111, 0o100)
-  assert.equal(result.pluginIdentityRelativeFiles.includes('skills/build-openadam-agent-tools/scripts/openadam-dev'), true)
+  if (process.platform === 'win32') {
+    assert.match(launcher, /@echo off\r\nsetlocal DisableDelayedExpansion/u)
+    assert.match(launcher, /"\/private\/runtime\/node" "\/private\/package\/openadam-dev\.mjs" %\*/u)
+  } else {
+    assert.match(launcher, /^#!\/bin\/sh\nexec '\/private\/runtime\/node' '\/private\/package\/openadam-dev\.mjs' "\$@"\n$/u)
+    assert.equal((await stat(result.developerSkill.launcherPath)).mode & 0o111, 0o100)
+  }
+  const launcherName = process.platform === 'win32' ? 'openadam-dev.cmd' : 'openadam-dev'
+  assert.equal(result.pluginIdentityRelativeFiles.includes(`skills/build-openadam-agent-tools/scripts/${launcherName}`), true)
 })
 
 test('Codex projection keeps a Provider Skill executable while switching its MCP surface off', async (t) => {

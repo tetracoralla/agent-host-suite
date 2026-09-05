@@ -15,7 +15,7 @@
     "agent-tool-observer": "src/cli.mjs"
   },
   "scripts": {
-    "test": "node --no-warnings --test test/*.test.mjs",
+    "test": "node --no-warnings --test --test-timeout=180000 test/*.test.mjs",
     "check:contracts": "node --no-warnings scripts/check-contracts.mjs",
     "check:release": "node --no-warnings scripts/check-public-release.mjs",
     "measure:trace-plane": "node --no-warnings scripts/measure-trace-plane.mjs",

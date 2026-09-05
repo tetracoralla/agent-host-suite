@@ -99,7 +99,7 @@ export function createCodexRunner({ mathPresent = true, timePresent = false, leg
 
   async function runner(command, args, options = {}) {
     calls.push({ command, args: [...args], options })
-    if (command === '/usr/bin/env' && args[0] === 'which') return { status: 0, stdout: `/fake/${args[1]}\n`, stderr: '' }
+    if (command === 'where.exe' || (command === '/usr/bin/env' && args[0] === 'which')) return { status: 0, stdout: `/fake/${args.at(-1)}\n`, stderr: '' }
     if (command === '/fake/codex' && args[0] === '--version') return { status: 0, stdout: 'codex-cli test\n', stderr: '' }
     if (command === '/fake/codex' && args.join(' ') === 'plugin marketplace list --json') {
       return {
@@ -163,7 +163,7 @@ export function createClaudeRunner() {
   const prefix = ['--disable-slash-commands', '--no-chrome', '--setting-sources', 'user']
   async function runner(command, args) {
     calls.push({ command, args: [...args] })
-    if (command === '/usr/bin/env' && args[0] === 'which') return { status: 0, stdout: '/fake/claude\n', stderr: '' }
+    if (command === 'where.exe' || (command === '/usr/bin/env' && args[0] === 'which')) return { status: 0, stdout: '/fake/claude\n', stderr: '' }
     if (command !== '/fake/claude' || JSON.stringify(args.slice(0, prefix.length)) !== JSON.stringify(prefix)) {
       throw new Error(`unexpected fake command: ${command} ${args.join(' ')}`)
     }

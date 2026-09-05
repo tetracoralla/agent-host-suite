@@ -65,7 +65,7 @@
     "check:package": "node scripts/check-package.mjs",
     "check:repository": "node scripts/check-repository.mjs",
     "check:syntax": "node --check bin/agent-host.mjs && node scripts/check-syntax.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test --test-timeout=180000 test/*.test.mjs",
     "audit:production": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org"
   },
   "dependencies": {

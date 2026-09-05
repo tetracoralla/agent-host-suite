@@ -1,3 +1,4 @@
+import { assertPrivateAccess, secureWindowsDirectory } from './private-permissions.mjs'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -28,6 +29,7 @@ async function ownerOnlyDirectory(path) {
   await mkdir(path, { recursive: true, mode: 0o700 })
   const info = await lstat(path)
   if (info.isSymbolicLink() || !info.isDirectory()) throw invalidRecovery()
+  await secureWindowsDirectory(path)
   await chmod(path, 0o700)
 }
 
@@ -161,7 +163,8 @@ async function verifiedFile(directory, record) {
     || !Number.isSafeInteger(record.mode) || record.mode < 0 || record.mode > 0o777) throw invalidRecovery()
   const path = join(directory, record.name)
   const info = await lstat(path).catch(() => null)
-  if (info === null || info.isSymbolicLink() || !info.isFile() || info.size !== record.bytes || (info.mode & 0o077) !== 0) throw invalidRecovery()
+  if (info === null || info.isSymbolicLink() || !info.isFile() || info.size !== record.bytes) throw invalidRecovery()
+  await assertPrivateAccess(path, info).catch(() => { throw invalidRecovery() })
   const bytes = await readFile(path)
   if (digest(bytes) !== record.sha256) throw invalidRecovery()
   return { contents: bytes, mode: record.mode }
@@ -170,13 +173,18 @@ async function verifiedFile(directory, record) {
 export async function loadServiceRecoveryBundle(recoveryRoot, identity) {
   if (typeof recoveryRoot !== 'string' || !RECOVERY_ID.test(identity ?? '')) throw invalidRecovery()
   const rootInfo = await lstat(recoveryRoot).catch(() => null)
-  if (rootInfo === null || rootInfo.isSymbolicLink() || !rootInfo.isDirectory() || (rootInfo.mode & 0o077) !== 0) throw invalidRecovery()
+  if (rootInfo === null || rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) throw invalidRecovery()
   const directory = join(recoveryRoot, identity)
   const directoryInfo = await lstat(directory).catch(() => null)
-  if (directoryInfo === null || directoryInfo.isSymbolicLink() || !directoryInfo.isDirectory() || (directoryInfo.mode & 0o077) !== 0) throw invalidRecovery()
+  if (directoryInfo === null || directoryInfo.isSymbolicLink() || !directoryInfo.isDirectory()) throw invalidRecovery()
   const names = (await readdir(directory)).sort()
   const manifestInfo = await lstat(join(directory, MANIFEST_FILE)).catch(() => null)
-  if (manifestInfo === null || manifestInfo.isSymbolicLink() || !manifestInfo.isFile() || (manifestInfo.mode & 0o077) !== 0) throw invalidRecovery()
+  if (manifestInfo === null || manifestInfo.isSymbolicLink() || !manifestInfo.isFile()) throw invalidRecovery()
+  await Promise.all([
+    assertPrivateAccess(recoveryRoot, rootInfo),
+    assertPrivateAccess(directory, directoryInfo),
+    assertPrivateAccess(join(directory, MANIFEST_FILE), manifestInfo),
+  ]).catch(() => { throw invalidRecovery() })
   const manifestBytes = await readFile(join(directory, MANIFEST_FILE))
   let manifest
   try {

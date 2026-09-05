@@ -1,3 +1,4 @@
+import { assertPrivateAccess } from './private-permissions.mjs'
 import { homedir, platform, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, parse } from 'node:path'
 import { lstat, mkdtemp, rm } from 'node:fs/promises'
@@ -1399,10 +1400,10 @@ export async function preflightServiceRecovery(options) {
     paths = await readStatePaths(resolveStateRoot(options.stateRoot))
     const stateInfo = await lstat(paths.state)
     if (stateInfo.isSymbolicLink() || !stateInfo.isFile() || stateInfo.size < 1 || stateInfo.size > 16 * 1024 * 1024
-      || (typeof process.getuid === 'function' && stateInfo.uid !== process.getuid())
-      || (stateInfo.mode & 0o077) !== 0) {
+      || (typeof process.getuid === 'function' && stateInfo.uid !== process.getuid())) {
       throw new AgentHostError('SERVICE_RECOVERY_STATE_INVALID', 'Service recovery requires one existing private Agent Host installation state')
     }
+    await assertPrivateAccess(paths.state, stateInfo)
     state = await loadState(paths)
   } catch (error) {
     if (error instanceof AgentHostError && error.code === 'SERVICE_RECOVERY_STATE_INVALID') throw error

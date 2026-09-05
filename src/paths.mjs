@@ -1,3 +1,4 @@
+import { secureWindowsDirectory } from './private-permissions.mjs'
 import { homedir, platform } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { chmod, lstat, mkdir, realpath } from 'node:fs/promises'
@@ -28,7 +29,8 @@ export async function ensurePrivateDirectory(path) {
   if (typeof process.getuid === 'function' && info.uid !== process.getuid()) {
     throw new AgentHostError('STATE_ROOT_WRONG_OWNER', `Private state path is not owned by the current user: ${path}`)
   }
-  if ((info.mode & 0o077) !== 0) await chmod(path, 0o700)
+  if (platform() === 'win32') await secureWindowsDirectory(path)
+  else if ((info.mode & 0o077) !== 0) await chmod(path, 0o700)
   return realpath(path)
 }
 

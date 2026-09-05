@@ -77,6 +77,6 @@ test('development observability manifest resolves Host-owned package roots', asy
   const manifest = await buildDevelopmentObservabilityManifest(root)
   assert.equal(manifest['agent-tool-observer'].root, await realpath(fixture.observer))
   assert.equal(manifest['context-surface-analyzer'].root, await realpath(fixture.analyzer))
-  assert.equal(manifest['agent-tool-observer'].args[0].endsWith('/packages/agent-tool-observer/src/cli.mjs'), true)
-  assert.equal(manifest['context-surface-analyzer'].args[0].endsWith('/packages/context-surface-analyzer/src/cli.js'), true)
+  assert.equal(manifest['agent-tool-observer'].args[0].endsWith(join('packages', 'agent-tool-observer', 'src', 'cli.mjs')), true)
+  assert.equal(manifest['context-surface-analyzer'].args[0].endsWith(join('packages', 'context-surface-analyzer', 'src', 'cli.js')), true)
 })

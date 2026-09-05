@@ -12,7 +12,7 @@
     "build": "node scripts/build.js",
     "start": "node src/ui-server.js",
     "mcp": "node src/mcp-server.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-timeout=180000 test/*.test.js",
     "check:syntax": "node scripts/check-syntax.js",
     "check:plugin": "node scripts/check-plugin.js",
     "check:release": "node scripts/check-public-release.mjs",

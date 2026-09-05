@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, delimiter } from 'node:path'
 import test from 'node:test'
 import { resolveExecutable, runFile, toolSearchPath } from '../src/process.mjs'
 
@@ -60,7 +60,7 @@ test('process runner rejects an already-cancelled command before spawning it', a
   )
 })
 
-test('tool search path appends standard install directories to a Finder-clean PATH', () => {
+test('tool search path appends standard install directories to a Finder-clean PATH', { skip: process.platform === 'win32' }, () => {
   const exampleHome = '/opt/openadam-example-home'
   const search = toolSearchPath('/usr/bin:/bin:/usr/sbin:/sbin', exampleHome)
   const entries = search.split(':')
@@ -70,7 +70,7 @@ test('tool search path appends standard install directories to a Finder-clean PA
   }
 })
 
-test('tool search path keeps custom entries first and never duplicates', () => {
+test('tool search path keeps custom entries first and never duplicates', { skip: process.platform === 'win32' }, () => {
   const custom = '/opt/homebrew/bin:/usr/local/bin:/my/own/bin'
   const entries = toolSearchPath(custom, homedir()).split(':')
   assert.deepEqual(entries.slice(0, 3), ['/opt/homebrew/bin', '/usr/local/bin', '/my/own/bin'])
@@ -82,15 +82,15 @@ test('resolveExecutable finds hosts outside a GUI-clean PATH', async (t) => {
   t.after(() => rm(root, { recursive: true, force: true }))
   const bin = join(root, 'bin')
   await mkdir(bin)
-  const fake = join(bin, 'fake-host-cli')
+  const fake = join(bin, process.platform === 'win32' ? 'fake-host-cli.cmd' : 'fake-host-cli')
   await writeFile(fake, '#!/bin/sh\nexit 0\n')
   await chmod(fake, 0o755)
   const discovered = await resolveExecutable('fake-host-cli', (command, args, options) =>
-    runFile(command, args, { ...options, env: { ...options.env, PATH: `${options.env.PATH}:${bin}` } }))
+    runFile(command, args, { ...options, env: { ...options.env, PATH: `${options.env.PATH}${delimiter}${bin}` } }))
   assert.equal(discovered, fake)
 })
 
-test('resolveExecutable probes which with an augmented environment', async () => {
+test('resolveExecutable probes which with an augmented environment', { skip: process.platform === 'win32' }, async () => {
   let capturedOptions
   const result = await resolveExecutable('definitely-not-a-real-host-cli', (command, args, options) => {
     capturedOptions = options

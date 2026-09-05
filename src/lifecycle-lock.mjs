@@ -1,3 +1,4 @@
+import { assertPrivateAccess, secureWindowsDirectory } from './private-permissions.mjs'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
@@ -116,12 +117,7 @@ async function existingPrivateRoot(root) {
   if (info.isSymbolicLink() || !info.isDirectory()) {
     throw new AgentHostError('STATE_ROOT_UNSAFE', `Private state path is not a real directory: ${root}`)
   }
-  if (typeof process.getuid === 'function' && info.uid !== process.getuid()) {
-    throw new AgentHostError('STATE_ROOT_WRONG_OWNER', `Private state path is not owned by the current user: ${root}`)
-  }
-  if ((info.mode & 0o077) !== 0) {
-    throw new AgentHostError('STATE_ROOT_PERMISSIONS_UNSAFE', 'The Agent Host state root must not be accessible by group or other users')
-  }
+  await assertPrivateAccess(root, info)
   return await realpath(root)
 }
 
@@ -129,6 +125,7 @@ async function publishNewRootLease(root, owner) {
   await mkdir(dirname(root), { recursive: true, mode: 0o700 })
   const candidate = await mkdtemp(join(dirname(root), `.${basename(root)}.lifecycle-root-candidate-`))
   try {
+    await secureWindowsDirectory(candidate)
     const lockPath = join(candidate, LOCK_DIRECTORY)
     await mkdir(lockPath, { mode: 0o700 })
     await writePrivateJson(join(lockPath, OWNER_FILE), owner)

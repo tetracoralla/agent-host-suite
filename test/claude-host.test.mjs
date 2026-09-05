@@ -18,7 +18,7 @@ function fixture() {
   }
   const mutations = []
   const runner = async (command, args, options = {}) => {
-    if (command === '/usr/bin/env' && args[0] === 'which') return { status: 0, stdout: '/usr/bin/claude\n', stderr: '' }
+    if (command === 'where.exe' || (command === '/usr/bin/env' && args[0] === 'which')) return { status: 0, stdout: '/usr/bin/claude\n', stderr: '' }
     const commandArgs = userConfigCommand(args)
     if (commandArgs[0] === '--version') return { status: 0, stdout: '2.1.233\n', stderr: '' }
     if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get') {

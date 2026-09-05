@@ -28,7 +28,7 @@
     "examples/"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test --test-timeout=180000 test/*.test.mjs",
     "check:syntax": "node --check src/*.mjs && node --check scripts/*.mjs && node --check test/*.mjs",
     "check:direct-runtime": "node scripts/check-direct-runtime.mjs",
     "check": "npm run check:syntax && npm test && npm run check:direct-runtime && node scripts/check-repository.mjs"

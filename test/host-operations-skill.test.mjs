@@ -16,7 +16,7 @@ import { createCodexRunner } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
 
-test('operations launcher prefers an installed application over an ambient CLI', async (t) => {
+test('operations launcher prefers an installed application over an ambient CLI', { skip: process.platform !== 'darwin' }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-operations-launcher-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const installedApp = join(root, 'Applications', 'Agent Host.app')

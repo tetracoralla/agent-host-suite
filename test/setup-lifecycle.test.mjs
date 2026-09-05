@@ -315,7 +315,7 @@ test('quick host status detects the executable without starting the Agent app CL
   assert.equal(result.status, 'ok')
   assert.equal(result.managed, true)
   assert.equal(result.healthy, null)
-  assert.deepEqual(quickCalls.map((call) => [call.command, ...call.args]), [['/usr/bin/env', 'which', 'codex']])
+  assert.deepEqual(quickCalls.map((call) => [call.command, ...call.args]), [process.platform === 'win32' ? ['where.exe', 'codex'] : ['/usr/bin/env', 'which', 'codex']])
 })
 
 test('purge-data removes the private state root for a deep state root', async (t) => {

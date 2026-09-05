@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, mkdtemp, readFile, readdir, rm, truncate, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -54,24 +54,24 @@ function tarArchive(entries) {
 async function repository(t) {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-source-policy-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  await execFileAsync('/usr/bin/git', ['init', '-q'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['config', 'user.name', 'Agent Host Test'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['init', '-q'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.name', 'Agent Host Test'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
   await writeFile(join(root, '.gitignore'), 'ignored-output\n')
   await writeFile(join(root, 'package.json'), '{}\n')
-  await execFileAsync('/usr/bin/git', ['add', '.gitignore', 'package.json'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['commit', '-qm', 'fixture'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['remote', 'add', 'origin', 'https://github.com/tetracoralla/fixture.git'], { cwd: root })
-  const { stdout } = await execFileAsync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['add', '.gitignore', 'package.json'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['commit', '-qm', 'fixture'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['remote', 'add', 'origin', 'https://github.com/tetracoralla/fixture.git'], { cwd: root })
+  const { stdout } = await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['rev-parse', 'HEAD'], { cwd: root })
   return { root, revision: stdout.trim() }
 }
 
 async function armorialRepository(t, { failRelease = false, linkedRelease = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-armorial-source-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  await execFileAsync('/usr/bin/git', ['init', '-q'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['config', 'user.name', 'Agent Host Test'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['init', '-q'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.name', 'Agent Host Test'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
   await mkdir(join(root, 'scripts'))
   await mkdir(join(root, 'payload', 'armorial', '.codex-plugin'), { recursive: true })
   await writeFile(join(root, '.gitignore'), '.release/\nnode_modules/\n')
@@ -116,19 +116,19 @@ renameSync(temporary + '.gz', archive)
 const digest = createHash('sha256').update(readFileSync(archive)).digest('hex')
 writeFileSync(archive + '.sha256', digest + '  ' + archiveName + '\n')
 `)
-  await execFileAsync('/usr/bin/git', ['add', '.'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['commit', '-qm', 'armorial fixture'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['remote', 'add', 'origin', 'https://github.com/tetracoralla/armorial-fixture.git'], { cwd: root })
-  const { stdout } = await execFileAsync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['add', '.'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['commit', '-qm', 'armorial fixture'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['remote', 'add', 'origin', 'https://github.com/tetracoralla/armorial-fixture.git'], { cwd: root })
+  const { stdout } = await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['rev-parse', 'HEAD'], { cwd: root })
   return { root, revision: stdout.trim() }
 }
 
 async function fileVitalsRepository(t) {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-file-vitals-source-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  await execFileAsync('/usr/bin/git', ['init', '-q'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['config', 'user.name', 'Agent Host Test'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['init', '-q'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.name', 'Agent Host Test'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
   const bundle = 'file-vitals-0.3.3-darwin-arm64'
   await mkdir(join(root, '.codex-plugin'), { recursive: true })
   await mkdir(join(root, 'payload', bundle, '.codex-plugin'), { recursive: true })
@@ -155,7 +155,7 @@ async function fileVitalsRepository(t) {
   for (const name of ['finspect', 'file-vitals-capability', 'file-vitals-transport-schema-probe']) {
     const path = join(root, 'payload', bundle, 'runtime', name)
     await writeFile(path, '#!/bin/sh\nexit 0\n')
-    await execFileAsync('/bin/chmod', ['755', path])
+    await chmod(path, 0o755)
   }
   await writeFile(join(root, 'scripts/build_plugin.sh'), `#!/bin/bash
 set -euo pipefail
@@ -173,11 +173,11 @@ mv "$tarfile.gz" "dist/plugin/$bundle.tar.gz"
 (cd dist/plugin && shasum -a 256 "$bundle.tar.gz" > "$bundle.tar.gz.sha256")
 rm -f "$list"
 `)
-  await execFileAsync('/bin/chmod', ['755', join(root, 'scripts/build_plugin.sh')])
-  await execFileAsync('/usr/bin/git', ['add', '.'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['commit', '-qm', 'file vitals fixture'], { cwd: root })
-  await execFileAsync('/usr/bin/git', ['remote', 'add', 'origin', 'https://github.com/tetracoralla/file-vitals-fixture.git'], { cwd: root })
-  const { stdout } = await execFileAsync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root })
+  await chmod(join(root, 'scripts/build_plugin.sh'), 0o755)
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['add', '.'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['commit', '-qm', 'file vitals fixture'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['remote', 'add', 'origin', 'https://github.com/tetracoralla/file-vitals-fixture.git'], { cwd: root })
+  const { stdout } = await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['rev-parse', 'HEAD'], { cwd: root })
   return { root, revision: stdout.trim() }
 }
 
@@ -263,7 +263,7 @@ test('remote-tagged builds materialize only tracked files from the locked revisi
   await assert.rejects(readFile(join(snapshots.suite, 'ignored-output')), (error) => error.code === 'ENOENT')
 })
 
-test('remote-tagged Armorial builds twice from a git-archive source snapshot without a local release artifact', async (t) => {
+test('remote-tagged Armorial builds twice from a git-archive source snapshot without a local release artifact', { skip: process.platform !== 'darwin' }, async (t) => {
   const fixture = await armorialRepository(t)
   const observation = await remoteObservation(t, fixture)
   assert.equal(observation.sourcePolicy, 'remote-tagged')
@@ -296,7 +296,7 @@ test('remote-tagged Armorial builds twice from a git-archive source snapshot wit
   assert.equal(snapshots.every((value) => !value.includes('.release')), true)
 })
 
-test('remote-tagged File Vitals builds twice from tracked source without a prebuilt dist artifact', async (t) => {
+test('remote-tagged File Vitals builds twice from tracked source without a prebuilt dist artifact', { skip: process.platform !== 'darwin' }, async (t) => {
   const fixture = await fileVitalsRepository(t)
   const observation = {
     repository: 'https://github.com/tetracoralla/file-vitals-fixture',
@@ -363,7 +363,7 @@ test('File Vitals artifact overrides are paired development inputs and cannot by
   }
 })
 
-test('File Vitals source build rejects an oversized generated archive before copy, checksum read, or archive commands', async (t) => {
+test('File Vitals source build rejects an oversized generated archive before copy, checksum read, or archive commands', { skip: process.platform !== 'darwin' }, async (t) => {
   const fixture = await fileVitalsRepository(t)
   const runRoot = await mkdtemp(join(tmpdir(), 'agent-host-file-vitals-oversized-'))
   t.after(() => rm(runRoot, { recursive: true, force: true }))
@@ -401,7 +401,7 @@ test('File Vitals source build rejects an oversized generated archive before cop
   assert.deepEqual(await readdir(scratchRoot), [])
 })
 
-test('File Vitals source build fully inspects an unsafe generated archive before its first copy', async (t) => {
+test('File Vitals source build fully inspects an unsafe generated archive before its first copy', { skip: process.platform !== 'darwin' }, async (t) => {
   const fixture = await fileVitalsRepository(t)
   const runRoot = await mkdtemp(join(tmpdir(), 'agent-host-file-vitals-unsafe-'))
   t.after(() => rm(runRoot, { recursive: true, force: true }))
@@ -445,7 +445,7 @@ test('File Vitals source build fully inspects an unsafe generated archive before
   assert.deepEqual(await readdir(scratchRoot), [])
 })
 
-test('failed verified Armorial source build removes every partial release output', async (t) => {
+test('failed verified Armorial source build removes every partial release output', { skip: process.platform !== 'darwin' }, async (t) => {
   const fixture = await armorialRepository(t, { failRelease: true })
   const observation = await remoteObservation(t, fixture)
   const runRoot = await mkdtemp(join(tmpdir(), 'agent-host-armorial-source-failure-'))
@@ -468,7 +468,7 @@ test('failed verified Armorial source build removes every partial release output
   assert.deepEqual(await readdir(scratchRoot), [])
 })
 
-test('verified Armorial source build rejects linked archive members and removes the candidate', async (t) => {
+test('verified Armorial source build rejects linked archive members and removes the candidate', { skip: process.platform !== 'darwin' }, async (t) => {
   const fixture = await armorialRepository(t, { linkedRelease: true })
   const observation = await remoteObservation(t, fixture)
   const runRoot = await mkdtemp(join(tmpdir(), 'agent-host-armorial-linked-release-'))
@@ -588,7 +588,7 @@ test('Provider archive inspection closes path, type, count, expansion, compresse
   await assert.rejects(() => access(digestBoundWork), (error) => error.code === 'ENOENT')
 })
 
-test('macOS Provider extraction rejects real case-folding archive collisions before scratch extraction or publication', async (t) => {
+test('macOS Provider extraction rejects real case-folding archive collisions before scratch extraction or publication', { skip: process.platform !== 'darwin' }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-provider-real-collision-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const archivePath = join(root, 'provider.tar.gz')

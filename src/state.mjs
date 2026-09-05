@@ -1,3 +1,4 @@
+import { assertPrivateAccess } from './private-permissions.mjs'
 import { copyFile, lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
@@ -97,12 +98,7 @@ export async function readStatePaths(root) {
   if (info.isSymbolicLink() || !info.isDirectory()) {
     throw new AgentHostError('STATE_ROOT_UNSAFE', `Private state path is not a real directory: ${root}`)
   }
-  if (typeof process.getuid === 'function' && info.uid !== process.getuid()) {
-    throw new AgentHostError('STATE_ROOT_WRONG_OWNER', `Private state path is not owned by the current user: ${root}`)
-  }
-  if ((info.mode & 0o077) !== 0) {
-    throw new AgentHostError('STATE_ROOT_PERMISSIONS_UNSAFE', 'The Agent Host state root must not be accessible by group or other users')
-  }
+  await assertPrivateAccess(root, info)
   return statePaths(await realpath(root))
 }
 

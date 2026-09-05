@@ -5,6 +5,7 @@ import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { ensurePrivateDirectory } from '../src/paths.mjs'
 import { AgentHostError } from '../src/errors.mjs'
 import { retireLifecycleRoot, withLifecycleMutation } from '../src/lifecycle-lock.mjs'
 import { cleanupStorage } from '../src/storage.mjs'
@@ -83,7 +84,7 @@ async function temporaryStateRoot(t) {
   t.after(() => rm(directory, { recursive: true, force: true }))
   const root = join(directory, 'state')
   await mkdir(root)
-  await chmod(root, 0o700)
+  await ensurePrivateDirectory(root)
   return root
 }
 
