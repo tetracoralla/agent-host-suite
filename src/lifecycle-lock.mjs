@@ -42,33 +42,44 @@ function processIsAlive(pid) {
   }
 }
 
-async function observedProcessStartedAt(pid) {
-  if (pid === process.pid) return Date.now() - process.uptime() * 1000
-  if (platform() === 'win32') {
-    try {
-      const { stdout } = await execFileAsync('powershell.exe', [
-        '-NoProfile', '-NonInteractive', '-Command',
-        `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
-      ], { timeout: 5_000, maxBuffer: 4_096, windowsHide: true })
-      const parsed = Date.parse(stdout.trim())
-      return Number.isFinite(parsed) ? parsed : null
-    } catch {
-      return null
+async function observedProcessStartTimes(pids) {
+  const requested = [...new Set(pids)].filter((pid) => Number.isInteger(pid) && pid > 0)
+  const observed = new Map()
+  if (requested.includes(process.pid)) observed.set(process.pid, Date.now() - process.uptime() * 1000)
+  if (platform() !== 'win32') return observed
+  const external = requested.filter((pid) => pid !== process.pid)
+  if (external.length === 0) return observed
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command', [
+        "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')",
+        "$rows = @(foreach ($processId in (ConvertFrom-Json -InputObject $env:OPENADAM_LOCK_PROCESS_IDS)) { try { $item = Get-Process -Id $processId -ErrorAction Stop; [pscustomobject]@{ pid = $item.Id; startedAt = $item.StartTime.ToUniversalTime().ToString('o') } } catch {} })",
+        'ConvertTo-Json -InputObject $rows -Compress',
+      ].join('; '),
+    ], {
+      timeout: 5000, maxBuffer: 32768, windowsHide: true,
+      env: { ...process.env, OPENADAM_LOCK_PROCESS_IDS: JSON.stringify(external) },
+    })
+    const rows = JSON.parse(stdout)
+    if (!Array.isArray(rows)) return observed
+    for (const row of rows) {
+      const startedAt = Date.parse(row?.startedAt)
+      if (external.includes(row?.pid) && Number.isFinite(startedAt)) observed.set(row.pid, startedAt)
     }
+  } catch {
+    // Missing observations retain live, identity-uncertain owners.
   }
-  // POSIX `ps lstart` is a zone-less wall-clock value. Ambiguous fall-back
-  // instants (including non-one-hour transitions) cannot safely distinguish a
-  // live owner from PID reuse. A live external PID is therefore uncertain and
-  // must fail closed instead of being reclaimed.
-  return null
+  return observed
 }
 
-async function ownerProcessMatches(owner) {
+async function ownerProcessMatches(owner, snapshot) {
   if (!processIsAlive(owner.pid)) return false
-  const observed = await observedProcessStartedAt(owner.pid)
-  if (observed === null) return true
+  const observed = (snapshot ?? await observedProcessStartTimes([owner.pid])).get(owner.pid)
+  // POSIX ps lstart is a zone-less wall clock. Live external owners remain
+  // uncertain rather than being reclaimed across an ambiguous DST instant.
+  if (observed === undefined) return true
   const delta = Math.abs(observed - Date.parse(owner.processStartedAt))
-  return delta <= 2_000
+  return delta <= 2000
 }
 
 function lockOwner(operation) {
@@ -257,13 +268,18 @@ async function inspectRecoveryClaims(claimsPath, ownToken) {
     if (!claims.has(token)) throw recoveryInvalid('The Agent Host lifecycle recovery directory contains an orphaned election ticket')
   }
 
+  // One fresh bounded OS observation for this directory pass. Starting a
+  // PowerShell per claimant makes competing recovery scans quadratic in costly
+  // subprocesses. No observation is retained between election passes.
+  const snapshot = await observedProcessStartTimes([...claims.values()]
+    .map((item) => item.value.pid).filter(processIsAlive))
   const active = []
   for (const [token, item] of claims) {
     const ticket = tickets.get(token) ?? null
     if (ticket !== null && ticket.targetOwnerToken !== item.value.targetOwnerToken) {
       throw recoveryInvalid('The Agent Host lifecycle recovery ticket targets a different lock owner')
     }
-    if (token === ownToken || await ownerProcessMatches(item.value)) {
+    if (token === ownToken || await ownerProcessMatches(item.value, snapshot)) {
       active.push({ ...item, ticket })
       continue
     }
