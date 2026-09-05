@@ -247,13 +247,7 @@ test("Codex incremental runs keep one usage rollup per session and complete call
     ]);
 
     const third = scanCodex({ database, config, minimumMtimeMs: 0, scannedAtMs: 3, budget });
-    const fd = fs.openSync(file, 'r');
-    let observed;
-    try {
-      const opened = fs.fstatSync(fd), named = fs.lstatSync(file);
-      observed = { opened: `${opened.dev}:${opened.ino}`, named: `${named.dev}:${named.ino}`, cursors: database.prepare('SELECT * FROM source_cursor').all() };
-    } finally { fs.closeSync(fd); }
-    assert.equal(third.eventsWritten, 0, JSON.stringify(observed));
+    assert.equal(third.eventsWritten, 0);
     assert.equal(database.prepare("SELECT count(*) AS n FROM tool_event").get().n, 2);
     database.close();
   } finally {

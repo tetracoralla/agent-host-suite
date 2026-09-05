@@ -1,3 +1,4 @@
+import { statSourcePath } from "./source-stat.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { ObserverError } from "../errors.mjs";
@@ -49,7 +50,7 @@ export function discoverJsonlFiles(roots, options = {}) {
         const candidate = path.join(current.directory, entry.name);
         let stat;
         try {
-          stat = fs.lstatSync(candidate);
+          stat = statSourcePath(candidate);
         } catch {
           continue;
         }

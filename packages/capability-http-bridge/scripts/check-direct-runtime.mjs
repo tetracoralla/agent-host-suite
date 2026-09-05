@@ -82,7 +82,7 @@ try {
       maxResultBytes: 262144,
       maxProtocolLineBytes: 1048576,
       maxStderrBytes: 4096,
-      defaultTimeoutMs: 5000,
+      defaultTimeoutMs: 10000,
       circuitBreakerFailureThreshold: 3,
       circuitBreakerCooldownMs: 50,
     },

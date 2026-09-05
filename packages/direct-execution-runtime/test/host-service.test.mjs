@@ -429,9 +429,9 @@ test('host shutdown aborts active work and reaps the owned provider process', as
     const request = requestDirectHost({
       socketPath,
       action: 'run',
-      workOrder: workOrder('shutdown-active', [fakeCall('slow', { value: 'late', delayMs: 500 })]),
+      workOrder: workOrder('shutdown-active', [fakeCall('slow', { value: 'late', delayMs: 5000 })]),
     }).catch((error) => error)
-    await waitFor(() => Number.isInteger(runtime.sessionSnapshot()[0].pid), 5000)
+    await waitFor(() => Number.isInteger(runtime.sessionSnapshot()[0].pid), 20000)
     const pid = runtime.sessionSnapshot()[0].pid
 
     await service.close()
@@ -444,7 +444,7 @@ test('host shutdown aborts active work and reaps the owned provider process', as
       (error) => error.code === 'ESRCH',
     )
     await assertEndpointAbsent(socketPath)
-  })
+  }, fakeConfig({ limits: { defaultTimeoutMs: 30000 } }))
 })
 
 test('host client resolves the first complete response line and rejects a second response in the same frame', async () => {

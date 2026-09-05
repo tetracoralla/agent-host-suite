@@ -1,3 +1,4 @@
+import { statSourcePath } from "../core/source-stat.mjs";
 import { assertPrivateFiles } from "../private-files.mjs";
 import fs from "node:fs";
 import { eventIdentifier, hashIdentifier } from "../core/hash.mjs";
@@ -201,7 +202,7 @@ export function scanDirectRuntime({ database, config, scannedAtMs, deadlineMs, b
     }
     let info;
     try {
-      info = fs.lstatSync(filePath);
+      info = statSourcePath(filePath);
     } catch (error) {
       if (error.code === "ENOENT") continue;
       health.status = "error";

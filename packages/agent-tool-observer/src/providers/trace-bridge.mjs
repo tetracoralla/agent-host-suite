@@ -1,3 +1,4 @@
+import { statSourcePath } from "../core/source-stat.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { eventIdentifier, hashIdentifier } from "../core/hash.mjs";
@@ -253,7 +254,7 @@ export function scanTraceBridges({ database, config, scannedAtMs, budget }) {
     if (!fs.existsSync(filePath)) continue;
     let sourceStat;
     try {
-      sourceStat = fs.lstatSync(filePath);
+      sourceStat = statSourcePath(filePath);
     } catch {
       continue;
     }

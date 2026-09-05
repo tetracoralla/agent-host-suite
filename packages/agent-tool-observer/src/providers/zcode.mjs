@@ -1,3 +1,4 @@
+import { statSourcePath } from "../core/source-stat.mjs";
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { eventIdentifier, hashIdentifier } from "../core/hash.mjs";
@@ -142,7 +143,7 @@ export function scanZcode({
   const health = emptyHealth(scannedAtMs);
   let stat;
   try {
-    stat = fs.lstatSync(config.zcodeDatabasePath);
+    stat = statSourcePath(config.zcodeDatabasePath);
   } catch (error) {
     if (error.code === "ENOENT") return { ...health, status: "missing", errorCode: "SOURCE_DATABASE_MISSING", filesSeen: 0 };
     return { ...health, status: "error", errorCode: stableErrorCode(error) };

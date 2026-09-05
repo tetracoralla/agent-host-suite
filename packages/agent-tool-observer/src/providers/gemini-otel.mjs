@@ -1,3 +1,4 @@
+import { statSourcePath } from "../core/source-stat.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { eventIdentifier, hashIdentifier } from "../core/hash.mjs";
@@ -162,7 +163,7 @@ export function scanGeminiTelemetry({ database, config, scannedAtMs, budget }) {
   for (const filePath of config.geminiTelemetryLogs) {
     if (!fs.existsSync(filePath)) continue;
     let sourceStat;
-    try { sourceStat = fs.lstatSync(filePath); } catch { continue; }
+    try { sourceStat = statSourcePath(filePath); } catch { continue; }
     if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) continue;
     if (budget.remainingBytes <= 0 || budget.remainingLines <= 0 || Date.now() >= budget.deadlineMs) break;
     const sourceId = hashIdentifier("source:gemini-cli-otel", filePath);
