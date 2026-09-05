@@ -61,6 +61,36 @@ jobs:
         # and real ACL subprocesses; it is not a per-operation latency fence.
         run: npm run check:syntax && node --test --test-timeout=900000 test/*.test.mjs && npm run check:repository && npm run check:package
       - run: npm run audit:production
+
+  windows-packages:
+    name: Windows ${{ matrix.workspace }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [direct-execution-runtime, capability-http-bridge, agent-tool-observer, context-surface-analyzer]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - run: npm run check --workspace @openadam/${{ matrix.workspace }}
+
+  windows-packaging:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - name: Reject unrelated installation directories
+        run: ./scripts/test-windows-installation.ps1
       - name: Create a complete bound Windows packaging fixture
         shell: pwsh
         run: >-
@@ -89,20 +119,3 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed Windows CLI failed' }
           & (Join-Path $install 'Uninstall-AgentHost.ps1') -InstallRoot $install
           if (Test-Path -LiteralPath $install) { throw 'Windows uninstaller left the application installed' }
-
-  windows-packages:
-    name: Windows ${{ matrix.workspace }}
-    runs-on: windows-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        workspace: [direct-execution-runtime, capability-http-bridge, agent-tool-observer, context-surface-analyzer]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.16.0
-          cache: npm
-      - run: npm ci
-      - run: npm run check --workspace @openadam/${{ matrix.workspace }}

@@ -151,9 +151,16 @@ async function run() {
     const archivePath = join(distributionRoot, `${bundleName}.zip`)
     await execFileAsync('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-Command', 'Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -CompressionLevel Optimal',
-      bundleRoot, archivePath,
-    ], { windowsHide: true, maxBuffer: 4 * 1024 * 1024 })
+      '-Command', [
+        "$ErrorActionPreference = 'Stop'",
+        "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')",
+        '$archive = ConvertFrom-Json -InputObject $env:OPENADAM_WINDOWS_ARCHIVE',
+        'Compress-Archive -LiteralPath $archive.source -DestinationPath $archive.destination -CompressionLevel Optimal',
+      ].join('; '),
+    ], {
+      windowsHide: true, maxBuffer: 4 * 1024 * 1024,
+      env: { ...process.env, OPENADAM_WINDOWS_ARCHIVE: JSON.stringify({ source: bundleRoot, destination: archivePath }) },
+    })
     const archiveInfo = await stat(archivePath)
     const archiveSha256 = await digest(archivePath)
     await writeFile(join(distributionRoot, 'SHA256SUMS'), `${archiveSha256}  ${basename(archivePath)}\n`)

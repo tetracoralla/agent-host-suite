@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')
 Set-StrictMode -Version Latest
 
 function Get-NormalizedRoot([string]$Path) {
@@ -18,6 +19,23 @@ function Get-NormalizedRoot([string]$Path) {
     throw "Unsafe installation path: $resolved"
   }
   return $resolved
+}
+
+# Keep this guard self-contained: restore/uninstall re-execute a temporary copy.
+function Assert-ManagedInstallation([string]$Root) {
+  if (-not (Test-Path -LiteralPath $Root)) { return }
+  $item = Get-Item -LiteralPath $Root -Force
+  if (-not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+    throw 'The application path must be a real Agent Host installation directory.'
+  }
+  $marker = Join-Path $Root 'install-manifest.json'
+  if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+    throw 'Refusing to replace or remove a directory without an Agent Host installation manifest.'
+  }
+  $owned = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+  if ($owned.schemaVersion -ne 'openadam.agent-host-windows-payload.v0.1' -or @($owned.files).Count -eq 0) {
+    throw 'The directory has no supported Agent Host installation manifest.'
+  }
 }
 
 function Assert-Payload([string]$Root, [object]$Manifest) {
@@ -92,6 +110,8 @@ function Install-Shortcuts([string]$Root) {
 }
 
 $InstallRoot = Get-NormalizedRoot $InstallRoot
+Assert-ManagedInstallation $InstallRoot
+Assert-ManagedInstallation "$InstallRoot.previous"
 $PreviousRoot = "$InstallRoot.previous"
 $StagingRoot = "$InstallRoot.staging-$PID"
 $manifestPath = Join-Path $PSScriptRoot 'payload-manifest.json'
@@ -144,7 +164,7 @@ $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.schemaVersion -ne 'openadam.agent-host-windows-payload.v0.1') { throw 'Unsupported Agent Host payload manifest.' }
 Assert-Payload $payloadRoot $manifest
 
-if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
+if (Test-Path -LiteralPath $StagingRoot) { throw 'The installation staging path already exists; its contents were retained.' }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $InstallRoot) | Out-Null
 Copy-Item -LiteralPath $payloadRoot -Destination $StagingRoot -Recurse
 Assert-Payload $StagingRoot $manifest

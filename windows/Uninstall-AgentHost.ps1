@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')
 Set-StrictMode -Version Latest
 
 function Get-NormalizedRoot([string]$Path) {
@@ -17,6 +18,23 @@ function Get-NormalizedRoot([string]$Path) {
   return $resolved
 }
 
+# Keep this guard self-contained: restore/uninstall re-execute a temporary copy.
+function Assert-ManagedInstallation([string]$Root) {
+  if (-not (Test-Path -LiteralPath $Root)) { return }
+  $item = Get-Item -LiteralPath $Root -Force
+  if (-not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+    throw 'The application path must be a real Agent Host installation directory.'
+  }
+  $marker = Join-Path $Root 'install-manifest.json'
+  if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+    throw 'Refusing to replace or remove a directory without an Agent Host installation manifest.'
+  }
+  $owned = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+  if ($owned.schemaVersion -ne 'openadam.agent-host-windows-payload.v0.1' -or @($owned.files).Count -eq 0) {
+    throw 'The directory has no supported Agent Host installation manifest.'
+  }
+}
+
 function Remove-UserPath([string]$BinPath) {
   $current = [Environment]::GetEnvironmentVariable('Path', 'User')
   $parts = @($current -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -25,6 +43,8 @@ function Remove-UserPath([string]$BinPath) {
 }
 
 $InstallRoot = Get-NormalizedRoot $InstallRoot
+Assert-ManagedInstallation $InstallRoot
+Assert-ManagedInstallation "$InstallRoot.previous"
 if (-not $Internal -and $PSCommandPath.StartsWith(($InstallRoot + '\'), [System.StringComparison]::OrdinalIgnoreCase)) {
   $temporary = Join-Path $env:TEMP "openadam-agent-host-uninstall-$PID.ps1"
   Copy-Item -LiteralPath $PSCommandPath -Destination $temporary -Force
