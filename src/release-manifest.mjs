@@ -1,3 +1,4 @@
+import { posix, win32 } from 'node:path'
 import { arch, platform } from 'node:os'
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -193,8 +194,8 @@ export function resolveArtifactUrl(manifestPath, value) {
 function relativePath(value, label) {
   requiredString(value, label)
   if (value.includes('\\')) fail('COMPONENT_DESCRIPTOR_INVALID', `${label} cannot contain backslashes`)
-  const normalized = normalize(value)
-  if (isAbsolute(normalized) || normalized === '..' || normalized.startsWith(`..${sep}`) || normalized === '.') fail('COMPONENT_DESCRIPTOR_INVALID', `${label} must be a contained relative file path`)
+  const normalized = posix.normalize(value)
+  if ((posix.isAbsolute(normalized) || win32.isAbsolute(normalized)) || normalized === '..' || normalized.startsWith('../') || normalized === '.') fail('COMPONENT_DESCRIPTOR_INVALID', `${label} must be a contained relative file path`)
   return normalized
 }
 

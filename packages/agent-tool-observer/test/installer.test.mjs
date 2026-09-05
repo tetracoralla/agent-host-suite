@@ -1,3 +1,4 @@
+import { assertPrivateFiles } from "../src/private-files.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -58,8 +59,7 @@ test("LaunchAgent log preparation repairs modes and rejects symlink targets", ()
     const stderrPath = path.join(root, "stderr.log");
     fs.writeFileSync(stdoutPath, "existing", { mode: 0o644 });
     prepareOwnerLogFiles({ stdoutPath, stderrPath });
-    assert.equal(fs.lstatSync(stdoutPath).mode & 0o777, 0o600);
-    assert.equal(fs.lstatSync(stderrPath).mode & 0o777, 0o600);
+    assertPrivateFiles([{ path: stdoutPath }, { path: stderrPath }]);
 
     fs.unlinkSync(stderrPath);
     fs.symlinkSync(stdoutPath, stderrPath);

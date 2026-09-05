@@ -1,3 +1,4 @@
+import { assertPrivateFiles } from "../private-files.mjs";
 import fs from "node:fs";
 import { eventIdentifier, hashIdentifier } from "../core/hash.mjs";
 import { readJsonlIncremental } from "../core/jsonl-reader.mjs";
@@ -209,12 +210,14 @@ export function scanDirectRuntime({ database, config, scannedAtMs, deadlineMs, b
     }
     present += 1;
     health.filesSeen += 1;
-    if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0
+    if (!info.isFile() || info.isSymbolicLink()
         || (typeof process.getuid === "function" && info.uid !== process.getuid())) {
       health.status = "error";
       health.errorCode = "SOURCE_FILE_INVALID";
       continue;
     }
+    try { assertPrivateFiles([{ path: filePath }], "SOURCE_FILE_INVALID"); }
+    catch { health.status = "error"; health.errorCode = "SOURCE_FILE_INVALID"; continue; }
     if (budget.remainingBytes <= 0 || budget.remainingLines <= 0) {
       if (health.status !== "error") health.status = "partial";
       health.errorCode ??= "RUN_BUDGET_REACHED";

@@ -1,4 +1,5 @@
-import { isAbsolute, normalize, sep } from 'node:path'
+import { posix, win32 } from 'node:path'
+const { isAbsolute, normalize, sep } = posix
 import { AgentHostError } from './errors.mjs'
 
 export const DEVELOPER_KIT_INTEGRATION_SCHEMA = 'openadam.agent-host-developer-kit-integration.v0.1'
@@ -28,7 +29,7 @@ export function developerKitRelativePath(value, label) {
   string(value, label)
   if (value.includes('\\')) fail(`${label} cannot contain backslashes`)
   const result = normalize(value)
-  if (isAbsolute(result) || result === '.' || result === '..' || result.startsWith(`..${sep}`)) fail(`${label} must be a contained relative path`)
+  if ((isAbsolute(result) || win32.isAbsolute(result)) || result === '.' || result === '..' || result.startsWith(`..${sep}`)) fail(`${label} must be a contained relative path`)
   return result
 }
 

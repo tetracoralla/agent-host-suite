@@ -1,7 +1,8 @@
+import { windowsAccessList, requirePrivateWindowsResults } from './windows-private-access.mjs'
 import { createHash } from 'node:crypto'
-import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, symlink } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { HostError } from './errors.mjs'
 
 const COPY_BUFFER_BYTES = 64 * 1024
@@ -130,14 +131,14 @@ function launchFields(binding) {
     : { command: binding.adapterCommand, args: binding.adapterArgs, cwd: binding.adapterCwd }
 }
 
-async function mirrorSparseTree(sourceRoot, destinationRoot, boundFiles, materializedDirectories) {
+async function mirrorSparseTree(sourceRoot, destinationRoot, boundFiles, materializedDirectories, providerRoot) {
   const mirrorDirectory = async (directoryPath) => {
     const sourceDirectory = resolve(sourceRoot, directoryPath)
     const destinationDirectory = resolve(destinationRoot, directoryPath)
     const entries = await readdir(sourceDirectory, { withFileTypes: true })
     const seen = new Set()
     for (const entry of entries) {
-      const childPath = directoryPath === '' ? entry.name : `${directoryPath}/${entry.name}`
+      const childPath = join(directoryPath, entry.name)
       seen.add(childPath)
       const sourcePath = resolve(sourceDirectory, entry.name)
       const destinationPath = resolve(destinationDirectory, entry.name)
@@ -158,7 +159,15 @@ async function mirrorSparseTree(sourceRoot, destinationRoot, boundFiles, materia
           declaration.executable,
         )
       } else {
-        await symlink(sourcePath, destinationPath, entry.isDirectory() ? 'dir' : 'file')
+        if (process.platform !== 'win32') {
+          await symlink(sourcePath, destinationPath, entry.isDirectory() ? 'dir' : 'file')
+        } else if (entry.isDirectory()) {
+          // Junctions need no Developer Mode or symlink privilege.
+          await symlink(sourcePath, destinationPath, 'junction')
+        } else if (sourcePath.startsWith(`${providerRoot}${sep}`) || basename(sourcePath) === 'package.json') {
+          // Copy adjacent provider files; never copy unrelated drive-root files.
+          await copyFile(sourcePath, destinationPath)
+        }
       }
     }
     for (const childPath of materializedDirectories) {
@@ -195,31 +204,39 @@ export async function createLaunchSnapshot(binding) {
   }
 
   try {
-    await chmod(temporaryRoot, 0o700)
+    if (process.platform === 'win32') requirePrivateWindowsResults([await windowsAccessList(temporaryRoot, true)])
+    else await chmod(temporaryRoot, 0o700)
     await mkdir(filesystemRoot, { mode: 0o700 })
     const fields = launchFields(binding)
-    const boundFiles = new Map()
-    const providerRootPath = relative(resolve('/'), binding.rootPath)
+    const volumes = new Map()
+    const coordinates = (path) => {
+      const root = parse(path).root
+      if (!volumes.has(root)) volumes.set(root, { root, name: `volume-${volumes.size}`, files: new Map() })
+      return { volume: volumes.get(root), path: relative(root, path) }
+    }
     for (const identity of binding.launchIdentityFiles) {
-      const stagedIdentityPath = providerRootPath === '' ? identity.path : `${providerRootPath}/${identity.path}`
-      addBoundFile(boundFiles, stagedIdentityPath, {
-        sourcePath: identity.sourcePath,
-        digest: identity.digest,
-        executable: false,
+      const location = coordinates(resolve(binding.rootPath, identity.path))
+      addBoundFile(location.volume.files, location.path, {
+        sourcePath: identity.sourcePath, digest: identity.digest, executable: false,
       })
     }
-
-    const commandPath = relative(resolve('/'), fields.command)
-    addBoundFile(boundFiles, commandPath, {
-      sourcePath: fields.command,
-      digest: binding.commandDigest,
-      executable: true,
+    const commandLocation = coordinates(fields.command)
+    addBoundFile(commandLocation.volume.files, commandLocation.path, {
+      sourcePath: fields.command, digest: binding.commandDigest, executable: true,
     })
-    const materializedDirectories = new Set()
-    for (const path of boundFiles.keys()) addDirectoryAndParents(materializedDirectories, dirname(path) === '.' ? '' : dirname(path))
-    await mirrorSparseTree(resolve('/'), filesystemRoot, boundFiles, materializedDirectories)
+    const boundFiles = new Map()
+    for (const volume of volumes.values()) {
+      const destination = resolve(filesystemRoot, volume.name)
+      await mkdir(destination, { mode: 0o700 })
+      const directories = new Set()
+      for (const path of volume.files.keys()) {
+        addDirectoryAndParents(directories, dirname(path) === '.' ? '' : dirname(path))
+        boundFiles.set(join(volume.name, path), volume.files.get(path))
+      }
+      await mirrorSparseTree(volume.root, destination, volume.files, directories, binding.rootPath)
+    }
+    const command = resolve(filesystemRoot, commandLocation.volume.name, commandLocation.path)
 
-    const command = resolve(filesystemRoot, commandPath)
     const stagedBySourcePath = new Map()
     const stagedDirectories = new Map()
     for (const [path, declaration] of boundFiles) {
@@ -237,7 +254,7 @@ export async function createLaunchSnapshot(binding) {
     }
     const args = stagedArguments(fields.args, binding.argumentReferences ?? [], stagedBySourcePath)
     const commandInfo = await lstat(command)
-    if (!commandInfo.isFile() || commandInfo.nlink !== 1 || (commandInfo.mode & 0o111) === 0) {
+    if (!commandInfo.isFile() || commandInfo.nlink !== 1 || (process.platform !== 'win32' && (commandInfo.mode & 0o111) === 0)) {
       throw new HostError('HOST_PROVIDER_REPLACED', 'Frozen provider command is not one private executable file', {
         retryable: true,
       })

@@ -1,10 +1,17 @@
+import { requirePrivateWindowsResults, windowsAccessListsSync } from './windows-private-access.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { HostError } from './errors.mjs'
 
+function privateWindows(requests) {
+  try { requirePrivateWindowsResults(windowsAccessListsSync(requests)) }
+  catch { throw new HostError('HOST_OBSERVATION_LOG_INVALID', 'Observation log access list is not private') }
+}
+
 const DEFAULT_MAX_LOG_BYTES = 256 * 1024 * 1024
 
 function assertOwnerDirectory(directory) {
+  const existed = fs.existsSync(directory)
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
   const info = fs.lstatSync(directory)
   if (!info.isDirectory() || info.isSymbolicLink()) {
@@ -13,7 +20,9 @@ function assertOwnerDirectory(directory) {
   if (typeof process.getuid === 'function' && info.uid !== process.getuid()) {
     throw new HostError('HOST_OBSERVATION_LOG_INVALID', 'Observation log parent must be owned by the current user')
   }
-  if ((info.mode & 0o077) !== 0) {
+  if (process.platform === 'win32') {
+    privateWindows([{ path: directory, ensure: !existed }])
+  } else if ((info.mode & 0o077) !== 0) {
     throw new HostError('HOST_OBSERVATION_LOG_INVALID', 'Observation log parent must be accessible only to its owner')
   }
 }
@@ -37,7 +46,8 @@ export class JsonlObservationSink {
       if (typeof process.getuid === 'function' && info.uid !== process.getuid()) {
         throw new HostError('HOST_OBSERVATION_LOG_INVALID', 'Observation log must be owned by the current user')
       }
-      fs.chmodSync(this.filePath, 0o600)
+      if (process.platform === 'win32') privateWindows([{ path: this.filePath, ensure: true }])
+      else fs.chmodSync(this.filePath, 0o600)
     }
   }
 
@@ -53,6 +63,7 @@ export class JsonlObservationSink {
     try {
       const info = fs.fstatSync(descriptor)
       if (!info.isFile()) throw new HostError('HOST_OBSERVATION_LOG_INVALID', 'Observation log target is not a regular file')
+      if (process.platform === 'win32') privateWindows([{ path: this.filePath, ensure: true }])
       fs.writeFileSync(descriptor, line, { encoding: 'utf8' })
     } finally {
       fs.closeSync(descriptor)

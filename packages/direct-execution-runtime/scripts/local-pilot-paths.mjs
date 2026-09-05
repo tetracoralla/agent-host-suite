@@ -242,7 +242,7 @@ export async function resolveProviderArtifacts(requirements, cwd, resolver) {
     if (
       relativeExecutable === ''
       || relativeExecutable.startsWith(`..${sep}`)
-      || relativeExecutable !== requirement.executableRelativePath
+      || relativeExecutable.split(sep).join('/') !== requirement.executableRelativePath
     ) {
       throw new Error(
         `${requirement.command} is not the declared packaged runtime executable`,

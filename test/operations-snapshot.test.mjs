@@ -222,7 +222,7 @@ test('operations snapshot prefers current Observer snapshots over stale Host cac
   const calls = []
   const runner = async (command, args) => {
     calls.push([command, args])
-    if (command === '/bin/ps') return { status: 0, stdout: '', stderr: '' }
+    if (command === '/bin/ps' || command === 'powershell.exe') return { status: 0, stdout: '', stderr: '' }
     if ((command === '/bin/launchctl' || command === 'schtasks.exe')) return { status: 0, stdout: '', stderr: '' }
     if (args.includes('status')) return { status: 0, stdout: JSON.stringify(status), stderr: '' }
     if (args.includes('report')) return { status: 0, stdout: JSON.stringify(report), stderr: '' }
@@ -265,7 +265,7 @@ test('operations snapshot accepts one shared current Observer read without launc
     observability: { enabled: true, consentedAt: now },
   })
   const runner = async (command) => {
-    if (command === '/bin/ps') return { status: 0, stdout: '', stderr: '' }
+    if (command === '/bin/ps' || command === 'powershell.exe') return { status: 0, stdout: '', stderr: '' }
     throw new Error('the injected Observer result must prevent a second Observer read')
   }
   const snapshot = await operationsSnapshot({ stateRoot: root }, {

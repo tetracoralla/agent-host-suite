@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -96,13 +97,13 @@ test('Capability workspace authority is canonicalized and bound into execution i
 
 test('legacy Provider Manifests are rejected because they do not bind Profile semantics', async () => {
   await assert.rejects(() => prepareRuntimeConfig(fakeConfig({
-    manifestPath: new URL('./fixtures/fake-capability/provider-v0.2.json', import.meta.url).pathname,
+    manifestPath: fileURLToPath(new URL('./fixtures/fake-capability/provider-v0.2.json', import.meta.url)),
   })), (error) => error.code === 'HOST_BINDING_INVALID')
 })
 
 test('Capability semantic drift is rejected even when operation schemas are unchanged', async () => {
   await assert.rejects(() => prepareRuntimeConfig(fakeConfig({
-    profilePath: new URL('./fixtures/fake-capability/capability-profile-semantic-drift.json', import.meta.url).pathname,
+    profilePath: fileURLToPath(new URL('./fixtures/fake-capability/capability-profile-semantic-drift.json', import.meta.url)),
   })), (error) => error.code === 'HOST_SCHEMA_DRIFT' && /Profile semantics/.test(error.message))
 })
 

@@ -1,3 +1,4 @@
+import { assertPrivateFiles } from "./private-files.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -247,6 +248,7 @@ export function writeTraceOutputExclusive(filePath, contents) {
   let destinationCreated = false;
   try {
     descriptor = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
+    assertPrivateFiles([{ path: temporary, ensure: true }], "TRACE_OUTPUT_PERMISSIONS");
     fs.writeFileSync(descriptor, contents, "utf8");
     fs.fsyncSync(descriptor);
     fs.closeSync(descriptor);
@@ -262,7 +264,8 @@ export function writeTraceOutputExclusive(filePath, contents) {
     if (!destinationStat.isFile() || destinationStat.isSymbolicLink()) {
       throw new ObserverError("TRACE_OUTPUT_INVALID", "Trace analysis output must be a regular non-symlinked file");
     }
-    const destinationDescriptor = fs.openSync(destination, fs.constants.O_RDONLY);
+    assertPrivateFiles([{ path: destination, ensure: true }], "TRACE_OUTPUT_PERMISSIONS");
+    const destinationDescriptor = fs.openSync(destination, fs.constants.O_RDWR);
     try {
       fs.fsyncSync(destinationDescriptor);
     } finally {

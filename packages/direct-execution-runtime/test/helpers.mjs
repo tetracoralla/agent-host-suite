@@ -1,9 +1,18 @@
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
 export const fakeRoot = resolve(repositoryRoot, 'test/fixtures/fake-capability')
-export const fakeMcpRoot = resolve(repositoryRoot, 'test/fixtures/fake-mcp')
+const originalMcpRoot = resolve(repositoryRoot, 'test/fixtures/fake-mcp')
+let mcpRoot = originalMcpRoot
+if (process.platform === 'win32') {
+  mkdirSync(resolve(repositoryRoot, '.verify'), { recursive: true })
+  mcpRoot = mkdtempSync(resolve(repositoryRoot, '.verify/windows-mcp-'))
+  cpSync(originalMcpRoot, mcpRoot, { recursive: true })
+  process.once('exit', () => rmSync(mcpRoot, { recursive: true, force: true }))
+}
+export const fakeMcpRoot = mcpRoot
 
 export function fakeConfig(overrides = {}) {
   const rootPath = overrides.rootPath ?? fakeRoot
@@ -67,13 +76,15 @@ export function fakeMcpConfig(overrides = {}) {
   const config = fakeConfig(overrides)
   const rootPath = overrides.rootPath ?? fakeMcpRoot
   const serverPath = overrides.command ?? resolve(rootPath, 'server.mjs')
+  const executable = resolve(rootPath, 'node.exe')
+  if (process.platform === 'win32' && !existsSync(executable)) copyFileSync(process.execPath, executable)
   config.providers = [{
     providerId: overrides.providerId ?? 'test.fake-mcp',
     transport: 'mcp-stdio',
     lifecycle: overrides.lifecycle ?? 'persistent',
     rootPath,
-    command: serverPath,
-    args: overrides.args ?? [],
+    command: process.platform === 'win32' ? executable : serverPath,
+    args: process.platform === 'win32' ? [serverPath, ...(overrides.args ?? [])] : overrides.args ?? [],
     cwd: overrides.cwd ?? rootPath,
     identityFiles: overrides.identityFiles ?? [serverPath],
     expectedServer: { name: 'direct-execution-fake-mcp', version: '0.1.0' },

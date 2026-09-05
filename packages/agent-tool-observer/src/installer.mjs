@@ -1,3 +1,4 @@
+import { assertPrivateFiles } from "./private-files.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -49,9 +50,7 @@ function assertDirectory(directory, create = false) {
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new ObserverError("INSTALL_DIRECTORY_INVALID", "Installation directory must be a real directory");
   }
-  if (os.platform() !== "win32" && (stat.mode & 0o077) !== 0) {
-    throw new ObserverError("INSTALL_DIRECTORY_PERMISSIONS", "Installation directory must be accessible only to its owner");
-  }
+  assertPrivateFiles([{ path: directory, ensure: create && os.platform() === "win32" }], "INSTALL_DIRECTORY_PERMISSIONS");
 }
 
 function runtimeSourceRoot() {
@@ -69,7 +68,7 @@ function runtimeInventory(root = runtimeSourceRoot()) {
         throw new ObserverError("OBSERVER_RUNTIME_INVALID", "Observer runtime source must not contain symlinks");
       }
       if (entry.isDirectory()) walk(absolute, accepts);
-      else if (entry.isFile() && accepts(entry.name)) files.push(path.relative(root, absolute));
+      else if (entry.isFile() && accepts(entry.name)) files.push(path.relative(root, absolute).split(path.sep).join("/"));
     }
   };
   walk(path.join(root, "src"), (name) => name.endsWith(".mjs"));
@@ -171,7 +170,7 @@ function ensureOwnerLogFile(filePath) {
     if (!stat.isFile() || stat.isSymbolicLink()) {
       throw new ObserverError("LOG_TARGET_INVALID", "LaunchAgent log target must be a regular non-symlinked file");
     }
-    fs.chmodSync(filePath, 0o600);
+    assertPrivateFiles([{ path: filePath, ensure: true }], "LOG_TARGET_INVALID");
     return;
   }
   const descriptor = fs.openSync(
@@ -180,6 +179,7 @@ function ensureOwnerLogFile(filePath) {
     0o600
   );
   fs.closeSync(descriptor);
+  assertPrivateFiles([{ path: filePath, ensure: true }], "LOG_TARGET_INVALID");
 }
 
 export function prepareOwnerLogFiles(paths) {

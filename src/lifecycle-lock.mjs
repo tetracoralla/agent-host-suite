@@ -133,7 +133,7 @@ async function publishNewRootLease(root, owner) {
     return await realpath(root)
   } catch (error) {
     await rm(candidate, { recursive: true, force: true }).catch(() => {})
-    if (['EEXIST', 'ENOTEMPTY'].includes(error?.code)) return null
+    if (['EEXIST', 'ENOTEMPTY', 'EACCES', 'EPERM'].includes(error?.code)) return null
     throw error
   }
 }
@@ -414,7 +414,7 @@ async function acquireLifecycleLease(paths, operation, dependencies) {
       leaseLocations.set(lease, { root: existingRoot, lockPath })
       return lease
     } catch (error) {
-      if (!['EEXIST', 'ENOTEMPTY', 'EACCES'].includes(error?.code)) throw error
+      if (!['EEXIST', 'ENOTEMPTY', 'EACCES', 'EPERM'].includes(error?.code)) throw error
     }
 
     const retained = await readJson(join(lockPath, OWNER_FILE)).catch((error) => {

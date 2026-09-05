@@ -1,3 +1,4 @@
+import { assertPrivateFiles } from "./private-files.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { ObserverError } from "./errors.mjs";
@@ -28,6 +29,7 @@ export function writeSnapshot(config, name, value) {
   const temporary = `${target}.tmp-${process.pid}`;
   const descriptor = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
   try {
+    assertPrivateFiles([{ path: temporary, ensure: true }], "SNAPSHOT_INVALID");
     fs.writeFileSync(descriptor, serialized, "utf8");
     fs.fsyncSync(descriptor);
   } finally {
@@ -41,9 +43,10 @@ export function readSnapshot(config, name) {
   const target = snapshotPath(config, name);
   validateExistingTarget(target);
   const stat = fs.lstatSync(target);
-  if (stat.size > MAX_SNAPSHOT_BYTES || (stat.mode & 0o077) !== 0) {
+  if (stat.size > MAX_SNAPSHOT_BYTES) {
     throw new ObserverError("SNAPSHOT_INVALID", "Observer snapshot is oversized or not owner-only");
   }
+  assertPrivateFiles([{ path: target }], "SNAPSHOT_INVALID");
   try {
     return JSON.parse(fs.readFileSync(target, "utf8"));
   } catch {

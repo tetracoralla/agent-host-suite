@@ -124,7 +124,7 @@ if (!ajv.compile(resolutionRequestSchema)(exampleResolutionRequest)) {
 ajv.compile(resolutionResultSchema)
 
 const cli = resolve(root, 'src/cli.mjs')
-if (((await stat(cli)).mode & 0o111) === 0) throw new Error('CLI entry point is not executable')
+if (process.platform !== 'win32' && ((await stat(cli)).mode & 0o111) === 0) throw new Error('CLI entry point is not executable')
 const evalsDriver = resolve(root, 'src/evals-driver.mjs')
-if (((await stat(evalsDriver)).mode & 0o111) === 0) throw new Error('evaluator driver entry point is not executable')
+if (process.platform !== 'win32' && ((await stat(evalsDriver)).mode & 0o111) === 0) throw new Error('evaluator driver entry point is not executable')
 process.stdout.write(`runtime package invariants passed for ${sourceFiles.length} executable modules\n`)

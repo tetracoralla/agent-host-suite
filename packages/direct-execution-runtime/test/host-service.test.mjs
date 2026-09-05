@@ -1,3 +1,4 @@
+import { testSocketPath, assertEndpointAbsent } from './ipc-helpers.mjs'
 import { access, chmod, mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises'
 import { connect, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -15,7 +16,7 @@ import { fakeCall, fakeConfig, fakeMcpConfig, workOrder } from './helpers.mjs'
 async function withService(task, config = fakeConfig(), serviceOptions = {}) {
   const directory = await mkdtemp(resolve(tmpdir(), 'direct-host-service-'))
   const runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(config))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const service = new DirectHostService(runtime, { socketPath, ...serviceOptions })
   try {
     const ready = await service.start()
@@ -49,8 +50,7 @@ test('persistent host service reuses one provider session across separate client
   await withService(async ({ runtime, service, socketPath, ready }) => {
     const validateReady = createValidator().compile(await loadBundledSchema('host-service-observation.schema.json'))
     assertSchema(validateReady, ready, 'TEST_READY_INVALID', 'host readiness')
-    const mode = (await stat(socketPath)).mode & 0o777
-    assert.equal(mode, 0o600)
+    if (process.platform !== 'win32') assert.equal((await stat(socketPath)).mode & 0o777, 0o600)
     const first = await requestDirectHost({
       socketPath,
       action: 'run',
@@ -89,7 +89,7 @@ test('persistent host service reuses one provider session across separate client
     await duplicate.close()
 
     await service.close()
-    await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
+    await assertEndpointAbsent(socketPath)
     assert.equal(runtime.sessionSnapshot()[0].present, false)
   })
 })
@@ -120,7 +120,7 @@ test('an explicitly prepared service finishes persistent provider startup before
 test('concurrent start callers share one startup and receive readiness only after the Socket is live', async (t) => {
   const directory = await mkdtemp(resolve(tmpdir(), 'dx-concurrent-start-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
@@ -141,7 +141,7 @@ test('concurrent start callers share one startup and receive readiness only afte
     const [firstReady, secondReady] = await Promise.all([first, second])
     assert.strictEqual(firstReady, secondReady)
     assert.equal(preparations, 1)
-    assert.equal((await stat(socketPath)).isSocket(), true)
+    if (process.platform !== 'win32') assert.equal((await stat(socketPath)).isSocket(), true)
     const response = await requestDirectHost({
       socketPath,
       action: 'run',
@@ -156,7 +156,7 @@ test('concurrent start callers share one startup and receive readiness only afte
 test('close is single-flight with startup and leaves no falsely ready Socket or Provider session', async (t) => {
   const directory = await mkdtemp(resolve(tmpdir(), 'dx-start-close-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
@@ -174,7 +174,7 @@ test('close is single-flight with startup and leaves no falsely ready Socket or 
   await assert.rejects(() => service.start(), (error) => error.code === 'HOST_SERVICE_CLOSING')
   await assert.rejects(starting, (error) => error.code === 'HOST_SERVICE_CLOSING')
   await closing
-  await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
+  await assertEndpointAbsent(socketPath)
   assert.equal(runtime.sessionSnapshot().every((provider) => provider.present === false), true)
 })
 
@@ -208,7 +208,7 @@ test('current and compatibility readiness schemas admit Windows named pipes but 
 test('a failed startup is terminal, leaves no residue, and a fresh service can retry the Socket', async (t) => {
   const directory = await mkdtemp(resolve(tmpdir(), 'dx-start-retry-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
@@ -224,7 +224,7 @@ test('a failed startup is terminal, leaves no residue, and a fresh service can r
   }
   const service = new DirectHostService(runtime, { socketPath })
   await assert.rejects(() => service.start(), (error) => error.code === 'HOST_TIMEOUT')
-  await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
+  await assertEndpointAbsent(socketPath)
   assert.equal(runtime.sessionSnapshot().every((provider) => provider.present === false), true)
   await assert.rejects(() => service.start(), (error) => error.code === 'HOST_SERVICE_CLOSED')
 
@@ -233,7 +233,7 @@ test('a failed startup is terminal, leaves no residue, and a fresh service can r
   try {
     const ready = await retry.start()
     assert.equal(ready.status, 'ready')
-    assert.equal((await stat(socketPath)).isSocket(), true)
+    if (process.platform !== 'win32') assert.equal((await stat(socketPath)).isSocket(), true)
   } finally {
     await retry.close()
   }
@@ -241,7 +241,7 @@ test('a failed startup is terminal, leaves no residue, and a fresh service can r
 
 test('service preparation shares one total deadline and never publishes a partially prepared Socket', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'dx-prep-'))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const config = fakeMcpConfig({ args: ['--startup-delay=3000'] })
   const second = structuredClone(config.providers[0])
   second.providerId = 'test.fake-mcp-second'
@@ -259,7 +259,7 @@ test('service preparation shares one total deadline and never publishes a partia
     await waitFor(() => runtime.sessionSnapshot()[0].pid !== null, 4500)
     const preparedPid = runtime.sessionSnapshot()[0].pid
     await assert.rejects(starting, (error) => error.code === 'HOST_TIMEOUT')
-    await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
+    await assertEndpointAbsent(socketPath)
     assert.equal(runtime.sessionSnapshot().every((provider) => provider.present === false), true)
     assert.throws(() => process.kill(preparedPid, 0), (error) => error.code === 'ESRCH')
   } finally {
@@ -270,7 +270,7 @@ test('service preparation shares one total deadline and never publishes a partia
 
 test('a pre-warmed runtime produces a valid warm readiness observation', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'dx-warm-ready-'))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
@@ -443,13 +443,13 @@ test('host shutdown aborts active work and reaps the owned provider process', as
       () => process.kill(pid, 0),
       (error) => error.code === 'ESRCH',
     )
-    await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
+    await assertEndpointAbsent(socketPath)
   })
 })
 
 test('host client resolves the first complete response line and rejects a second response in the same frame', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'direct-host-client-framing-'))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const server = createServer((socket) => {
     const chunks = []
     socket.on('data', (chunk) => {
@@ -484,7 +484,7 @@ test('host client resolves the first complete response line and rejects a second
 
 test('host client accepts a service that responds before any client EOF (installed 0.1.x framing)', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'direct-host-client-legacy-'))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const server = createServer((socket) => {
     const chunks = []
     socket.on('data', (chunk) => {
@@ -544,12 +544,12 @@ test('host service answers a client that keeps its write side open', async () =>
   })
 })
 
-test('host service refuses a socket directory accessible by other users', async () => {
+test('host service refuses a socket directory accessible by other users', { skip: process.platform === 'win32' }, async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'direct-host-insecure-'))
   const runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(fakeConfig()))
   try {
     await chmod(directory, 0o755)
-    const service = new DirectHostService(runtime, { socketPath: resolve(directory, 'runtime.sock') })
+    const service = new DirectHostService(runtime, { socketPath: testSocketPath(directory) })
     await assert.rejects(() => service.start(), (error) => error.code === 'HOST_CONFIG_INVALID')
     await service.close()
   } finally {
@@ -558,7 +558,7 @@ test('host service refuses a socket directory accessible by other users', async 
   }
 })
 
-test('host service rejects an overlong Unix Socket path before listening can truncate it', async () => {
+test('host service rejects an overlong Unix Socket path before listening can truncate it', { skip: process.platform === 'win32' }, async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'direct-host-long-socket-'))
   const runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(fakeConfig()))
   try {
@@ -591,7 +591,7 @@ test('host service rejects a socket path that exceeds the limit only after paren
       () => service.start(),
       (error) => error.code === 'HOST_CONFIG_INVALID' && /Canonical host socket path/.test(error.message),
     )
-    await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
+    await assertEndpointAbsent(socketPath)
     await assert.rejects(() => access(canonicalSocketPath), (error) => error.code === 'ENOENT')
   } finally {
     await service.close()

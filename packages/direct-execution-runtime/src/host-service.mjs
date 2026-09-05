@@ -18,6 +18,7 @@ function windowsNamedPipe(path) {
 
 async function secureSocketPath(path) {
   if (windowsNamedPipe(path)) return path
+  if (platform() === 'win32') throw new HostError('HOST_CONFIG_INVALID', 'Windows Host service requires an explicit named pipe')
   if (!isAbsolute(path)) throw new HostError('HOST_CONFIG_INVALID', 'Host socket path must be absolute')
   if (Buffer.byteLength(path) > UNIX_SOCKET_PATH_MAX_BYTES) {
     throw new HostError('HOST_CONFIG_INVALID', `Host socket path exceeds the ${UNIX_SOCKET_PATH_MAX_BYTES}-byte platform limit`)

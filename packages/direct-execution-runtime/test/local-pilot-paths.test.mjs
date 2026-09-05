@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { chmod, cp, lstat, mkdtemp, mkdir, open, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
+import { delimiter, resolve } from 'node:path'
 import { resolveProviderExecutable } from '../src/config.mjs'
 import { digestFile } from '../src/json.mjs'
 import { fakeRoot } from './helpers.mjs'
@@ -129,8 +129,8 @@ test('local pilot uses an explicit absolute Math Anchor checkout or the legacy s
   const workspace = resolve('/tmp', 'openadam-workspace')
   assert.equal(resolveMathAnchorRoot(workspace, {}), resolve(workspace, 'calculator'))
   assert.equal(
-    resolveMathAnchorRoot(workspace, { OPENADAM_MATH_ANCHOR_ROOT: '/tmp/moved-math-anchor' }),
-    '/tmp/moved-math-anchor',
+    resolveMathAnchorRoot(workspace, { OPENADAM_MATH_ANCHOR_ROOT: resolve('/tmp/moved-math-anchor') }),
+    resolve('/tmp/moved-math-anchor'),
   )
   assert.throws(
     () => resolveMathAnchorRoot(workspace, { OPENADAM_MATH_ANCHOR_ROOT: 'relative/path' }),
@@ -142,11 +142,11 @@ test('local pilot workspace accepts only an explicit absolute override', () => {
   const runtimeRoot = resolve('/tmp', 'agent-host-suite/packages/direct-execution-runtime')
   assert.equal(
     resolvePilotWorkspace(runtimeRoot, {}),
-    '/tmp',
+    resolve('/tmp'),
   )
   assert.equal(
-    resolvePilotWorkspace(runtimeRoot, { OPENADAM_DIRECT_PILOT_WORKSPACE_ROOT: '/tmp/tools-dev' }),
-    '/tmp/tools-dev',
+    resolvePilotWorkspace(runtimeRoot, { OPENADAM_DIRECT_PILOT_WORKSPACE_ROOT: resolve('/tmp/tools-dev') }),
+    resolve('/tmp/tools-dev'),
   )
   assert.throws(
     () => resolvePilotWorkspace(runtimeRoot, { OPENADAM_DIRECT_PILOT_WORKSPACE_ROOT: 'relative/path' }),
@@ -186,7 +186,7 @@ test('provider executable resolution validates every safe PATH entry before sele
     const executable = resolve(bin, 'provider-tool')
     await writeFile(executable, '#!/bin/sh\nexit 0\n')
     await chmod(executable, 0o700)
-    for (const unsafePath of [`${bin}:relative`, `${bin}:`]) {
+    for (const unsafePath of [`${bin}${delimiter}relative`, `${bin}${delimiter}`]) {
       process.env.PATH = unsafePath
       await assert.rejects(
         () => resolveProviderExecutable('provider-tool', root),
@@ -505,4 +505,10 @@ test('optional Procedure admission rejects a valid Host component whose Direct m
   } finally {
     await rm(componentRoot, { recursive: true, force: true })
   }
+})
+
+
+test('native Node executable resolves through the complete safe PATH', async () => {
+  const executable = await resolveProviderExecutable('node')
+  assert.equal(await realpath(executable), await realpath(process.execPath))
 })

@@ -914,7 +914,7 @@ test('service replacement retires its recovery bundle when descriptor mutation n
       { launcherPath, socketPath: '\\\\.\\pipe\\agent-host-old-pre-mutation', taskName: '\\openAdam\\AgentHostRuntime', created: true },
       { platformName: 'win32', existingEndpointReady: false, recoveryRoot, recoveryLifecycle: recoveryLifecycle(directory) },
     ),
-    (error) => error.code === 'ENAMETOOLONG',
+    (error) => error.code === 'ENAMETOOLONG' || (process.platform === 'win32' && error.code === 'ENOENT'),
   )
   assert.deepEqual(await readFile(launcherPath), priorContents)
   assert.deepEqual(await readdir(recoveryRoot), [])

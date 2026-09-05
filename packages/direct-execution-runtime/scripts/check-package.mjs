@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { testSocketPath, assertEndpointAbsent } from '../test/ipc-helpers.mjs'
 import { execFile, spawn } from 'node:child_process'
 import { lstat, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -117,7 +118,7 @@ function packagedResolutionRequest() {
 }
 
 try {
-  const packed = await execFileAsync('npm', ['pack', '--json', '--pack-destination', directory], {
+  const packed = await execFileAsync(process.execPath, [process.env.npm_execpath,'pack', '--json', '--pack-destination', directory], {
     cwd: root,
     maxBuffer: 4 * 1024 * 1024,
   })
@@ -167,7 +168,7 @@ try {
 
   const consumer = resolve(directory, 'consumer')
   const tarball = resolve(directory, metadata.filename)
-  await execFileAsync('npm', [
+  await execFileAsync(process.execPath, [process.env.npm_execpath,
     'install', '--ignore-scripts', '--no-audit', '--no-fund', '--prefix', consumer, tarball,
   ], { cwd: directory, maxBuffer: 4 * 1024 * 1024 })
   await execFileAsync(process.execPath, [
@@ -181,7 +182,7 @@ try {
   const firstOrderPath = resolve(directory, 'work-order-first.json')
   const secondOrderPath = resolve(directory, 'work-order-second.json')
   const resolutionPath = resolve(directory, 'resolution-request.json')
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   await Promise.all([
     writeFile(configPath, `${JSON.stringify(packagedProviderConfig(fakeRoot))}\n`),
     writeFile(firstOrderPath, `${JSON.stringify(packagedWorkOrder('packaged-first'))}\n`),
@@ -228,7 +229,8 @@ try {
     if (exited.error !== undefined) throw exited.error
     if (exited.code !== 0) throw new Error(`packaged service did not stop cleanly: ${exited.code ?? exited.signal}`)
   }
-  const socketAfterClose = await lstat(socketPath).catch((error) => {
+  await assertEndpointAbsent(socketPath)
+  const socketAfterClose = process.platform === 'win32' ? null : await lstat(socketPath).catch((error) => {
     if (error?.code === 'ENOENT') return undefined
     throw error
   })

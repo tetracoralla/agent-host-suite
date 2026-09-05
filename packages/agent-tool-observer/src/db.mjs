@@ -1,3 +1,4 @@
+import { assertPrivateFiles } from "./private-files.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -405,10 +406,7 @@ function ensureOwnerDirectory(directory) {
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new ObserverError("STATE_DIR_INVALID", "Observer state directory must be a real directory");
   }
-  if (!existed) fs.chmodSync(directory, 0o700);
-  if ((stat.mode & 0o077) !== 0) {
-    throw new ObserverError("STATE_DIR_PERMISSIONS", "Observer state directory must not be accessible by group or other users");
-  }
+  assertPrivateFiles([{ path: directory, ensure: !existed }], "STATE_DIR_PERMISSIONS");
 }
 
 function reclassifyStoredTools(database) {
@@ -482,6 +480,8 @@ export function openStateDatabase(config) {
       throw new ObserverError("STATE_FILE_INVALID", "Observer state files must be regular non-symlinked files");
     }
   }
+  assertPrivateFiles([config.databasePath, `${config.databasePath}-wal`, `${config.databasePath}-shm`]
+    .filter((path) => fs.existsSync(path)).map((path) => ({ path })));
   const database = new DatabaseSync(config.databasePath);
   database.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;");
   database.exec(SCHEMA_SQL);
@@ -553,21 +553,11 @@ export function openStateDatabase(config) {
     throw new ObserverError("SCHEMA_VERSION_UNSUPPORTED", "Observer database schema version is not supported");
   }
   ensureAdditiveToolColumns(database);
-  if (!databaseExisted) fs.chmodSync(config.databasePath, 0o600);
-  const databaseMode = fs.lstatSync(config.databasePath).mode;
-  if ((databaseMode & 0o077) !== 0) {
-    database.close();
-    throw new ObserverError("STATE_FILE_PERMISSIONS", "Observer database must not be accessible by group or other users");
-  }
-  for (const suffix of ["-wal", "-shm"]) {
-    const candidate = `${config.databasePath}${suffix}`;
-    if (!fs.existsSync(candidate)) continue;
-    if (!databaseExisted) fs.chmodSync(candidate, 0o600);
-    if ((fs.lstatSync(candidate).mode & 0o077) !== 0) {
-      database.close();
-      throw new ObserverError("STATE_FILE_PERMISSIONS", "Observer database sidecars must not be accessible by group or other users");
-    }
-  }
+  try {
+    assertPrivateFiles([config.databasePath, `${config.databasePath}-wal`, `${config.databasePath}-shm`]
+      .filter((path) => fs.existsSync(path)).map((path) => ({ path, ensure: !databaseExisted })));
+  } catch (error) { database.close(); throw error; }
+
   return database;
 }
 
@@ -576,9 +566,10 @@ export function openReadOnlyStateDatabase(config) {
     throw new ObserverError("STATE_DATABASE_MISSING", "Observer database does not exist yet");
   }
   const stat = fs.lstatSync(config.databasePath);
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
+  if (!stat.isFile() || stat.isSymbolicLink()) {
     throw new ObserverError("STATE_FILE_INVALID", "Observer database must be an owner-only regular non-symlinked file");
   }
+  assertPrivateFiles([{ path: config.databasePath }], "STATE_FILE_INVALID");
   const database = new DatabaseSync(config.databasePath, { readOnly: true });
   database.exec("PRAGMA query_only = ON; PRAGMA busy_timeout = 2000;");
   return database;

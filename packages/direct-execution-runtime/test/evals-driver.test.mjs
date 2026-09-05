@@ -1,3 +1,4 @@
+import { testSocketPath, assertEndpointAbsent } from './ipc-helpers.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { chmod, mkdtemp, rm } from 'node:fs/promises'
@@ -51,7 +52,7 @@ function request(overrides = {}) {
 test('evaluator driver pins identity and invokes a persistent host service', async () => {
   await chmod(driverPath, 0o755)
   const directory = await mkdtemp(resolve(tmpdir(), 'de-eval-'))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const prepared = await prepareRuntimeConfig(fakeConfig())
   const binding = prepared.providers.get('test.fake-capability')
   const runtime = new DirectExecutionRuntime(prepared)
@@ -107,7 +108,7 @@ test('evaluator driver pins identity and invokes a persistent host service', asy
 test('evaluator driver preserves an explicit projected MCP operation target', async () => {
   await chmod(driverPath, 0o755)
   const directory = await mkdtemp(resolve(tmpdir(), 'de-proj-'))
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const prepared = await prepareRuntimeConfig(fakeProjectedMcpConfig())
   const binding = prepared.providers.get('test.fake-mcp')
   const runtime = new DirectExecutionRuntime(prepared)

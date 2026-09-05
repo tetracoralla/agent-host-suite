@@ -331,3 +331,13 @@ compact ordinary MCP catalog.
 - dependency graphs, arbitrary workflows, or a new Procedure language;
 - side-effecting provider authorization;
 - UI, daemon auto-start, network service, npm publication, or deployment.
+
+
+Windows launch snapshots keep separate source-volume coordinates, secure the
+staging directory with a private NTFS access list, and copy the bound executable
+and identity bytes. Unbound directories use junctions; adjacent unbound provider
+files are copied because creating file symlinks would require Developer Mode.
+Unrelated files at a drive root are not copied. This does not add an execution
+sandbox or extend the declared identity set. Windows native command lookup
+recognizes `.exe` and `.com` on the validated PATH and never starts an implicit
+command shell for `.cmd` or `.bat` files.

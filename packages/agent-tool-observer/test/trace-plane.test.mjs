@@ -843,7 +843,7 @@ test("adapter plans separate automatic reads from explicit shell configuration",
 
     const claude = buildAdapterPlan(config, "openadam.claude-code-hooks", { homeDirectory: root, nodePath, platformName: "darwin", environment: {} });
     assert.equal(Object.values(claude.configuration.fragment.hooks).flat().every((item) => item.hooks[0].async === true), true);
-    assert.equal(JSON.stringify(claude).includes(root), true);
+    assert.equal(JSON.stringify(claude).includes(JSON.stringify(root).slice(1, -1)), true);
 
     const copilot = buildAdapterPlan(config, "openadam.github-copilot-cli-hooks", { homeDirectory: root, nodePath, environment: {} });
     assert.equal(copilot.configuration.kind, "write-owned-json");

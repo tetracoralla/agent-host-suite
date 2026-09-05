@@ -286,14 +286,15 @@ async function resolveExecutable(command, cwd) {
     }
     return canonical
   }
-  if (command.includes('/')) {
+  if (command.includes('/') || command.includes('\\')) {
     const candidate = isAbsolute(command) ? command : resolve(cwd, command)
     return await requireExecutableFile(candidate).catch((error) => {
       if (error instanceof HostError) throw error
       throw new HostError('HOST_PROVIDER_UNAVAILABLE', `adapter executable is unavailable: ${command}`, { cause: error })
     })
   }
-  const safePath = getDefaultEnvironment().PATH ?? process.env.PATH ?? ''
+  const environment = getDefaultEnvironment()
+  const safePath = Object.entries(environment).find(([key]) => key.toUpperCase() === 'PATH')?.[1] ?? process.env.PATH ?? ''
   const directories = safePath.split(delimiter)
   if (directories.some((directory) => directory.length === 0 || !isAbsolute(directory))) {
     throw new HostError(
@@ -302,11 +303,12 @@ async function resolveExecutable(command, cwd) {
     )
   }
   for (const directory of directories) {
-    const candidate = resolve(directory, command)
-    try {
-      return await requireExecutableFile(candidate)
-    } catch {
-      // Continue across the bounded PATH entries.
+    // Native process launch never executes .cmd/.bat via an implicit shell.
+    const names = process.platform === 'win32' && !/\.(?:exe|com)$/iu.test(command)
+      ? [command, `${command}.exe`, `${command}.com`] : [command]
+    for (const name of names) {
+      try { return await requireExecutableFile(resolve(directory, name)) }
+      catch { /* Continue across explicit safe PATH entries. */ }
     }
   }
   throw new HostError('HOST_PROVIDER_UNAVAILABLE', `adapter executable is unavailable on the safe PATH: ${command}`)

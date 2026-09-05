@@ -80,7 +80,10 @@ test('runtime files use a private socket path within the platform byte limit', a
   assert.match(files.configPath, /provider-config-[a-f0-9]{24}\.json$/u)
   assert.equal(JSON.parse(await readFile(files.configPath, 'utf8')).schemaVersion, 'openadam.direct-provider-config.v0.2')
   assert.equal(Buffer.byteLength(files.socketPath, 'utf8') <= 103, true)
-  assert.equal(files.socketPath, join(files.socketDirectory, 'direct-runtime.sock'))
+  if (process.platform === 'win32') {
+    assert.equal(files.socketDirectory, null)
+    assert.match(files.socketPath, /^\\\\\.\\pipe\\/u)
+  } else assert.equal(files.socketPath, join(files.socketDirectory, 'direct-runtime.sock'))
 })
 
 test('an explicit isolated socket directory is created and cleaned without using the user cache root', async (t) => {
@@ -94,6 +97,12 @@ test('an explicit isolated socket directory is created and cleaned without using
       'migratory-time': { version: '2.0.0', root: '/private/time', profilePath: '/private/time/profile.json', manifestPath: '/private/time/provider.json', adapterPath: '/private/time/adapter.mjs', inputSchemaPath: '/private/time/input.json', outputSchemaPath: '/private/time/output.json' },
     },
   }, { socketDirectory })
+  if (process.platform === 'win32') {
+    assert.equal(files.socketDirectory, null)
+    assert.equal((await cleanupRuntimeSocket(paths, files, { socketDirectory })).removed, false)
+    await assert.rejects(access(socketDirectory), (error) => error.code === 'ENOENT')
+    return
+  }
   assert.equal(files.socketDirectory, await realpath(socketDirectory))
   assert.equal((await cleanupRuntimeSocket(paths, files, { socketDirectory })).removed, true)
   await assert.rejects(access(socketDirectory), (error) => error.code === 'ENOENT')

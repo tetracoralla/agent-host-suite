@@ -69,7 +69,7 @@ test('Codex receives Agent Host operations as a Skill-only managed plugin', asyn
   assert.equal(fake.plugins.has('agent-host-operations@agent-host-local'), true)
   assert.equal((await inspectOperationsSkill(managed, fake.runner)).status, 'ok')
   const pluginRoot = managed.binding.entries[0].pluginRoot
-  assert.equal((await stat(join(pluginRoot, 'skills', 'agent-host-operations', 'scripts', 'agent-host'))).mode & 0o111, 0o111)
+  if (process.platform !== 'win32') assert.equal((await stat(join(pluginRoot, 'skills', 'agent-host-operations', 'scripts', 'agent-host'))).mode & 0o111, 0o111)
   const plugin = JSON.parse(await readFile(join(pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'))
   assert.equal(plugin.mcpServers, undefined)
   assert.equal(plugin.skills, './skills/')
@@ -132,6 +132,6 @@ test('ZCode receives the packaged operations Skill from immutable Host storage',
   assert.equal((await lstat(managed.exposurePath)).isSymbolicLink(), true)
   assert.equal(await realpath(managed.exposurePath), managed.projectionRoot)
   assert.equal((await inspectOperationsSkill(managed, null)).status, 'ok')
-  assert.equal((await stat(join(managed.projectionRoot, 'scripts', 'agent-host'))).mode & 0o111, 0o111)
+  if (process.platform !== 'win32') assert.equal((await stat(join(managed.projectionRoot, 'scripts', 'agent-host'))).mode & 0o111, 0o111)
   assert.equal((await uninstallOperationsSkill(managed, null)).removed, true)
 })

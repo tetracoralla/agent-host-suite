@@ -1,3 +1,4 @@
+import { assertPrivateFiles } from "./private-files.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -138,11 +139,13 @@ function prepareAppendTarget(output) {
     throw new ObserverError("TRACE_HOOK_OUTPUT_INVALID", "Trace hook output must be an absolute path");
   }
   const parent = path.dirname(output);
+  const existed = fs.existsSync(parent);
   fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
   const parentStat = fs.lstatSync(parent);
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
     throw new ObserverError("TRACE_HOOK_OUTPUT_INVALID", "Trace hook output directory must be a real directory");
   }
+  assertPrivateFiles([{ path: parent, ensure: !existed }], "TRACE_HOOK_OUTPUT_INVALID");
   return path.resolve(output);
 }
 
@@ -158,6 +161,7 @@ export function appendHookRecords(output, records) {
   try {
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile()) throw new ObserverError("TRACE_HOOK_OUTPUT_INVALID", "Trace hook output must be a regular file");
+    assertPrivateFiles([{ path: target, ensure: true }], "TRACE_HOOK_OUTPUT_INVALID");
     fs.writeSync(descriptor, contents, null, "utf8");
   } finally {
     fs.closeSync(descriptor);

@@ -17,8 +17,10 @@ test('private state rejects a shared directory without repairing it during a rea
   await ensurePrivateDirectory(root)
   const file = join(root, 'owned.json')
   await writeFile(file, '{"retained":true}\n', { mode: 0o600 })
-  await assertPrivateAccess(root, await lstat(root))
-  await assertPrivateAccess(file, await lstat(file))
+  await Promise.all([
+    assertPrivateAccess(root, await lstat(root)),
+    assertPrivateAccess(file, await lstat(file)),
+  ])
   if (process.platform === 'win32') {
     // Use the well-known Everyone SID, independent of Windows display language.
     await execute('icacls.exe', [root, '/grant', '*S-1-1-0:(OI)(CI)(RX)'], { windowsHide: true })

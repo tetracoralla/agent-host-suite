@@ -1,3 +1,4 @@
+import { testSocketPath, assertEndpointAbsent } from './ipc-helpers.mjs'
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -87,7 +88,7 @@ test('CLI rejects duplicate JSON keys with a stable host error', async () => {
 test('CLI serve and socket client keep a provider warm across processes', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'direct-exec-cli-service-'))
   const configPath = resolve(directory, 'providers.json')
-  const socketPath = resolve(directory, 'runtime.sock')
+  const socketPath = testSocketPath(directory)
   const cliPath = resolve(repositoryRoot, 'src/cli.mjs')
   let service
   try {
@@ -131,7 +132,7 @@ test('CLI serve and socket client keep a provider warm across processes', async 
       service.kill('SIGTERM')
       await new Promise((resolvePromise) => service.once('exit', resolvePromise))
     }
-    await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
+    await assertEndpointAbsent(socketPath)
     await rm(directory, { recursive: true, force: true })
   }
 })

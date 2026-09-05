@@ -408,3 +408,11 @@ known/unknown call coverage, and both routing bounds. Its summary names the
 returned items as routing observations, not total turns. These fields remain
 mechanical correlations; adoption, opportunity, route quality, task quality,
 and causation stay outside the Suite.
+
+
+Windows private storage uses NTFS access lists rather than synthetic POSIX mode
+bits. The Suite owns `src/windows-private-access.mjs`; the Direct Runtime and
+Observer carry verified identical copies so each component remains self-contained.
+`node scripts/sync-platform-support.mjs --write` refreshes those copies, and the
+repository check rejects drift. Concurrent asynchronous checks are batched only
+within the pending request; no permission result survives for a later read.
