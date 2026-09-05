@@ -38,18 +38,18 @@ enum MonitoringHealthEvaluator {
             now: now
         )
         let healthy = collectionComplete && freshness.isFresh
-        let prefix = collectionComplete ? (freshness.isFresh ? "Complete" : "Stale") : "Partial"
+        let prefix = L10n.text(collectionComplete ? (freshness.isFresh ? "Complete" : "Stale") : "Partial")
         var details: [String] = []
         if collection.status != nil && collection.status != "completed" {
-            details.append("last run \(collection.status ?? "unknown")")
+            details.append(L10n.format("last run {status}", ["status": collection.status ?? L10n.text("unknown")]))
         }
         if problemCount > 0 {
-            details.append("\(problemCount) source\(problemCount == 1 ? "" : "s") incomplete")
+            details.append(L10n.format(problemCount == 1 ? "{count} source incomplete" : "{count} sources incomplete", ["count": problemCount.formatted()]))
         }
         details.append(freshness.detail)
         return ManagerHealthFacet(
             id: "monitoring",
-            name: "Monitoring",
+            name: L10n.text("Monitoring"),
             isHealthy: healthy,
             detail: "\(prefix) · \(details.joined(separator: ", "))"
         )
@@ -61,19 +61,19 @@ enum MonitoringHealthEvaluator {
         now: Date
     ) -> (isFresh: Bool, detail: String) {
         guard let refreshedAt, let refreshed = parseDate(refreshedAt) else {
-            return (false, "no refresh time recorded")
+            return (false, L10n.text("no refresh time recorded"))
         }
         let age = now.timeIntervalSince(refreshed)
         if age < -futureTolerance {
-            return (false, "refresh time is in the future")
+            return (false, L10n.text("refresh time is in the future"))
         }
         let normalizedAge = max(0, age)
-        let ageText = ageDescription(normalizedAge)
+        let ageText = L10n.relativeAge(since: now.addingTimeInterval(-normalizedAge), now: now)
         if let interval = maintenanceIntervalSeconds, interval > 0,
            normalizedAge > TimeInterval(interval * 2) {
-            return (false, "refreshed \(ageText) (stale)")
+            return (false, L10n.format("refreshed {age} (stale)", ["age": ageText]))
         }
-        return (true, "refreshed \(ageText)")
+        return (true, L10n.format("refreshed {age}", ["age": ageText]))
     }
 
     private static func parseDate(_ value: String) -> Date? {
@@ -85,10 +85,4 @@ enum MonitoringHealthEvaluator {
         return standard.date(from: value)
     }
 
-    private static func ageDescription(_ age: TimeInterval) -> String {
-        if age < 60 { return "just now" }
-        if age < 3_600 { return "\(Int(age / 60))m ago" }
-        if age < 86_400 { return "\(Int(age / 3_600))h ago" }
-        return "\(Int(age / 86_400))d ago"
-    }
 }

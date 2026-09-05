@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "openadam.agent-host-profile.v0.2",
+  "id": "developer",
+  "displayName": "Developer Kit",
+  "components": [
+    "direct-execution-runtime",
+    "math-anchor",
+    "migratory-time",
+    "agent-tool-development-kit"
+  ],
+  "agentComponents": [],
+  "requiresConsent": false
+}

@@ -1,88 +1,96 @@
 # Local dogfood contract
 
-Local dogfood makes this Mac behave like an external installation while it
-remains the primary implementation workspace. It isolates executable
-provenance, not Agent workspace access.
+Local dogfood makes the development Mac behave like an external Agent Host
+installation while Agents continue to work in authorized source repositories.
+It isolates executable provenance, not workspace access. Current installed
+state and rerunnable checks control runtime claims; this document defines the
+stable boundary only.
 
-## Required behavior
+## Isolation invariants
 
-- Agents may implement in authorized workspaces, while installed tools load
-  plugins, Skills, executables, Node, and services from immutable versioned
-  Agent Host packages rather than development checkouts.
-- Codex receives thin Suite-owned projections. MCP commands and working
-  directories resolve to verified packages; workspace-dependent tools receive
-  only the explicit canonical `--workspace-root` grant.
-- Historical state may retain displaced development bindings only for rollback
-  or uninstall. Active bindings and LaunchAgents must not execute those paths.
-- Observer remains local, metadata-only, bounded, model-free, and unable to
-  turn completion or correlation into correctness, adoption, opportunity,
-  routing quality, or task quality.
-- Active and rollback releases remain byte-verifiable. Unchanged component
-  content reuses one content-addressed package across Suite releases.
+- Agents may edit authorized repositories under `tools-dev`, but every
+  installed Skill, launcher, runtime, service, and plugin resolves to immutable
+  Agent Host package storage. Archived projects and source checkouts are never
+  runtime inputs.
+- Workspace-aware tools receive only the canonical root explicitly granted at
+  setup. A package cannot discover or substitute another development root.
+- ZCode is the primary local Agent app. Codex and optional Claude Code use
+  separate public carriers. Provider/model credentials remain user-owned and
+  are not changed by Agent Host.
+- The installed inventory is distinct from the active Agent-visible set.
+  Inactive tools retain their immutable Skills and direct launchers without
+  adding MCP schemas to the current model catalog.
+- Direct Runtime remains the structured fast path after Capability selection.
+  It does not replace task discovery or Agent judgment and makes no model call.
+- Observer is opt-in, local, bounded, short-lived, and metadata-only. It may
+  report recorded use, partial runtime outcome, provider-specific usage, and
+  Trace Plane coverage; it leaves Skill activation, non-use reason, semantic
+  effect, adoption, correctness, quality, opportunity, and value unknown.
+- Automatic record adapters are read-only. Event, telemetry, and hook adapters
+  require a non-mutating plan plus an explicit user-owned configuration change.
+  No provider credentials, prompts, routing rules, or live Agent task are
+  modified.
+- Setup, update, rollback, active-set changes, cleanup, disconnect, monitoring
+  disable, and uninstall preserve user-owned Agent-app entries and the declared
+  recovery release. Destructive data removal remains a separate confirmation.
 
-## Admission checks
+## Build and install an isolated release
 
-1. The release binds version, platform, archive bytes and SHA-256, license,
-   notices, SBOM, entrypoints, identity files, and closed operation schemas.
-2. Components materialize beneath private Suite state and remain runnable when
-   source checkouts move or change.
-3. Active Codex, Claude, Direct Runtime, and LaunchAgent routes contain no
-   provider-checkout path.
-4. Deep health exercises installed carriers and typed results without reading
-   source to discover an entrypoint.
-5. Setup, update, rollback, tool-set change, cleanup, and uninstall preserve
-   user ownership and one complete recovery target.
-6. Default Manager inspection does not launch Agent-app CLIs or touch unrelated
-   protected folders merely to prove configuration. Explicit Full Check owns
-   effectful binding inspection.
-7. Observer correlates a call with a release only as a bounded candidate using
-   a declared tool binding and provider session-start metadata.
+Build a current release catalog and run all source-independent package probes:
 
-## Active installation
+```text
+npm run check
+npm run build:internal-beta-artifacts
+npm run probe:internal-beta-artifacts -- /absolute/release-catalog/current.json
+node scripts/check-developer-kit-hosts.mjs --release-manifest /absolute/release-catalog/current.json
+node scripts/check-packaged-trace-plane.mjs --release-manifest /absolute/release-catalog/current.json
+```
 
-`local-dogfood-20260831.31` / `0.1.2-dogfood.31` is active, with dogfood.30 as
-the rollback release. Twelve components are installed; eight are available
-Agent tools. The current active set is Math Anchor, BatchTicket, and
-Equatorium. Observer and Context Surface Analyzer remain backstage.
+Then install into an explicit temporary state root or through the packaged
+native macOS app. Do not point setup at a development root when validating the
+external-user path. The Developer Kit check uses temporary Codex, ZCode, and
+Claude configuration roots and invokes no model.
 
-Dogfood.29 changes only Agent Tool Observer. Observer 0.2.0 publishes report
-v0.5 and retires the unpublished receipt importer and its report projections.
-Agent Host derives Procedure and Capability totals only from Direct Runtime
-semantic observations. Legacy private database rows are not deleted during
-the update and remain outside the current input/report contract. Dogfood.30
-reuses all component artifacts and makes the Suite reject malformed semantic
-summary target kinds, negative counts, and non-integer counts. Dogfood.31
-changes only Direct Execution Runtime. It prevents an abandoned cold MCP
-startup from publishing a child process after session close has already taken
-ownership of an empty session.
+## Runtime verification
 
-The installed Agent Host 0.1.2 build 31 and internal Beta DMG passed ad-hoc
-signature, embedded-catalog, bootstrap, checksum, and distribution checks. A
-deep installed doctor passed all 25 current package, MCP, Direct Runtime,
-semantic, and catalog checks while intentionally skipping external Agent-app
-CLI launch.
+Use the packaged Agent Host executable, not `src/cli.mjs`, for installed claims:
 
-## Context and routing cost
+```text
+agent-host status --json
+agent-host snapshot --json
+agent-host usage --json
+agent-host observability adapters --json
+agent-host doctor --deep --skip-agent-apps --json
+agent-host rollback --dry-run --json
+agent-host storage --json
+agent-host cleanup --dry-run --json
+```
 
-The current active catalog measures 9 tools, 18 schemas, and 64,804 canonical
-UTF-8 bytes. It is within the declared 65,536-byte reference budget and has no
-hard name collision. This measurement applies to the selected three-tool set;
-the larger set of all available local tools is not the default and must be
-measured again before activation.
+Default Manager refresh does not launch an Agent app. `doctor --deep` without
+`--skip-agent-apps` and **Run Full Check** are explicit current binding probes.
+A real fresh Agent task is still required to assess discovery and natural
+selection; an installed binding, historical call, or offered tool is not an
+adoption result.
 
-The current release has no observed fresh-session Agent-tool call yet.
-Historical calls, direct doctor probes, installation, and catalog presence are
-not current-release adoption. Observer reports provider coverage, record
-bounds, and unknown opportunity/task quality explicitly.
+For Trace Plane cost, run the packaged Observer measurement against exact
+user-authorized ZCode sources. It copies them into a temporary owner-only
+snapshot, removes the copy afterward, reports source rotation, and emits no
+paths:
 
-## Storage and distribution boundary
+```text
+npm run measure:trace-plane --workspace @openadam/agent-tool-observer -- \
+  --zcode-file /absolute/model-io-session.jsonl --json
+```
 
-At the dogfood.31 snapshot, private state uses 749,789,184 allocated bytes and
-the installed App uses 192,745,472 bytes. Eight unreferenced package versions
-are cleanup candidates totaling 197,271,552 allocated bytes. Cleanup is a
-separate verified action; dogfood.30 and the original 0.1.1 App remain
-recoverable until owner acceptance.
+## Verdict lanes
 
-The internal DMG is ad-hoc signed. Public download, Developer ID signing,
-notarization, clean-machine distribution, tags, Releases, and owner
-business/experience acceptance remain separate lanes.
+Report source regression, immutable package probes, installed Agent flow,
+Direct Runtime, automatic monitoring, native Manager runtime, Windows artifact,
+and owner experience separately. A macOS source or package PASS cannot establish
+a Windows-device result. Ad-hoc macOS signing is sufficient only for local
+dogfood; public macOS distribution still requires Developer ID, notarization,
+and Gatekeeper acceptance.
+
+Prior dated observations remain outside the default reading path under
+an ignored local evidence directory. They can generate hypotheses but never establish the
+current installation.

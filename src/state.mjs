@@ -1,4 +1,6 @@
-import { copyFile, mkdir, readdir, rm } from 'node:fs/promises'
+import { assertPrivateAccess } from './private-permissions.mjs'
+import { copyFile, lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
 import { AgentHostError } from './errors.mjs'
 import { readJson, writePrivateJson } from './json.mjs'
@@ -14,7 +16,7 @@ const STATE_ALLOWED_KEYS = new Set([
   ...STATE_REQUIRED_KEYS,
   'releaseActivatedAt', 'bindingsActivatedAt', 'developmentRoot', 'workspaceRoot',
   'releaseId', 'releaseManifest', 'availableAgentComponents', 'agentComponents',
-  'privateComponents', 'rolledBackFrom',
+  'releaseSourceProvenance', 'privateComponents', 'rolledBackFrom', 'componentWarmupVersion',
 ])
 
 function plainObject(value) {
@@ -43,7 +45,17 @@ export function validateState(state) {
     if (state[key] !== undefined && (typeof state[key] !== 'string' || state[key].length === 0)) invalid.push(key)
   }
   if (state.releaseManifest !== undefined && !plainObject(state.releaseManifest)) invalid.push('releaseManifest')
+  if (state.releaseSourceProvenance !== undefined) {
+    const provenance = state.releaseSourceProvenance
+    if (!plainObject(provenance)
+      || Object.keys(provenance).some((key) => !['policy', 'recordSha256', 'remoteConfirmedAtBuildTime'].includes(key))
+      || !['local-development', 'local-clean', 'remote-tagged'].includes(provenance.policy)
+      || !/^sha256:[0-9a-f]{64}$/u.test(provenance.recordSha256 ?? '')
+      || typeof provenance.remoteConfirmedAtBuildTime !== 'boolean'
+      || provenance.remoteConfirmedAtBuildTime !== (provenance.policy === 'remote-tagged')) invalid.push('releaseSourceProvenance')
+  }
   if (state.workspaceRoot !== undefined && state.workspaceRoot !== null && (typeof state.workspaceRoot !== 'string' || state.workspaceRoot.length === 0)) invalid.push('workspaceRoot')
+  if (state.componentWarmupVersion !== undefined && state.componentWarmupVersion !== 1) invalid.push('componentWarmupVersion')
   for (const key of ['components', 'hosts', 'runtime', 'observability', 'privateComponents']) {
     if (state[key] !== undefined && !plainObject(state[key])) invalid.push(key)
   }
@@ -72,8 +84,22 @@ export function statePaths(root) {
     downloads: join(root, 'downloads'),
     packages: join(root, 'packages'),
     hostProjections: join(root, 'host-projections'),
+    serviceRecovery: join(root, 'service-recovery'),
     activity: join(root, 'activity.jsonl'),
   }
+}
+
+export async function readStatePaths(root) {
+  const info = await lstat(root).catch((error) => {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  })
+  if (info === null) return statePaths(root)
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new AgentHostError('STATE_ROOT_UNSAFE', `Private state path is not a real directory: ${root}`)
+  }
+  await assertPrivateAccess(root, info)
+  return statePaths(await realpath(root))
 }
 
 export async function prepareStatePaths(root) {
@@ -102,7 +128,7 @@ export async function saveState(paths, state, { retainCurrent = false } = {}) {
     const current = await readJson(paths.state)
     if (current !== null) {
       const timestamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
-      await copyFile(paths.state, join(paths.history, `${timestamp}-${current.suiteVersion ?? 'unknown'}.json`))
+      await copyFile(paths.state, join(paths.history, `${timestamp}-${current.suiteVersion ?? 'unknown'}-${randomUUID().slice(0, 8)}.json`))
     }
   }
   await writePrivateJson(paths.state, state)
@@ -119,10 +145,36 @@ export async function listHistory(paths) {
   return entries.filter((name) => name.endsWith('.json')).sort().reverse().map((name) => join(paths.history, name))
 }
 
+function compatibilityIdentity(state) {
+  const components = Object.fromEntries(Object.entries(state?.components ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([id, component]) => [id, component?.fingerprint ?? null]))
+  return JSON.stringify({
+    channel: state?.channel ?? null,
+    suiteVersion: state?.suiteVersion ?? null,
+    releaseId: state?.releaseId ?? null,
+    components,
+  })
+}
+
+// History also contains same-release operational snapshots written before a
+// host connection or monitoring-state transition. Those snapshots are useful
+// for recovery, but they are not a previous compatibility set. Whole-suite
+// rollback must skip them or it can misleadingly "restore" the current release.
+export async function loadRollbackState(paths, current) {
+  const currentIdentity = compatibilityIdentity(current)
+  for (const path of await listHistory(paths)) {
+    if (path.includes('-uninstalled-')) continue
+    const candidate = await readJson(path)
+    if (candidate !== null && compatibilityIdentity(candidate) !== currentIdentity) return candidate
+  }
+  return null
+}
+
 export async function archiveAndRemoveState(paths, state) {
   await mkdir(paths.history, { recursive: true, mode: 0o700 })
   const timestamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
-  const archived = join(paths.history, `${timestamp}-uninstalled-${state.suiteVersion}.json`)
+  const archived = join(paths.history, `${timestamp}-uninstalled-${state.suiteVersion}-${randomUUID().slice(0, 8)}.json`)
   await writePrivateJson(archived, { ...state, uninstalledAt: new Date().toISOString() })
   await rm(paths.state, { force: true })
   return basename(archived)

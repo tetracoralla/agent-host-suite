@@ -2,10 +2,12 @@ import { listActivity } from './activity.mjs'
 import { AgentHostError } from './errors.mjs'
 import { readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
-import { loadState, prepareStatePaths } from './state.mjs'
+import { loadState, readStatePaths } from './state.mjs'
 import { storageStatus } from './storage.mjs'
 import { runFile } from './process.mjs'
 import { join } from 'node:path'
+import { readCurrentObservability } from './observability.mjs'
+import { readProcessInventory } from './process-inventory.mjs'
 
 export const OPERATIONS_SNAPSHOT_SCHEMA = 'openadam.agent-host-operations-snapshot.v0.1'
 export const OPERATIONS_SNAPSHOT_MAX_BYTES = 16_384
@@ -13,6 +15,7 @@ const RECENT_ACTIVITY_LIMIT = 12
 const ACTIVITY_TYPE_MAX_CHARS = 120
 const ACTIVITY_SUMMARY_MAX_CHARS = 320
 const TOP_TOOL_USAGE_LIMIT = 8
+const PROVIDER_ACTIVITY_LIMIT = 8
 
 function boundedText(value, limit) {
   if (typeof value !== 'string') return null
@@ -59,7 +62,36 @@ function compactToolUsage(report) {
   }
 }
 
-function compactObservability(state, analysis) {
+function compactObservedActivity(report) {
+  const activity = report?.activity
+  if (activity === null || activity === undefined) return null
+  const providers = Array.isArray(activity.providers) ? activity.providers : []
+  return {
+    providers: providers.slice(0, PROVIDER_ACTIVITY_LIMIT).map((item) => ({
+      provider: boundedText(item?.provider, 80),
+      observedSessions: item?.observedSessions ?? null,
+      observedTurns: item?.observedTurns ?? null,
+      observedActiveDays: item?.observedActiveDays ?? item?.activeUtcDays ?? null,
+      firstObservedAtMs: item?.firstObservedAtMs ?? null,
+      lastObservedAtMs: item?.lastObservedAtMs ?? null,
+      longestObservedSessionSpanMs: item?.longestObservedSessionSpanMs ?? null,
+      sessionDurationSemantics: boundedText(item?.sessionDurationSemantics, 180),
+      currentObservedDayStreak: item?.currentObservedDayStreak ?? null,
+      longestObservedDayStreak: item?.longestObservedDayStreak ?? null,
+    })),
+    providersReturned: Math.min(providers.length, PROVIDER_ACTIVITY_LIMIT),
+    providersAvailable: providers.length,
+    dailyRowsAvailable: activity.dailyRowsAvailable ?? (Array.isArray(activity.daily) ? activity.daily.length : null),
+    dailyRowsOmitted: true,
+    dailyRowsRoute: 'agent-host usage --json',
+    sessionSemantics: boundedText(activity.sessionSemantics, 180),
+    turnSemantics: boundedText(activity.turnSemantics, 180),
+    activeDaySemantics: boundedText(activity.activeDaySemantics, 180),
+    dayStreakSemantics: boundedText(activity.dayStreakSemantics, 180),
+  }
+}
+
+function compactObservability(state, analysis, current) {
   const value = state.observability
   if (value?.enabled !== true) {
     return {
@@ -74,13 +106,23 @@ function compactObservability(state, analysis) {
       },
     }
   }
-  const latest = value.latest ?? null
+  const currentAvailable = current?.status !== 'unavailable' && current !== null
+  const latest = currentAvailable ? {
+    ...value.latest,
+    refreshedAt: current.observedAt,
+    collection: current.collection,
+    report: current.report,
+  } : value.latest ?? null
   const collection = latest?.collection ?? null
   const report = latest?.report ?? null
   return {
     enabled: true,
     consentedAt: value.consentedAt ?? null,
     refreshedAt: latest?.refreshedAt ?? null,
+    observationSource: currentAvailable ? 'current-observer-snapshots' : 'cached-agent-host-refresh',
+    currentReadErrorCode: current?.status === 'unavailable' ? current.errorCode : null,
+    collector: currentAvailable ? current.collector : null,
+    freshness: currentAvailable ? current.freshness : null,
     collection: collection === null ? null : {
       startedAtMs: collection.startedAtMs ?? null,
       completedAtMs: collection.completedAtMs ?? null,
@@ -89,7 +131,7 @@ function compactObservability(state, analysis) {
       providersPartial: collection.providersPartial ?? null,
       providersMissing: collection.providersMissing ?? null,
       providersError: collection.providersError ?? null,
-      sources: [...(collection.providers ?? []), ...(collection.semanticSources ?? [])].map(collectionSource),
+      sources: (collection.sources ?? [...(collection.providers ?? []), ...(collection.semanticSources ?? [])]).map(collectionSource),
     },
     catalog: latest?.context === undefined ? null : {
       canonicalUtf8Bytes: latest.context.catalog?.canonicalUtf8Bytes ?? null,
@@ -101,11 +143,14 @@ function compactObservability(state, analysis) {
         metric: item.metric,
         actual: item.actual,
         limit: item.limit,
+        remaining: Number.isFinite(item.actual) && Number.isFinite(item.limit) ? item.limit - item.actual : null,
         status: item.status,
       })),
     },
     directRuntime: report?.directRuntime ?? null,
     freshSessionCorrelation: report?.freshSessionCorrelation ?? null,
+    activity: compactObservedActivity(report),
+    observationCoverage: report?.observationCoverage ?? null,
     toolUsage: compactToolUsage(report),
     totals: report?.totals ?? null,
     privacy: {
@@ -161,19 +206,14 @@ function enforceBudget(result) {
 // command line references the private state root (provider children, the
 // direct runtime service, and the CLI itself). Counts and resident bytes only.
 async function processBaseline(root, runner) {
-  const result = await runner('/bin/ps', ['axo', 'rss=,command='], {
-    allowFailure: true,
-    timeoutMs: 5_000,
-    maxBuffer: 8 * 1024 * 1024,
-  })
-  if (result.status !== 0) return null
+  const processes = await readProcessInventory(runner)
+  if (processes === null) return null
   let processCount = 0
   let totalRssBytes = 0
-  for (const line of result.stdout.split('\n')) {
-    const match = line.match(/^\s*(\d+)\s+(.+)$/u)
-    if (match === null || !match[2].includes(root)) continue
+  for (const process of processes) {
+    if (!process.command.includes(root)) continue
     processCount += 1
-    totalRssBytes += Number(match[1]) * 1024
+    totalRssBytes += process.rssBytes ?? 0
   }
   return {
     sampledAt: new Date().toISOString(),
@@ -185,7 +225,8 @@ async function processBaseline(root, runner) {
 
 export async function operationsSnapshot(options = {}, dependencies = {}) {
   const runner = dependencies.runner ?? runFile
-  const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  const hasProvidedObservability = Object.prototype.hasOwnProperty.call(dependencies, 'currentObservability')
+  const paths = await readStatePaths(resolveStateRoot(options.stateRoot))
   const state = await loadState(paths)
   if (state === null) {
     return enforceBudget({
@@ -196,11 +237,19 @@ export async function operationsSnapshot(options = {}, dependencies = {}) {
       assessmentBoundary: 'No installed Agent Host environment was observed.',
     })
   }
-  const [storage, activity, analysis, processes] = await Promise.all([
+  const [storage, activity, analysis, processes, currentObservability] = await Promise.all([
     storageStatus({ stateRoot: paths.root }),
     listActivity(paths, { limit: RECENT_ACTIVITY_LIMIT }),
     readJson(join(paths.context, 'managed-catalog.analysis.json')).catch(() => null),
     processBaseline(paths.root, runner),
+    state.observability?.enabled === true
+      ? (hasProvidedObservability
+        ? Promise.resolve(dependencies.currentObservability)
+        : readCurrentObservability(state, runner)).catch((error) => ({
+        status: 'unavailable',
+        errorCode: error instanceof AgentHostError ? error.code : 'OBSERVABILITY_CURRENT_READ_FAILED',
+      }))
+      : null,
   ])
   return enforceBudget({
     schemaVersion: OPERATIONS_SNAPSHOT_SCHEMA,
@@ -210,6 +259,7 @@ export async function operationsSnapshot(options = {}, dependencies = {}) {
     environment: {
       suiteVersion: state.suiteVersion,
       releaseId: state.releaseId ?? null,
+      sourceProvenance: state.releaseSourceProvenance ?? null,
       channel: state.channel,
       profile: state.profile,
       installedAt: state.installedAt,
@@ -234,7 +284,7 @@ export async function operationsSnapshot(options = {}, dependencies = {}) {
         created: state.runtime.service.created === true,
       },
     },
-    observability: compactObservability(state, analysis),
+    observability: compactObservability(state, analysis, currentObservability),
     storage: compactStorage(storage),
     processes,
     recentActivity: activity.map((item) => ({

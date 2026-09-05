@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { chmod, copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { platform } from 'node:os'
 import { fingerprintRelativeFiles } from '../development-manifest.mjs'
 import { AgentHostError } from '../errors.mjs'
 import { writePrivateJson } from '../json.mjs'
+import { canonicalPathGrants, componentEnvironment } from '../component-environment.mjs'
 
-const PROJECTION_SCHEMA = 'openadam.agent-host-codex-projection.v0.1'
+const PROJECTION_SCHEMA = 'openadam.agent-host-codex-projection.v0.2'
 
 function containedRelative(root, candidate, label) {
   const value = relative(root, candidate)
@@ -32,7 +34,7 @@ async function regularFiles(root, current = root, result = []) {
     const path = join(current, entry.name)
     if (entry.isSymbolicLink()) throw new AgentHostError('CODEX_PROJECTION_INVALID', `Codex projection refuses symbolic links: ${path}`)
     if (entry.isDirectory()) await regularFiles(root, path, result)
-    else if (entry.isFile()) result.push(relative(root, path))
+    else if (entry.isFile()) result.push(relative(root, path).split(sep).join('/'))
     else throw new AgentHostError('CODEX_PROJECTION_INVALID', `Codex projection refuses special files: ${path}`)
   }
   return result.sort()
@@ -40,14 +42,87 @@ async function regularFiles(root, current = root, result = []) {
 
 function projectionDigest(component, workspaceRoot) {
   const grant = (component.workspaceEnvironment ?? []).length === 0 ? '' : workspaceRoot ?? ''
-  return createHash('sha256')
+  const grants = canonicalPathGrants(component.pathGrants)
+  const digest = createHash('sha256')
     .update(PROJECTION_SCHEMA)
     .update('\0')
     .update(component.fingerprint)
     .update('\0')
+    .update(component.command ?? '')
+    .update('\0')
+    .update(JSON.stringify(component.args ?? []))
+    .update('\0')
+    .update(component.cwd ?? '')
+    .update('\0')
     .update(grant)
+    .update('\0')
+  if (Object.keys(grants).length > 0) digest.update(JSON.stringify(grants)).update('\0')
+  return digest
+    .update(component.skillOnly === true ? 'skill-only' : 'mcp-active')
     .digest('hex')
     .slice(0, 16)
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'\\''`)}'`
+}
+
+function batchQuote(value) {
+  const text = String(value)
+  if (/[\u0000\r\n"]/u.test(text)) throw new AgentHostError('CODEX_PROJECTION_INVALID', 'A Windows Skill launcher argument contains unsupported characters')
+  return `"${text.replaceAll('%', '%%')}"`
+}
+
+function projectedLauncherRelativePath(skill) {
+  return platform() === 'win32' ? `${skill.launcherRelativePath}.cmd` : skill.launcherRelativePath
+}
+
+async function readPluginManifest(component) {
+  let plugin
+  try {
+    plugin = JSON.parse(await readFile(join(component.pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'))
+  } catch (error) {
+    throw new AgentHostError('CODEX_PROJECTION_INVALID', `Cannot read ${component.displayName ?? component.plugin} plugin manifest: ${error.message}`)
+  }
+  if (plugin === null || typeof plugin !== 'object' || Array.isArray(plugin)) {
+    throw new AgentHostError('CODEX_PROJECTION_INVALID', `${component.displayName ?? component.plugin} plugin manifest is invalid`)
+  }
+  return plugin
+}
+
+async function assertSkillOnlyPlugin(component) {
+  const plugin = await readPluginManifest(component)
+  if (plugin.skills !== './skills/' || plugin.mcpServers !== undefined) {
+    throw new AgentHostError('CODEX_PROJECTION_INVALID', `${component.displayName ?? component.plugin} must remain a Skill-only Codex plugin`)
+  }
+}
+
+function launcherBinding(component) {
+  if (component.developerSkill !== undefined) {
+    return { skill: component.developerSkill, command: component.command, args: component.args }
+  }
+  if (component.providerSkill !== undefined) {
+    return { skill: component.providerSkill, command: component.providerSkill.command, args: component.providerSkill.args }
+  }
+  return null
+}
+
+async function writeSkillLauncher(component, stagingPlugin) {
+  const binding = launcherBinding(component)
+  if (binding === null) return
+  const { skill } = binding
+  if (skill === null || typeof skill !== 'object' || typeof skill.id !== 'string' || typeof skill.launcherRelativePath !== 'string') {
+    throw new AgentHostError('CODEX_PROJECTION_INVALID', `${component.displayName ?? component.plugin} Skill metadata is invalid`)
+  }
+  const skillRoot = join(stagingPlugin, 'skills', skill.id)
+  const launcher = join(skillRoot, projectedLauncherRelativePath(skill))
+  containedRelative(skillRoot, launcher, `${component.displayName ?? component.plugin} launcher`)
+  await mkdir(dirname(launcher), { recursive: true, mode: 0o700 })
+  const script = platform() === 'win32'
+    ? `@echo off\r\nsetlocal DisableDelayedExpansion\r\n${[binding.command, ...binding.args].map(batchQuote).join(' ')} %*\r\n`
+    : `#!/bin/sh\nexec ${shellQuote(binding.command)} ${binding.args.map(shellQuote).join(' ')} "$@"\n`
+  await writeFile(launcher, script, { mode: 0o500, flag: 'wx' })
+  await chmod(launcher, 0o500)
 }
 
 async function readMcpProjection(component, workspaceRoot) {
@@ -74,7 +149,7 @@ async function readMcpProjection(component, workspaceRoot) {
   if (current === null || typeof current !== 'object' || Array.isArray(current)) {
     throw new AgentHostError('CODEX_PROJECTION_INVALID', `${component.displayName ?? component.plugin} MCP server configuration is invalid`)
   }
-  const environment = Object.fromEntries((component.workspaceEnvironment ?? []).map((variable) => [variable, workspaceRoot]))
+  const environment = componentEnvironment(component, workspaceRoot)
   const projected = {
     ...current,
     command: component.command,
@@ -88,6 +163,7 @@ async function readMcpProjection(component, workspaceRoot) {
 }
 
 async function materializeComponent(componentId, component, projectionRoot, workspaceRoot) {
+  if (component.skillOnly === true && component.providerSkill === undefined) await assertSkillOnlyPlugin(component)
   const digest = projectionDigest(component, workspaceRoot)
   const componentProjectionRoot = join(projectionRoot, componentId, digest)
   const marketplaceRoot = join(componentProjectionRoot, 'marketplace')
@@ -110,13 +186,21 @@ async function materializeComponent(componentId, component, projectionRoot, work
         join(component.marketplaceRoot, '.agents', 'plugins', 'marketplace.json'),
         join(stagingMarketplace, '.agents', 'plugins', 'marketplace.json'),
       )
-      await copyFile(
-        join(component.pluginRoot, '.codex-plugin', 'plugin.json'),
-        join(stagingPlugin, '.codex-plugin', 'plugin.json'),
-      )
+      if (component.skillOnly === true && component.providerSkill !== undefined) {
+        const plugin = await readPluginManifest(component)
+        if (plugin.skills !== './skills/') throw new AgentHostError('CODEX_PROJECTION_INVALID', `${component.displayName ?? component.plugin} discovery plugin must expose Skills`)
+        delete plugin.mcpServers
+        await writePrivateJson(join(stagingPlugin, '.codex-plugin', 'plugin.json'), plugin)
+      } else {
+        await copyFile(
+          join(component.pluginRoot, '.codex-plugin', 'plugin.json'),
+          join(stagingPlugin, '.codex-plugin', 'plugin.json'),
+        )
+      }
       await copyOptionalDirectory(join(component.pluginRoot, 'skills'), join(stagingPlugin, 'skills'))
       await copyOptionalDirectory(join(component.pluginRoot, 'assets'), join(stagingPlugin, 'assets'))
-      await writePrivateJson(join(stagingPlugin, '.mcp.json'), await readMcpProjection(component, workspaceRoot))
+      await writeSkillLauncher(component, stagingPlugin)
+      if (component.skillOnly !== true) await writePrivateJson(join(stagingPlugin, '.mcp.json'), await readMcpProjection(component, workspaceRoot))
       await writePrivateJson(join(stagingRoot, 'projection.json'), {
         schemaVersion: PROJECTION_SCHEMA,
         component: componentId,
@@ -136,12 +220,25 @@ async function materializeComponent(componentId, component, projectionRoot, work
     }
   }
   const pluginIdentityRelativeFiles = await regularFiles(pluginRoot)
+  if (component.skillOnly === true) await assertSkillOnlyPlugin({ ...component, pluginRoot })
+  const projectedSkill = component.developerSkill === undefined ? undefined : {
+    ...component.developerSkill,
+    root: join(pluginRoot, 'skills', component.developerSkill.id),
+    launcherPath: join(pluginRoot, 'skills', component.developerSkill.id, projectedLauncherRelativePath(component.developerSkill)),
+  }
+  const projectedProviderSkill = component.providerSkill === undefined ? undefined : {
+    ...component.providerSkill,
+    root: join(pluginRoot, 'skills', component.providerSkill.id),
+    launcherPath: join(pluginRoot, 'skills', component.providerSkill.id, projectedLauncherRelativePath(component.providerSkill)),
+  }
   return {
     ...component,
     marketplaceRoot,
     pluginRoot,
     pluginIdentityRelativeFiles,
     pluginIdentityFingerprint: await fingerprintRelativeFiles(pluginRoot, pluginIdentityRelativeFiles),
+    ...(projectedSkill === undefined ? {} : { developerSkill: projectedSkill }),
+    ...(projectedProviderSkill === undefined ? {} : { providerSkill: projectedProviderSkill }),
   }
 }
 

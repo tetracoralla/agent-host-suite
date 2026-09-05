@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "openadam.agent-shell-adapter.v0.1",
+  "id": "openadam.claude-project-events",
+  "version": "0.1.0",
+  "provider": "claude",
+  "transport": "stable-local-records",
+  "collection": { "passiveMetadata": true, "explicitAnalysisPack": false },
+  "signals": {
+    "modelSteps": "unavailable",
+    "toolOffers": "unavailable",
+    "toolCalls": "available",
+    "toolResults": "available",
+    "usage": "partial",
+    "turnEnds": "unavailable",
+    "selfReportedRationalePresence": "unavailable"
+  },
+  "content": { "passiveStorage": "metadata-only", "explicitPack": "metadata-only" },
+  "runtime": { "platforms": ["darwin", "win32", "linux"], "sourceFormats": ["claude-project-jsonl"] }
+}

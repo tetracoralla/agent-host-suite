@@ -1,0 +1,5 @@
+node_modules/
+instance.json
+.secrets/
+.verify/
+*.tgz

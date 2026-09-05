@@ -6,7 +6,7 @@ suite_root="${script_dir:h}"
 configuration="${1:-release}"
 target_architecture="${AGENT_HOST_TARGET_ARCHITECTURE:-$(uname -m)}"
 release_catalog="${AGENT_HOST_RELEASE_CATALOG:-${suite_root}/.build/internal-beta/release-catalog}"
-bundled_profile="${AGENT_HOST_BUNDLED_PROFILE:-standard}"
+bundled_profile="${AGENT_HOST_BUNDLED_PROFILE:-observability}"
 if [[ "${configuration}" != "debug" && "${configuration}" != "release" ]]; then
   print -u2 "configuration must be debug or release"
   exit 2
@@ -14,6 +14,17 @@ fi
 if [[ "${target_architecture}" != "arm64" && "${target_architecture}" != "x86_64" ]]; then
   print -u2 "AGENT_HOST_TARGET_ARCHITECTURE must be arm64 or x86_64"
   exit 2
+fi
+if [[ ! -f "${release_catalog}/current.json" || ! -d "${release_catalog}/artifacts" ]]; then
+  print -u2 "bound release catalog is unavailable; run npm run build:internal-beta-artifacts first"
+  exit 1
+fi
+package_version="$(node -e 'const pkg=require(process.argv[1]); process.stdout.write(pkg.version)' "${suite_root}/package.json")"
+catalog_version="$(node -e 'const release=require(process.argv[1]); process.stdout.write(release.suiteVersion)' "${release_catalog}/current.json")"
+manager_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${suite_root}/macos/Info.plist")"
+if [[ "${package_version}" != "${catalog_version}" || "${package_version}" != "${manager_version}" ]]; then
+  print -u2 "Host package, Manager app, and release catalog versions differ"
+  exit 1
 fi
 build_triple="${target_architecture}-apple-macosx14.0"
 
@@ -33,10 +44,11 @@ if [[ ! -x "${binary_path}" || ! -x "${shim_path}" || "${app_path}" != "${suite_
   print -u2 "refusing to package unresolved build paths"
   exit 1
 fi
-if [[ ! -f "${release_catalog}/current.json" || ! -d "${release_catalog}/artifacts" ]]; then
-  print -u2 "bound release catalog is unavailable; run npm run build:internal-beta-artifacts first"
-  exit 1
+allowed_source_policies="local-development,local-clean,remote-tagged"
+if [[ "${AGENT_HOST_PUBLIC_DISTRIBUTION:-0}" == "1" ]]; then
+  allowed_source_policies="remote-tagged"
 fi
+node "${suite_root}/scripts/check-release-source-provenance.mjs" "${release_catalog}" "${allowed_source_policies}" >/dev/null
 node "${suite_root}/scripts/stage-bundled-release-catalog.mjs" "${release_catalog}" "${bundled_catalog}" "${bundled_profile}" >/dev/null
 
 rm -rf "${staging_path}"
@@ -54,8 +66,17 @@ cp "${suite_root}/macos/AgentHost.icns" "${staging_path}/Contents/Resources/Agen
 for item in bin src catalog schemas skills package.json node_modules LICENSE NOTICE THIRD_PARTY_NOTICES.txt; do
   cp -R "${suite_root}/${item}" "${staging_path}/Contents/Resources/agent-host-suite/${item}"
 done
+cp "${suite_root}/README.md" "${staging_path}/Contents/Resources/agent-host-suite/README.md"
+cp "${suite_root}/README.zh-CN.md" "${staging_path}/Contents/Resources/agent-host-suite/README.zh-CN.md"
+mkdir -p "${staging_path}/Contents/Resources/agent-host-suite/docs"
+for document in WINDOWS.md WINDOWS.zh-CN.md TRACE_PLANE.md TRACE_PLANE.zh-CN.md; do
+  cp "${suite_root}/docs/${document}" "${staging_path}/Contents/Resources/agent-host-suite/docs/${document}"
+done
+node "${suite_root}/scripts/prune-dangling-links.mjs" "${staging_path}/Contents/Resources/agent-host-suite/node_modules" >/dev/null
+rm -rf "${staging_path}/Contents/Resources/agent-host-suite/catalog/releases"
+mkdir -p "${staging_path}/Contents/Resources/agent-host-suite/catalog/releases"
 cp "${bundled_catalog}/current.json" "${staging_path}/Contents/Resources/agent-host-suite/catalog/releases/current.json"
-rm -rf "${staging_path}/Contents/Resources/agent-host-suite/catalog/releases/artifacts"
+cp "${bundled_catalog}/build-provenance.json" "${staging_path}/Contents/Resources/agent-host-suite/catalog/releases/build-provenance.json"
 cp -R "${bundled_catalog}/artifacts" "${staging_path}/Contents/Resources/agent-host-suite/catalog/releases/artifacts"
 node "${suite_root}/scripts/write-sbom.mjs" "${staging_path}/Contents/Resources/agent-host-suite/sbom.spdx.json"
 codesign --force --sign - --timestamp=none "${staging_path}/Contents/MacOS/agent-host"

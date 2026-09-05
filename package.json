@@ -1,6 +1,6 @@
 {
   "name": "@openadam/agent-host-suite",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "description": "Install and manage one compatible local environment for Agent tools.",
   "license": "Apache-2.0",
   "author": "openAdam",
@@ -10,11 +10,18 @@
     "url": "https://github.com/tetracoralla/agent-host-suite.git"
   },
   "type": "module",
+  "workspaces": [
+    "packages/direct-execution-runtime",
+    "packages/capability-http-bridge",
+    "packages/agent-tool-observer",
+    "packages/context-surface-analyzer"
+  ],
   "engines": {
     "node": ">=22.16.0"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "win32"
   ],
   "bin": {
     "agent-host": "bin/agent-host.mjs"
@@ -28,21 +35,38 @@
     "LICENSE",
     "NOTICE",
     "THIRD_PARTY_NOTICES.txt",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md",
+    "docs/WINDOWS.md",
+    "docs/WINDOWS.zh-CN.md",
+    "docs/TRACE_PLANE.md",
+    "docs/TRACE_PLANE.zh-CN.md"
   ],
   "scripts": {
     "build:app-icon": "scripts/build-app-icon.sh",
     "build:internal-beta-artifacts": "node scripts/build-internal-beta-artifacts.mjs",
+    "build:development-artifacts": "AGENT_HOST_SOURCE_POLICY=local-development AGENT_HOST_OUTPUT_ROOT=.build/development/release-catalog node scripts/build-internal-beta-artifacts.mjs",
+    "build:remote-release-artifacts": "AGENT_HOST_SOURCE_POLICY=remote-tagged node scripts/build-internal-beta-artifacts.mjs",
     "check:internal-beta": "scripts/check-macos-distribution.sh internal-beta",
     "package:internal-beta": "scripts/package-internal-beta.sh",
+    "package:windows": "node scripts/package-windows.mjs",
     "probe:internal-beta-artifacts": "node scripts/probe-internal-beta-artifacts.mjs",
+    "probe:provider-discovery": "node scripts/probe-provider-discovery.mjs",
+    "check:packaged-trace-plane": "node scripts/check-packaged-trace-plane.mjs",
+    "probe:direct-capability-release": "node scripts/probe-direct-capability-release.mjs",
     "measure:local-dogfood": "node scripts/run-local-dogfood-cost-experiment.mjs",
     "measure:profile-catalogs": "node scripts/measure-profile-catalogs.mjs",
-    "check": "npm run check:syntax && npm test && npm run check:repository && npm run check:package",
+    "check:skill-refinery-vertical": "node scripts/check-skill-refinery-vertical.mjs",
+    "check": "npm run check:syntax && npm test && npm run check:direct-runtime && npm run check:http-bridge && npm run check:observer && npm run check:context-analyzer && npm run check:repository && npm run check:package",
+    "check:direct-runtime": "npm run check --workspace @openadam/direct-execution-runtime",
+    "check:http-bridge": "npm run check --workspace @openadam/capability-http-bridge",
+    "check:observer": "npm run check --workspace @openadam/agent-tool-observer",
+    "check:context-analyzer": "npm run check --workspace @openadam/context-surface-analyzer",
     "check:package": "node scripts/check-package.mjs",
     "check:repository": "node scripts/check-repository.mjs",
     "check:syntax": "node --check bin/agent-host.mjs && node scripts/check-syntax.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test --test-timeout=180000 test/*.test.mjs",
+    "audit:production": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"

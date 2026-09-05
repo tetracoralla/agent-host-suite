@@ -1,14 +1,18 @@
+import { posix, win32 } from 'node:path'
 import { arch, platform } from 'node:os'
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readJson } from './json.mjs'
 import { AgentHostError } from './errors.mjs'
+import { isDeveloperKitIntegrationSchema, validateDeveloperKitIntegration } from './developer-kit-integration.mjs'
 import { isToolIntegrationSchema, validateToolIntegration } from './tool-integration.mjs'
 
 export const RELEASE_SCHEMA = 'openadam.agent-host-release.v0.2'
 export const COMPONENT_SCHEMA = 'openadam.agent-host-component.v0.1'
 export const REQUIRED_RELEASE_COMPONENTS = ['node-runtime', 'direct-execution-runtime', 'math-anchor', 'migratory-time']
 export const OBSERVABILITY_RELEASE_COMPONENTS = ['agent-tool-observer', 'context-surface-analyzer']
+
+const SUITE_VERSION_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?$/u
 
 const COMPONENT_KINDS = new Map([
   ['node-runtime', 'node-runtime'],
@@ -17,6 +21,7 @@ const COMPONENT_KINDS = new Map([
   ['migratory-time', 'migratory-time'],
   ['agent-tool-observer', 'agent-tool-observer'],
   ['context-surface-analyzer', 'context-surface-analyzer'],
+  ['agent-tool-development-kit', 'developer-kit'],
 ])
 
 function expectedComponentKind(id) {
@@ -25,6 +30,42 @@ function expectedComponentKind(id) {
 
 function fail(code, message, details) {
   throw new AgentHostError(code, message, details)
+}
+
+function compareNumericIdentifier(left, right) {
+  const normalizedLeft = left.replace(/^0+(?=\d)/u, '')
+  const normalizedRight = right.replace(/^0+(?=\d)/u, '')
+  if (normalizedLeft.length !== normalizedRight.length) return normalizedLeft.length < normalizedRight.length ? -1 : 1
+  return normalizedLeft === normalizedRight ? 0 : normalizedLeft < normalizedRight ? -1 : 1
+}
+
+export function compareSuiteVersions(left, right) {
+  const leftMatch = String(left).match(SUITE_VERSION_PATTERN)
+  const rightMatch = String(right).match(SUITE_VERSION_PATTERN)
+  if (leftMatch === null || rightMatch === null) fail('RELEASE_MANIFEST_INVALID', 'Suite version comparison requires valid semantic versions')
+  for (let index = 1; index <= 3; index += 1) {
+    const comparison = compareNumericIdentifier(leftMatch[index], rightMatch[index])
+    if (comparison !== 0) return comparison
+  }
+  const leftPrerelease = leftMatch[4]?.split('.') ?? null
+  const rightPrerelease = rightMatch[4]?.split('.') ?? null
+  if (leftPrerelease === null || rightPrerelease === null) {
+    if (leftPrerelease === rightPrerelease) return 0
+    return leftPrerelease === null ? 1 : -1
+  }
+  const length = Math.max(leftPrerelease.length, rightPrerelease.length)
+  for (let index = 0; index < length; index += 1) {
+    const leftIdentifier = leftPrerelease[index]
+    const rightIdentifier = rightPrerelease[index]
+    if (leftIdentifier === undefined || rightIdentifier === undefined) return leftIdentifier === undefined ? -1 : 1
+    if (leftIdentifier === rightIdentifier) continue
+    const leftNumeric = /^\d+$/u.test(leftIdentifier)
+    const rightNumeric = /^\d+$/u.test(rightIdentifier)
+    if (leftNumeric && rightNumeric) return compareNumericIdentifier(leftIdentifier, rightIdentifier)
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1
+    return leftIdentifier < rightIdentifier ? -1 : 1
+  }
+  return 0
 }
 
 function exactKeys(value, allowed, label) {
@@ -38,9 +79,9 @@ function requiredString(value, label) {
   return value
 }
 
-export function currentReleasePlatform() {
-  const value = `${platform()}-${arch()}`
-  if (!['darwin-arm64', 'darwin-x64'].includes(value)) {
+export function currentReleasePlatform(platformName = platform(), architecture = arch()) {
+  const value = `${platformName}-${architecture}`
+  if (!['darwin-arm64', 'darwin-x64', 'win32-arm64', 'win32-x64'].includes(value)) {
     fail('RELEASE_PLATFORM_UNSUPPORTED', `No Agent Host release is available for ${value}`)
   }
   return value === 'darwin-x64' ? 'darwin-x86_64' : value
@@ -95,7 +136,7 @@ export function validateReleaseManifest(manifest) {
   exactKeys(manifest, ['schemaVersion', 'releaseId', 'suiteVersion', 'status', 'createdAt', 'platforms', 'components'], 'release manifest')
   if (manifest.schemaVersion !== RELEASE_SCHEMA) fail('RELEASE_SCHEMA_UNSUPPORTED', `Unsupported release schema: ${manifest.schemaVersion ?? 'missing'}`)
   requiredString(manifest.releaseId, 'release id')
-  if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$/u.test(manifest.suiteVersion ?? '')) fail('RELEASE_MANIFEST_INVALID', 'Suite version is invalid')
+  if (!SUITE_VERSION_PATTERN.test(manifest.suiteVersion ?? '')) fail('RELEASE_MANIFEST_INVALID', 'Suite version is invalid')
   if (!['draft-unbound', 'internal-beta', 'published'].includes(manifest.status)) fail('RELEASE_MANIFEST_INVALID', 'Release status is invalid')
   requiredString(manifest.createdAt, 'release creation time')
   if (Number.isNaN(Date.parse(manifest.createdAt))) fail('RELEASE_MANIFEST_INVALID', 'Release creation time is invalid')
@@ -141,7 +182,7 @@ export function installDirectoryName(component) {
 
 export function resolveArtifactUrl(manifestPath, value) {
   if (/^https:\/\//u.test(value) || /^file:/u.test(value)) return new URL(value)
-  const base = new URL(`file://${dirname(manifestPath).split(sep).map(encodeURIComponent).join('/')}/`)
+  const base = new URL('./', pathToFileURL(manifestPath))
   const resolved = new URL(value, base)
   const root = resolve(dirname(manifestPath))
   const target = resolve(fileURLToPath(resolved))
@@ -153,8 +194,8 @@ export function resolveArtifactUrl(manifestPath, value) {
 function relativePath(value, label) {
   requiredString(value, label)
   if (value.includes('\\')) fail('COMPONENT_DESCRIPTOR_INVALID', `${label} cannot contain backslashes`)
-  const normalized = normalize(value)
-  if (isAbsolute(normalized) || normalized === '..' || normalized.startsWith(`..${sep}`) || normalized === '.') fail('COMPONENT_DESCRIPTOR_INVALID', `${label} must be a contained relative file path`)
+  const normalized = posix.normalize(value)
+  if ((posix.isAbsolute(normalized) || win32.isAbsolute(normalized)) || normalized === '..' || normalized.startsWith('../') || normalized === '.') fail('COMPONENT_DESCRIPTOR_INVALID', `${label} must be a contained relative file path`)
   return normalized
 }
 
@@ -182,6 +223,9 @@ export function validateComponentDescriptor(descriptor, releaseComponent) {
   if (descriptor.integration !== null && (typeof descriptor.integration !== 'object' || Array.isArray(descriptor.integration))) fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} integration metadata is invalid`)
   if (descriptor.kind === 'agent-tool' || isToolIntegrationSchema(descriptor.integration?.schemaVersion)) {
     validateToolIntegration(descriptor.integration, paths)
+  }
+  if (descriptor.kind === 'developer-kit' || isDeveloperKitIntegrationSchema(descriptor.integration?.schemaVersion)) {
+    validateDeveloperKitIntegration(descriptor.integration, paths)
   }
   return descriptor
 }

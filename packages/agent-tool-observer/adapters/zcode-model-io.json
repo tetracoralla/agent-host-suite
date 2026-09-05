@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "openadam.agent-shell-adapter.v0.1",
+  "id": "openadam.zcode-model-io",
+  "version": "0.1.0",
+  "provider": "zcode",
+  "transport": "stable-local-records",
+  "collection": { "passiveMetadata": true, "explicitAnalysisPack": true },
+  "signals": {
+    "modelSteps": "available",
+    "toolOffers": "available",
+    "toolCalls": "available",
+    "toolResults": "partial",
+    "usage": "available",
+    "turnEnds": "unavailable",
+    "selfReportedRationalePresence": "available"
+  },
+  "content": { "passiveStorage": "metadata-only", "explicitPack": "selected-content" },
+  "runtime": { "platforms": ["darwin", "win32", "linux"], "sourceFormats": ["zcode-model-io-jsonl"] }
+}

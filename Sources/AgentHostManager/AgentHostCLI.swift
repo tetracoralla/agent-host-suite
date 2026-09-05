@@ -75,6 +75,56 @@ struct AgentHostCLI: Sendable {
         }.value
     }
 
+    func exportRetainedTrace(provider: String, sessionHash: String) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            let fileManager = FileManager.default
+            let directory = fileManager.temporaryDirectory
+                .appendingPathComponent("agent-host-trace-\(UUID().uuidString)", isDirectory: true)
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            defer { try? fileManager.removeItem(at: directory) }
+            let output = directory.appendingPathComponent("trace.json", isDirectory: false)
+            let receipt = try self.runSynchronously(
+                [
+                    "observability", "export-trace",
+                    "--provider", provider,
+                    "--session", sessionHash,
+                    "--output", output.path,
+                ],
+                as: TraceExportReceipt.self
+            )
+            guard receipt.status == "completed",
+                  receipt.schemaVersion == TraceContractValidator.retainedPackVersion,
+                  receipt.contentPolicy == "metadata-only",
+                  receipt.observerPackRetained == false,
+                  receipt.sourcePathStoredInPack == false,
+                  receipt.interpretationStatus == "not-performed",
+                  receipt.outputPath == output.path else {
+                throw CLIError.failed(
+                    code: "TRACE_EXPORT_RECEIPT_INVALID",
+                    message: "Agent Host returned an invalid trace export receipt."
+                )
+            }
+            let data = try Data(contentsOf: output)
+            guard TraceContractValidator.isValidRetainedExport(
+                data: data,
+                receipt: receipt,
+                outputPath: output.path,
+                provider: provider,
+                sessionHash: sessionHash
+            ) else {
+                throw CLIError.failed(
+                    code: "TRACE_EXPORT_CONTENT_INVALID",
+                    message: "Agent Host returned an invalid retained trace export."
+                )
+            }
+            return data
+        }.value
+    }
+
     private func runSynchronously<T: Decodable>(_ arguments: [String], as type: T.Type) throws -> T {
         let process = Process()
         let stdout = Pipe()
@@ -130,7 +180,10 @@ struct AgentHostCLI: Sendable {
         }
         if process.terminationStatus != 0,
            let failure = try? JSONDecoder().decode(PublicFailure.self, from: payload) {
-            throw CLIError.failed(code: failure.error.code, message: failure.error.message)
+            let message = failure.error.recoveryInstruction
+                .map { "\(failure.error.message)\nRecovery: \($0)" }
+                ?? failure.error.message
+            throw CLIError.failed(code: failure.error.code, message: message)
         }
         guard process.terminationStatus == 0 else {
             throw CLIError.failed(code: "COMMAND_FAILED", message: String(data: payload, encoding: .utf8) ?? "Agent Host did not complete the action.")
@@ -173,23 +226,41 @@ enum CLIError: LocalizedError {
         case let .failed(code, message):
             switch code {
             case "RELEASE_UNBOUND":
-                "No verified Agent Host release is available yet."
+                L10n.text("No verified Agent Host release is available yet.")
             case "COMPONENT_PACKAGE_UNAVAILABLE", "DEVELOPMENT_COMPONENT_INVALID":
-                "A required tool package is unavailable in this build. Install a verified release or repair the tool package, then try again."
+                L10n.text("A required tool package is unavailable in this build. Install a verified release or repair the tool package, then try again.")
             case "CODEX_NOT_INSTALLED":
-                "Codex is not installed or cannot be found on this Mac."
+                L10n.text("Codex is not installed or cannot be found on this Mac.")
+            case "CLAUDE_NOT_INSTALLED":
+                L10n.text("Claude Code is not installed or cannot be found on this Mac.")
+            case "ZCODE_NOT_INSTALLED":
+                L10n.text("ZCode is not installed or cannot be found on this Mac.")
             case "CODEX_PLUGIN_CONFLICT", "CODEX_MARKETPLACE_CONFLICT":
-                "Codex has a conflicting tool installation that Agent Host left unchanged. Replace it with the managed installation to continue."
+                L10n.text("Codex has a conflicting tool installation that Agent Host left unchanged. Replace it with the managed installation to continue.")
+            case "CLAUDE_MCP_CONFLICT":
+                L10n.text("Claude Code has a conflicting tool installation that Agent Host left unchanged. Replace it with the managed installation to continue.")
+            case "ZCODE_MCP_CONFLICT":
+                L10n.text("ZCode has a conflicting tool installation that Agent Host left unchanged. Replace it with the managed installation to continue.")
             case "STATE_INVALID_JSON", "STATE_SCHEMA_INVALID", "STATE_SCHEMA_UNSUPPORTED":
-                "The saved Agent Host state is unreadable, so Agent Host left the environment unchanged. Restore a known-good Agent Host backup before trying again."
+                L10n.text("The saved Agent Host state is unreadable, so Agent Host left the environment unchanged. Restore a known-good Agent Host backup before trying again.")
             case "ROLLBACK_UNAVAILABLE", "ROLLBACK_BYTES_UNAVAILABLE":
-                "A complete previous version is not available to restore."
+                L10n.text("A complete previous version is not available to restore.")
             case "SERVICE_CONFLICT":
-                "Another Agent Host local execution service is already configured. Open that installation or remove it before setting up again."
+                L10n.text("Another Agent Host local execution service is already configured. Open that installation or remove it before setting up again.")
             case "SERVICE_PATH_UNSAFE":
-                "The local execution service cannot be installed safely. Remove the conflicting service entry, then try again."
+                L10n.text("The local execution service cannot be installed safely. Remove the conflicting service entry, then try again.")
             case "COMMAND_TIMEOUT":
-                "Agent Host took too long to complete this action. Try again; if it repeats, run a full check."
+                L10n.text("Agent Host took too long to complete this action. Try again; if it repeats, run a full check.")
+            case "OBSERVABILITY_DISABLED":
+                L10n.text("Turn on local monitoring before loading or exporting retained trace sessions.")
+            case "TRACE_STATE_SCHEMA_UNAVAILABLE":
+                L10n.text("The installed monitoring component cannot read retained trace sessions. Update or repair Agent Host, then try again.")
+            case "TRACE_SESSION_NOT_FOUND":
+                L10n.text("This retained trace session is no longer available.")
+            case "TRACE_SESSION_RANGE_EMPTY":
+                L10n.text("No retained trace events remain in the selected time range.")
+            case "TRACE_SOURCE_CATALOG_INVALID", "TRACE_EXPORT_RECEIPT_INVALID", "TRACE_EXPORT_SIZE_MISMATCH", "TRACE_EXPORT_CONTENT_INVALID":
+                L10n.text("Agent Host could not prepare a verified trace export. Run a full check, then try again.")
             default:
                 message
             }

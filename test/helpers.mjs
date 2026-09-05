@@ -14,7 +14,7 @@ async function json(path, value) {
 export async function createDevelopmentWorkspace(root) {
   const math = join(root, 'calculator')
   const time = join(root, 'migratory-time')
-  const runtime = join(root, 'direct-execution-runtime')
+  const runtime = join(root, 'agent-host-suite', 'packages', 'direct-execution-runtime')
   const capability = join(root, 'capability-contracts')
   await json(join(math, 'plugins/math-anchor/.codex-plugin/plugin.json'), { name: 'math-anchor', version: '0.3.0' })
   await json(join(math, 'plugins/math-anchor/.mcp.json'), {
@@ -49,11 +49,43 @@ export async function createDevelopmentWorkspace(root) {
   await write(join(runtime, 'src/sessions/mcp-session.mjs'), '')
   await write(join(runtime, 'src/schema.mjs'), '')
   await json(join(runtime, 'schemas/provider-config.schema.json'), { type: 'object' })
+  await json(join(runtime, 'schemas/provider-config.schema.v0.2.json'), { type: 'object' })
+  await json(join(runtime, 'schemas/host-service-observation.schema.json'), { type: 'object' })
+  await json(join(runtime, 'schemas/host-service-observation.schema.v0.1.json'), { type: 'object' })
   await json(join(runtime, 'schemas/work-order.schema.json'), { type: 'object' })
   await json(join(runtime, 'schemas/contract-selection.schema.json'), { type: 'object' })
   await json(join(runtime, 'schemas/host-request.schema.json'), { type: 'object' })
   await json(join(capability, 'catalog/capabilities/time-zone-convert.v0.2.json'), { schemaVersion: 'openadam.capability-profile.v0.3' })
   return { root, math, time, runtime, capability }
+}
+
+export async function createDevelopmentObservabilityWorkspace(root) {
+  const observer = join(root, 'agent-host-suite', 'packages', 'agent-tool-observer')
+  const analyzer = join(root, 'agent-host-suite', 'packages', 'context-surface-analyzer')
+  await json(join(observer, 'package.json'), { name: '@openadam/agent-tool-observer', version: '0.3.0' })
+  await json(join(observer, 'package-lock.json'), { lockfileVersion: 3 })
+  await write(join(observer, 'src/cli.mjs'), '')
+  await write(join(observer, 'src/report.mjs'), '')
+  await json(join(analyzer, 'package.json'), { name: '@openadam/context-surface-analyzer', version: '0.1.2' })
+  await json(join(analyzer, 'package-lock.json'), { lockfileVersion: 3 })
+  await write(join(analyzer, 'src/cli.js'), '')
+  await write(join(analyzer, 'src/core.js'), '')
+  return { observer, analyzer }
+}
+
+export async function healthyCatalogPreflight(components) {
+  return {
+    status: 'within',
+    canonicalUtf8Bytes: Object.keys(components).length * 100,
+    largestToolUtf8Bytes: Object.keys(components).length === 0 ? 0 : 100,
+    toolCount: Object.keys(components).length,
+    budgets: { maxCatalogUtf8Bytes: 65_536, maxToolCount: 64, maxLargestToolUtf8Bytes: 40_000, maxResultUtf8Bytes: 65_536 },
+    exceeded: [],
+  }
+}
+
+export async function compatibleApplicationState() {
+  return { status: 'compatible', checked: true, carrier: 'test-application' }
 }
 
 export function createCodexRunner({ mathPresent = true, timePresent = false, legacyTimeRoot = null, mathVersion = '0.3.0', mathMarketplace = 'math-anchor', mathMarketplaceRoot = null } = {}) {
@@ -67,7 +99,7 @@ export function createCodexRunner({ mathPresent = true, timePresent = false, leg
 
   async function runner(command, args, options = {}) {
     calls.push({ command, args: [...args], options })
-    if (command === '/usr/bin/env' && args[0] === 'which') return { status: 0, stdout: `/fake/${args[1]}\n`, stderr: '' }
+    if (command === 'where.exe' || (command === '/usr/bin/env' && args[0] === 'which')) return { status: 0, stdout: `/fake/${args.at(-1)}\n`, stderr: '' }
     if (command === '/fake/codex' && args[0] === '--version') return { status: 0, stdout: 'codex-cli test\n', stderr: '' }
     if (command === '/fake/codex' && args.join(' ') === 'plugin marketplace list --json') {
       return {
@@ -123,4 +155,36 @@ export function createCodexRunner({ mathPresent = true, timePresent = false, leg
     throw new Error(`unexpected fake command: ${command} ${args.join(' ')}`)
   }
   return { runner, calls, marketplaces, get plugins() { return plugins } }
+}
+
+export function createClaudeRunner() {
+  const calls = []
+  const entries = new Map()
+  const prefix = ['--disable-slash-commands', '--no-chrome', '--setting-sources', 'user']
+  async function runner(command, args) {
+    calls.push({ command, args: [...args] })
+    if (command === 'where.exe' || (command === '/usr/bin/env' && args[0] === 'which')) return { status: 0, stdout: '/fake/claude\n', stderr: '' }
+    if (command !== '/fake/claude' || JSON.stringify(args.slice(0, prefix.length)) !== JSON.stringify(prefix)) {
+      throw new Error(`unexpected fake command: ${command} ${args.join(' ')}`)
+    }
+    const current = args.slice(prefix.length)
+    if (current[0] === '--version') return { status: 0, stdout: 'claude test\n', stderr: '' }
+    if (current[0] === 'mcp' && current[1] === 'get') {
+      const entry = entries.get(current[2])
+      if (entry === undefined) return { status: 1, stdout: `No MCP server named "${current[2]}".\n`, stderr: '' }
+      return { status: 0, stdout: `Command: ${entry.command}\nArgs: ${entry.args.join(' ')}\n`, stderr: '' }
+    }
+    if (current[0] === 'mcp' && current[1] === 'add') {
+      const name = current[4]
+      const separator = current.indexOf('--')
+      entries.set(name, { command: current[separator + 1], args: current.slice(separator + 2) })
+      return { status: 0, stdout: '', stderr: '' }
+    }
+    if (current[0] === 'mcp' && current[1] === 'remove') {
+      entries.delete(current[4])
+      return { status: 0, stdout: '', stderr: '' }
+    }
+    throw new Error(`unexpected fake Claude command: ${current.join(' ')}`)
+  }
+  return { runner, calls, entries }
 }

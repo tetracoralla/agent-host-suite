@@ -2,11 +2,17 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { platform } from 'node:os'
 import { join, dirname } from 'node:path'
 import { promisify } from 'node:util'
 import { pipeline } from 'node:stream/promises'
+import { currentReleasePlatform } from '../src/release-manifest.mjs'
 
 const execFileAsync = promisify(execFile)
+
+function tarCommand() {
+  return platform() === 'win32' ? 'tar.exe' : '/usr/bin/tar'
+}
 
 async function write(path, contents, mode = 0o600) {
   await mkdir(dirname(path), { recursive: true })
@@ -57,31 +63,36 @@ async function component(catalogRoot, fixtureRoot, definition, marker) {
   }
   const descriptorPath = join(root, 'component.json')
   await json(descriptorPath, descriptor)
-  const archiveName = `${definition.id}-${definition.version}-darwin-arm64.tar.gz`
+  const releasePlatform = currentReleasePlatform()
+  const archiveName = `${definition.id}-${definition.version}-${releasePlatform}.tar.gz`
   const archivePath = join(catalogRoot, 'artifacts', archiveName)
-  await execFileAsync('/usr/bin/tar', ['-czf', archivePath, '-C', root, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } })
+  await execFileAsync(tarCommand(), ['-czf', archivePath, '-C', root, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } })
   const archiveInfo = await stat(archivePath)
   return {
     id: definition.id,
     version: definition.version,
-    platform: 'darwin-arm64',
+    platform: releasePlatform,
     artifact: { url: `artifacts/${archiveName}`, sha256: await digest(archivePath), bytes: archiveInfo.size, format: 'tar.gz' },
     descriptorSha256: await digest(descriptorPath),
     license: { spdx: definition.id === 'node-runtime' ? 'MIT' : 'Apache-2.0', files: ['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt'] },
   }
 }
 
-export async function createReleaseFixture(root, { suiteVersion, releaseId, marker, includeObservability = false }) {
+export async function createReleaseFixture(root, { suiteVersion, releaseId, marker, includeObservability = false, includeDeveloper = false }) {
   const catalogRoot = join(root, 'catalog')
   await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
+  const nodeEntrypoint = platform() === 'win32' ? 'bin/node.exe' : 'bin/node'
+  const nodeContents = platform() === 'win32'
+    ? await readFile(process.execPath)
+    : '#!/bin/sh\nexec /usr/bin/env node "$@"\n'
   const mathPluginIdentity = ['.codex-plugin/plugin.json', '.mcp.json', 'runtime/math-anchor-runtime/math-anchor-runtime', 'runtime/math-anchor-runtime/.math-anchor-build-manifest.json', 'skills/calculate/SKILL.md']
   const timePluginIdentity = ['.codex-plugin/plugin.json', '.mcp.json', 'server/index.mjs', 'runtime/node', 'skills/convert-time-zones/SKILL.md']
   const definitions = [
     {
       id: 'node-runtime', version: '22.22.1', kind: 'node-runtime',
-      files: [['bin/node', ['#!/bin/sh\nexit 0\n', true]]],
-      identityFiles: ['bin/node', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json'],
-      entrypoints: { node: 'bin/node' }, integration: null,
+      files: [[nodeEntrypoint, [nodeContents, true]]],
+      identityFiles: [nodeEntrypoint, 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json'],
+      entrypoints: { node: nodeEntrypoint }, integration: null,
     },
     {
       id: 'direct-execution-runtime', version: '0.1.0', kind: 'direct-runtime',
@@ -139,36 +150,100 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
       },
     )
   }
+  if (includeDeveloper) {
+    const pluginRoot = 'marketplace/plugins/agent-tool-development-kit'
+    const skillRoot = `${pluginRoot}/skills/build-openadam-agent-tools`
+    const pluginIdentity = [
+      '.codex-plugin/plugin.json',
+      'skills/build-openadam-agent-tools/SKILL.md',
+      'skills/build-openadam-agent-tools/agents/openai.yaml',
+    ]
+    definitions.push({
+      id: 'agent-tool-development-kit', version: '0.1.0', kind: 'developer-kit',
+      files: [
+        ['runtime/openadam-dev.mjs', ["process.stdout.write(JSON.stringify({version:'0.1.0'})+'\\n')\n", false]],
+        ['marketplace/.agents/plugins/marketplace.json', ['{"name":"openadam-developer-tools"}\n', false]],
+        [`${pluginRoot}/.codex-plugin/plugin.json`, ['{"name":"agent-tool-development-kit","version":"0.1.0","skills":"./skills/"}\n', false]],
+        [`${skillRoot}/SKILL.md`, ['---\nname: build-openadam-agent-tools\n---\n', false]],
+        [`${skillRoot}/agents/openai.yaml`, ['interface:\n  display_name: Developer Kit\n', false]],
+      ],
+      identityFiles: [
+        'runtime/openadam-dev.mjs',
+        'marketplace/.agents/plugins/marketplace.json',
+        ...pluginIdentity.map((path) => `${pluginRoot}/${path}`),
+        'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json',
+      ],
+      entrypoints: { cli: 'runtime/openadam-dev.mjs', skill: `${skillRoot}/SKILL.md` },
+      integration: {
+        schemaVersion: 'openadam.agent-host-developer-kit-integration.v0.1',
+        displayName: 'Agent Tool Development Kit',
+        summary: 'Build, check, package, and probe OpenAdam-compatible Agent tools.',
+        cli: { executor: 'suite-node', command: 'runtime/openadam-dev.mjs', args: [], versionArguments: ['--version', '--json'] },
+        codex: {
+          marketplaceRoot: 'marketplace', marketplace: 'openadam-developer-tools',
+          pluginRoot, plugin: 'agent-tool-development-kit', identityFiles: pluginIdentity,
+        },
+        skill: {
+          id: 'build-openadam-agent-tools', root: skillRoot,
+          identityFiles: ['SKILL.md', 'agents/openai.yaml'], launcher: 'scripts/openadam-dev',
+        },
+        ownership: { uninstall: 'agent-host-created-only' },
+      },
+    })
+  }
   const components = []
   for (const definition of definitions) components.push(await component(catalogRoot, root, definition, marker))
   const manifestPath = join(catalogRoot, 'current.json')
   await json(manifestPath, {
     schemaVersion: 'openadam.agent-host-release.v0.2', releaseId, suiteVersion, status: 'internal-beta',
-    createdAt: '2026-08-27T00:00:00.000Z', platforms: ['darwin-arm64'], components,
+    createdAt: '2026-08-27T00:00:00.000Z', platforms: [currentReleasePlatform()], components,
+  })
+  await json(join(catalogRoot, 'build-provenance.json'), {
+    schemaVersion: 'openadam.agent-host-build-provenance.v0.1',
+    policy: 'local-development',
+    releaseId,
+    suiteVersion,
+    createdAt: '2026-08-27T00:00:00.000Z',
+    sources: {
+      suite: {
+        repository: null,
+        revision: '0'.repeat(40),
+        dirty: true,
+        sourcePolicy: 'local-development',
+      },
+    },
+    reusedComponents: [],
+    distributionBoundary: 'local-build-only-not-a-remote-confirmed-distribution',
   })
   return manifestPath
 }
 
-export async function createToolComponentFixture(root, { id = 'private-fixture', version = '0.1.0', marker = 'private' } = {}) {
+export async function createToolComponentFixture(root, { id = 'private-fixture', version = '0.1.0', marker = 'private', discovery = false, optionalPathEnvironment = [] } = {}) {
   const catalogRoot = join(root, 'catalog')
   await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
   const pluginRoot = `marketplace/plugins/${id}`
   const identityFiles = ['.codex-plugin/plugin.json', '.mcp.json', 'skills/use-private-fixture/SKILL.md']
+  const discoveryRuntime = `${pluginRoot}/cli.mjs`
   const releaseComponent = await component(catalogRoot, root, {
     id,
     version,
     kind: 'agent-tool',
     files: [
       ['marketplace/.agents/plugins/marketplace.json', [`{"name":"${id}-local"}\n`, false]],
-      [`${pluginRoot}/.codex-plugin/plugin.json`, [`{"name":"${id}","version":"${version}"}\n`, false]],
+      [`${pluginRoot}/.codex-plugin/plugin.json`, [`{"name":"${id}","version":"${version}","skills":"./skills/","mcpServers":"./.mcp.json"}\n`, false]],
       [`${pluginRoot}/.mcp.json`, [`{"mcpServers":{"${id}":{"command":"./server.mjs","args":[],"cwd":"."}}}\n`, false]],
       [`${pluginRoot}/skills/use-private-fixture/SKILL.md`, ['---\nname: use-private-fixture\n---\n', false]],
       [`${pluginRoot}/server.mjs`, [`// ${marker}\nprocess.stdin.resume()\n`, false]],
+      ...(discovery ? [[discoveryRuntime, [`process.stdout.write('${version}\\n')\n`, false]]] : []),
     ],
     identityFiles: ['marketplace/.agents/plugins/marketplace.json', ...identityFiles.map((path) => `${pluginRoot}/${path}`)],
     entrypoints: { server: `${pluginRoot}/server.mjs` },
     integration: {
-      schemaVersion: 'openadam.agent-host-tool-integration.v0.2',
+      schemaVersion: discovery
+        ? 'openadam.agent-host-tool-integration.v0.3'
+        : optionalPathEnvironment.length > 0
+          ? 'openadam.agent-host-tool-integration.v0.5'
+          : 'openadam.agent-host-tool-integration.v0.2',
       displayName: 'Private Fixture',
       summary: 'Run one deterministic private fixture operation.',
       codex: {
@@ -185,9 +260,27 @@ export async function createToolComponentFixture(root, { id = 'private-fixture',
         args: [],
         cwd: pluginRoot,
         workspaceEnvironment: [],
+        ...(optionalPathEnvironment.length === 0 ? {} : { optionalPathEnvironment }),
         expectedTools: ['private_fixture.run'],
         timeoutMs: 5000,
       },
+      ...(discovery ? {
+        discovery: {
+          kind: 'skill-cli',
+          skill: {
+            id: 'use-private-fixture',
+            root: `${pluginRoot}/skills/use-private-fixture`,
+            identityFiles: ['SKILL.md'],
+            launcher: 'scripts/private-fixture',
+          },
+          runtime: {
+            executor: 'suite-node',
+            command: discoveryRuntime,
+            args: [],
+            versionArguments: ['--version'],
+          },
+        },
+      } : {}),
       ownership: { uninstall: 'agent-host-created-only' },
     },
   }, marker)
@@ -199,7 +292,7 @@ export async function createToolComponentFixture(root, { id = 'private-fixture',
       descriptorSha256: releaseComponent.descriptorSha256,
       id,
       version,
-      platform: 'darwin-arm64',
+      platform: currentReleasePlatform(),
       spdx: 'Apache-2.0',
     },
   }

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-build-provenance.schema.v0.1.json",
+  "title": "Agent Host build provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "policy", "releaseId", "suiteVersion", "createdAt", "sources", "reusedComponents", "distributionBoundary"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-build-provenance.v0.1" },
+    "policy": { "enum": ["local-development", "local-clean", "remote-tagged"] },
+    "releaseId": { "type": "string", "minLength": 1 },
+    "suiteVersion": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "sources": {
+      "type": "object",
+      "minProperties": 1,
+      "required": ["suite"],
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "revision", "dirty", "sourcePolicy"],
+        "properties": {
+          "repository": { "type": ["string", "null"] },
+          "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "dirty": { "type": "boolean" },
+          "sourcePolicy": { "enum": ["local-development", "local-clean", "remote-tagged"] },
+          "ref": { "type": "string", "pattern": "^refs/tags/" },
+          "remoteVerified": { "const": true }
+        }
+      }
+    },
+    "reusedComponents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "artifactSha256", "fromReleaseId"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "artifactSha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "fromReleaseId": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "distributionBoundary": {
+      "enum": [
+        "local-build-only-not-a-remote-confirmed-distribution",
+        "source-checkouts-were-clean-and-matched-remote-release-tags-at-build-time"
+      ]
+    }
+  }
+}

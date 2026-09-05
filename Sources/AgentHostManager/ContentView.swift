@@ -14,20 +14,20 @@ struct ContentView: View {
             ToolbarItemGroup {
                 if store.suite?.configured == true {
                     Button { Task { await store.runDoctor() } } label: {
-                        Label("Check", systemImage: "stethoscope")
+                        Label(L10n.text("Check"), systemImage: "stethoscope")
                     }
-                    .help("Run a full environment check")
+                    .help(L10n.text("Run a full environment check"))
                     .disabled(store.isBusy)
 
                     Button { Task { await store.prepareUpdate() } } label: {
-                        Label(store.health.needsRepair ? "Repair" : "Update", systemImage: "arrow.triangle.2.circlepath")
+                        Label(L10n.text(store.health.needsRepair ? "Repair" : "Update"), systemImage: "arrow.triangle.2.circlepath")
                     }
-                    .help(store.health.needsRepair ? "Repair the installed environment" : "Check for compatible updates")
+                    .help(L10n.text(store.health.needsRepair ? "Repair the installed environment" : "Check for compatible updates"))
                     .disabled(store.isBusy)
                 }
 
                 SettingsLink {
-                    Label("Settings", systemImage: "gearshape")
+                    Label(L10n.text("Settings"), systemImage: "gearshape")
                 }
             }
         }
@@ -36,11 +36,16 @@ struct ContentView: View {
             set: { if !$0 { store.dismissError() } }
         )) {
             if store.recovery == .replaceHostConflicts {
-                Button("Replace Conflicting Installation", role: .destructive) {
+                Button(L10n.text("Replace Conflicting Installation"), role: .destructive) {
                     Task { await store.replaceConflictingInstallations() }
                 }
             }
-            Button("OK", role: .cancel) { store.dismissError() }
+            if case .replaceHostConnection = store.recovery {
+                Button(L10n.text("Replace Conflicting Connection"), role: .destructive) {
+                    Task { await store.replaceConflictingHostConnection() }
+                }
+            }
+            Button(L10n.text("OK"), role: .cancel) { store.dismissError() }
         } message: {
             Text(store.errorMessage ?? "")
         }
@@ -65,7 +70,7 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: $selection) {
             ForEach(store.suite?.configured == true ? ManagerSection.allCases : [.overview]) { section in
-                Label(section.title, systemImage: section.systemImage)
+                Label(L10n.text(section.title), systemImage: section.systemImage)
                     .tag(section)
             }
         }
@@ -82,7 +87,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .accessibilityLabel("Version \(version)")
+                    .accessibilityLabel("\(L10n.text("Version")) \(version)")
             }
         }
     }
@@ -93,6 +98,7 @@ struct ContentView: View {
             case .overview: EnvironmentView(store: store)
             case .tools: ToolsView(store: store)
             case .agentApps: AgentAppsView(store: store)
+            case .usage: UsageReliabilityView(store: store)
             case .activity: ActivityView(store: store)
             }
         } else {

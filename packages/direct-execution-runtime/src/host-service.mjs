@@ -1,0 +1,373 @@
+import { chmod, lstat, realpath, stat, unlink } from 'node:fs/promises'
+import { connect, createServer } from 'node:net'
+import { platform } from 'node:os'
+import { basename, dirname, isAbsolute, resolve } from 'node:path'
+import { HostError } from './errors.mjs'
+import { assertHostRequest, hostFailure, hostSuccess, HOST_SERVICE_VERSION } from './host-protocol.mjs'
+import { decodeUtf8Strict, jsonBytes, parseStrictJson } from './json.mjs'
+
+const ENVELOPE_ALLOWANCE_BYTES = 64 * 1024
+const DEFAULT_REQUEST_RECEIVE_TIMEOUT_MS = 30_000
+const SOCKET_VISIBILITY_ATTEMPTS = 100
+const SOCKET_VISIBILITY_DELAY_MS = 5
+const UNIX_SOCKET_PATH_MAX_BYTES = platform() === 'darwin' ? 103 : 107
+
+function windowsNamedPipe(path) {
+  return platform() === 'win32' && /^\\\\\.\\pipe\\[^\\/]+$/iu.test(path)
+}
+
+async function secureSocketPath(path) {
+  if (windowsNamedPipe(path)) return path
+  if (platform() === 'win32') throw new HostError('HOST_CONFIG_INVALID', 'Windows Host service requires an explicit named pipe')
+  if (!isAbsolute(path)) throw new HostError('HOST_CONFIG_INVALID', 'Host socket path must be absolute')
+  if (Buffer.byteLength(path) > UNIX_SOCKET_PATH_MAX_BYTES) {
+    throw new HostError('HOST_CONFIG_INVALID', `Host socket path exceeds the ${UNIX_SOCKET_PATH_MAX_BYTES}-byte platform limit`)
+  }
+  const name = basename(path)
+  if (name.length === 0 || name === '.' || name === '..') {
+    throw new HostError('HOST_CONFIG_INVALID', 'Host socket path must name a socket file')
+  }
+  const parent = await realpath(dirname(path)).catch((error) => {
+    throw new HostError('HOST_CONFIG_INVALID', 'Host socket directory does not exist', { cause: error })
+  })
+  const canonicalPath = resolve(parent, name)
+  if (Buffer.byteLength(canonicalPath) > UNIX_SOCKET_PATH_MAX_BYTES) {
+    throw new HostError('HOST_CONFIG_INVALID', `Canonical host socket path exceeds the ${UNIX_SOCKET_PATH_MAX_BYTES}-byte platform limit`)
+  }
+  const parentInfo = await stat(parent)
+  if (!parentInfo.isDirectory()) throw new HostError('HOST_CONFIG_INVALID', 'Host socket parent is not a directory')
+  if (typeof process.getuid === 'function' && parentInfo.uid !== process.getuid()) {
+    throw new HostError('HOST_CONFIG_INVALID', 'Host socket directory is not owned by the current user')
+  }
+  if ((parentInfo.mode & 0o077) !== 0) {
+    throw new HostError('HOST_CONFIG_INVALID', 'Host socket directory must not be accessible by group or other users')
+  }
+  return canonicalPath
+}
+
+async function liveSocket(path) {
+  return await new Promise((resolvePromise, reject) => {
+    let settled = false
+    const socket = connect({ path })
+    const finish = (method, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.destroy()
+      method(value)
+    }
+    const timer = setTimeout(() => finish(resolvePromise, false), 250)
+    socket.once('connect', () => finish(resolvePromise, true))
+    socket.once('error', (error) => {
+      if (error?.code === 'ECONNREFUSED' || error?.code === 'ENOENT') finish(resolvePromise, false)
+      else finish(reject, new HostError('HOST_SERVICE_UNAVAILABLE', 'Existing host socket could not be inspected', { cause: error }))
+    })
+  })
+}
+
+async function prepareSocket(path, replaceStaleSocket) {
+  if (windowsNamedPipe(path)) {
+    if (await liveSocket(path)) throw new HostError('HOST_SERVICE_IN_USE', 'Another host service is already listening on the named pipe')
+    return
+  }
+  const existing = await lstat(path).catch((error) => {
+    if (error?.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (existing === undefined) return
+  if (!existing.isSocket()) throw new HostError('HOST_CONFIG_INVALID', 'Host socket path already exists and is not a socket')
+  if (await liveSocket(path)) throw new HostError('HOST_SERVICE_IN_USE', 'Another host service is already listening on the socket')
+  if (!replaceStaleSocket) {
+    throw new HostError('HOST_STALE_SOCKET', 'A stale host socket exists; pass --replace-stale-socket to replace it')
+  }
+  await unlink(path)
+}
+
+function sameFile(left, right) {
+  return left !== undefined && right !== undefined && left.dev === right.dev && left.ino === right.ino
+}
+
+export async function waitForSocketIdentity(path, dependencies = {}) {
+  if (windowsNamedPipe(path)) {
+    const delay = dependencies.delay ?? ((duration) => new Promise((resolvePromise) => setTimeout(resolvePromise, duration)))
+    for (let attempt = 0; attempt < SOCKET_VISIBILITY_ATTEMPTS; attempt += 1) {
+      if (await liveSocket(path)) return null
+      if (attempt + 1 < SOCKET_VISIBILITY_ATTEMPTS) await delay(SOCKET_VISIBILITY_DELAY_MS)
+    }
+    throw new HostError('HOST_SERVICE_UNAVAILABLE', 'Host service named pipe did not become reachable after listening')
+  }
+  const inspect = dependencies.lstat ?? lstat
+  const delay = dependencies.delay ?? ((duration) => new Promise((resolvePromise) => setTimeout(resolvePromise, duration)))
+  for (let attempt = 0; attempt < SOCKET_VISIBILITY_ATTEMPTS; attempt += 1) {
+    try {
+      const identity = await inspect(path)
+      if (!identity.isSocket()) throw new HostError('HOST_SERVICE_UNAVAILABLE', 'Host service listener did not create a Unix Socket')
+      return identity
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+      if (attempt + 1 < SOCKET_VISIBILITY_ATTEMPTS) await delay(SOCKET_VISIBILITY_DELAY_MS)
+    }
+  }
+  throw new HostError('HOST_SERVICE_UNAVAILABLE', 'Host service Socket did not become visible after listening')
+}
+
+export class DirectHostService {
+  #server
+  #socketIdentity
+  #sockets = new Set()
+  #controllers = new Set()
+  #closing
+  #starting
+  #closeRequested = false
+  #closed = false
+
+  constructor(runtime, options) {
+    this.runtime = runtime
+    this.requestLimit = runtime.config.limits.maxWorkOrderBytes + ENVELOPE_ALLOWANCE_BYTES
+    this.responseLimit = runtime.config.limits.maxResultBytes + ENVELOPE_ALLOWANCE_BYTES
+    this.requestedSocketPath = options.socketPath
+    this.replaceStaleSocket = options.replaceStaleSocket === true
+    this.maxConnections = options.maxConnections ?? 64
+    this.requestReceiveTimeoutMs = options.requestReceiveTimeoutMs ?? DEFAULT_REQUEST_RECEIVE_TIMEOUT_MS
+    if (!Number.isInteger(this.maxConnections) || this.maxConnections < 1 || this.maxConnections > 1024) {
+      throw new HostError('HOST_CONFIG_INVALID', 'Host maxConnections must be between 1 and 1024')
+    }
+    if (!Number.isInteger(this.requestReceiveTimeoutMs) || this.requestReceiveTimeoutMs < 10 || this.requestReceiveTimeoutMs > 60_000) {
+      throw new HostError('HOST_CONFIG_INVALID', 'Host requestReceiveTimeoutMs must be between 10 and 60000')
+    }
+  }
+
+  async start() {
+    if (this.#closed) throw new HostError('HOST_SERVICE_CLOSED', 'Host service is closed; create a new runtime and service to start again')
+    if (this.#closeRequested || this.#closing !== undefined) throw new HostError('HOST_SERVICE_CLOSING', 'Host service is closing')
+    if (this.#starting !== undefined) return await this.#starting
+    if (this.#server !== undefined) throw new HostError('HOST_SERVICE_IN_USE', 'Host service is already started')
+    const starting = this.#startOnce()
+    this.#starting = starting
+    try {
+      return await starting
+    } finally {
+      if (this.#starting === starting) this.#starting = undefined
+    }
+  }
+
+  async #startOnce() {
+    this.socketPath = await secureSocketPath(this.requestedSocketPath)
+    await prepareSocket(this.socketPath, this.replaceStaleSocket)
+    let providerPreparation
+    try {
+      providerPreparation = this.runtime.config.servicePreparation.mode === 'persistent-providers'
+        ? await this.runtime.preparePersistentProviders({
+            timeoutMs: this.runtime.config.servicePreparation.totalTimeoutMs,
+          })
+        : { status: 'skipped', strategy: 'lazy', providers: [], totalMs: 0 }
+      if (this.#closeRequested) throw new HostError('HOST_SERVICE_CLOSING', 'Host service closed before startup completed')
+      const server = createServer({ allowHalfOpen: true }, (socket) => this.#accept(socket))
+      server.maxConnections = this.maxConnections
+      this.#server = server
+      await new Promise((resolvePromise, reject) => {
+        const onError = (error) => {
+          cleanup()
+          reject(new HostError('HOST_SERVICE_UNAVAILABLE', `Host service could not listen: ${error.message}`, { cause: error }))
+        }
+        const onListening = () => {
+          cleanup()
+          resolvePromise()
+        }
+        const cleanup = () => {
+          server.off('error', onError)
+          server.off('listening', onListening)
+        }
+        server.once('error', onError)
+        server.once('listening', onListening)
+        server.listen(this.socketPath)
+      })
+      const createdIdentity = await waitForSocketIdentity(this.socketPath)
+      if (!windowsNamedPipe(this.socketPath)) {
+        this.#socketIdentity = createdIdentity
+        await chmod(this.socketPath, 0o600)
+        const securedIdentity = await lstat(this.socketPath)
+        if (!securedIdentity.isSocket() || !sameFile(createdIdentity, securedIdentity)) {
+          throw new HostError('HOST_SERVICE_UNAVAILABLE', 'Host service Socket identity changed while securing it')
+        }
+        this.#socketIdentity = securedIdentity
+      }
+      if (this.#closeRequested) throw new HostError('HOST_SERVICE_CLOSING', 'Host service closed before readiness could be published')
+    } catch (error) {
+      let cleanupError
+      try {
+        await this.#closeOwned()
+      } catch (failure) {
+        cleanupError = failure
+      }
+      this.#closed = true
+      if (cleanupError !== undefined) {
+        throw new HostError('HOST_CLEANUP_FAILED', 'Host service startup failed and owned resources could not be fully reclaimed', {
+          cause: cleanupError,
+          details: { startupCode: error.code ?? 'HOST_SERVICE_UNAVAILABLE' },
+        })
+      }
+      throw error
+    }
+    return {
+      schemaVersion: HOST_SERVICE_VERSION,
+      status: 'ready',
+      socketPath: this.socketPath,
+      pid: process.pid,
+      providerPreparation,
+      limits: {
+        maxConnections: this.maxConnections,
+        requestReceiveTimeoutMs: this.requestReceiveTimeoutMs,
+        maxWorkOrderBytes: this.runtime.config.limits.maxWorkOrderBytes,
+        maxResultBytes: this.runtime.config.limits.maxResultBytes,
+      },
+    }
+  }
+
+  #accept(socket) {
+    this.#sockets.add(socket)
+    socket.once('close', () => this.#sockets.delete(socket))
+    socket.setTimeout(this.requestReceiveTimeoutMs)
+    let buffer = Buffer.alloc(0)
+    let processing = false
+    let responded = false
+    let requestId = 'invalid-request'
+    let controller
+    let framingError
+
+    const respond = (response) => {
+      if (responded || socket.destroyed) return
+      responded = true
+      let output = response
+      if (jsonBytes(output) > this.responseLimit) {
+        output = hostFailure(requestId, new HostError('HOST_RESULT_TOO_LARGE', 'Host service response exceeds its complete envelope limit'))
+      }
+      socket.end(`${JSON.stringify(output)}\n`)
+    }
+    const fail = (error) => respond(hostFailure(requestId, error))
+
+    socket.once('timeout', () => {
+      if (!processing && !responded) fail(new HostError('HOST_TIMEOUT', 'Host service did not receive a complete request before its deadline'))
+    })
+
+    // A complete newline-terminated request line starts processing immediately,
+    // before any client EOF. This keeps one framing across clients that
+    // half-close after the request and clients that keep the write side open
+    // while waiting for the response (installed 0.1.x clients).
+    socket.on('data', (chunk) => {
+      if (responded) return
+      if (processing) {
+        framingError ??= new HostError('HOST_PROTOCOL_ERROR', 'Host service accepts exactly one request per connection')
+        controller?.abort()
+        return
+      }
+      buffer = Buffer.concat([buffer, chunk])
+      if (buffer.length > this.requestLimit) {
+        fail(new HostError('HOST_INPUT_TOO_LARGE', 'Host service request exceeds its complete envelope limit'))
+        return
+      }
+      const newline = buffer.indexOf(0x0a)
+      if (newline === -1) return
+      processing = true
+      socket.setTimeout(0)
+      try {
+        if (newline !== buffer.length - 1) {
+          decodeUtf8Strict(buffer.subarray(newline + 1), 'host request trailing bytes')
+          fail(new HostError('HOST_PROTOCOL_ERROR', 'Host service accepts exactly one request per connection'))
+          return
+        }
+      } catch (error) {
+        fail(error)
+        return
+      }
+      void (async () => {
+        try {
+          const request = parseStrictJson(
+            decodeUtf8Strict(buffer.subarray(0, newline), 'host request'),
+            'host request',
+          )
+          if (typeof request?.id === 'string') requestId = request.id
+          assertHostRequest(request, this.requestLimit)
+          controller = new AbortController()
+          this.#controllers.add(controller)
+          const result = request.action === 'inspect'
+            ? await this.runtime.inspectBindings({ signal: controller.signal })
+            : request.action === 'project'
+              ? await this.runtime.projectContract(request.selection, { signal: controller.signal })
+            : request.action === 'validate'
+              ? await this.runtime.validateWorkOrder(request.workOrder, { signal: controller.signal })
+              : await this.runtime.runWorkOrder(request.workOrder, { signal: controller.signal })
+          if (framingError !== undefined) fail(framingError)
+          else respond(hostSuccess(request.id, result))
+        } catch (error) {
+          fail(framingError ?? error)
+        } finally {
+          if (controller !== undefined) this.#controllers.delete(controller)
+        }
+      })()
+    })
+    socket.once('end', () => {
+      if (responded || processing) return
+      fail(new HostError('HOST_PROTOCOL_ERROR', 'Host service request ended without one complete JSON line'))
+    })
+    socket.once('close', () => {
+      if (!responded) controller?.abort()
+    })
+    socket.once('error', () => {
+      if (!responded) controller?.abort()
+    })
+  }
+
+  async close() {
+    if (this.#closed) return
+    if (this.#closing !== undefined) return await this.#closing
+    this.#closeRequested = true
+    const closing = (async () => {
+      try {
+        if (this.#starting !== undefined) await this.#starting.catch(() => {})
+        if (!this.#closed) await this.#closeOwned()
+      } finally {
+        this.#closed = true
+      }
+    })()
+    this.#closing = closing
+    try {
+      await closing
+    } finally {
+      if (this.#closing === closing) this.#closing = undefined
+    }
+  }
+
+  async #closeOwned() {
+    for (const controller of this.#controllers) controller.abort()
+    this.#controllers.clear()
+    for (const socket of this.#sockets) socket.destroy()
+    this.#sockets.clear()
+    const server = this.#server
+    this.#server = undefined
+    let serverError
+    if (server !== undefined) {
+      await new Promise((resolvePromise) => {
+        server.close((error) => {
+          serverError = error
+          resolvePromise()
+        })
+      })
+    }
+    let runtimeError
+    try {
+      await this.runtime.close()
+    } catch (error) {
+      runtimeError = error
+    }
+    if (this.socketPath !== undefined && !windowsNamedPipe(this.socketPath)) {
+      const current = await lstat(this.socketPath).catch((error) => {
+        if (error?.code === 'ENOENT') return undefined
+        throw error
+      })
+      if (sameFile(current, this.#socketIdentity)) await unlink(this.socketPath)
+    }
+    if (runtimeError !== undefined) throw runtimeError
+    if (serverError !== undefined) throw new HostError('HOST_CLEANUP_FAILED', 'Host service did not close cleanly', { cause: serverError })
+  }
+}

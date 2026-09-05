@@ -17,9 +17,20 @@
     "workspaceRoot": { "type": ["string", "null"], "minLength": 1 },
     "releaseId": { "type": "string", "minLength": 1 },
     "releaseManifest": { "type": "object" },
+    "releaseSourceProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "recordSha256", "remoteConfirmedAtBuildTime"],
+      "properties": {
+        "policy": { "enum": ["local-development", "local-clean", "remote-tagged"] },
+        "recordSha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "remoteConfirmedAtBuildTime": { "type": "boolean" }
+      }
+    },
     "components": { "type": "object" },
     "availableAgentComponents": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
     "agentComponents": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "componentWarmupVersion": { "const": 1 },
     "privateComponents": { "type": "object" },
     "hosts": { "type": "object" },
     "runtime": { "type": "object" },

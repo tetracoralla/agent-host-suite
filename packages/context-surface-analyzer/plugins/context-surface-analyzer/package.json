@@ -1,0 +1,9 @@
+{
+  "name": "@openadam/context-surface-analyzer-plugin-runtime",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}

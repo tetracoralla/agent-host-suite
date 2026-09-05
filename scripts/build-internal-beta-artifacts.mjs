@@ -1,15 +1,27 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { access, chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { access, chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
+import { buildProvenance, inspectBuildSources, materializeGitSourceSnapshots } from './release-source-provenance.mjs'
+import {
+  ARMORIAL_COMPATIBILITY_VERSION,
+  buildArmorialPluginFromVerifiedSource,
+  buildFileVitalsPluginFromSource,
+  extractVerifiedProviderPluginArchive,
+  fileVitalsSourceBuildRequired,
+  FILE_VITALS_COMPATIBILITY_VERSION,
+} from './provider-source-build.mjs'
 
 const suiteRoot = fileURLToPath(new URL('../', import.meta.url))
 const workspaceRoot = dirname(suiteRoot)
-const outputRoot = join(suiteRoot, '.build', 'internal-beta', 'release-catalog')
+const suiteBuildRoot = join(suiteRoot, '.build')
+const outputRoot = process.env.AGENT_HOST_OUTPUT_ROOT === undefined
+  ? join(suiteRoot, '.build', 'internal-beta', 'release-catalog')
+  : containedBuildOutput(process.env.AGENT_HOST_OUTPUT_ROOT)
 const outputStaging = `${outputRoot}.staging-${process.pid}`
 const artifactRoot = join(outputStaging, 'artifacts')
 const componentSchema = 'openadam.agent-host-component.v0.1'
@@ -23,24 +35,98 @@ const reuseComponentIds = new Set((process.env.AGENT_HOST_REUSE_COMPONENTS ?? ''
   .map((value) => value.trim())
   .filter(Boolean))
 const reusedComponentIds = new Set()
+const sourcePolicy = process.env.AGENT_HOST_SOURCE_POLICY ?? 'local-clean'
+const sourceLockPath = process.env.AGENT_HOST_RELEASE_SOURCE_LOCK
 const platform = 'darwin-arm64'
 const nodeVersion = '22.22.1'
 const nodeArchiveName = `node-v${nodeVersion}-darwin-arm64.tar.gz`
 const nodeUrl = `https://nodejs.org/dist/v${nodeVersion}/${nodeArchiveName}`
 const nodeUpstreamSha256 = 'sha256:679ad4966339e4ef4900f57996714864e4211b898825bb840c3086c419fbcef2'
 const sourceRoots = {
-  runtime: join(workspaceRoot, 'direct-execution-runtime'),
+  runtime: join(suiteRoot, 'packages', 'direct-execution-runtime'),
   math: process.env.AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT ?? join(workspaceRoot, 'calculator'),
-  time: join(workspaceRoot, 'migratory-time'),
-  capability: join(workspaceRoot, 'capability-contracts'),
-  observer: join(workspaceRoot, 'agent-tool-observer'),
-  analyzer: join(workspaceRoot, 'context-surface-analyzer'),
-  dataTransformer: join(workspaceRoot, 'data-transformer'),
-  armorial: join(workspaceRoot, 'icon-svg-select'),
-  laniakea: join(workspaceRoot, 'laniakea'),
-  projective: join(workspaceRoot, 'perspective-tool'),
-  equatorium: join(workspaceRoot, 'standard-expression-interpreter'),
-  fileVitals: join(workspaceRoot, 'universal-inspector'),
+  time: process.env.AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT ?? join(workspaceRoot, 'migratory-time'),
+  capability: process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT ?? join(workspaceRoot, 'capability-contracts'),
+  observer: join(suiteRoot, 'packages', 'agent-tool-observer'),
+  analyzer: join(suiteRoot, 'packages', 'context-surface-analyzer'),
+  dataTransformer: process.env.AGENT_HOST_DATA_TRANSFORMER_SOURCE_ROOT ?? join(workspaceRoot, 'data-transformer'),
+  armorial: process.env.AGENT_HOST_ARMORIAL_SOURCE_ROOT ?? join(workspaceRoot, 'icon-svg-select'),
+  laniakea: process.env.AGENT_HOST_LANIAKEA_SOURCE_ROOT ?? join(workspaceRoot, 'laniakea'),
+  projective: process.env.AGENT_HOST_PROJECTIVE_SOURCE_ROOT ?? join(workspaceRoot, 'perspective-tool'),
+  equatorium: process.env.AGENT_HOST_EQUATORIUM_SOURCE_ROOT ?? join(workspaceRoot, 'standard-expression-interpreter'),
+  fileVitals: process.env.AGENT_HOST_FILE_VITALS_SOURCE_ROOT ?? join(workspaceRoot, 'universal-inspector'),
+  developerKit: process.env.AGENT_HOST_DEVELOPER_KIT_SOURCE_ROOT ?? join(workspaceRoot, 'agent-tool-development-kit'),
+}
+const componentSourceIds = Object.freeze({
+  'direct-execution-runtime': ['suite'],
+  'math-anchor': ['math-anchor'],
+  'migratory-time': ['migratory-time', 'capability-contracts'],
+  'agent-tool-observer': ['suite'],
+  'context-surface-analyzer': ['suite'],
+  'agent-tool-development-kit': ['agent-tool-development-kit'],
+  'data-transformer': ['data-transformer', 'capability-contracts'],
+  armorial: ['armorial'],
+  laniakea: ['laniakea'],
+  projective: ['projective'],
+  equatorium: ['equatorium'],
+  'file-vitals': ['file-vitals', 'capability-contracts'],
+})
+const logicalSourceRoots = Object.freeze({
+  suite: suiteRoot,
+  'math-anchor': sourceRoots.math,
+  'migratory-time': sourceRoots.time,
+  'capability-contracts': sourceRoots.capability,
+  'agent-tool-development-kit': sourceRoots.developerKit,
+  'data-transformer': sourceRoots.dataTransformer,
+  armorial: sourceRoots.armorial,
+  laniakea: sourceRoots.laniakea,
+  projective: sourceRoots.projective,
+  equatorium: sourceRoots.equatorium,
+  'file-vitals': sourceRoots.fileVitals,
+})
+let sourceObservations = null
+
+function useMaterializedSourceRoots(roots) {
+  sourceRoots.runtime = join(roots.suite, 'packages', 'direct-execution-runtime')
+  sourceRoots.observer = join(roots.suite, 'packages', 'agent-tool-observer')
+  sourceRoots.analyzer = join(roots.suite, 'packages', 'context-surface-analyzer')
+  sourceRoots.math = roots['math-anchor']
+  sourceRoots.time = roots['migratory-time']
+  sourceRoots.capability = roots['capability-contracts']
+  sourceRoots.developerKit = roots['agent-tool-development-kit']
+  sourceRoots.dataTransformer = roots['data-transformer']
+  sourceRoots.armorial = roots.armorial
+  sourceRoots.laniakea = roots.laniakea
+  sourceRoots.projective = roots.projective
+  sourceRoots.equatorium = roots.equatorium
+  sourceRoots.fileVitals = roots['file-vitals']
+}
+
+async function providerReleaseInput(sourceId, environmentName, fallbackRelativePath, materializedRoots) {
+  const originalRoot = await realpath(logicalSourceRoots[sourceId])
+  const requested = process.env[environmentName] ?? join(originalRoot, fallbackRelativePath)
+  if (materializedRoots === null) return requested
+  const requestedReal = await realpath(requested)
+  const relation = relative(originalRoot, requestedReal)
+  if (relation === '..' || relation.startsWith(`..${sep}`) || isAbsolute(relation)) {
+    throw new Error(`${environmentName} must remain inside the locked ${sourceId} repository for a remote-tagged build`)
+  }
+  return join(materializedRoots[sourceId], relation)
+}
+
+async function providerReleaseInputWhenBuilt(componentId, sourceId, environmentName, fallbackRelativePath, materializedRoots) {
+  return reuseComponentIds.has(componentId)
+    ? null
+    : providerReleaseInput(sourceId, environmentName, fallbackRelativePath, materializedRoots)
+}
+
+function containedBuildOutput(value) {
+  const output = resolve(value)
+  const relation = relative(suiteBuildRoot, output)
+  if (relation === '' || relation === '..' || relation.startsWith(`..${sep}`) || isAbsolute(relation)) {
+    throw new Error('AGENT_HOST_OUTPUT_ROOT must be one contained directory beneath the suite .build directory')
+  }
+  return output
 }
 
 function requiredEnvironment(name) {
@@ -128,10 +214,10 @@ async function removeLinks(root) {
   await walk(root)
 }
 
-async function sourceState(root) {
-  const revision = (await command('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root })).trim()
-  const dirty = (await command('/usr/bin/git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: root })).trim().length > 0
-  return { revision, dirty }
+function sourceState(sourceId) {
+  const source = sourceObservations?.[sourceId]
+  if (source === undefined) throw new Error(`source provenance was not inspected for ${sourceId}`)
+  return source
 }
 
 async function dependencyPackages(root) {
@@ -191,7 +277,7 @@ function sbom(name, version, license, source, packages = [], upstream = null) {
       { SPDXID: 'SPDXRef-RootPackage', name, versionInfo: version, downloadLocation: upstream?.url ?? 'NOASSERTION', licenseConcluded: license, licenseDeclared: license, filesAnalyzed: false, ...(upstream === null ? {} : { checksums: [{ algorithm: 'SHA256', checksumValue: upstream.sha256.slice(7) }] }) },
       ...packages.map((item, index) => ({ SPDXID: `SPDXRef-Dependency-${index + 1}`, name: item.name, versionInfo: item.version, downloadLocation: 'NOASSERTION', licenseConcluded: item.license, licenseDeclared: item.license, filesAnalyzed: false })),
     ],
-    annotations: [{ annotationDate: componentCreatedAt, annotationType: 'OTHER', annotator: 'Tool: Agent Host internal Beta builder', comment: `sourceRevision=${source?.revision ?? 'upstream'}; sourceDirty=${source?.dirty ?? false}` }],
+    annotations: [{ annotationDate: componentCreatedAt, annotationType: 'OTHER', annotator: 'Tool: Agent Host internal Beta builder', comment: `sourceRevision=${source?.revision ?? 'upstream'}; sourceDirty=${source?.dirty ?? false}; sourcePolicy=${source?.sourcePolicy ?? 'upstream'}; sourceRef=${source?.ref ?? 'none'}` }],
   }
 }
 
@@ -298,16 +384,55 @@ async function buildDirectRuntime(workRoot) {
   await installProductionDependencies(root)
   const notices = await legalNotices(root, 'Direct Execution Runtime')
   await writeText(join(root, 'THIRD_PARTY_NOTICES.txt'), notices.text)
-  const source = await sourceState(sourceRoots.runtime)
+  const source = sourceState('suite')
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
   await writeJson(join(root, 'sbom.spdx.json'), sbom('direct-execution-runtime', pkg.version, 'Apache-2.0', source, notices.packages))
-  const identityFiles = ['package.json', 'package-lock.json', 'src/cli.mjs', 'src/runtime.mjs', 'src/host-service.mjs', 'src/config.mjs', 'schemas/provider-config.schema.json', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json']
+  const identityFiles = ['package.json', 'package-lock.json', 'src/cli.mjs', 'src/runtime.mjs', 'src/host-service.mjs', 'src/config.mjs', 'schemas/provider-config.schema.json', 'schemas/provider-config.schema.v0.2.json', 'schemas/host-service-observation.schema.json', 'schemas/host-service-observation.schema.v0.1.json', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json']
   return await finalizeComponent({ root, id: 'direct-execution-runtime', version: pkg.version, kind: 'direct-runtime', identityFiles, entrypoints: { cli: 'src/cli.mjs' }, integration: null })
 }
 
-async function buildLocalNodeUtility(workRoot, { id, kind, title, sourceRoot, entrypoint }) {
+async function buildDeveloperKit() {
+  const pkg = JSON.parse(await readFile(join(sourceRoots.developerKit, 'package.json'), 'utf8'))
+  const archiveFile = `agent-tool-development-kit-${pkg.version}-${platform}.tar.gz`
+  const archivePath = join(artifactRoot, archiveFile)
+  const output = await command(process.execPath, [
+    join(sourceRoots.developerKit, 'scripts', 'build-developer-component.mjs'),
+    '--output', archivePath,
+  ], { cwd: sourceRoots.developerKit })
+  let result
+  try {
+    result = JSON.parse(output)
+  } catch (error) {
+    throw new Error(`Developer Kit builder returned invalid JSON: ${error.message}`)
+  }
+  const info = await stat(archivePath)
+  if (result.component?.id !== 'agent-tool-development-kit' || result.component.version !== pkg.version
+    || result.component.kind !== 'developer-kit' || result.artifact?.bytes !== info.size
+    || result.artifact?.sha256 !== await sha256(archivePath)) {
+    throw new Error('Developer Kit builder output does not match its staged component artifact')
+  }
+  return {
+    id: result.component.id,
+    version: result.component.version,
+    platform,
+    artifact: { url: `artifacts/${archiveFile}`, sha256: result.artifact.sha256, bytes: result.artifact.bytes, format: 'tar.gz' },
+    descriptorSha256: result.descriptorSha256,
+    license: result.license,
+  }
+}
+
+async function buildLocalNodeUtility(workRoot, {
+  id,
+  kind,
+  title,
+  sourceRoot,
+  sourceId,
+  entrypoint,
+  additionalPaths = [],
+  additionalIdentityFiles = [],
+}) {
   const root = join(workRoot, id)
-  for (const path of ['package.json', 'package-lock.json', 'src', 'LICENSE', 'NOTICE']) {
+  for (const path of ['package.json', 'package-lock.json', 'src', ...additionalPaths, 'LICENSE', 'NOTICE']) {
     await copyPath(join(sourceRoot, path), join(root, path))
   }
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
@@ -320,14 +445,23 @@ async function buildLocalNodeUtility(workRoot, { id, kind, title, sourceRoot, en
     notices = { packages: [], text: `# Third-Party Notices\n\n${title} has no bundled third-party package dependencies.\n` }
   }
   await writeText(join(root, 'THIRD_PARTY_NOTICES.txt'), notices.text)
-  const source = await sourceState(sourceRoot)
+  const source = sourceState(sourceId)
   await writeJson(join(root, 'sbom.spdx.json'), sbom(id, pkg.version, 'Apache-2.0', source, notices.packages))
   return await finalizeComponent({
     root,
     id,
     version: pkg.version,
     kind,
-    identityFiles: ['package.json', 'package-lock.json', entrypoint, 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json'],
+    identityFiles: [
+      'package.json',
+      'package-lock.json',
+      entrypoint,
+      ...additionalIdentityFiles,
+      'LICENSE',
+      'NOTICE',
+      'THIRD_PARTY_NOTICES.txt',
+      'sbom.spdx.json',
+    ],
     entrypoints: { cli: entrypoint },
     integration: null,
   })
@@ -376,10 +510,16 @@ async function buildAgentTool(workRoot, spec) {
   const pluginRoot = join(root, pluginRootRelative)
   let pluginSource = spec.pluginRoot
   if (spec.pluginArchive !== undefined) {
-    const extracted = join(workRoot, `${spec.id}-provider-release`)
-    await mkdir(extracted, { recursive: true })
-    await command('/usr/bin/tar', ['-xzf', spec.pluginArchive, '-C', extracted])
-    pluginSource = join(extracted, spec.pluginArchiveRoot)
+    const archiveWork = join(workRoot, `${spec.id}-provider-release`)
+    const extracted = await extractVerifiedProviderPluginArchive({
+      sourceArchive: spec.pluginArchive,
+      archiveWork,
+      expectedRoot: spec.pluginArchiveRoot,
+      expectedSha256: spec.pluginArchiveSha256,
+      label: `${spec.id} Provider`,
+      targetFilesystem: 'macos-default',
+    })
+    pluginSource = extracted.extractedRoot
   }
   await copyPath(pluginSource, pluginRoot)
   for (const path of spec.additionalPaths ?? []) await copyPath(join(spec.repositoryRoot, path), join(root, path))
@@ -388,6 +528,9 @@ async function buildAgentTool(workRoot, spec) {
   const mcpPath = join(pluginRoot, '.mcp.json')
   const plugin = JSON.parse(await readFile(pluginPath, 'utf8'))
   const mcp = JSON.parse(await readFile(mcpPath, 'utf8'))
+  if (spec.expectedVersion !== undefined && plugin.version !== spec.expectedVersion) {
+    throw new Error(`${spec.id} plugin version differs from the required compatibility version`)
+  }
   const serverEntries = Object.entries(mcp.mcpServers ?? {})
   if (serverEntries.length !== 1) throw new Error(`${spec.id} must declare exactly one MCP server`)
   const [serverName, server] = serverEntries[0]
@@ -420,7 +563,7 @@ async function buildAgentTool(workRoot, spec) {
     }],
   })
 
-  const legalRoot = spec.legalRoot ?? spec.pluginRoot
+  const legalRoot = spec.legalRoot ?? pluginSource
   const licensePath = await existingFile([join(legalRoot, 'LICENSE'), join(spec.repositoryRoot, 'LICENSE')])
   const noticePath = await existingFile([join(legalRoot, 'NOTICE'), join(spec.repositoryRoot, 'NOTICE')])
   const thirdPartyPath = await existingFile([
@@ -433,7 +576,7 @@ async function buildAgentTool(workRoot, spec) {
   await copyPath(noticePath, join(root, 'NOTICE'))
   if (thirdPartyPath === null) await writeText(join(root, 'THIRD_PARTY_NOTICES.txt'), `# Third-Party Notices\n\n${spec.displayName} declares no separately bundled third-party package notices in this integration artifact.\n`)
   else await copyPath(thirdPartyPath, join(root, 'THIRD_PARTY_NOTICES.txt'))
-  const source = await sourceState(spec.repositoryRoot)
+  const source = sourceState(spec.sourceId)
   await writeJson(join(root, 'sbom.spdx.json'), sbom(spec.id, plugin.version, plugin.license ?? 'Apache-2.0', source, []))
 
   const providerSbom = await existingFile([
@@ -458,15 +601,131 @@ async function buildAgentTool(workRoot, spec) {
     ...(providerSbomRelative === null ? [] : [providerSbomRelative]),
     ...(spec.identityFiles ?? []),
   ]
+  let discovery = null
+  if (spec.discovery !== undefined) {
+    const skillId = spec.discovery.skillId
+    if (typeof skillId !== 'string' || !/^[a-z][a-z0-9-]*$/u.test(skillId)) throw new Error(`${spec.id} discovery Skill id is invalid`)
+    const skillRoot = `${pluginRootRelative}/skills/${skillId}`
+    const skillIdentityFiles = spec.discovery.identityFiles ?? ['SKILL.md']
+    for (const path of skillIdentityFiles) {
+      if (await existingFile([join(root, skillRoot, containedPluginPath(path, `${spec.id} discovery Skill identity file`))]) === null) {
+        throw new Error(`${spec.id} discovery Skill identity file is absent: ${path}`)
+      }
+    }
+    const discoveryCommandWithinPlugin = containedPluginPath(spec.discovery.command, `${spec.id} discovery CLI command`)
+    const discoveryCommand = `${pluginRootRelative}/${discoveryCommandWithinPlugin}`
+    if (await existingFile([join(root, discoveryCommand)]) === null) throw new Error(`${spec.id} discovery CLI is absent: ${discoveryCommandWithinPlugin}`)
+    discovery = {
+      kind: 'skill-cli',
+      skill: {
+        id: skillId,
+        root: skillRoot,
+        identityFiles: skillIdentityFiles,
+        launcher: containedPluginPath(spec.discovery.launcher, `${spec.id} discovery launcher`),
+      },
+      runtime: {
+        executor: spec.discovery.executor ?? 'suite-node',
+        command: discoveryCommand,
+        args: spec.discovery.args ?? [],
+        versionArguments: spec.discovery.versionArguments ?? ['--version'],
+      },
+    }
+  }
+  let directCapability = null
+  let directCapabilityComponentIdentityFiles = []
+  if (spec.directCapability !== undefined) {
+    const capabilityRoot = 'capability-contracts'
+    const profileRelative = `${capabilityRoot}/${basename(spec.directCapability.profileSource)}`
+    await copyPath(spec.directCapability.profileSource, join(root, profileRelative))
+    const contracts = []
+    for (const contract of spec.directCapability.contracts) {
+      const profileInputSchema = `${capabilityRoot}/schemas/${basename(contract.inputSchemaSource)}`
+      const profileOutputSchema = `${capabilityRoot}/schemas/${basename(contract.outputSchemaSource)}`
+      await copyPath(contract.inputSchemaSource, join(root, profileInputSchema))
+      await copyPath(contract.outputSchemaSource, join(root, profileOutputSchema))
+      const inputSchema = `${pluginRootRelative}/${containedPluginPath(contract.providerInputSchema, `${spec.id} Direct Capability input schema`)}`
+      const outputSchema = `${pluginRootRelative}/${containedPluginPath(contract.providerOutputSchema, `${spec.id} Direct Capability output schema`)}`
+      if (await existingFile([join(root, inputSchema)]) === null || await existingFile([join(root, outputSchema)]) === null) {
+        throw new Error(`${spec.id} Direct Capability contract schemas are absent`)
+      }
+      contracts.push({ operationId: contract.operationId, inputSchema, outputSchema, profileInputSchema, profileOutputSchema })
+    }
+    const manifestWithinPlugin = containedPluginPath(spec.directCapability.manifest, `${spec.id} Direct Capability manifest`)
+    const manifest = `${pluginRootRelative}/${manifestWithinPlugin}`
+    if (await existingFile([join(root, manifest)]) === null) throw new Error(`${spec.id} Direct Capability manifest is absent`)
+    const adapterWithinPlugin = containedPluginPath(spec.directCapability.adapterCommand, `${spec.id} Direct Capability adapter`)
+    const adapterCommand = `${pluginRootRelative}/${adapterWithinPlugin}`
+    if (await existingFile([join(root, adapterCommand)]) === null) throw new Error(`${spec.id} Direct Capability adapter is absent`)
+    const providerManifest = JSON.parse(await readFile(join(root, manifest), 'utf8'))
+    const implementations = Array.isArray(providerManifest.implementations)
+      ? providerManifest.implementations.filter((implementation) => (
+        implementation?.capabilityId === spec.directCapability.capabilityId
+        && implementation?.capabilityVersion === spec.directCapability.capabilityVersion
+      ))
+      : []
+    const implementation = implementations.length === 1 ? implementations[0] : null
+    const expectedAdapterArgs = spec.directCapability.args ?? []
+    if (
+      providerManifest.provider?.id !== spec.directCapability.providerId
+      || providerManifest.provider?.version !== plugin.version
+      || implementation?.adapter?.protocol !== 'openadam.capability-jsonl.v0.1'
+      || containedPluginPath(implementation.adapter.command, `${spec.id} Provider Manifest adapter`) !== adapterWithinPlugin
+      || JSON.stringify(implementation.adapter.args ?? []) !== JSON.stringify(expectedAdapterArgs)
+      || (implementation.adapter.cwd ?? '.') !== '.'
+    ) {
+      throw new Error(`${spec.id} Direct Capability Provider Manifest differs from the Host integration`)
+    }
+    const capabilityIdentityFiles = [adapterCommand, runtimeCommandRelative]
+    directCapability = {
+      providerId: spec.directCapability.providerId,
+      transport: 'capability-jsonl-v0.1',
+      lifecycle: spec.directCapability.lifecycle ?? 'per-call',
+      ...(spec.directCapability.workspaceRoot === undefined ? {} : { workspaceRoot: spec.directCapability.workspaceRoot }),
+      capabilityId: spec.directCapability.capabilityId,
+      capabilityVersion: spec.directCapability.capabilityVersion,
+      adapter: {
+        command: adapterCommand,
+        args: expectedAdapterArgs,
+        cwd: pluginRootRelative,
+      },
+      manifest,
+      profile: profileRelative,
+      identityFiles: [...new Set(capabilityIdentityFiles)],
+      contracts: contracts.map(({ operationId, inputSchema, outputSchema }) => ({ operationId, inputSchema, outputSchema })),
+    }
+    directCapabilityComponentIdentityFiles = [
+      manifest,
+      profileRelative,
+      ...contracts.flatMap((contract) => [contract.inputSchema, contract.outputSchema, contract.profileInputSchema, contract.profileOutputSchema]),
+    ]
+  }
+  const integrationSchema = directCapability !== null
+    ? 'openadam.agent-host-tool-integration.v0.4'
+    : discovery === null
+      ? 'openadam.agent-host-tool-integration.v0.2'
+      : 'openadam.agent-host-tool-integration.v0.3'
+  const componentIdentityFiles = [...new Set([
+    ...identityFiles,
+    ...(directCapability?.identityFiles ?? []),
+    ...directCapabilityComponentIdentityFiles,
+  ])]
   return await finalizeComponent({
     root,
     id: spec.id,
     version: plugin.version,
     kind: spec.kind ?? 'agent-tool',
-    identityFiles,
-    entrypoints: { mcp: runtimeCommandRelative, ...(spec.entrypoints ?? {}) },
+    identityFiles: componentIdentityFiles,
+    entrypoints: {
+      mcp: runtimeCommandRelative,
+      ...(directCapability === null ? {} : {
+        capability: directCapability.adapter.command,
+        capabilityManifest: directCapability.manifest,
+        capabilityProfile: directCapability.profile,
+      }),
+      ...(spec.entrypoints ?? {}),
+    },
     integration: {
-      schemaVersion: 'openadam.agent-host-tool-integration.v0.2',
+      schemaVersion: integrationSchema,
       displayName: spec.displayName,
       summary: spec.summary,
       codex: {
@@ -486,6 +745,8 @@ async function buildAgentTool(workRoot, spec) {
         expectedTools: spec.expectedTools,
         timeoutMs: spec.timeoutMs ?? 10000,
       },
+      ...(discovery === null ? {} : { discovery }),
+      ...(directCapability === null ? {} : { directCapability }),
       ownership: { uninstall: 'agent-host-created-only' },
     },
   })
@@ -494,6 +755,10 @@ async function buildAgentTool(workRoot, spec) {
 async function buildMathAnchor(workRoot) {
   const root = join(workRoot, 'math-anchor')
   await copyPath(join(sourceRoots.math, '.agents/plugins/marketplace.json'), join(root, '.agents/plugins/marketplace.json'))
+  const marketplacePath = join(root, '.agents/plugins/marketplace.json')
+  const marketplace = JSON.parse(await readFile(marketplacePath, 'utf8'))
+  marketplace.name = 'math-anchor-agent-host'
+  await writeJson(marketplacePath, marketplace)
   await copyPath(join(sourceRoots.math, 'plugins/math-anchor'), join(root, 'plugins/math-anchor'))
   await copyPath(join(sourceRoots.math, 'LICENSE'), join(root, 'LICENSE'))
   await copyPath(join(sourceRoots.math, 'NOTICE'), join(root, 'NOTICE'))
@@ -509,7 +774,7 @@ async function buildMathAnchor(workRoot) {
     kind: 'math-anchor',
     identityFiles,
     entrypoints: { command: 'plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime' },
-    integration: { pluginRoot: 'plugins/math-anchor', marketplaceRoot: '.', marketplace: 'openadam', plugin: plugin.name, pluginIdentityRelativeFiles, args: ['mcp'] },
+    integration: { pluginRoot: 'plugins/math-anchor', marketplaceRoot: '.', marketplace: marketplace.name, plugin: plugin.name, pluginIdentityRelativeFiles, args: ['mcp'] },
   })
 }
 
@@ -536,7 +801,7 @@ async function buildMigratoryTime(workRoot, nodeComponent) {
   await writeJson(manifestPath, manifest)
   const notices = await legalNotices(root, 'Migratory Time')
   await writeText(join(root, 'THIRD_PARTY_NOTICES.txt'), notices.text)
-  const source = await sourceState(sourceRoots.time)
+  const source = sourceState('migratory-time')
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
   const plugin = JSON.parse(await readFile(join(root, 'plugins/migratory-time/.codex-plugin/plugin.json'), 'utf8'))
   await writeJson(join(root, 'sbom.spdx.json'), sbom('migratory-time', plugin.version, 'Apache-2.0', source, notices.packages))
@@ -554,12 +819,73 @@ async function buildMigratoryTime(workRoot, nodeComponent) {
 }
 
 async function main() {
+  const knownComponentIds = new Set(['node-runtime', ...Object.keys(componentSourceIds)])
+  const unknownReuseIds = [...reuseComponentIds].filter((id) => !knownComponentIds.has(id))
+  if (unknownReuseIds.length > 0) throw new Error(`requested reusable components are unknown: ${unknownReuseIds.join(', ')}`)
+  if (sourcePolicy === 'remote-tagged' && reuseComponentIds.size > 0) {
+    throw new Error('remote-tagged builds cannot reuse a prior local component catalog')
+  }
+  const requiredSourceIds = new Set(['suite'])
+  for (const [componentId, sourceIds] of Object.entries(componentSourceIds)) {
+    if (!reuseComponentIds.has(componentId)) for (const sourceId of sourceIds) requiredSourceIds.add(sourceId)
+  }
+  const requiredSourceRoots = Object.fromEntries([...requiredSourceIds].sort().map((id) => [id, logicalSourceRoots[id]]))
+  sourceObservations = await inspectBuildSources(sourcePolicy, requiredSourceRoots, { sourceLockPath })
+
   const workRoot = await mkdtemp(join(tmpdir(), 'agent-host-internal-beta-'))
-  const cacheRoot = join(suiteRoot, '.build', 'download-cache')
-  await mkdir(cacheRoot, { recursive: true })
-  await rm(outputStaging, { recursive: true, force: true })
-  await mkdir(artifactRoot, { recursive: true })
   try {
+    const materializedRoots = sourcePolicy === 'remote-tagged'
+      ? await materializeGitSourceSnapshots(requiredSourceRoots, sourceObservations, join(workRoot, 'remote-sources'))
+      : null
+    if (materializedRoots !== null) useMaterializedSourceRoots(materializedRoots)
+    const armorialSourceBuild = materializedRoots === null || reuseComponentIds.has('armorial')
+      ? null
+      : await buildArmorialPluginFromVerifiedSource({
+        sourceRoot: materializedRoots.armorial,
+        scratchRoot: workRoot,
+        sourceObservation: sourceObservations.armorial,
+      })
+    const fileVitalsOverrides = [
+      process.env.AGENT_HOST_FILE_VITALS_PLUGIN_ROOT,
+      process.env.AGENT_HOST_FILE_VITALS_PLUGIN_ARCHIVE,
+    ]
+    const rebuildFileVitals = fileVitalsSourceBuildRequired({
+      sourcePolicy,
+      reuseRequested: reuseComponentIds.has('file-vitals'),
+      pluginRootOverride: fileVitalsOverrides[0],
+      archiveOverride: fileVitalsOverrides[1],
+    })
+    const fileVitalsSourceBuild = rebuildFileVitals
+      ? await buildFileVitalsPluginFromSource({
+        sourceRoot: sourceRoots.fileVitals,
+        scratchRoot: workRoot,
+        sourceObservation: sourceObservations['file-vitals'],
+      })
+      : null
+    const providerReleaseInputs = {
+      dataTransformerPluginRoot: await providerReleaseInputWhenBuilt('data-transformer', 'data-transformer', 'AGENT_HOST_DATA_TRANSFORMER_PLUGIN_ROOT', 'dist/plugin/data-transformer-0.2.0-darwin-arm64', materializedRoots),
+      dataTransformerPluginArchive: await providerReleaseInputWhenBuilt('data-transformer', 'data-transformer', 'AGENT_HOST_DATA_TRANSFORMER_PLUGIN_ARCHIVE', 'dist/plugin/data-transformer-0.2.0-darwin-arm64.tar.gz', materializedRoots),
+      armorialPluginRoot: armorialSourceBuild === null
+        ? await providerReleaseInputWhenBuilt('armorial', 'armorial', 'AGENT_HOST_ARMORIAL_PLUGIN_ROOT', 'plugins/armorial', materializedRoots)
+        : materializedRoots.armorial,
+      armorialPluginArchive: armorialSourceBuild === null
+        ? await providerReleaseInputWhenBuilt('armorial', 'armorial', 'AGENT_HOST_ARMORIAL_PLUGIN_ARCHIVE', `.release/armorial-${ARMORIAL_COMPATIBILITY_VERSION}-codex-plugin-macos-arm64.tar.gz`, materializedRoots)
+        : armorialSourceBuild.archivePath,
+      armorialPluginArchiveSha256: armorialSourceBuild?.sha256,
+      projectivePluginRoot: await providerReleaseInputWhenBuilt('projective', 'projective', 'AGENT_HOST_PROJECTIVE_PLUGIN_ROOT', 'plugins/projective', materializedRoots),
+      projectivePluginArchive: await providerReleaseInputWhenBuilt('projective', 'projective', 'AGENT_HOST_PROJECTIVE_PLUGIN_ARCHIVE', 'artifacts/codex-plugin/projective-0.1.0+codex.20260824173741-codex-macos-arm64.tar.gz', materializedRoots),
+      fileVitalsPluginRoot: fileVitalsSourceBuild === null
+        ? await providerReleaseInputWhenBuilt('file-vitals', 'file-vitals', 'AGENT_HOST_FILE_VITALS_PLUGIN_ROOT', `dist/plugin/file-vitals-${FILE_VITALS_COMPATIBILITY_VERSION}-darwin-arm64`, materializedRoots)
+        : fileVitalsSourceBuild.pluginRoot,
+      fileVitalsPluginArchive: fileVitalsSourceBuild === null
+        ? await providerReleaseInputWhenBuilt('file-vitals', 'file-vitals', 'AGENT_HOST_FILE_VITALS_PLUGIN_ARCHIVE', `dist/plugin/file-vitals-${FILE_VITALS_COMPATIBILITY_VERSION}-darwin-arm64.tar.gz`, materializedRoots)
+        : fileVitalsSourceBuild.archivePath,
+      fileVitalsPluginArchiveSha256: fileVitalsSourceBuild?.sha256,
+    }
+    const cacheRoot = join(suiteRoot, '.build', 'download-cache')
+    await mkdir(cacheRoot, { recursive: true })
+    await rm(outputStaging, { recursive: true, force: true })
+    await mkdir(artifactRoot, { recursive: true })
     const node = await buildOrReuse('node-runtime', () => buildNode(workRoot, cacheRoot))
     const components = [
       node,
@@ -571,28 +897,70 @@ async function main() {
         kind: 'agent-tool-observer',
         title: 'Agent Tool Observer',
         sourceRoot: sourceRoots.observer,
+        sourceId: 'suite',
         entrypoint: 'src/cli.mjs',
+        additionalPaths: ['adapters', 'integrations'],
+        additionalIdentityFiles: [
+          'adapters/claude-code-hooks.json',
+          'adapters/claude-project-events.json',
+          'adapters/codex-session-events.json',
+          'adapters/deepseek-harness-session-events.json',
+          'adapters/gemini-cli-otel.json',
+          'adapters/github-copilot-cli-hooks.json',
+          'adapters/zcode-model-io.json',
+          'integrations/deepseek-harness/index.mjs',
+          'integrations/deepseek-harness/package.json',
+        ],
       })),
       await buildOrReuse('context-surface-analyzer', () => buildLocalNodeUtility(workRoot, {
         id: 'context-surface-analyzer',
         kind: 'context-surface-analyzer',
         title: 'Context Surface Analyzer',
         sourceRoot: sourceRoots.analyzer,
+        sourceId: 'suite',
         entrypoint: 'src/cli.js',
       })),
+      await buildOrReuse('agent-tool-development-kit', () => buildDeveloperKit()),
       await buildOrReuse('data-transformer', () => buildAgentTool(workRoot, {
         id: 'data-transformer',
         displayName: 'BatchTicket',
         summary: 'Inspect, reshape, validate, and compare structured data.',
         marketplace: 'data-transformer-local',
         plugin: 'data-transformer',
+        sourceId: 'data-transformer',
         repositoryRoot: sourceRoots.dataTransformer,
-        pluginRoot: process.env.AGENT_HOST_DATA_TRANSFORMER_PLUGIN_ROOT ?? join(sourceRoots.dataTransformer, 'dist/plugin/data-transformer-0.2.0-darwin-arm64'),
-        pluginArchive: process.env.AGENT_HOST_DATA_TRANSFORMER_PLUGIN_ARCHIVE ?? join(sourceRoots.dataTransformer, 'dist/plugin/data-transformer-0.2.0-darwin-arm64.tar.gz'),
+        pluginRoot: providerReleaseInputs.dataTransformerPluginRoot,
+        pluginArchive: providerReleaseInputs.dataTransformerPluginArchive,
         pluginArchiveRoot: 'data-transformer-0.2.0-darwin-arm64',
         expectedTools: ['data_diff', 'data_inspect', 'data_transform', 'data_validate'],
         workspaceEnvironment: ['ADT_WORKSPACE_ROOT'],
         timeoutMs: 30000,
+        directCapability: {
+          providerId: 'io.github.tetracoralla.batchticket',
+          capabilityId: 'org.openadam.structured-data.analyze',
+          capabilityVersion: '0.1.0',
+          lifecycle: 'persistent',
+          workspaceRoot: 'host-required',
+          manifest: 'capabilities/provider.json',
+          adapterCommand: 'runtime/adt-capability',
+          profileSource: join(sourceRoots.capability, 'catalog/capabilities/structured-data-analyze.v0.1.json'),
+          contracts: [
+            {
+              operationId: 'inspect',
+              inputSchemaSource: join(sourceRoots.capability, 'catalog/capabilities/schemas/structured-data.inspect.v0.1.input.schema.json'),
+              outputSchemaSource: join(sourceRoots.capability, 'catalog/capabilities/schemas/structured-data.inspect.v0.1.output.schema.json'),
+              providerInputSchema: 'capabilities/schemas/structured-data.inspect.input.schema.json',
+              providerOutputSchema: 'capabilities/schemas/structured-data.inspect.output.schema.json',
+            },
+            {
+              operationId: 'validate',
+              inputSchemaSource: join(sourceRoots.capability, 'catalog/capabilities/schemas/structured-data.validate.v0.1.input.schema.json'),
+              outputSchemaSource: join(sourceRoots.capability, 'catalog/capabilities/schemas/structured-data.validate.v0.1.output.schema.json'),
+              providerInputSchema: 'capabilities/schemas/structured-data.validate.input.schema.json',
+              providerOutputSchema: 'capabilities/schemas/structured-data.validate.output.schema.json',
+            },
+          ],
+        },
       })),
       await buildOrReuse('armorial', () => buildAgentTool(workRoot, {
         id: 'armorial',
@@ -600,11 +968,20 @@ async function main() {
         summary: 'Choose project-aware icons without redrawing them.',
         marketplace: 'openadam-local',
         plugin: 'armorial',
+        sourceId: 'armorial',
         repositoryRoot: sourceRoots.armorial,
-        pluginRoot: process.env.AGENT_HOST_ARMORIAL_PLUGIN_ROOT ?? join(sourceRoots.armorial, 'plugins/armorial'),
-        pluginArchive: process.env.AGENT_HOST_ARMORIAL_PLUGIN_ARCHIVE ?? join(sourceRoots.armorial, '.release/armorial-0.5.0-codex-plugin-macos-arm64.tar.gz'),
+        pluginRoot: providerReleaseInputs.armorialPluginRoot,
+        pluginArchive: providerReleaseInputs.armorialPluginArchive,
+        pluginArchiveSha256: providerReleaseInputs.armorialPluginArchiveSha256,
         pluginArchiveRoot: 'armorial',
         expectedTools: ['browse_icons', 'choose_icon', 'get_icon', 'get_icons', 'resolve_icon', 'search_icons'],
+        discovery: {
+          skillId: 'icon-svg-select',
+          identityFiles: ['SKILL.md', 'references/html-retrofit.md', 'references/selection-messages.md'],
+          command: 'dist/adapters/cli.js',
+          launcher: 'scripts/armorial',
+          versionArguments: ['--version'],
+        },
       })),
       await buildOrReuse('laniakea', () => buildAgentTool(workRoot, {
         id: 'laniakea',
@@ -612,6 +989,7 @@ async function main() {
         summary: 'Create, inspect, search, and revise Markdown mind maps.',
         marketplace: 'laniakea',
         plugin: 'laniakea',
+        sourceId: 'laniakea',
         repositoryRoot: sourceRoots.laniakea,
         pluginRoot: join(sourceRoots.laniakea, 'plugins/laniakea'),
         expectedTools: ['create_mind_map', 'read_mind_map', 'search_mind_map', 'update_mind_map'],
@@ -622,9 +1000,10 @@ async function main() {
         summary: 'Compose, inspect, render, and emit explicit projective planes.',
         marketplace: 'projective-local',
         plugin: 'projective',
+        sourceId: 'projective',
         repositoryRoot: sourceRoots.projective,
-        pluginRoot: process.env.AGENT_HOST_PROJECTIVE_PLUGIN_ROOT ?? join(sourceRoots.projective, 'plugins/projective'),
-        pluginArchive: process.env.AGENT_HOST_PROJECTIVE_PLUGIN_ARCHIVE ?? join(sourceRoots.projective, 'artifacts/codex-plugin/projective-0.1.0+codex.20260824173741-codex-macos-arm64.tar.gz'),
+        pluginRoot: providerReleaseInputs.projectivePluginRoot,
+        pluginArchive: providerReleaseInputs.projectivePluginArchive,
         pluginArchiveRoot: 'projective',
         expectedTools: ['projective.compose', 'projective.css', 'projective.inspect', 'projective.render', 'projective.solve'],
         workspaceEnvironment: ['PROJECTIVE_WORKSPACE_ROOT'],
@@ -635,6 +1014,7 @@ async function main() {
         summary: 'Interpret specification-dense standard expressions deterministically.',
         marketplace: 'equatorium',
         plugin: 'equatorium',
+        sourceId: 'equatorium',
         repositoryRoot: sourceRoots.equatorium,
         pluginRoot: join(sourceRoots.equatorium, 'plugins/equatorium'),
         expectedTools: ['sei_run'],
@@ -645,14 +1025,40 @@ async function main() {
         summary: 'Inspect and inventory files before acting on them.',
         marketplace: 'file-vitals-local',
         plugin: 'file-vitals',
+        sourceId: 'file-vitals',
         repositoryRoot: sourceRoots.fileVitals,
-        pluginRoot: process.env.AGENT_HOST_FILE_VITALS_PLUGIN_ROOT ?? join(sourceRoots.fileVitals, 'dist/plugin/file-vitals-0.3.2-darwin-arm64'),
+        pluginRoot: providerReleaseInputs.fileVitalsPluginRoot,
+        pluginArchive: providerReleaseInputs.fileVitalsPluginArchive,
+        pluginArchiveSha256: providerReleaseInputs.fileVitalsPluginArchiveSha256,
+        pluginArchiveRoot: `file-vitals-${FILE_VITALS_COMPATIBILITY_VERSION}-darwin-arm64`,
+        expectedVersion: FILE_VITALS_COMPATIBILITY_VERSION,
         expectedTools: ['file_inspect', 'file_inspect_batch', 'workspace_inventory'],
         workspaceEnvironment: ['UFI_WORKSPACE_ROOT'],
+        directCapability: {
+          providerId: 'io.github.tetracoralla.file-vitals',
+          capabilityId: 'org.openadam.file.inspect',
+          capabilityVersion: '0.1.0',
+          lifecycle: 'persistent',
+          workspaceRoot: 'host-required',
+          manifest: 'capabilities/provider.json',
+          adapterCommand: 'runtime/file-vitals-capability',
+          profileSource: join(sourceRoots.capability, 'catalog/capabilities/file-inspect.v0.1.json'),
+          contracts: [{
+            operationId: 'inspect',
+            inputSchemaSource: join(sourceRoots.capability, 'catalog/capabilities/schemas/file.inspect.v0.1.input.schema.json'),
+            outputSchemaSource: join(sourceRoots.capability, 'catalog/capabilities/schemas/file.inspect.v0.1.output.schema.json'),
+            providerInputSchema: 'capabilities/schemas/file.inspect.input.schema.json',
+            providerOutputSchema: 'capabilities/schemas/file.inspect.output.schema.json',
+          }],
+        },
       })),
     ]
     const unreused = [...reuseComponentIds].filter((id) => !reusedComponentIds.has(id))
-    if (unreused.length > 0) throw new Error(`requested reusable components are unknown: ${unreused.join(', ')}`)
+    if (unreused.length > 0) throw new Error(`requested reusable components were not staged: ${unreused.join(', ')}`)
+    const postBuildSources = await inspectBuildSources(sourcePolicy, requiredSourceRoots, { sourceLockPath })
+    if (JSON.stringify(postBuildSources) !== JSON.stringify(sourceObservations)) {
+      throw new Error('source repositories changed while release components were being built')
+    }
     const releaseManifest = {
       schemaVersion: 'openadam.agent-host-release.v0.2',
       releaseId,
@@ -663,12 +1069,31 @@ async function main() {
       components,
     }
     await writeJson(join(outputStaging, 'current.json'), releaseManifest)
+    const sourceProvenance = buildProvenance({
+      policy: sourcePolicy,
+      releaseId,
+      suiteVersion: releaseVersion,
+      createdAt: releaseCreatedAt,
+      sources: sourceObservations,
+      reusedComponents: components
+        .filter((component) => reusedComponentIds.has(component.id))
+        .map((component) => ({
+          id: component.id,
+          artifactSha256: component.artifact.sha256,
+          fromReleaseId: priorRelease.releaseId,
+        })),
+    })
+    await writeJson(join(outputStaging, 'build-provenance.json'), sourceProvenance)
     try {
       const previous = JSON.parse(await readFile(join(outputRoot, 'current.json'), 'utf8'))
       if (previous.releaseId === releaseId) {
         const priorDigests = new Map(previous.components.map((item) => [item.id, item.artifact.sha256]))
         const changed = components.filter((item) => priorDigests.get(item.id) !== item.artifact.sha256).map((item) => item.id)
         if (changed.length > 0) throw new Error(`${releaseId} is already bound to different component bytes: ${changed.join(', ')}`)
+        const previousProvenance = JSON.parse(await readFile(join(outputRoot, 'build-provenance.json'), 'utf8'))
+        if (JSON.stringify(previousProvenance) !== JSON.stringify(sourceProvenance)) {
+          throw new Error(`${releaseId} is already bound to different source provenance`)
+        }
       }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error

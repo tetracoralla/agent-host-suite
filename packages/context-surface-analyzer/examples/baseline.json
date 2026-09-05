@@ -1,0 +1,43 @@
+{
+  "format": "context-surface.snapshot.v0.1",
+  "source": { "id": "sample-plugin", "revision": "1.0.0" },
+  "tools": [
+    {
+      "name": "sample.lookup",
+      "description": "Look up one record by its stable identifier.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      }
+    },
+    {
+      "name": "sample.describe",
+      "description": "Describe one record by its stable identifier.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      }
+    }
+  ],
+  "measurements": [
+    {
+      "metric": "input_tokens",
+      "value": 412,
+      "source": "external-counter",
+      "provider": "example-provider",
+      "model": "example-model",
+      "serialization": "tools-list-json",
+      "tokenizerVersion": "example-1"
+    }
+  ],
+  "budgets": {
+    "maxCatalogUtf8Bytes": 2048,
+    "maxToolCount": 8,
+    "maxLargestToolUtf8Bytes": 1024,
+    "maxResultUtf8Bytes": 65536
+  }
+}

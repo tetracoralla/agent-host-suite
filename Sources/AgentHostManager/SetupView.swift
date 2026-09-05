@@ -6,12 +6,12 @@ struct SetupView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Set up your Agent environment", subtitle: "Install one verified local environment for Codex.") {
+                PageHeader(title: "Set up your Agent environment", subtitle: "Install one verified local environment for your Agent app.") {
                     HealthPill(health: store.health)
                 }
 
                 Panel {
-                    Label("Standard tools", systemImage: "shippingbox.fill")
+                    Label(L10n.text("Standard tools"), systemImage: "shippingbox.fill")
                         .font(.headline)
                     SetupItem(name: "Math Anchor", detail: "Exact and scientific calculation", image: "function")
                     Divider()
@@ -19,38 +19,33 @@ struct SetupView: View {
                 }
 
                 Panel {
-                    Label("Local service", systemImage: "bolt.fill")
+                    Label(L10n.text("Local service"), systemImage: "bolt.fill")
                         .font(.headline)
                     SetupItem(name: "Local execution", detail: "Keeps installed tools ready on this Mac", image: "bolt.fill")
                 }
 
                 Panel {
-                    Text("Agent app").font(.headline)
-                    HStack(spacing: 12) {
-                        Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .foregroundStyle(.blue)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Codex")
-                            Text(store.hostStatuses["codex"]?.appInstalled == true ? "Detected on this Mac" : "Codex must be installed first")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: store.hostStatuses["codex"]?.appInstalled == true ? "checkmark.circle.fill" : "exclamationmark.circle")
-                            .foregroundStyle(store.hostStatuses["codex"]?.appInstalled == true ? .green : .orange)
+                    Text(L10n.text("Agent app")).font(.headline)
+                    ForEach(Array(ManagerAgentApp.all.enumerated()), id: \.element.id) { index, app in
+                        if index > 0 { Divider() }
+                        AgentAppChoiceRow(
+                            app: app,
+                            installed: store.hostStatuses[app.id]?.appInstalled == true,
+                            selected: store.selectedSetupHost == app.id,
+                            select: { store.selectedSetupHost = app.id }
+                        )
                     }
                 }
 
                 HStack {
-                    Button("Review Setup") {
+                    Button(L10n.text("Review Setup")) {
                         Task { await store.prepareSetup() }
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(store.isBusy || store.hostStatuses["codex"]?.appInstalled != true)
+                    .disabled(store.isBusy || store.hostStatuses[store.selectedSetupHost]?.appInstalled != true)
 
-                    Text("Local monitoring stays off until you turn it on.")
+                    Text(L10n.text("Local monitoring stays off until you turn it on."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -69,9 +64,9 @@ struct SetupPlanView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Install Agent Environment")
+                Text(L10n.text("Install Agent Environment"))
                     .font(.title2.weight(.semibold))
-                Text("Agent Host will install the Standard tools, connect them to Codex, and start local execution.")
+                Text(L10n.format("Agent Host will install the Standard tools, connect them to {app}, and start local execution.", ["app": store.selectedSetupHostName]))
                     .foregroundStyle(.secondary)
             }
 
@@ -84,22 +79,22 @@ struct SetupPlanView: View {
             }
 
             Panel {
-                LabeledContent("Tool set", value: plan.profileDisplayName ?? "Standard")
-                LabeledContent("Codex entries", value: (plan.hosts?["codex"]?.entries?.count ?? 0).formatted())
-                LabeledContent("Background service", value: plan.service?.supported == true ? "Will be installed" : "Unavailable")
+                LabeledContent(L10n.text("Tool set"), value: L10n.text(plan.profileDisplayName ?? "Standard"))
+                LabeledContent(L10n.format("{app} entries", ["app": store.selectedSetupHostName]), value: (plan.hosts?[store.selectedSetupHost]?.entries?.count ?? 0).formatted())
+                LabeledContent(L10n.text("Background service"), value: L10n.text(plan.service?.supported == true ? "Will be installed" : "Unavailable"))
             }
 
             NoticeView(
-                title: "A new Codex task will be required",
-                message: "Open a fresh task after setup so Codex can load the installed tools.",
+                title: L10n.format("A new {app} task will be required", ["app": store.selectedSetupHostName]),
+                message: L10n.format("Open a fresh task after setup so {app} can load the installed tools.", ["app": store.selectedSetupHostName]),
                 systemImage: "arrow.clockwise.circle.fill",
                 color: .blue
             )
 
             HStack {
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(L10n.text("Cancel"), role: .cancel) { dismiss() }
                 Spacer()
-                Button("Install") { Task { await store.installStandard() } }
+                Button(L10n.text("Install")) { Task { await store.installStandard() } }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
             }
@@ -107,6 +102,37 @@ struct SetupPlanView: View {
         .padding(24)
         .frame(width: 520)
         .accessibilityElement(children: .contain)
+    }
+}
+
+private struct AgentAppChoiceRow: View {
+    let app: ManagerAgentApp
+    let installed: Bool
+    let selected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 12) {
+                Image(systemName: app.systemImage)
+                    .foregroundStyle(installed ? .blue : .secondary)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(app.name).foregroundStyle(.primary)
+                    Text(L10n.text(installed ? "Detected on this Mac" : "Not installed"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(selected ? .blue : .secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!installed)
+        .accessibilityLabel(L10n.format("Use {app} for setup", ["app": app.name]))
+        .accessibilityValue(L10n.text(selected ? "Selected" : installed ? "Available" : "Not installed"))
     }
 }
 
@@ -121,8 +147,8 @@ private struct SetupItem: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+                Text(L10n.text(name))
+                Text(L10n.text(detail)).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -134,9 +160,9 @@ private struct PlanRow: View {
 
     var body: some View {
         HStack {
-            Text(name)
+            Text(L10n.text(name))
             Spacer()
-            Text(version ?? "Unavailable")
+            Text(version ?? L10n.text("Unavailable"))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }

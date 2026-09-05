@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-tool-integration.schema.v0.4.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "displayName", "summary", "codex", "runtime", "directCapability", "ownership"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-tool-integration.v0.4" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 180 },
+    "codex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marketplaceRoot", "marketplace", "pluginRoot", "plugin", "identityFiles"],
+      "properties": {
+        "marketplaceRoot": { "type": "string", "minLength": 1 },
+        "marketplace": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "pluginRoot": { "type": "string", "minLength": 1 },
+        "plugin": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "identityFiles": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "executor", "command", "args", "cwd", "expectedTools", "timeoutMs"],
+      "properties": {
+        "transport": { "const": "mcp-stdio" },
+        "executor": { "enum": ["component", "suite-node"] },
+        "command": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "cwd": { "type": "string", "minLength": 1 },
+        "workspaceEnvironment": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" } },
+        "expectedTools": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 30000 }
+      }
+    },
+    "directCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "transport", "lifecycle", "capabilityId", "capabilityVersion", "adapter", "manifest", "profile", "identityFiles", "contracts"],
+      "properties": {
+        "providerId": { "type": "string", "minLength": 1 },
+        "transport": { "const": "capability-jsonl-v0.1" },
+        "lifecycle": { "enum": ["persistent", "per-call"] },
+        "workspaceRoot": { "const": "host-required" },
+        "capabilityId": { "type": "string", "minLength": 1 },
+        "capabilityVersion": { "type": "string", "minLength": 1 },
+        "adapter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "args", "cwd"],
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "cwd": { "type": "string", "minLength": 1 }
+          }
+        },
+        "manifest": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
+        "identityFiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "contracts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operationId", "inputSchema", "outputSchema"],
+            "properties": {
+              "operationId": { "type": "string", "minLength": 1 },
+              "inputSchema": { "type": "string", "minLength": 1 },
+              "outputSchema": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uninstall"],
+      "properties": { "uninstall": { "const": "agent-host-created-only" } }
+    }
+  }
+}

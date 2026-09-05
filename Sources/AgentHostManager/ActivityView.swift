@@ -11,7 +11,7 @@ struct ActivityView: View {
                 }
 
                 if store.activity.isEmpty {
-                    ContentUnavailableView("No activity yet", systemImage: "clock", description: Text("Install, update, repair, and connection changes appear here."))
+                    ContentUnavailableView(L10n.text("No activity yet"), systemImage: "clock", description: Text(L10n.text("Install, update, repair, and connection changes appear here.")))
                         .frame(maxWidth: .infinity, minHeight: 300)
                 } else {
                     Panel {
@@ -43,14 +43,14 @@ private struct ActivityRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.summary)
+                Text(entry.localizedSummary)
                 if let date = entry.date {
-                    Text(date, format: .relative(presentation: .named))
+                    Text(L10n.relativeAge(since: date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(Array(entry.humanDetail(componentNames: componentNames).enumerated()), id: \.offset) { _, item in
-                    Text("\(item.label): \(item.value)")
+                    Text("\(L10n.text(item.label)): \(L10n.text(item.value))")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }

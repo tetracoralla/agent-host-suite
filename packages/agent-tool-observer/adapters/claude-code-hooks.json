@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "openadam.agent-shell-adapter.v0.1",
+  "id": "openadam.claude-code-hooks",
+  "version": "0.1.0",
+  "provider": "claude",
+  "transport": "official-hooks",
+  "collection": { "passiveMetadata": true, "explicitAnalysisPack": false },
+  "signals": {
+    "modelSteps": "unavailable",
+    "toolOffers": "unavailable",
+    "toolCalls": "available",
+    "toolResults": "available",
+    "usage": "unavailable",
+    "turnEnds": "partial",
+    "selfReportedRationalePresence": "unavailable"
+  },
+  "content": { "passiveStorage": "metadata-only", "explicitPack": "metadata-only" },
+  "runtime": { "platforms": ["darwin", "win32", "linux"], "sourceFormats": ["openadam.agent-shell-trace-bridge.v0.1", "claude-code-hooks"] }
+}

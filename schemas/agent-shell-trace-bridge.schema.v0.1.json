@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-shell-trace-bridge.schema.v0.1.json",
+  "title": "Agent Shell Trace Bridge Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "adapter", "provider", "eventId", "kind", "occurredAt", "contentIncluded"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-shell-trace-bridge.v0.1" },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "sourceFormat"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "sourceFormat": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "providerVersion": { "type": ["string", "null"], "maxLength": 100 }
+      }
+    },
+    "provider": { "type": "string", "enum": ["claude", "deepseek-harness", "gemini-cli", "github-copilot-cli"] },
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "sessionId": { "type": ["string", "null"], "maxLength": 300 },
+    "turnId": { "type": ["string", "number", "null"] },
+    "requestId": { "type": ["string", "null"], "maxLength": 300 },
+    "callId": { "type": ["string", "null"], "maxLength": 300 },
+    "kind": { "type": "string", "enum": ["model-step", "tool-offer", "tool-call", "tool-result", "turn-end"] },
+    "occurredAt": { "type": "integer", "minimum": 0 },
+    "completedAt": { "type": ["integer", "null"], "minimum": 0 },
+    "model": { "type": ["string", "null"], "maxLength": 200 },
+    "querySource": { "type": ["string", "null"], "maxLength": 100 },
+    "finishReason": { "type": ["string", "null"], "maxLength": 100 },
+    "status": { "type": ["string", "null"], "enum": ["observed", "completed", "error", "cancelled", "unknown", null] },
+    "toolName": { "type": ["string", "null"], "maxLength": 256 },
+    "attempt": { "type": ["integer", "null"], "minimum": 0 },
+    "durationMs": { "type": ["number", "null"], "minimum": 0 },
+    "requestBytes": { "type": ["integer", "null"], "minimum": 0 },
+    "responseBytes": { "type": ["integer", "null"], "minimum": 0 },
+    "requestMessageCount": { "type": ["integer", "null"], "minimum": 0 },
+    "offeredToolCount": { "type": ["integer", "null"], "minimum": 0 },
+    "emittedToolCallCount": { "type": ["integer", "null"], "minimum": 0 },
+    "inputTokens": { "type": ["integer", "null"], "minimum": 0 },
+    "cachedInputTokens": { "type": ["integer", "null"], "minimum": 0 },
+    "outputTokens": { "type": ["integer", "null"], "minimum": 0 },
+    "reasoningTokens": { "type": ["integer", "null"], "minimum": 0 },
+    "totalTokens": { "type": ["integer", "null"], "minimum": 0 },
+    "selfReportedRationalePresent": { "type": ["boolean", "null"] },
+    "stableErrorCode": { "type": ["string", "null"], "pattern": "^[A-Z0-9_]{1,100}$" },
+    "stableReason": { "type": ["string", "null"], "maxLength": 100 },
+    "contentIncluded": { "const": false }
+  }
+}

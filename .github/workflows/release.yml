@@ -18,7 +18,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - run: ./scripts/package-macos-app.sh release
+      - run: AGENT_HOST_PUBLIC_DISTRIBUTION=1 ./scripts/package-macos-app.sh release
       - name: Record runner architecture
         run: echo "APP_ARCH=$(uname -m)" >> "$GITHUB_ENV"
       - name: Require signing and notarization credentials

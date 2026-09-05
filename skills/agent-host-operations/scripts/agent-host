@@ -23,11 +23,6 @@ if [[ -n "${AGENT_HOST_CLI:-}" ]]; then
 fi
 
 current_path="${0:A}"
-command_path="$(command -v agent-host || true)"
-if [[ -n "${command_path}" && "${command_path:A}" != "${current_path}" ]]; then
-  exec "${command_path}" "$@"
-fi
-
 user_app="${HOME}/Applications/Agent Host.app"
 for app_path in "/Applications/Agent Host.app" "${user_app}"; do
   launcher_path="${app_path}/Contents/MacOS/agent-host"
@@ -40,6 +35,11 @@ for app_path in "/Applications/Agent Host.app" "${user_app}"; do
     exec "${node_path}" "${cli_path}" "$@"
   fi
 done
+
+command_path="$(command -v agent-host || true)"
+if [[ -n "${command_path}" && "${command_path:A}" != "${current_path}" ]]; then
+  exec "${command_path}" "$@"
+fi
 
 print -u2 "AGENT_HOST_CLI_UNAVAILABLE: Install Agent Host.app or the published agent-host CLI."
 exit 127

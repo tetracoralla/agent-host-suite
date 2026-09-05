@@ -8,35 +8,35 @@ struct EnvironmentChangePlanView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(title)
+                Text(L10n.text(title))
                     .font(.title2.weight(.semibold))
-                Text(summary)
+                Text(L10n.text(summary))
                     .foregroundStyle(.secondary)
             }
 
             Panel {
                 switch plan {
                 case let .update(update, _, replaceHostConflicts):
-                    LabeledContent("Tool set", value: update.profileDisplayName ?? update.profile)
-                    LabeledContent("Components changing", value: update.changed.count.formatted())
-                    LabeledContent("Agent apps checked", value: update.activation.hosts.count.formatted())
-                    LabeledContent("Background service", value: update.activation.service?.supported == false ? "Unavailable" : "Checked")
+                    LabeledContent(L10n.text("Tool set"), value: L10n.text(update.profileDisplayName ?? update.profile))
+                    LabeledContent(L10n.text("Components changing"), value: update.changed.count.formatted())
+                    LabeledContent(L10n.text("Agent apps checked"), value: update.activation.hosts.count.formatted())
+                    LabeledContent(L10n.text("Background service"), value: L10n.text(update.activation.service?.supported == false ? "Unavailable" : "Checked"))
                     if replaceHostConflicts {
                         Divider()
-                        Label("Conflicting copies with the same verified identity will be replaced. Agent Host records what it displaced so uninstall can restore it.", systemImage: "arrow.triangle.swap")
+                        Label(L10n.text("Conflicting copies with the same verified identity will be replaced. Agent Host records what it displaced so uninstall can restore it."), systemImage: "arrow.triangle.swap")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 case let .rollback(rollback):
-                    LabeledContent("Restore version", value: rollback.targetVersion)
-                    LabeledContent("Agent apps", value: "Reconnect to retained package")
-                    LabeledContent("Background service", value: "Restore retained configuration")
+                    LabeledContent(L10n.text("Restore version"), value: rollback.targetVersion)
+                    LabeledContent(L10n.text("Agent apps"), value: L10n.text("Reconnect to retained package"))
+                    LabeledContent(L10n.text("Background service"), value: L10n.text("Restore retained configuration"))
                 }
             }
 
             if case let .update(update, _, _) = plan, !update.changed.isEmpty {
                 Panel {
-                    Text("Changes").font(.headline)
+                    Text(L10n.text("Changes")).font(.headline)
                     ForEach(update.changed, id: \.self) { id in
                         Label(displayName(id), systemImage: "arrow.down.circle")
                     }
@@ -51,9 +51,9 @@ struct EnvironmentChangePlanView: View {
             )
 
             HStack {
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(L10n.text("Cancel"), role: .cancel) { dismiss() }
                 Spacer()
-                Button(actionTitle) { Task { await store.applyEnvironmentChange() } }
+                Button(L10n.text(actionTitle)) { Task { await store.applyEnvironmentChange() } }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
             }
@@ -90,14 +90,14 @@ struct EnvironmentChangePlanView: View {
 
     private func displayName(_ id: String) -> String {
         switch id {
-        case "direct-execution-runtime": "Local execution"
+        case "direct-execution-runtime": L10n.text("Local execution")
         case "math-anchor": "Math Anchor"
         case "migratory-time": "Migratory Time"
         case "data-transformer": "BatchTicket"
-        case "context-surface-analyzer": "Catalog measurement"
+        case "context-surface-analyzer": L10n.text("Catalog measurement")
         case "file-vitals": "File Vitals"
-        case "agent-catalog": "Agent tool availability"
-        case "workspace-grant": "Workspace access"
+        case "agent-catalog": L10n.text("Agent tool availability")
+        case "workspace-grant": L10n.text("Workspace access")
         default: id.split(separator: "-").map { $0.capitalized }.joined(separator: " ")
         }
     }

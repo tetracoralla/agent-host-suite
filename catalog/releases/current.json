@@ -5,7 +5,10 @@
   "status": "draft-unbound",
   "createdAt": "2026-08-27T00:00:00.000Z",
   "platforms": [
-    "darwin-arm64"
+    "darwin-arm64",
+    "darwin-x86_64",
+    "win32-x64",
+    "win32-arm64"
   ],
   "components": []
 }

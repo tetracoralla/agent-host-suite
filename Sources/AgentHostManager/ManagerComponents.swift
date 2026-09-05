@@ -8,10 +8,10 @@ struct PageHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
+                Text(L10n.text(title))
                     .font(.largeTitle.weight(.semibold))
                 if let subtitle {
-                    Text(subtitle)
+                    Text(L10n.text(subtitle))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -44,7 +44,7 @@ struct HealthPill: View {
         case let .attention(message): (message, .orange, "exclamationmark.triangle.fill")
         case .unavailable: ("Not set up", .secondary, "circle.dashed")
         }
-        Label(value.0, systemImage: value.2)
+        Label(L10n.text(value.0), systemImage: value.2)
             .font(.caption.weight(.medium))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -64,7 +64,7 @@ struct ItemStatePill: View {
         case .unavailable: (.secondary, "circle.dashed")
         case .inactive: (.secondary, "shippingbox")
         }
-        Label(state.label, systemImage: value.1)
+        Label(L10n.text(state.label), systemImage: value.1)
             .font(.caption.weight(.medium))
             .foregroundStyle(value.0)
     }
@@ -77,7 +77,7 @@ struct BusyOverlay: View {
         VStack(spacing: 10) {
             ProgressView()
                 .controlSize(.large)
-            Text(label)
+            Text(L10n.text(label))
                 .font(.callout.weight(.medium))
         }
         .padding(.horizontal, 24)
@@ -85,7 +85,7 @@ struct BusyOverlay: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .shadow(radius: 14, y: 6)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(label)
+        .accessibilityLabel(L10n.text(label))
         .accessibilityAddTraits(.updatesFrequently)
     }
 }
@@ -103,8 +103,8 @@ struct NoticeView: View {
                 .font(.title3)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline)
-                Text(message).foregroundStyle(.secondary)
+                Text(L10n.text(title)).font(.headline)
+                Text(L10n.text(message)).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

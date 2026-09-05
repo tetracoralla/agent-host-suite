@@ -1,11 +1,14 @@
 import { lstat, readdir, realpath, rm } from 'node:fs/promises'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AgentHostError } from './errors.mjs'
-import { readJson } from './json.mjs'
+import { canonicalJson, readJson, sha256 } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { verifyReleaseComponent } from './release-artifacts.mjs'
-import { listHistory, loadState, prepareStatePaths } from './state.mjs'
+import { runFile } from './process.mjs'
+import { loadRollbackState, loadState, prepareStatePaths, readStatePaths, statePaths } from './state.mjs'
+import { readProcessInventory } from './process-inventory.mjs'
+import { withLifecycleMutation } from './lifecycle-lock.mjs'
 
 function allocatedBytes(info) {
   return Number.isFinite(info.blocks) ? Number(info.blocks) * 512 : Number(info.size)
@@ -46,7 +49,9 @@ function contained(root, candidate) {
 async function inventorySections(paths, packageInventory = null) {
   const sections = {}
   for (const name of ['packages', 'hostProjections', 'downloads', 'history', 'backups', 'runtime', 'observations', 'context']) {
-    sections[name] = name === 'packages' && packageInventory !== null ? packageInventory.total : await treeUsage(paths[name])
+    sections[name] = name === 'packages' && packageInventory !== null
+      ? packageInventory.total
+      : await treeUsage(paths[name], { allowSymbolicLinks: name === 'backups' })
   }
   sections.total = Object.values(sections).reduce((total, item) => ({
     apparentBytes: total.apparentBytes + item.apparentBytes,
@@ -94,16 +99,16 @@ async function managerAppUsage() {
   }
 }
 
-// Measure a read-only installation tree without following links. Private storage
-// keeps the stricter no-link policy because cleanup can mutate those paths.
+// Measure a read-only installation tree without following links. Mutable
+// package/download storage keeps the stricter no-link policy. The private
+// backup section uses the same non-following measurement because Host conflict
+// recovery intentionally preserves a displaced user-owned Skill symlink.
 export async function measureReadOnlyTreeUsage(path) {
   return await treeUsage(path, { allowSymbolicLinks: true })
 }
 
 async function rollbackState(paths) {
-  const history = await listHistory(paths)
-  const target = history.find((path) => !path.includes('-uninstalled-'))
-  return target === undefined ? null : await readJson(target)
+  return await loadRollbackState(paths, await loadState(paths))
 }
 
 function retainedStateComponents(state) {
@@ -153,14 +158,52 @@ async function verifyRetainedStates(states) {
   }
 }
 
+async function livePackageReferences(packageRoot, runner) {
+  const processes = await readProcessInventory(runner)
+  if (processes === null) {
+    throw new AgentHostError(
+      'STORAGE_LIVE_PROCESS_SCAN_FAILED',
+      'Cannot identify packages used by live Agent sessions; refusing to calculate cleanup candidates',
+    )
+  }
+  const prefix = `${packageRoot}${sep}`
+  const windows = process.platform === 'win32'
+  const searchedPrefix = windows ? prefix.toLowerCase() : prefix
+  const live = new Map()
+  for (const { command } of processes) {
+    const nativeCommand = windows ? command.replaceAll('/', '\\') : command
+    const searchedCommand = windows ? nativeCommand.toLowerCase() : nativeCommand
+    let offset = 0
+    while (offset < command.length) {
+      const start = searchedCommand.indexOf(searchedPrefix, offset)
+      if (start === -1) break
+      const segments = nativeCommand.slice(start + prefix.length).split(sep)
+      if (segments.length >= 2 && segments[0] !== '' && segments[1] !== '') {
+        const path = join(packageRoot, segments[0], segments[1].split(/[\s"']/u)[0])
+        try {
+          const resolved = await realpath(path)
+          if (contained(packageRoot, resolved)) {
+            live.set(resolved, { reason: 'live-process', component: segments[0], version: null })
+          }
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error
+        }
+      }
+      offset = start + prefix.length
+    }
+  }
+  return live
+}
+
 function releaseActivationMs(state) {
   const value = Date.parse(state.releaseActivatedAt ?? state.updatedAt ?? state.installedAt ?? '')
   return Number.isFinite(value) ? value : 0
 }
 
-async function packagePlan(paths, current, rollback) {
+async function packagePlan(paths, current, rollback, runner) {
   const states = [['current', current], ...(rollback === null ? [] : [['rollback', rollback]])]
   const { packageRoot, retained } = await retainedPackageRoots(paths, states)
+  const live = await livePackageReferences(packageRoot, runner)
   const cutoffMs = releaseActivationMs(current)
   const removable = []
   const retainedEntries = []
@@ -180,6 +223,11 @@ async function packagePlan(paths, current, rollback) {
       const keep = retained.get(resolved)
       if (keep !== undefined) {
         retainedEntries.push({ path, ...keep })
+        continue
+      }
+      const liveReference = live.get(resolved)
+      if (liveReference !== undefined) {
+        retainedEntries.push({ path, ...liveReference })
         continue
       }
       if (name.startsWith('.staging-') || info.mtimeMs >= cutoffMs) {
@@ -220,13 +268,61 @@ async function downloadPlan(paths, current) {
   return { retained, removable }
 }
 
-function planSummary(packageResult, downloadResult) {
-  const candidates = [...packageResult.removable, ...downloadResult.removable]
+const CONTENT_ADDRESSED_RUNTIME_CONFIG = /^provider-config-[0-9a-f]{24}\.json$/u
+const LEGACY_RUNTIME_CONFIG_NAME = 'provider-config.json'
+
+function isRuntimeConfigName(name) {
+  return CONTENT_ADDRESSED_RUNTIME_CONFIG.test(name) || name === LEGACY_RUNTIME_CONFIG_NAME
+}
+
+async function runtimeConfigPlan(paths, current, rollback) {
+  const runtimeRoot = resolve(paths.runtime)
+  const retainedPaths = new Set()
+  for (const [reason, state] of [['current', current], ...(rollback === null ? [] : [['rollback', rollback]])]) {
+    const configPath = state?.runtime?.configPath
+    if (typeof configPath !== 'string'
+      || resolve(dirname(configPath)) !== runtimeRoot
+      || !isRuntimeConfigName(basename(configPath))) continue
+    const info = await lstat(configPath).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error))
+    if (info === null) {
+      throw new AgentHostError('STORAGE_RETAINED_RUNTIME_CONFIG_MISSING', `Cannot clean storage while the retained ${reason} runtime configuration is missing`)
+    }
+    if (info.isSymbolicLink() || !info.isFile()) {
+      throw new AgentHostError('STORAGE_PATH_UNSAFE', `Runtime configuration storage contains an unsafe entry: ${configPath}`)
+    }
+    retainedPaths.add(resolve(configPath))
+  }
+  const retained = []
+  const removable = []
+  for (const name of await readdir(paths.runtime)) {
+    if (!isRuntimeConfigName(name)) continue
+    const path = join(paths.runtime, name)
+    const info = await lstat(path)
+    if (info.isSymbolicLink() || !info.isFile()) {
+      throw new AgentHostError('STORAGE_PATH_UNSAFE', `Runtime configuration storage contains an unsafe entry: ${path}`)
+    }
+    if (retainedPaths.has(resolve(path))) {
+      retained.push({ path })
+      continue
+    }
+    removable.push({
+      path,
+      usage: await treeUsage(path),
+      identity: { dev: Number(info.dev), ino: Number(info.ino), mtimeMs: Number(info.mtimeMs) },
+    })
+  }
+  return { retained, removable }
+}
+
+function planSummary(packageResult, downloadResult, runtimeConfigResult) {
+  const candidates = [...packageResult.removable, ...downloadResult.removable, ...runtimeConfigResult.removable]
   return {
     packageVersions: packageResult.removable.length,
     downloads: downloadResult.removable.length,
+    runtimeConfigs: runtimeConfigResult.removable.length,
     apparentBytes: candidates.reduce((sum, item) => sum + item.usage.apparentBytes, 0),
     allocatedBytes: candidates.reduce((sum, item) => sum + item.usage.allocatedBytes, 0),
+    livePackageVersions: packageResult.retained.filter((item) => item.reason === 'live-process').length,
   }
 }
 
@@ -240,13 +336,15 @@ async function removeCandidate(candidate) {
   await rm(candidate.path, { recursive: current.isDirectory(), force: false })
 }
 
-export async function storageStatus(options = {}) {
-  const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+export async function storageStatus(options = {}, dependencies = {}) {
+  const runner = dependencies.runner ?? runFile
+  const paths = await readStatePaths(resolveStateRoot(options.stateRoot))
   const current = await loadState(paths)
   if (current === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   const rollback = await rollbackState(paths)
-  const packages = await packagePlan(paths, current, rollback)
+  const packages = await packagePlan(paths, current, rollback, runner)
   const downloads = await downloadPlan(paths, current)
+  const runtimeConfigs = await runtimeConfigPlan(paths, current, rollback)
   const [packageInventory, managerApp] = await Promise.all([packageUsageByComponent(paths), managerAppUsage()])
   const sections = await inventorySections(paths, packageInventory)
   return {
@@ -263,20 +361,22 @@ export async function storageStatus(options = {}) {
       allocatedBytes: sections.total.allocatedBytes + (managerApp?.allocatedBytes ?? 0),
     },
     cleanup: {
-      ...planSummary(packages, downloads),
+      ...planSummary(packages, downloads, runtimeConfigs),
       retainedPackageVersions: packages.retained.length,
     },
   }
 }
 
-export async function cleanupStorage(options = {}) {
-  const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+async function cleanupStorageUnlocked(options = {}, dependencies = {}, preparedPaths = null) {
+  const runner = dependencies.runner ?? runFile
+  const paths = preparedPaths ?? await prepareStatePaths(resolveStateRoot(options.stateRoot))
   const current = await loadState(paths)
   if (current === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   const rollback = await rollbackState(paths)
-  const packages = await packagePlan(paths, current, rollback)
+  const packages = await packagePlan(paths, current, rollback, runner)
   const downloads = await downloadPlan(paths, current)
-  const summary = planSummary(packages, downloads)
+  const runtimeConfigs = await runtimeConfigPlan(paths, current, rollback)
+  const summary = planSummary(packages, downloads, runtimeConfigs)
   const before = await inventorySections(paths)
   if (options.dryRun === true) {
     return {
@@ -285,12 +385,30 @@ export async function cleanupStorage(options = {}) {
     }
   }
   await verifyRetainedStates(packages.states)
+  await dependencies.beforeCleanupCommit?.()
+  const currentNow = await loadState(paths)
+  const rollbackNow = currentNow === null ? null : await rollbackState(paths)
+  if (currentNow === null
+    || sha256(canonicalJson(currentNow)) !== sha256(canonicalJson(current))
+    || sha256(canonicalJson(rollbackNow)) !== sha256(canonicalJson(rollback))) {
+    throw new AgentHostError(
+      'STORAGE_STATE_CHANGED_DURING_CLEANUP',
+      'Agent Host state changed after cleanup planning; no storage was removed',
+    )
+  }
   for (const candidate of downloads.removable) await removeCandidate(candidate)
   for (const candidate of packages.removable) await removeCandidate(candidate)
+  for (const candidate of runtimeConfigs.removable) await removeCandidate(candidate)
   const after = await inventorySections(paths)
   return {
     status: 'cleaned', dryRun: false, currentVersion: current.suiteVersion,
     rollbackVersion: rollback?.suiteVersion ?? null, removed: summary, before, after,
     reclaimedAllocatedBytes: Math.max(0, before.total.allocatedBytes - after.total.allocatedBytes),
   }
+}
+
+export async function cleanupStorage(options = {}, dependencies = {}) {
+  const paths = statePaths(resolveStateRoot(options.stateRoot))
+  return await withLifecycleMutation(paths, 'storage.cleanup', dependencies, (locked, preparedPaths) =>
+    cleanupStorageUnlocked(options, locked, preparedPaths))
 }

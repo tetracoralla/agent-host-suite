@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openadam:schema:agent-host-developer-kit-integration:v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "displayName", "summary", "cli", "codex", "skill", "ownership"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-developer-kit-integration.v0.1" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 180 },
+    "cli": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executor", "command", "args", "versionArguments"],
+      "properties": {
+        "executor": { "const": "suite-node" },
+        "command": { "$ref": "#/$defs/path" },
+        "args": { "$ref": "#/$defs/strings" },
+        "versionArguments": { "$ref": "#/$defs/nonEmptyStrings" }
+      }
+    },
+    "codex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marketplaceRoot", "marketplace", "pluginRoot", "plugin", "identityFiles"],
+      "properties": {
+        "marketplaceRoot": { "$ref": "#/$defs/path" },
+        "marketplace": { "$ref": "#/$defs/id" },
+        "pluginRoot": { "$ref": "#/$defs/path" },
+        "plugin": { "$ref": "#/$defs/id" },
+        "identityFiles": { "$ref": "#/$defs/nonEmptyStrings" }
+      }
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "root", "identityFiles", "launcher"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "root": { "$ref": "#/$defs/path" },
+        "identityFiles": { "$ref": "#/$defs/nonEmptyStrings" },
+        "launcher": { "$ref": "#/$defs/path" }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uninstall"],
+      "properties": { "uninstall": { "const": "agent-host-created-only" } }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "maxLength": 128 },
+    "path": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000\\\\]+$" },
+    "strings": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "nonEmptyStrings": { "allOf": [{ "$ref": "#/$defs/strings" }, { "minItems": 1 }] }
+  }
+}

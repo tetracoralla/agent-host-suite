@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-trace-analysis-pack.schema.v0.1.json",
+  "title": "Agent Host Trace Analysis Pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "source", "privacy", "limits", "events", "unknowns", "interpretationStatus"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-trace-analysis-pack.v0.1" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "adapterId", "adapterVersion", "sourceFormat", "sourceBytes", "sourceSha256", "sessionHashes"],
+      "properties": {
+        "provider": { "const": "zcode" },
+        "adapterId": { "const": "openadam.zcode-model-io" },
+        "adapterVersion": { "type": "string" },
+        "sourceFormat": { "const": "zcode-model-io-jsonl" },
+        "sourceBytes": { "type": "integer", "minimum": 0 },
+        "sourceSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "sessionHashes": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentPolicy", "selectedConversationContentIncluded", "sensitiveContentConfirmed", "transportSecretsExcluded", "selectedContentMayContainUserSecrets", "observerDatabaseRetention", "sourcePathIncluded", "credentialFieldsRedacted"],
+      "properties": {
+        "contentPolicy": { "enum": ["metadata-only", "selected-content"] },
+        "selectedConversationContentIncluded": { "type": "boolean" },
+        "sensitiveContentConfirmed": { "type": "boolean" },
+        "transportSecretsExcluded": { "const": true },
+        "selectedContentMayContainUserSecrets": { "type": "boolean" },
+        "observerDatabaseRetention": { "const": false },
+        "sourcePathIncluded": { "const": false },
+        "credentialFieldsRedacted": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxInputBytes", "maxEvents", "maxLineBytes", "maxContentBytesPerEvent", "maxOutputBytes", "inputTruncated", "eventLimitReached", "outputTruncated", "skippedLines", "contentTruncations", "eventsReturned"],
+      "properties": {
+        "maxInputBytes": { "type": "integer", "minimum": 4096 },
+        "maxEvents": { "type": "integer", "minimum": 1 },
+        "maxLineBytes": { "type": "integer", "minimum": 1024 },
+        "maxContentBytesPerEvent": { "type": "integer", "minimum": 1024 },
+        "maxOutputBytes": { "type": "integer", "minimum": 4096 },
+        "inputTruncated": { "type": "boolean" },
+        "eventLimitReached": { "type": "boolean" },
+        "outputTruncated": { "type": "boolean" },
+        "skippedLines": { "type": "integer", "minimum": 0 },
+        "contentTruncations": { "type": "integer", "minimum": 0 },
+        "eventsReturned": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ordinal", "kind", "sessionHash", "turnHash", "requestHash", "startedAtMs", "completedAtMs", "facts"],
+        "properties": {
+          "ordinal": { "type": "integer", "minimum": 0 },
+          "kind": { "const": "model-step" },
+          "sessionHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "turnHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "requestHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "startedAtMs": { "type": ["integer", "null"], "minimum": 0 },
+          "completedAtMs": { "type": ["integer", "null"], "minimum": 0 },
+          "facts": { "type": "object" },
+          "selectedContent": { "type": "object" }
+        }
+      }
+    },
+    "unknowns": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "interpretationStatus": { "const": "not-performed" }
+  }
+}

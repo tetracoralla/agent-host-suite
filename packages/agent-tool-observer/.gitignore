@@ -1,0 +1,8 @@
+.DS_Store
+coverage/
+node_modules/
+local-state/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

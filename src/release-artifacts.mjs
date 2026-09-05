@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { platform, tmpdir } from 'node:os'
+import { basename, dirname, posix, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { AgentHostError } from './errors.mjs'
@@ -22,7 +22,8 @@ import {
   validateComponentDescriptor,
 } from './release-manifest.mjs'
 import { runFile } from './process.mjs'
-import { isToolIntegrationSchema, TOOL_INTEGRATION_SCHEMA_V2 } from './tool-integration.mjs'
+import { isDeveloperKitIntegrationSchema } from './developer-kit-integration.mjs'
+import { isToolIntegrationSchema, TOOL_INTEGRATION_SCHEMA_V2, TOOL_INTEGRATION_SCHEMA_V3, TOOL_INTEGRATION_SCHEMA_V4, TOOL_INTEGRATION_SCHEMA_V5 } from './tool-integration.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
 
 function fail(code, message, details) {
@@ -33,6 +34,26 @@ const MAX_LOCAL_COMPONENT_ARCHIVE_BYTES = 512 * 1024 * 1024
 const MAX_LOCAL_COMPONENT_FILES = 20_000
 const MAX_LOCAL_COMPONENT_EXPANDED_BYTES = 1024 * 1024 * 1024
 const MAX_COMPONENT_DESCRIPTOR_BYTES = 1024 * 1024
+const MIN_ARCHIVE_COMMAND_TIMEOUT_MS = 60_000
+const MAX_ARCHIVE_COMMAND_TIMEOUT_MS = 10 * 60_000
+const ARCHIVE_TIMEOUT_MS_PER_MIB = 2_000
+const observedLocalArtifacts = new WeakSet()
+
+function tarCommand() {
+  return platform() === 'win32' ? 'tar.exe' : '/usr/bin/tar'
+}
+
+function portableRelative(root, path) {
+  return relative(root, path).split(sep).join('/')
+}
+
+function archiveCommandTimeoutMs(bytes) {
+  const mebibytes = Math.max(1, Math.ceil(bytes / (1024 * 1024)))
+  return Math.min(
+    MAX_ARCHIVE_COMMAND_TIMEOUT_MS,
+    MIN_ARCHIVE_COMMAND_TIMEOUT_MS + mebibytes * ARCHIVE_TIMEOUT_MS_PER_MIB,
+  )
+}
 
 async function digestFile(path) {
   const hash = createHash('sha256')
@@ -96,22 +117,24 @@ function archiveEntryName(raw) {
 function expectedArchiveDirectories(files) {
   const directories = new Set()
   for (const file of files) {
-    let directory = dirname(file)
+    let directory = posix.dirname(file)
     while (directory !== '.') {
       directories.add(directory)
-      directory = dirname(directory)
+      directory = posix.dirname(directory)
     }
   }
   return directories
 }
 
 async function inspectArchive(path, runner) {
-  const listing = await runner('/usr/bin/tar', ['-tzf', path])
-  const entries = listing.stdout.split('\n').filter(Boolean)
+  const archiveInfo = await stat(path)
+  const timeoutMs = archiveCommandTimeoutMs(archiveInfo.size)
+  const listing = await runner(tarCommand(), ['-tzf', path], { timeoutMs })
+  const entries = listing.stdout.split(/\r?\n/u).filter(Boolean)
   if (entries.length === 0 || !entries.some((entry) => entry.replace(/^\.\//u, '') === 'component.json')) fail('RELEASE_ARCHIVE_INVALID', 'Release archive does not contain component.json')
   for (const entry of entries) if (!safeArchiveEntry(entry)) fail('RELEASE_ARCHIVE_UNSAFE', `Release archive contains an unsafe path: ${entry}`)
-  const verbose = await runner('/usr/bin/tar', ['-tvzf', path])
-  const verboseLines = verbose.stdout.split('\n').filter(Boolean)
+  const verbose = await runner(tarCommand(), ['-tvzf', path], { timeoutMs })
+  const verboseLines = verbose.stdout.split(/\r?\n/u).filter(Boolean)
   for (const line of verboseLines) {
     if (!['-', 'd'].includes(line[0])) fail('RELEASE_ARCHIVE_UNSAFE', 'Release archives cannot contain links or special files')
   }
@@ -152,11 +175,16 @@ async function localArtifactObservation(path, runner) {
   }
   const artifactPath = await realpath(absolute)
   const archive = await inspectArchive(artifactPath, runner)
-  const descriptorResult = await runner('/usr/bin/tar', ['-xOzf', artifactPath, './component.json'], {
+  const archiveTimeoutMs = archiveCommandTimeoutMs(info.size)
+  const descriptorResult = await runner(tarCommand(), ['-xOzf', artifactPath, './component.json'], {
     maxBuffer: MAX_COMPONENT_DESCRIPTOR_BYTES,
+    timeoutMs: archiveTimeoutMs,
   }).catch(async (error) => {
     if (error.code !== 'HOST_COMMAND_FAILED') throw error
-    return runner('/usr/bin/tar', ['-xOzf', artifactPath, 'component.json'], { maxBuffer: MAX_COMPONENT_DESCRIPTOR_BYTES })
+    return runner(tarCommand(), ['-xOzf', artifactPath, 'component.json'], {
+      maxBuffer: MAX_COMPONENT_DESCRIPTOR_BYTES,
+      timeoutMs: archiveTimeoutMs,
+    })
   })
   let descriptor
   try {
@@ -169,7 +197,7 @@ async function localArtifactObservation(path, runner) {
     version: descriptor?.version,
     platform: 'local',
     artifact: {
-      url: new URL(`file://${artifactPath.split(sep).map(encodeURIComponent).join('/')}`).href,
+      url: pathToFileURL(artifactPath).href,
       sha256: await digestFile(artifactPath),
       bytes: info.size,
       format: 'tar.gz',
@@ -215,7 +243,7 @@ async function localArtifactObservation(path, runner) {
       actualArchiveExpandedBytes: archiveExpandedBytes,
     })
   }
-  return {
+  const observation = {
     artifactPath,
     releaseComponent,
     descriptor,
@@ -232,6 +260,8 @@ async function localArtifactObservation(path, runner) {
       expandedBytes,
     },
   }
+  observedLocalArtifacts.add(observation)
+  return observation
 }
 
 export async function observeLocalComponentArtifact(path, dependencies = {}) {
@@ -248,7 +278,7 @@ export async function previewLocalComponentArtifact(path, dependencies = {}) {
     if (!(await verifyArchive(boundArchive, observation.releaseComponent))) {
       fail('LOCAL_COMPONENT_BINDING_MISMATCH', 'The local component artifact changed while it was being previewed')
     }
-    await installArtifact(observation.releaseComponent, boundArchive, { packages: temporaryRoot }, runner)
+    await installArtifact(observation.releaseComponent, boundArchive, { packages: temporaryRoot }, runner, { archiveInspected: true })
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })
   }
@@ -283,6 +313,14 @@ function requireLocalBinding(binding, observation) {
 export async function materializeLocalComponentArtifact(path, binding, paths, dependencies = {}) {
   const runner = dependencies.runner ?? runFile
   const observation = await localArtifactObservation(path, runner)
+  return materializeObservedLocalComponentArtifact(observation, binding, paths, { runner })
+}
+
+export async function materializeObservedLocalComponentArtifact(observation, binding, paths, dependencies = {}) {
+  if (!observedLocalArtifacts.has(observation)) {
+    fail('LOCAL_COMPONENT_OBSERVATION_INVALID', 'Local component materialization requires a current observation from this process')
+  }
+  const runner = dependencies.runner ?? runFile
   const releaseComponent = requireLocalBinding(binding, observation)
   const temporaryRoot = await mkdtemp(join(paths.downloads ?? tmpdir(), 'agent-host-local-component-'))
   try {
@@ -291,7 +329,7 @@ export async function materializeLocalComponentArtifact(path, binding, paths, de
     if (!(await verifyArchive(boundArchive, releaseComponent))) {
       fail('LOCAL_COMPONENT_BINDING_MISMATCH', 'The local component artifact changed while it was being imported')
     }
-    const installed = await installArtifact(releaseComponent, boundArchive, paths, runner)
+    const installed = await installArtifact(releaseComponent, boundArchive, paths, runner, { archiveInspected: true })
     return { ...observation, releaseComponent, installed }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })
@@ -303,10 +341,10 @@ async function inventoryFiles(root, current = root) {
   for (const entry of await readdir(current, { withFileTypes: true })) {
     const path = join(current, entry.name)
     const info = await lstat(path)
-    if (info.isSymbolicLink()) fail('RELEASE_ARCHIVE_UNSAFE', `Installed component contains a symbolic link: ${relative(root, path)}`)
+    if (info.isSymbolicLink()) fail('RELEASE_ARCHIVE_UNSAFE', `Installed component contains a symbolic link: ${portableRelative(root, path)}`)
     if (info.isDirectory()) output.push(...await inventoryFiles(root, path))
-    else if (info.isFile()) output.push({ path, relative: relative(root, path), info })
-    else fail('RELEASE_ARCHIVE_UNSAFE', `Installed component contains a special file: ${relative(root, path)}`)
+    else if (info.isFile()) output.push({ path, relative: portableRelative(root, path), info })
+    else fail('RELEASE_ARCHIVE_UNSAFE', `Installed component contains a special file: ${portableRelative(root, path)}`)
   }
   return output.sort((left, right) => left.relative.localeCompare(right.relative))
 }
@@ -324,13 +362,13 @@ async function verifyInstalledComponent(root, releaseComponent, { applyModes = t
     const item = expected.get(file.relative)
     if (file.info.size !== item.bytes || await digestFile(file.path) !== item.sha256) fail('COMPONENT_FILE_DIGEST_MISMATCH', `${releaseComponent.id} file differs from its descriptor: ${file.relative}`)
     if (applyModes) await chmod(file.path, item.executable ? 0o500 : 0o400)
-    if (item.executable) await access(file.path, constants.X_OK)
+    if (item.executable && platform() !== 'win32') await access(file.path, constants.X_OK)
   }
   if (applyModes) await chmod(descriptorPath, 0o400)
   return { root: resolvedRoot, descriptor, descriptorPath }
 }
 
-async function installArtifact(component, archivePath, paths, runner) {
+async function installArtifact(component, archivePath, paths, runner, options = {}) {
   const parent = await ensurePrivateDirectory(join(paths.packages, component.id))
   const destination = join(parent, installDirectoryName(component))
   try {
@@ -341,8 +379,12 @@ async function installArtifact(component, archivePath, paths, runner) {
   const staging = join(parent, `.staging-${process.pid}-${Date.now()}`)
   await mkdir(staging, { mode: 0o700 })
   try {
-    await inspectArchive(archivePath, runner)
-    await runner('/usr/bin/tar', ['-xzf', archivePath, '-C', staging, '--no-same-owner'])
+    if (options.archiveInspected !== true) await inspectArchive(archivePath, runner)
+    const extractionArgs = ['-xzf', archivePath, '-C', staging]
+    if (platform() !== 'win32') extractionArgs.push('--no-same-owner')
+    await runner(tarCommand(), extractionArgs, {
+      timeoutMs: archiveCommandTimeoutMs(component.artifact.bytes),
+    })
     const installed = await verifyInstalledComponent(staging, component)
     await rename(staging, destination)
     return { ...installed, root: destination, descriptorPath: join(destination, 'component.json'), created: true }
@@ -364,6 +406,41 @@ function requireEntrypoints(installed, names) {
   for (const name of names) {
     if (typeof installed.descriptor.entrypoints[name] !== 'string') fail('COMPONENT_DESCRIPTOR_INVALID', `${installed.descriptor.id} is missing the ${name} entrypoint`)
   }
+}
+
+async function productSkills(pluginRoot, identityRelativeFiles) {
+  const ids = [...new Set(identityRelativeFiles.flatMap((path) => {
+    const match = path.match(/^skills\/([a-z][a-z0-9-]*)\/SKILL\.md$/u)
+    return match === null ? [] : [match[1]]
+  }))]
+  const output = []
+  for (const id of ids) {
+    const root = await realpath(join(pluginRoot, 'skills', id))
+    const rootInfo = await lstat(root)
+    if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+      fail('COMPONENT_DESCRIPTOR_INVALID', `Product Skill root is unsafe: ${id}`)
+    }
+    const files = []
+    async function walk(current) {
+      for (const entry of await readdir(current, { withFileTypes: true })) {
+        const path = join(current, entry.name)
+        if (entry.isSymbolicLink()) fail('COMPONENT_DESCRIPTOR_INVALID', `Product Skill contains a symbolic link: ${id}`)
+        if (entry.isDirectory()) await walk(path)
+        else if (entry.isFile()) files.push(portableRelative(root, path))
+        else fail('COMPONENT_DESCRIPTOR_INVALID', `Product Skill contains a special file: ${id}`)
+      }
+    }
+    await walk(root)
+    files.sort()
+    if (!files.includes('SKILL.md')) fail('COMPONENT_DESCRIPTOR_INVALID', `Product Skill is missing SKILL.md: ${id}`)
+    output.push({
+      id,
+      root,
+      identityRelativeFiles: files,
+      identityFingerprint: await fingerprintRelativeFiles(root, files),
+    })
+  }
+  return output
 }
 
 function integration(installed) {
@@ -413,8 +490,10 @@ async function buildRuntimeManifest(release, installed) {
       plugin: mathIntegration.plugin,
       pluginIdentityRelativeFiles: mathIntegration.pluginIdentityRelativeFiles,
       pluginIdentityFingerprint: await fingerprintRelativeFiles(mathPluginRoot, mathIntegration.pluginIdentityRelativeFiles),
+      productSkills: await productSkills(mathPluginRoot, mathIntegration.pluginIdentityRelativeFiles),
       command: containedComponentPath(math.root, math.descriptor.entrypoints.command, 'Math Anchor command'),
       args: mathIntegration.args ?? ['mcp'],
+      cwd: mathPluginRoot,
     }),
     'migratory-time': await component(time, {
       pluginRoot: timePluginRoot,
@@ -423,8 +502,10 @@ async function buildRuntimeManifest(release, installed) {
       plugin: timeIntegration.plugin,
       pluginIdentityRelativeFiles: timeIntegration.pluginIdentityRelativeFiles,
       pluginIdentityFingerprint: await fingerprintRelativeFiles(timePluginRoot, timeIntegration.pluginIdentityRelativeFiles),
+      productSkills: await productSkills(timePluginRoot, timeIntegration.pluginIdentityRelativeFiles),
       command: nodeCommand,
       args: [containedComponentPath(time.root, time.descriptor.entrypoints.server, 'Migratory Time server')],
+      cwd: timePluginRoot,
       adapterPath: containedComponentPath(time.root, time.descriptor.entrypoints.adapter, 'Migratory Time adapter'),
       manifestPath: containedComponentPath(time.root, time.descriptor.entrypoints.manifest, 'Migratory Time provider manifest'),
       inputSchemaPath: containedComponentPath(time.root, time.descriptor.entrypoints.inputSchema, 'Migratory Time input schema'),
@@ -447,14 +528,81 @@ async function buildRuntimeManifest(release, installed) {
     })
   }
   for (const [id, item] of installed) {
+    if (!isDeveloperKitIntegrationSchema(item.descriptor.integration?.schemaVersion)) continue
+    const developerKit = item.descriptor.integration
+    const pluginRoot = directoryPath(item.root, developerKit.codex.pluginRoot, `${developerKit.displayName} plugin root`)
+    const skillRoot = directoryPath(item.root, developerKit.skill.root, `${developerKit.displayName} Skill root`)
+    const cliEntrypoint = containedComponentPath(item.root, developerKit.cli.command, `${developerKit.displayName} CLI entrypoint`)
+    components[id] = await component(item, {
+      displayName: developerKit.displayName,
+      summary: developerKit.summary,
+      command: nodeCommand,
+      args: [cliEntrypoint, ...developerKit.cli.args],
+      versionArguments: developerKit.cli.versionArguments,
+      pluginRoot,
+      marketplaceRoot: directoryPath(item.root, developerKit.codex.marketplaceRoot, `${developerKit.displayName} marketplace root`),
+      marketplace: developerKit.codex.marketplace,
+      plugin: developerKit.codex.plugin,
+      pluginIdentityRelativeFiles: developerKit.codex.identityFiles,
+      pluginIdentityFingerprint: await fingerprintRelativeFiles(pluginRoot, developerKit.codex.identityFiles),
+      skillOnly: true,
+      developerSkill: {
+        id: developerKit.skill.id,
+        root: skillRoot,
+        identityRelativeFiles: developerKit.skill.identityFiles,
+        identityFingerprint: await fingerprintRelativeFiles(skillRoot, developerKit.skill.identityFiles),
+        launcherRelativePath: developerKit.skill.launcher,
+      },
+      developerKitIntegrationSchema: developerKit.schemaVersion,
+    })
+  }
+  for (const [id, item] of installed) {
     if (!isToolIntegrationSchema(item.descriptor.integration?.schemaVersion)) continue
     const tool = item.descriptor.integration
     const pluginRoot = directoryPath(item.root, tool.codex.pluginRoot, `${tool.displayName} plugin root`)
     const runtimeEntrypoint = containedComponentPath(item.root, tool.runtime.command, `${tool.displayName} runtime command`)
-    const usesSuiteNode = tool.schemaVersion === TOOL_INTEGRATION_SCHEMA_V2 && tool.runtime.executor === 'suite-node'
+    const usesSuiteNode = [TOOL_INTEGRATION_SCHEMA_V2, TOOL_INTEGRATION_SCHEMA_V3, TOOL_INTEGRATION_SCHEMA_V4, TOOL_INTEGRATION_SCHEMA_V5].includes(tool.schemaVersion) && tool.runtime.executor === 'suite-node'
+    let providerSkill = null
+    if (tool.schemaVersion === TOOL_INTEGRATION_SCHEMA_V3) {
+      const discovery = tool.discovery
+      const skillRoot = directoryPath(item.root, discovery.skill.root, `${tool.displayName} discovery Skill root`)
+      const discoveryEntrypoint = containedComponentPath(item.root, discovery.runtime.command, `${tool.displayName} discovery CLI entrypoint`)
+      providerSkill = {
+        id: discovery.skill.id,
+        root: skillRoot,
+        identityRelativeFiles: discovery.skill.identityFiles,
+        identityFingerprint: await fingerprintRelativeFiles(skillRoot, discovery.skill.identityFiles),
+        launcherRelativePath: discovery.skill.launcher,
+        command: discovery.runtime.executor === 'suite-node' ? nodeCommand : discoveryEntrypoint,
+        args: discovery.runtime.executor === 'suite-node'
+          ? [discoveryEntrypoint, ...discovery.runtime.args]
+          : discovery.runtime.args,
+        versionArguments: discovery.runtime.versionArguments,
+        expectedVersion: item.descriptor.version,
+      }
+    }
     const auxiliaryCli = id === 'context-surface-analyzer' && components[id] !== undefined
       ? { cliCommand: components[id].command, cliArgs: components[id].args }
       : {}
+    const capabilityProvider = tool.schemaVersion === TOOL_INTEGRATION_SCHEMA_V4
+      ? {
+          providerId: tool.directCapability.providerId,
+          transport: tool.directCapability.transport,
+          lifecycle: tool.directCapability.lifecycle,
+          workspaceRootRequired: tool.directCapability.workspaceRoot === 'host-required',
+          rootPath: pluginRoot,
+          profilePath: containedComponentPath(item.root, tool.directCapability.profile, `${tool.displayName} Capability Profile`),
+          manifestPath: containedComponentPath(item.root, tool.directCapability.manifest, `${tool.displayName} Provider Manifest`),
+          identityFiles: tool.directCapability.identityFiles.map((path) => containedComponentPath(item.root, path, `${tool.displayName} Capability identity file`)),
+          capabilityId: tool.directCapability.capabilityId,
+          capabilityVersion: tool.directCapability.capabilityVersion,
+          contracts: tool.directCapability.contracts.map((contract) => ({
+            operationId: contract.operationId,
+            inputSchemaPath: containedComponentPath(item.root, contract.inputSchema, `${tool.displayName} Capability input schema`),
+            outputSchemaPath: containedComponentPath(item.root, contract.outputSchema, `${tool.displayName} Capability output schema`),
+          })),
+        }
+      : null
     components[id] = await component(item, {
       displayName: tool.displayName,
       summary: tool.summary,
@@ -464,13 +612,18 @@ async function buildRuntimeManifest(release, installed) {
       plugin: tool.codex.plugin,
       pluginIdentityRelativeFiles: tool.codex.identityFiles,
       pluginIdentityFingerprint: await fingerprintRelativeFiles(pluginRoot, tool.codex.identityFiles),
+      productSkills: await productSkills(pluginRoot, tool.codex.identityFiles),
       command: usesSuiteNode ? nodeCommand : runtimeEntrypoint,
       args: usesSuiteNode ? [runtimeEntrypoint, ...tool.runtime.args] : tool.runtime.args,
       cwd: directoryPath(item.root, tool.runtime.cwd, `${tool.displayName} runtime directory`),
       workspaceEnvironment: tool.runtime.workspaceEnvironment ?? [],
+      optionalPathEnvironment: tool.runtime.optionalPathEnvironment ?? [],
+      pathGrants: {},
       expectedTools: tool.runtime.expectedTools,
       healthTimeoutMs: tool.runtime.timeoutMs,
       toolIntegrationSchema: tool.schemaVersion,
+      ...(providerSkill === null ? {} : { providerSkill }),
+      ...(capabilityProvider === null ? {} : { capabilityProvider }),
       ...auxiliaryCli,
     })
   }
@@ -489,6 +642,7 @@ export async function materializeRelease({ path: manifestPath, manifest }, paths
   const selected = selectedReleaseComponents(manifest)
   const installed = new Map()
   const createdRoots = []
+  const createdComponentIds = []
   const createdDownloads = []
   const componentIds = dependencies.componentIds ?? [...selected.keys()]
   const missing = REQUIRED_RELEASE_COMPONENTS.filter((id) => !componentIds.includes(id))
@@ -500,7 +654,10 @@ export async function materializeRelease({ path: manifestPath, manifest }, paths
       const acquired = await acquireArtifact(component, manifestPath, paths)
       if (acquired.created) createdDownloads.push(acquired.path)
       const result = await installArtifact(component, acquired.path, paths, runner)
-      if (result.created) createdRoots.push(result.root)
+      if (result.created) {
+        createdRoots.push(result.root)
+        createdComponentIds.push(id)
+      }
       installed.set(id, result)
     }
     return {
@@ -508,6 +665,7 @@ export async function materializeRelease({ path: manifestPath, manifest }, paths
       release: structuredClone(manifest),
       manifestPath,
       createdRoots,
+      createdComponentIds,
       createdDownloads,
     }
   } catch (error) {

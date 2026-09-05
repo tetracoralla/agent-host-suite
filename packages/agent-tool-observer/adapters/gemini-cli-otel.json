@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "openadam.agent-shell-adapter.v0.1",
+  "id": "openadam.gemini-cli-otel",
+  "version": "0.1.0",
+  "provider": "gemini-cli",
+  "transport": "opentelemetry",
+  "collection": { "passiveMetadata": true, "explicitAnalysisPack": false },
+  "signals": {
+    "modelSteps": "partial",
+    "toolOffers": "unavailable",
+    "toolCalls": "available",
+    "toolResults": "partial",
+    "usage": "partial",
+    "turnEnds": "unavailable",
+    "selfReportedRationalePresence": "unavailable"
+  },
+  "content": { "passiveStorage": "metadata-only", "explicitPack": "metadata-only" },
+  "runtime": { "platforms": ["darwin", "win32", "linux"], "sourceFormats": ["openadam.agent-shell-trace-bridge.v0.1", "gemini-cli-otel"] }
+}

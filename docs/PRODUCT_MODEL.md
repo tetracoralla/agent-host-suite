@@ -1,234 +1,212 @@
 # Product model
 
+This document defines the durable user, product object, ownership boundary,
+profiles, and human surface. It does not record current component counts,
+installed versions, machine state, or release acceptance.
+
 ## User and task
 
-The initial user is an individual macOS user who runs Codex or Claude Code and
-wants a small set of deterministic tools plus a reliable direct execution
-service without cloning and configuring many repositories by hand.
+The intended user is an individual desktop Agent user who wants a small set of
+deterministic tools plus reliable local execution without cloning and
+configuring many repositories by hand.
 
 The user chooses an installed profile and a smaller active tool set, reviews
 the requested Agent-app and background-service changes, installs one Agent
 environment, checks current health, updates or rolls back a bound compatibility
 release, and can remove everything Agent Host created.
 
+The Windows Manager and native macOS Manager present English and Simplified
+Chinese, follow the operating-system language by default, and keep the explicit
+override in their secondary Settings surface. Platform-specific carrier and
+release claims remain in the platform and release documents.
+
 ## Product object
 
 Agent Host is a distribution and local operations product. The Agent Host Suite
 is this repository's technical distribution unit. Neither is the Agent-Host
 architecture itself, and Agent Host is not required for standards adoption.
+
 Its durable product object is an **Agent environment**: one installed
 compatibility set containing:
 
-- one exact suite release;
-- exact provider and runtime artifacts with hashes and licenses;
+- one exact Suite release;
+- exact Provider and runtime artifacts with hashes and licenses;
 - the selected profile;
 - the profile's installed component set and its separately declared
   Agent-visible component set;
 - explicit host adapters installed through supported host interfaces;
-- private current-host configuration and service state;
+- private current-host configuration and service state; and
 - optional, separately consented observation components.
 
 The compatibility set states which bytes are intended to work together. It
-does not establish provider value, universal compatibility, live availability,
+does not establish Provider value, universal compatibility, live availability,
 or business acceptance.
 
-## Layer boundary
+Within an environment, Agent Host manages **Provider Instances**, not
+Capability meaning. A Provider implementation may be an independently released
+product, a Host-owned package, or an explicitly bounded service. Its Instance
+is the exact installed or configured realization with a package root or
+endpoint, account or credential reference, grants, bindings, and current
+health. Capability Profiles remain in their standards source. Agent Host
+projects each admitted Instance into the Provider-specific Tools and thin
+Skills supported by the selected Agent app.
 
-- Capability and Procedure repositories own normative semantic contracts.
-- Provider repositories own provider source, binaries, domain behavior,
-  product Skills, plugins, and their releases.
-- Direct Execution Runtime owns bounded host execution mechanics.
+A Provider-specific local Instance may seal non-secret configuration beside
+its runtime as an identity file. Agent Host manages the exact archive,
+activation, catalog health, and removal. It does not interpret the Instance
+schema, retrieve a credential, prove privacy authorization, or assess model
+quality. Replacing configuration requires a newly built and previewed archive.
+
+## Ownership boundary
+
+- Host-independent Capability and Procedure standards own normative semantic
+  contracts.
+- Independently useful Provider products own their source, binaries, domain
+  behavior, product Skills, plugins, and releases.
+- Host-internal packages own execution, transport, instance, observation, and
+  routing-support implementation behind explicit contracts.
+- `packages/direct-execution-runtime` owns bounded Host execution mechanics.
 - Agent Host owns artifact acquisition, hash verification, installation,
   official host integration, local service lifecycle, profiles, update,
-  rollback, removal, a human status surface, and one bounded product operations
-  Skill for external Agents.
+  rollback, removal, a small human status surface, and one bounded product
+  operations Skill for external Agents.
 - Agent apps remain independently updated hosts. Agent Host never patches their
   binaries or private implementation files.
 
-## Profiles
+Agent Host never exposes a model-facing generic Provider invocation tool.
+Direct Runtime receives only already-selected, schema-validated structured
+work. Details of that carrier, lifecycle locking, service recovery, process
+scope, state, and observation projection belong to
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-`standard` initially contains Math Anchor and Migratory Time plus Direct
-Execution Runtime. It is deliberately small.
+## Profiles and private overlays
 
-`observability` adds Agent Tool Observer, a host-owned catalog snapshot
-exporter, and Context Surface Analyzer. It is opt-in because it creates local
-operational data and background work. Those components remain backstage and do
-not add tools or MCP processes to an ordinary Agent session.
+Profile membership is defined only by `catalog/profiles/*.json` and the selected
+bound release. This document defines profile behavior, not a copied inventory:
 
-`local-dogfood` extends that consented profile with BatchTicket, Armorial,
-Laniakea, Projective, Equatorium, and File Vitals. It is the primary local
-feedback configuration, not a public marketplace: every component is admitted
-through one versioned integration record and still keeps its provider-owned
-identity and Skill. The local tools are Agent-visible; observation components
-stay installed but backstage.
+- `standard` is the deliberately small default Agent-visible set plus the
+  required Host runtime.
+- `observability` extends standard with opt-in local observation and analysis.
+  Those components remain backstage and add no tools or MCP processes to an
+  ordinary Agent session. Consent remains off until the user selects the
+  Manager action or equivalent explicit CLI action.
+- `local-dogfood` extends the consented environment with a wider development
+  inventory. It is a local feedback configuration, not a public marketplace;
+  every component retains its Provider identity, integration record, and Skill.
+- `developer` installs the Agent Tool Development Kit as an immutable backstage
+  component. It starts with a zero-tool Agent catalog and projects only the thin
+  development Skill and version-locked launcher. It requires a bound release
+  and rejects mutable development-root installation.
 
-`evaluation` is for developers and CI. It is not installed into an ordinary
-Agent catalog.
+Evaluation helpers are development and CI tooling, not an installable profile
+or an ordinary Agent catalog. They do not need standalone product repositories
+merely because they exercise typed boundaries.
 
-`developer` accepts explicit local source roots and is not a public end-user
-release channel.
+Installed inventory and active Agent-visible tools are separate. An inactive
+Provider may retain an immutable Skill and direct launcher without contributing
+MCP schemas to the current Agent catalog. Working-set changes retain rollback
+bytes and displaced user entries and require a fresh Agent task before current
+discovery can be assessed.
 
-An installed environment may also carry a small, owner-selected set of
-**private Agent tools** outside the profile release. This is a local overlay,
-not another profile, registry, marketplace, or discovery channel. Agent Host
-accepts only one self-contained `agent-tool` archive at a time through the
-human CLI. It never accepts a source checkout, runtime command, or model-facing
-generic invocation request. A preview reacquires the archive and descriptor
-digests, file and expanded-byte bounds, an owner-supplied SPDX expression, the
-contained v0.1/v0.2 integration, and the live typed MCP catalog. Import
-requires those exact preview facts before immutable storage or host bindings
-can change.
+An environment may also carry a small owner-selected set of private Agent tools
+outside the release profile. This is a local overlay, not another profile,
+registry, marketplace, or Agent-facing import route. The human CLI accepts only
+self-contained sealed component archives through the closed tool-integration
+contract, previews exact artifact and live catalog facts before import, defaults
+the tool to inactive, and retains one component-level rollback. Optional path
+grants are explicit, component-specific, and never supplied by Agent input.
+Exact versions and fields belong to
+[`TOOL_INTEGRATION.md`](TOOL_INTEGRATION.md) and the corresponding schemas.
 
-## Dominant flows
+## Core flows
 
-1. Setup preflights the selected profile, artifacts, host conflicts, private
-   state location, explicit workspace grant for tools that require one, and
-   proposed background services before changing anything.
-2. Host adapters use official marketplace, plugin, MCP, or extension commands.
-3. Direct Runtime receives provider bindings with exact paths and starts as a
-   user-owned local service; it is not exposed as a generic Agent tool. For a
-   declared multi-operation MCP tool, the suite binds operation-level contract
-   projection, an explicit provider-owned schema lookup when the listed schema
-   is compact, and its native batch carrier. Current Math and Time bindings use
-   the `per-call` lifecycle: only the small host service stays resident, while
-   provider processes close after each selected structured request.
-4. Doctor reacquires installed plugin state, service state, live provider
-   contracts, and optionally projects one selected Math contract and runs
-   bounded single, native-batch, and time-zone semantic probes. The Manager's
-   automatic refresh uses the deep local route without starting Agent-app
-   CLIs; explicit Full Check adds current Codex and Claude binding inspection.
-5. Update retains the prior complete compatibility set until the new set is
-   installed and checked. Rollback reactivates that retained set.
-6. Storage inventory separates the Manager App from private state, then splits
-   private packages, thin host projections, downloads, history, backups,
-   runtime, observations, and catalog snapshots. The CLI's ordinary human
-   output shows the combined and sectional allocated footprint plus the exact
-   cleanup candidate summary instead of a bare status word. Cleanup verifies
-   the active and one rollback release, then removes only older unreferenced
-   suite-owned package versions and completed downloads; a dry run reports the
-   exact eligible allocated bytes first.
-7. `agent-host snapshot` composes a path-free, 16 KiB-bounded status view from
-   current Agent Host product results. The installed operations Skill makes
-   that the default collaboration route for an external Agent. Codex carries
-   it in a Skill-only plugin without an MCP server; Claude links to one
-   immutable private copy. Full doctor, observability, or activity output is
-   an explicit question-driven escalation, not default context.
-8. Weekly maintenance refreshes observation and catalog state, applies the
-   Observer's bounded retention and SQLite compaction, and then performs the
-   same verified storage cleanup.
-9. Uninstall removes only suite-created host entries, operations Skill
-   carriers, and services. The optional
-   `--purge-data` removes the suite's private snapshots, history, and retained
-   state. Observer's shared local database remains owned by Observer and needs
-   a separate explicit removal action so pre-existing history is never erased.
-10. Private component preview leaves Agent Host state unchanged, but it does
-    start the owner-selected component to inspect the live MCP catalog; effects
-    outside Agent Host state remain the component's responsibility and are not
-    established by dry-run status. Explicit import keeps the package inactive
-    unless `--activate` is selected, uses the same content-addressed
-    package store and Codex thin projection as release tools, and preserves one
-    prior imported version or removal as a byte-verifiable rollback target.
-    Import dry-run removes every package directory it created and reports the
-    proposed component as not installed and inactive. Component
-    rollback revalidates the retained content-addressed root, approved binding,
-    descriptor and every declared file, then repeats the live typed MCP health
-    probe before changing state or host bindings.
-    These overlay transitions do not enter compatibility-release rollback
-    history. If the authoritative state and host transition commits but the
-    append-only activity entry or stale projection cleanup cannot complete, the
-    command reports success with a structured warning instead of claiming the
-    component change failed.
-    Status is path-free. Removal disconnects only Suite-owned bindings and
-    retains the sealed package until the rollback target changes or verified
-    storage cleanup makes it unreferenced. Removal is an explicit rollback
-    state, so every component rollback returns to the immediately preceding
-    installed-or-removed state instead of skipping over the latest user action.
-    Current private import connects to
-    Codex only; it does not broaden the closed Claude integration set.
+1. **Setup and changes.** Setup, update, rollback, monitoring changes, host
+   connection changes, active-set changes, private-component changes, cleanup,
+   and uninstall preflight the complete target before mutation and share the
+   Host lifecycle boundary. They preserve user-owned host entries and either
+   commit the new state or disclose bounded partial effects.
+2. **Host connection.** Host adapters use only public marketplace, plugin, MCP,
+   Skill, or extension mechanisms. Conflicts fail closed; deliberate
+   replacement remains recoverable.
+3. **Direct execution.** Direct Runtime runs already-selected typed work below
+   the model and bounds Provider residency. It is not an Agent-visible router.
+4. **Health.** Local deep doctor reacquires installed package, service, live
+   contract, semantic-probe, and catalog-budget facts without needing to launch
+   Agent apps. Full Check is the separate explicit binding-verification route.
+5. **Release lifecycle.** Update retains one complete, byte-verifiable prior
+   compatibility release; rollback revalidates and restores it. Release and
+   platform qualification are governed by [`RELEASE.md`](RELEASE.md).
+6. **Storage and removal.** Inventory separates the Manager from private state
+   and distinguishes active, rollback, observation, download, and cleanup
+   classes. Cleanup removes only verified unreferenced Suite-owned bytes.
+   Uninstall removes only Suite-created host entries; destructive data removal
+   remains explicit.
+7. **Operations view.** `snapshot` provides the bounded default environment
+   view for the operations Skill; `usage` provides a separate bounded Usage &
+   Reliability result. Both preserve source, freshness, coverage, truncation,
+   Provider-specific semantics, and unknowns.
+8. **Catalog projection.** `catalog` exports only configured Capability and
+   Procedure bindings plus complete live schemas from active native Tools. It
+   is an exact point-in-time projection, not discovery, ranking, readiness,
+   semantic equivalence, or a Provider registry.
+9. **Observation.** Automatic record adapters are read-only. Telemetry and hook
+   adapters require an explicit user-owned configuration action. Passive
+   storage is metadata-only; content export requires a second confirmation and
+   never enters Observer storage. See [`TRACE_PLANE.md`](TRACE_PLANE.md).
 
-Before a deployment observation is written, Agent Host normalizes every
-Agent-visible tool name with the same exact semantic key used by Observer's
-deployment contract and fails with `AGENT_TOOL_BINDING_CONFLICT` on any empty
-or duplicate binding. Observer never becomes the first component to discover a
-Suite-owned catalog conflict.
-
-Observation summaries preserve Observer's provider-by-provider session-start
-basis and known/unknown coverage for Codex, Claude, and ZCode. Returned routing
-records are named as bounded observations, with their truncation state; a zero
-count is not presented as an adoption conclusion.
-
-The operations Skill does not add reasoning to Observer or Agent Host. It
-preserves timestamps, provider coverage, unknowns, and truncation, then leaves
-causation, opportunity, routing quality, task quality, user value, and action
-selection to the external Agent shell. A product result that is insufficient
-for the question remains insufficient; the Skill forbids bypassing that limit
-by reading private databases, provider event files, or implementation source.
-The snapshot's fresh-session requirement is installation policy only; current
-session uptake is explicitly `not-observed` until a real new host session is
-exercised.
-
-An active-set change is not an uninstall. Packages and rollback bytes remain
-installed, and an inactive Agent Host binding stays absent in the host. Any
-user-owned or source-checkout entry displaced during installation remains
-suspended until the component leaves the installed profile, the Agent app is
-disconnected, or Agent Host is uninstalled; those terminal flows restore it.
+An observation controls only what it directly reports. Offered tools,
+historical calls, or installed Skills do not establish current-session Skill
+activation, non-use reason, semantic effect, result adoption, correctness,
+task quality, opportunity, or value. Those remain unknown unless a separate
+current assessment or controlled task establishes them.
 
 ## Human surface
 
 The Agent Host Manager is a backstage management surface organized around four
 durable objects:
 
-- **Environment** — overall readiness, profile, version, background service,
+- **Environment** — readiness, profile, version, background service,
   monitoring, check, repair, rollback, and removal;
-- **Tools** — installed version, current health, an availability switch for the
-  active Agent-app set, and whether an entry is suite-owned or preserved user
-  configuration; this list is derived from the environment's declared
-  Agent-visible components and excludes backstage observation components;
-- **Agent Apps** — detected Codex and Claude installations, connected state,
-  health, and explicit connect/disconnect actions;
-- **Activity** — bounded local lifecycle history for setup, connection changes,
-  update, rollback, monitoring, and removal, translated into product names and
-  human labels rather than raw state-field identifiers.
+- **Tools** — installed version, current health, Agent-app availability, and
+  Suite-owned versus preserved user configuration;
+- **Agent Apps** — detected supported apps, connected state, health, and
+  explicit connect or disconnect actions; and
+- **Activity** — bounded local lifecycle history translated into product names
+  and human labels rather than raw state-field identifiers.
 
 Before installation, the same app presents one setup path: selected standard
 tools, detected Agent app, preflight review, then installation. Recoverable
 errors use product language and one next action; raw paths and protocol detail
 remain outside the primary interface.
 
-The Manager refreshes an outdated in-memory environment when it returns to the
-foreground and shows when the visible status was last checked. A long-running
-window must not present a pre-update catalog or health result as current. The
-initial load blocks incomplete actions; a later foreground refresh keeps the
-existing pages navigable, disables mutations, and labels the status as
-refreshing until the current local check completes.
+The Manager refreshes stale in-memory state on foreground return and shows when
+visible status was last checked. Automatic refresh does not launch Agent apps;
+mutations remain disabled while current local state is being reacquired. Full
+Check is the explicit current Agent-app binding route.
 
-The manager's default health refresh includes the bounded direct semantic
-probes. It must not report the environment or an individual tool as ready when
-only its files and Agent-app entries are present but the direct route is broken.
-It resolves Agent-app executables without launching them and labels their
-bindings as configured but unverified. This prevents a host CLI from loading
-unrelated project-scoped configuration or requesting protected-folder access
-merely because the Manager opened. Full Check is the explicit current binding
-verification route.
-
-It does not show MCP schemas, Agent reasoning, Capability catalogs, protocol
-metadata, prompts, or marketing explanations in the primary interface.
+The primary interface does not show MCP schemas, Agent reasoning, Capability
+catalogs, protocol metadata, prompts, or marketing explanations. Usage &
+Reliability preserves unavailable and partial coverage and never derives a
+non-use reason, correctness, adoption, quality, opportunity, or value.
 
 Canonical product language and its stable-identifier boundary are defined in
 [`TERMINOLOGY.md`](TERMINOLOGY.md).
 
-## Current completion boundary
+## Validation and completion claims
 
-The first practical completion line is one macOS arm64 machine with no active
-`tools-dev` execution dependency after installation: one verified release
-installs the selected profile, Codex discovers the installed providers in a
-fresh session, one
-structured Math call, one native Math batch, and one time-zone call run through
-Direct Runtime without a model, doctor reports current state, and update,
-rollback, privacy disable, and uninstall operate without editing config by
-hand.
+No prose statement in this document establishes that a release or installation
+is current, healthy, complete, or accepted. Reacquire the relevant facts and
+report these lanes separately:
 
-Claude Code is the second installed-host route. Gemini, Linux, and Windows may
-have validated adapters and CI packages before physical-device runtime is
-available, but they cannot be reported as runtime-complete until exercised on
-those hosts.
+- development regression;
+- immutable package and installed Agent flow;
+- Direct Runtime behavior;
+- human Manager runtime;
+- platform distribution; and
+- owner business and experience acceptance.
+
+The local installed route and its fresh-session adoption limit are defined in
+[`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md). The minimum high-risk review seams are
+defined in [`REVIEW_CONTRACT.md`](REVIEW_CONTRACT.md); that contract is a review
+floor, not a completion runway. CI or cross-compilation cannot establish
+physical-device runtime or owner acceptance.
