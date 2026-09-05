@@ -303,6 +303,21 @@ function recoveryOrder(left, right) {
   return ticketOrder === 0 ? left.value.token.localeCompare(right.value.token) : ticketOrder
 }
 
+async function removeRetiredLock(stalePath) {
+  // Retry the complete cleanup, not each descendant independently: nested rm
+  // retries can multiply the delay when one file remains held. The unique
+  // retired path never names an active or replacement lease.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(stalePath, { recursive: true, force: false })
+      return
+    } catch (error) {
+      if (platform() !== 'win32' || attempt >= 8 || !['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY'].includes(error?.code)) throw error
+      await new Promise((done) => setTimeout(done, 50 * (attempt + 1)))
+    }
+  }
+}
+
 async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operation, dependencies) {
   const claimsPath = join(lockPath, RECOVERY_CLAIMS_DIRECTORY)
   const claim = recoveryClaim(retained.token, operation)
@@ -423,7 +438,7 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
       }
     }
     try {
-      await rm(stalePath, { recursive: true, force: false })
+      await removeRetiredLock(stalePath)
     } catch (error) {
       throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The retired stale Agent Host lifecycle lock could not be removed', { causeCode: error?.code ?? null })
     }
