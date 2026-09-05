@@ -310,7 +310,7 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
     await mkdir(claimsPath, { mode: 0o700 })
   } catch (error) {
     if (error?.code === 'ENOENT') return false
-    if (error?.code !== 'EEXIST') throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The stale Agent Host lifecycle recovery directory could not be created safely')
+    if (error?.code !== 'EEXIST') throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The stale Agent Host lifecycle recovery directory could not be created safely', { causeCode: error?.code ?? null })
   }
   const claimsInfo = await lstat(claimsPath).catch((error) => error?.code === 'ENOENT' ? null : Promise.reject(error))
   if (claimsInfo === null) return false
@@ -325,7 +325,7 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
       published = true
     } catch (error) {
       if (error?.code === 'ENOENT') return false
-      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The stale Agent Host lifecycle recovery claim could not be published safely')
+      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The stale Agent Host lifecycle recovery claim could not be published safely', { causeCode: error?.code ?? null })
     }
     if (typeof dependencies.lifecycleRecoveryClaimPublished === 'function') {
       await dependencies.lifecycleRecoveryClaimPublished()
@@ -340,7 +340,7 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
       await writePrivateJson(ticketPath, ownTicket)
     } catch (error) {
       if (error?.code === 'ENOENT') return false
-      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The stale Agent Host lifecycle recovery ticket could not be published safely')
+      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The stale Agent Host lifecycle recovery ticket could not be published safely', { causeCode: error?.code ?? null })
     }
 
     let elected = false
@@ -391,12 +391,12 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
       await rename(lockPath, stalePath)
     } catch (error) {
       if (error?.code === 'ENOENT') return false
-      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The elected stale Agent Host lifecycle lock changed before retirement')
+      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The elected stale Agent Host lifecycle lock changed before retirement', { causeCode: error?.code ?? null })
     }
     try {
       await rm(stalePath, { recursive: true, force: false })
-    } catch {
-      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The retired stale Agent Host lifecycle lock could not be removed')
+    } catch (error) {
+      throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The retired stale Agent Host lifecycle lock could not be removed', { causeCode: error?.code ?? null })
     }
     if (typeof dependencies.lifecycleRecoveryRetired === 'function') {
       await dependencies.lifecycleRecoveryRetired()

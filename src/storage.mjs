@@ -167,15 +167,19 @@ async function livePackageReferences(packageRoot, runner) {
     )
   }
   const prefix = `${packageRoot}${sep}`
+  const windows = process.platform === 'win32'
+  const searchedPrefix = windows ? prefix.toLowerCase() : prefix
   const live = new Map()
   for (const { command } of processes) {
+    const nativeCommand = windows ? command.replaceAll('/', '\\') : command
+    const searchedCommand = windows ? nativeCommand.toLowerCase() : nativeCommand
     let offset = 0
     while (offset < command.length) {
-      const start = command.indexOf(prefix, offset)
+      const start = searchedCommand.indexOf(searchedPrefix, offset)
       if (start === -1) break
-      const segments = command.slice(start + prefix.length).split(sep)
+      const segments = nativeCommand.slice(start + prefix.length).split(sep)
       if (segments.length >= 2 && segments[0] !== '' && segments[1] !== '') {
-        const path = join(packageRoot, segments[0], segments[1].split(/\s/u)[0])
+        const path = join(packageRoot, segments[0], segments[1].split(/[\s"']/u)[0])
         try {
           const resolved = await realpath(path)
           if (contained(packageRoot, resolved)) {
