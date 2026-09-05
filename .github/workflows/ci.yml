@@ -56,7 +56,8 @@ jobs:
       - run: npm ci
       - name: Verify real private Windows access lists
         run: node --test --test-timeout=60000 test/private-permissions.test.mjs
-      - run: npm run check
+      - name: Verify Host source and installed package
+        run: npm run check:syntax && npm test && npm run check:repository && npm run check:package
       - run: npm run audit:production
       - name: Create a complete bound Windows packaging fixture
         shell: pwsh
@@ -86,3 +87,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed Windows CLI failed' }
           & (Join-Path $install 'Uninstall-AgentHost.ps1') -InstallRoot $install
           if (Test-Path -LiteralPath $install) { throw 'Windows uninstaller left the application installed' }
+
+  windows-packages:
+    name: Windows ${{ matrix.workspace }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [direct-execution-runtime, capability-http-bridge, agent-tool-observer, context-surface-analyzer]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - run: npm run check --workspace @openadam/${{ matrix.workspace }}
