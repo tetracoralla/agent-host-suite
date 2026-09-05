@@ -159,9 +159,9 @@ try {
     }
   }
   const cli = metadata.files.find((file) => file.path === 'src/cli.mjs')
-  if (cli === undefined || (cli.mode & 0o111) === 0) throw new Error('packaged CLI is absent or not executable')
+  if (cli === undefined || (process.platform !== 'win32' && (cli.mode & 0o111) === 0)) throw new Error('packaged CLI is absent or not executable')
   const evalsDriver = metadata.files.find((file) => file.path === 'src/evals-driver.mjs')
-  if (evalsDriver === undefined || (evalsDriver.mode & 0o111) === 0) {
+  if (evalsDriver === undefined || (process.platform !== 'win32' && (evalsDriver.mode & 0o111) === 0)) {
     throw new Error('packaged evaluator driver is absent or not executable')
   }
   for (const required of [
@@ -219,6 +219,21 @@ try {
     writeFile(resolutionPath, `${JSON.stringify(packagedResolutionRequest())}\n`),
   ])
   const installedCli = resolve(consumer, 'node_modules/@openadam/direct-execution-runtime/src/cli.mjs')
+  if (process.platform === 'win32') {
+    // NTFS has no POSIX executable bit. Verify npm's actual native command
+    // shims and execute the installed CLI through its Windows user entrypoint.
+    for (const name of ['openadam-direct-exec', 'openadam-direct-evals-driver']) {
+      if (!(await lstat(resolve(consumer, `node_modules/.bin/${name}.cmd`))).isFile()) {
+        throw new Error(`installed Windows command shim is absent: ${name}`)
+      }
+    }
+    const shim = resolve(consumer, 'node_modules/.bin/openadam-direct-exec.cmd')
+    const invocation = `""${shim}" validate --config "${configPath}" --work-order "${firstOrderPath}""`
+    const validated = await execFileAsync('cmd.exe', ['/d', '/s', '/c', invocation], {
+      cwd: consumer, windowsHide: true, windowsVerbatimArguments: true,
+    })
+    if (JSON.parse(validated.stdout).status !== 'valid') throw new Error('installed Windows command did not validate its work order')
+  }
   const resolved = JSON.parse((await execFileAsync(process.execPath, [
     installedCli, 'resolve', '--config', configPath, '--requirement', resolutionPath,
   ])).stdout)
