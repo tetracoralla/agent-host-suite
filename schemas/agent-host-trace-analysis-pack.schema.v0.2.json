@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-trace-analysis-pack.schema.v0.2.json",
+  "title": "Agent Host Observer-Retained Trace Analysis Pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "source", "privacy", "retention", "limits", "offeredToolCatalogs", "events", "unknowns", "interpretationStatus"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-trace-analysis-pack.v0.2" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "selectionKind", "sessionHash", "requestedRange", "retainedRange", "retainedEventCount", "adapters", "completeness"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/provider" },
+        "selectionKind": { "const": "observer-retained-session" },
+        "sessionHash": { "$ref": "#/$defs/hash" },
+        "requestedRange": { "$ref": "#/$defs/range" },
+        "retainedRange": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["firstEventAtMs", "lastEventAtMs"],
+          "properties": { "firstEventAtMs": { "$ref": "#/$defs/time" }, "lastEventAtMs": { "$ref": "#/$defs/time" } }
+        },
+        "retainedEventCount": { "type": "integer", "minimum": 1 },
+        "adapters": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/adapter" }
+        },
+        "completeness": { "const": "unknown" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentPolicy", "selectedConversationContentIncluded", "sensitiveContentConfirmed", "transportSecretsExcluded", "selectedContentMayContainUserSecrets", "observerPackRetained", "sourceUsesObserverRetainedMetadata", "sourcePathIncluded", "toolArgumentsIncluded", "toolResultsIncluded"],
+      "properties": {
+        "contentPolicy": { "const": "metadata-only" },
+        "selectedConversationContentIncluded": { "const": false },
+        "sensitiveContentConfirmed": { "const": false },
+        "transportSecretsExcluded": { "const": true },
+        "selectedContentMayContainUserSecrets": { "const": false },
+        "observerPackRetained": { "const": false },
+        "sourceUsesObserverRetainedMetadata": { "const": true },
+        "sourcePathIncluded": { "const": false },
+        "toolArgumentsIncluded": { "const": false },
+        "toolResultsIncluded": { "const": false }
+      }
+    },
+    "retention": { "$ref": "#/$defs/retention" },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxEvents", "maxOfferedToolsPerStep", "maxOutputBytes", "eventLimitReached", "outputTruncated", "eventsAvailable", "eventsReturned"],
+      "properties": {
+        "maxEvents": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "maxOfferedToolsPerStep": { "type": "integer", "minimum": 1, "maximum": 2000 },
+        "maxOutputBytes": { "type": "integer", "minimum": 4096, "maximum": 67108864 },
+        "eventLimitReached": { "type": "boolean" },
+        "outputTruncated": { "type": "boolean" },
+        "eventsAvailable": { "type": "integer", "minimum": 1 },
+        "eventsReturned": { "type": "integer", "minimum": 0, "maximum": 5000 }
+      }
+    },
+    "offeredToolCatalogs": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": { "$ref": "#/$defs/offeredToolCatalog" }
+    },
+    "events": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/event" } },
+    "unknowns": { "$ref": "#/$defs/unknowns" },
+    "interpretationStatus": { "const": "not-performed" }
+  },
+  "$defs": {
+    "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nullableHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "time": { "type": "integer", "minimum": 0 },
+    "nullableTime": { "type": ["integer", "null"], "minimum": 0 },
+    "nullableNonNegative": { "type": ["number", "null"], "minimum": 0 },
+    "nullableString": { "type": ["string", "null"] },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromMs", "toMs"],
+      "properties": { "fromMs": { "$ref": "#/$defs/nullableTime" }, "toMs": { "$ref": "#/$defs/nullableTime" } }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retentionDays", "currentCutoffMs", "eventsBeforeCutoffMayHaveBeenRemoved", "collectionBeforeMonitoringWasEnabled"],
+      "properties": {
+        "retentionDays": { "type": "integer", "minimum": 1 },
+        "currentCutoffMs": { "$ref": "#/$defs/time" },
+        "eventsBeforeCutoffMayHaveBeenRemoved": { "const": true },
+        "collectionBeforeMonitoringWasEnabled": { "const": "unavailable" }
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapterId", "adapterVersion", "providerVersion", "sourceFormat"],
+      "properties": {
+        "adapterId": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "adapterVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "providerVersion": { "type": ["string", "null"], "minLength": 1, "maxLength": 100 },
+        "sourceFormat": { "type": "string", "minLength": 1, "maxLength": 100 }
+      }
+    },
+    "offeredTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolName", "toolNamespace", "routeClass", "isOpenAdam"],
+      "properties": {
+        "toolName": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "toolNamespace": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "routeClass": { "enum": ["mcp", "native-shell", "host-builtin", "orchestration", "unknown"] },
+        "isOpenAdam": { "type": "boolean" }
+      }
+    },
+    "offeredToolCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["catalogHash", "offeredToolsReturned", "offeredToolsTruncated", "tools"],
+      "properties": {
+        "catalogHash": { "$ref": "#/$defs/hash" },
+        "offeredToolsReturned": { "type": "integer", "minimum": 0, "maximum": 2000 },
+        "offeredToolsTruncated": { "type": "boolean" },
+        "tools": { "type": "array", "maxItems": 2000, "items": { "$ref": "#/$defs/offeredTool" } }
+      }
+    },
+    "modelFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modelId", "querySource", "finishReason", "status", "attempt", "durationMs", "requestBytes", "responseBytes", "requestMessageCount", "offeredToolCount", "offeredToolCatalogHash", "emittedToolCallCount", "usage", "selfReportedRationalePresent", "stableErrorCode"],
+      "properties": {
+        "modelId": { "$ref": "#/$defs/nullableString" },
+        "querySource": { "$ref": "#/$defs/nullableString" },
+        "finishReason": { "$ref": "#/$defs/nullableString" },
+        "status": { "enum": ["observed", "completed", "error", "cancelled", "unknown"] },
+        "attempt": { "$ref": "#/$defs/nullableNonNegative" },
+        "durationMs": { "$ref": "#/$defs/nullableNonNegative" },
+        "requestBytes": { "$ref": "#/$defs/nullableNonNegative" },
+        "responseBytes": { "$ref": "#/$defs/nullableNonNegative" },
+        "requestMessageCount": { "$ref": "#/$defs/nullableNonNegative" },
+        "offeredToolCount": { "$ref": "#/$defs/nullableNonNegative" },
+        "offeredToolCatalogHash": { "$ref": "#/$defs/hash" },
+        "emittedToolCallCount": { "$ref": "#/$defs/nullableNonNegative" },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["inputTokens", "cachedInputTokens", "outputTokens", "reasoningTokens", "totalTokens"],
+          "properties": {
+            "inputTokens": { "$ref": "#/$defs/nullableNonNegative" },
+            "cachedInputTokens": { "$ref": "#/$defs/nullableNonNegative" },
+            "outputTokens": { "$ref": "#/$defs/nullableNonNegative" },
+            "reasoningTokens": { "$ref": "#/$defs/nullableNonNegative" },
+            "totalTokens": { "$ref": "#/$defs/nullableNonNegative" }
+          }
+        },
+        "selfReportedRationalePresent": { "type": ["boolean", "null"] },
+        "stableErrorCode": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "toolFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolName", "toolNamespace", "routeClass", "isOpenAdam", "status", "requestBytes", "responseBytes", "stableErrorCode"],
+      "properties": {
+        "toolName": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "toolNamespace": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "routeClass": { "enum": ["mcp", "native-shell", "host-builtin", "orchestration", "unknown"] },
+        "isOpenAdam": { "type": "boolean" },
+        "status": { "enum": ["observed", "completed", "error", "cancelled", "unknown"] },
+        "requestBytes": { "$ref": "#/$defs/nullableNonNegative" },
+        "responseBytes": { "$ref": "#/$defs/nullableNonNegative" },
+        "stableErrorCode": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "turnFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "stableReason", "stableErrorCode"],
+      "properties": {
+        "status": { "enum": ["completed", "error", "cancelled", "unknown"] },
+        "stableReason": { "$ref": "#/$defs/nullableString" },
+        "stableErrorCode": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordinal", "kind", "eventHash", "sessionHash", "turnHash", "requestHash", "callHash", "occurredAtMs", "completedAtMs", "adapter", "facts"],
+      "properties": {
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "kind": { "enum": ["model-step", "tool-call", "tool-result", "turn-end"] },
+        "eventHash": { "$ref": "#/$defs/hash" },
+        "sessionHash": { "$ref": "#/$defs/hash" },
+        "turnHash": { "$ref": "#/$defs/nullableHash" },
+        "requestHash": { "$ref": "#/$defs/nullableHash" },
+        "callHash": { "$ref": "#/$defs/nullableHash" },
+        "occurredAtMs": { "$ref": "#/$defs/nullableTime" },
+        "completedAtMs": { "$ref": "#/$defs/nullableTime" },
+        "adapter": { "$ref": "#/$defs/adapter" },
+        "facts": {}
+      },
+      "oneOf": [
+        { "properties": { "kind": { "const": "model-step" }, "facts": { "$ref": "#/$defs/modelFacts" } } },
+        { "properties": { "kind": { "enum": ["tool-call", "tool-result"] }, "facts": { "$ref": "#/$defs/toolFacts" } } },
+        { "properties": { "kind": { "const": "turn-end" }, "facts": { "$ref": "#/$defs/turnFacts" } } }
+      ]
+    },
+    "unknowns": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["authoritative-skill-activation", "semantic-correctness", "result-adoption", "non-use-reason", "task-quality", "product-opportunity"] }
+    }
+  }
+}

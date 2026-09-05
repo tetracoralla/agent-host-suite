@@ -19,6 +19,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run audit:production
 
   macos-app:
     runs-on: macos-14
@@ -34,9 +35,51 @@ jobs:
       - name: Create a bound packaging fixture
         run: >-
           node --input-type=module -e
-          "import { createReleaseFixture } from './test/release-helpers.mjs';
+          "import { readFile } from 'node:fs/promises';
+          import { createReleaseFixture } from './test/release-helpers.mjs';
+          const pkg=JSON.parse(await readFile('./package.json','utf8'));
           await createReleaseFixture('.build/ci-package', {
-            suiteVersion: '0.1.1-ci', releaseId: 'ci-package', marker: 'ci', includeObservability: true,
+            suiteVersion: pkg.version, releaseId: 'ci-package', marker: 'ci', includeObservability: true,
           });"
       - run: AGENT_HOST_RELEASE_CATALOG="$PWD/.build/ci-package/catalog" ./scripts/package-macos-app.sh debug
       - run: codesign --verify --deep --strict ".build/Agent Host.app"
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run audit:production
+      - name: Create a complete bound Windows packaging fixture
+        shell: pwsh
+        run: >-
+          node --input-type=module -e
+          "import { readFile } from 'node:fs/promises';
+          import { createReleaseFixture } from './test/release-helpers.mjs';
+          const pkg=JSON.parse(await readFile('./package.json','utf8'));
+          await createReleaseFixture('.build/ci-windows', {
+            suiteVersion: pkg.version, releaseId: 'ci-windows', marker: 'ci',
+            includeObservability: true, includeDeveloper: true,
+          });"
+      - name: Package, install, execute, and uninstall without source
+        shell: pwsh
+        env:
+          AGENT_HOST_RELEASE_CATALOG: ${{ github.workspace }}\.build\ci-windows\catalog
+          AGENT_HOST_ALLOW_LOCAL_SOURCE_DISTRIBUTION: "1"
+        run: |
+          npm run package:windows
+          $archive = Get-ChildItem -LiteralPath '.build\windows\distribution' -Filter '*.zip' | Select-Object -First 1
+          $expanded = Join-Path $env:RUNNER_TEMP 'agent-host-package'
+          $install = Join-Path $env:RUNNER_TEMP 'Agent Host'
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $expanded
+          $bundle = Get-ChildItem -LiteralPath $expanded -Directory | Select-Object -First 1
+          & (Join-Path $bundle.FullName 'Install-AgentHost.ps1') -InstallRoot $install -NoPath -NoShortcuts -NoLaunch
+          & (Join-Path $install 'runtime\node.exe') (Join-Path $install 'app\bin\agent-host.mjs') --help
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Windows CLI failed' }
+          & (Join-Path $install 'Uninstall-AgentHost.ps1') -InstallRoot $install
+          if (Test-Path -LiteralPath $install) { throw 'Windows uninstaller left the application installed' }

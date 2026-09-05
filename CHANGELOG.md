@@ -1,8 +1,97 @@
 # Changelog
 
+## Unreleased
+
+- Preserve a completed browser Manager action when its status refresh fails,
+  display lifecycle warnings, and offer a separate refresh without replaying
+  the change. Prevent overlapping changes and empty or unchanged tool-set
+  submissions.
+- Verify installed package module imports through portable file URLs and
+  check production dependencies against the npm registry in CI.
+
 All notable release changes will be recorded here.
 
 ## Unreleased
+
+- Added path-free retained trace-session discovery and metadata-only Trace
+  Analysis Pack v0.2 export for every session-bearing Agent-shell adapter.
+  Provider/session/time selection is bounded and read-only, reports retention
+  and unknown completeness, and is available through the CLI and bilingual
+  Manager without depending on provider files that may have rotated away.
+  Repeated offered-tool inventories are content-addressed once per pack and
+  byte-bounded exports remove catalogs whose events were truncated.
+- Shortened the Observer collection lease to a wall-time-derived bound and
+  made the next run reclaim a dead process holder while closing its unfinished
+  collection record, so an interrupted Manager refresh does not leave the
+  dashboard stuck in a false running state for a full lease window.
+- Added tool-integration v0.5 optional path grants with platform-native path
+  lists and lifecycle revalidation. Private import and rollback now enforce one
+  current overlay before mutation, rollback preserves path-grant errors, empty
+  grants retain legacy Codex projection addresses, and the cost experiment
+  requires the intended file tool while accepting exact quoted acknowledgments.
+- Added the local, metadata-only Trace Plane with seven capability-negotiated
+  Agent-shell adapters for Codex, Claude Code, ZCode, DeepSeek Harness, Gemini
+  CLI, and GitHub Copilot CLI. Automatic records remain read-only; hook and
+  telemetry setup is emitted only as a non-mutating plan. Observer report v0.8
+  exposes adapter coverage and bounded normalized model/tool/turn facts without
+  inferring non-use reason, correctness, adoption, quality, opportunity, or
+  value.
+- Added bounded, incremental ZCode model-I/O ingestion and an explicit Trace
+  Analysis Pack export. Export is metadata-only by default; selected content
+  requires two confirmations, excludes headers and provider options, and is
+  never retained in Observer state. Added a public DeepSeek Harness session
+  event bridge, local Gemini telemetry ingestion, stable hook launchers, and
+  package-level source-independence, privacy, settled-cost, and hook-only
+  provider checks.
+- Extended the Developer Kit intake contract so a user can authorize arbitrary
+  bounded material, including a Trace Analysis Pack, documentation, past work,
+  Skills, or an open-source project. The Kit validates a user/Agent-authored
+  proposal but does not generate or approve product opportunities itself.
+- Hardened Observer removal: normal uninstall preserves the stable hook
+  launcher and local observations, while purge requires separate confirmation
+  that local data may be removed and external Agent-shell adapters have been
+  disconnected.
+- Added the Windows current-user distribution carrier: private Node payload,
+  per-file integrity manifest, Start menu Manager/restore/uninstall, one-version
+  application rollback, named-pipe Direct Runtime, scheduled collection and
+  maintenance, portable host Skill launchers, Windows CI, and preserve-or-purge
+  lifecycle boundaries.
+- Added the bounded `agent-host usage` result and loopback browser Manager.
+  Observer report v0.8 includes provider-specific Token peaks, bounded UTC
+  daily activity, session/turn counts, active-day streaks, tool/runtime outcome
+  summaries and Direct Runtime reliability while keeping Skill activation,
+  non-use reason, semantic effect, adoption, correctness and value unknown.
+- Added complete English and Simplified Chinese product copy, system-language
+  selection by default, and a secondary persisted language setting in both the
+  Windows browser Manager and the native macOS Manager. Published bilingual
+  onboarding and Windows lifecycle guides in the distributable package.
+- Reused one current Observer read across each browser Manager refresh and kept
+  bounded daily activity out of the compact operations snapshot, avoiding
+  duplicate collection-report work and protecting its 16 KiB response budget.
+
+- Added ZCode as a first-class Agent app with atomic user MCP configuration,
+  immutable Operations/Developer/Provider and active product Skill projections,
+  explicit workspace grants, conflict-safe replacement, exact restoration,
+  health inspection, and preservation of user changes after installation.
+- Made the macOS Manager discover, set up, connect, inspect, and repair ZCode as
+  the primary local Agent app while retaining Codex and optional Claude Code
+  compatibility.
+- Project active product Skills from sealed provider package bytes into ZCode
+  and Claude so task discovery never depends on a source or archive checkout.
+- Make whole-suite rollback skip same-release operational snapshots and select
+  the most recent genuinely different compatibility set; storage and cleanup
+  use the same selection rule.
+- Separate each profile's immutable installed inventory from its small default
+  Agent working set. Local dogfood now starts and resets to Math Anchor only,
+  while additional products remain explicit, reversible activations protected
+  by the catalog budget preflight.
+- Publish the current profile v0.2 schema, including installed, Agent-facing,
+  and default Agent component sets, and exercise the Local reset behavior in
+  lifecycle regression coverage.
+- Refresh status, host summaries, monitoring, activity, and the context snapshot
+  after a Manager Full Check while preserving its explicit Agent-app results,
+  so an external CLI update cannot leave the window showing a mixed old/new
+  environment.
 
 - Defined canonical product terminology for Agent Host, Agent environments,
   Agent apps, independent Agent tools, integrations, and infrastructure

@@ -4,10 +4,17 @@ import SwiftUI
 struct AgentHostManagerApp: App {
     @StateObject private var store = AgentHostStore()
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(ManagerLanguage.storageKey) private var language = ManagerLanguage.system.rawValue
+
+    private var selectedLanguage: ManagerLanguage {
+        ManagerLanguage(rawValue: language) ?? .system
+    }
 
     var body: some Scene {
         WindowGroup("Agent Host") {
             ContentView(store: store)
+                .environment(\.locale, selectedLanguage.locale)
+                .id(selectedLanguage.id)
                 .frame(minWidth: 760, minHeight: 580)
                 .task { await store.refreshIfNeeded() }
                 .onChange(of: scenePhase) { _, phase in
@@ -18,11 +25,11 @@ struct AgentHostManagerApp: App {
         .defaultSize(width: 940, height: 700)
         .windowResizability(.contentMinSize)
         .commands {
-            CommandMenu("Environment") {
-                Button("Run Full Check") { Task { await store.runDoctor() } }
+            CommandMenu(L10n.text("Environment")) {
+                Button(L10n.text("Run Full Check")) { Task { await store.runDoctor() } }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(store.isBusy || store.suite?.configured != true)
-                Button(store.health.needsRepair ? "Review Repair" : "Review Update") { Task { await store.prepareUpdate() } }
+                Button(L10n.text(store.health.needsRepair ? "Review Repair" : "Review Update")) { Task { await store.prepareUpdate() } }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                     .disabled(store.isBusy || store.suite?.configured != true)
             }
@@ -30,6 +37,7 @@ struct AgentHostManagerApp: App {
 
         Settings {
             SettingsView(store: store)
+                .environment(\.locale, selectedLanguage.locale)
                 .frame(width: 520, height: 440)
         }
     }

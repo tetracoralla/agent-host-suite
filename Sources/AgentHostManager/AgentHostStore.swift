@@ -2,12 +2,15 @@ import Foundation
 
 enum RecoveryOption: Equatable {
     case replaceHostConflicts
+    case replaceHostConnection(String)
 }
 
 @MainActor
 final class AgentHostStore: ObservableObject {
     @Published private(set) var suite: SuiteStatus?
     @Published private(set) var observations: ObservabilityStatus?
+    @Published private(set) var usage: UsageSummary?
+    @Published private(set) var traceSourceCatalog: TraceSourceCatalog?
     @Published private(set) var doctor: DoctorResult?
     @Published private(set) var snapshot: SuiteSnapshot?
     @Published private(set) var hostStatuses: [String: HostStatusResult] = [:]
@@ -23,6 +26,7 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var recovery: RecoveryOption?
     @Published var isPresentingSetupPlan = false
     @Published var isPresentingEnvironmentChangePlan = false
+    @Published var selectedSetupHost = "zcode"
 
     private let cli: AgentHostCLI
     private let environment: [String: String]
@@ -38,13 +42,13 @@ final class AgentHostStore: ObservableObject {
     var health: ManagerHealth {
         if isBusy && suite == nil { return .loading }
         guard let suite, suite.configured else { return .unavailable }
-        guard doctor != nil else { return isBusy ? .loading : .attention("Run a health check") }
+        guard doctor != nil else { return isBusy ? .loading : .attention(L10n.text("Run a health check")) }
         let unhealthy = healthFacets.filter { !$0.isHealthy }
         if unhealthy.isEmpty { return .ready }
         let labels = attentionLabels
-        if labels.count == 1, let label = labels.first { return .attention("\(label) needs attention") }
-        if unhealthy.count == 1 { return .attention("\(unhealthy[0].name) needs attention") }
-        return .attention("\(unhealthy.count) items need attention")
+        if labels.count == 1, let label = labels.first { return .attention(L10n.format("{item} needs attention", ["item": L10n.text(label)])) }
+        if unhealthy.count == 1 { return .attention(L10n.format("{item} needs attention", ["item": L10n.text(unhealthy[0].name)])) }
+        return .attention(L10n.format("{count} items need attention", ["count": unhealthy.count.formatted()]))
     }
 
     // Independent health surfaces. No single "Ready" may hide an unhealthy
@@ -61,15 +65,15 @@ final class AgentHostStore: ObservableObject {
         let agentAppsVerified = managedHostIDs.isEmpty || fullHostChecks.count == managedHostIDs.count
         facets.append(ManagerHealthFacet(
             id: "agent-apps",
-            name: "Agent apps",
+            name: L10n.text("Agent apps"),
             isHealthy: hostProblems.isEmpty && missingApps.isEmpty,
             detail: !hostProblems.isEmpty
                 ? hostProblems[0].message
                 : !missingApps.isEmpty
-                    ? "A connected Agent app is no longer installed"
+                    ? L10n.text("A connected Agent app is no longer installed")
                     : agentAppsVerified
-                        ? "Connected apps have current bindings"
-                        : "Connected apps are configured · Run Full Check to verify bindings"
+                        ? L10n.text("Connected apps have current bindings")
+                        : L10n.text("Connected apps are configured · Run Full Check to verify bindings")
         ))
 
         let toolProblems = doctor.checks.filter {
@@ -77,9 +81,9 @@ final class AgentHostStore: ObservableObject {
         }
         facets.append(ManagerHealthFacet(
             id: "tools",
-            name: "Tools",
+            name: L10n.text("Tools"),
             isHealthy: toolProblems.isEmpty,
-            detail: toolProblems.isEmpty ? "Installed tool runtimes are ready" : toolProblems[0].message
+            detail: toolProblems.isEmpty ? L10n.text("Installed tool runtimes are ready") : toolProblems[0].message
         ))
 
         let runtimeProblems = doctor.checks.filter {
@@ -87,9 +91,9 @@ final class AgentHostStore: ObservableObject {
         }
         facets.append(ManagerHealthFacet(
             id: "direct-execution",
-            name: "Direct execution",
+            name: L10n.text("Direct execution"),
             isHealthy: runtimeProblems.isEmpty,
-            detail: runtimeProblems.isEmpty ? "The local execution service and direct probes are ready" : runtimeProblems[0].message
+            detail: runtimeProblems.isEmpty ? L10n.text("The local execution service and direct probes are ready") : runtimeProblems[0].message
         ))
 
         facets.append(monitoringFacet)
@@ -99,13 +103,13 @@ final class AgentHostStore: ObservableObject {
 
     private var monitoringFacet: ManagerHealthFacet {
         guard let observations else {
-            return ManagerHealthFacet(id: "monitoring", name: "Monitoring", isHealthy: true, detail: "Not configured")
+            return ManagerHealthFacet(id: "monitoring", name: L10n.text("Monitoring"), isHealthy: true, detail: L10n.text("Not configured"))
         }
         guard observations.enabled else {
-            return ManagerHealthFacet(id: "monitoring", name: "Monitoring", isHealthy: true, detail: "Off")
+            return ManagerHealthFacet(id: "monitoring", name: L10n.text("Monitoring"), isHealthy: true, detail: L10n.text("Off"))
         }
         guard let collection = snapshot?.observability?.collection else {
-            return ManagerHealthFacet(id: "monitoring", name: "Monitoring", isHealthy: false, detail: "On, but no collection result has been recorded")
+            return ManagerHealthFacet(id: "monitoring", name: L10n.text("Monitoring"), isHealthy: false, detail: L10n.text("On, but no collection result has been recorded"))
         }
         return MonitoringHealthEvaluator.evaluate(
             collection: collection,
@@ -117,42 +121,42 @@ final class AgentHostStore: ObservableObject {
     private var catalogFacet: ManagerHealthFacet {
         let catalog = snapshot?.observability?.catalog
         guard let catalog, catalog.canonicalUtf8Bytes != nil else {
-            return ManagerHealthFacet(id: "catalog", name: "Tool catalog", isHealthy: true, detail: "No measurement (monitoring off or not refreshed)")
+            return ManagerHealthFacet(id: "catalog", name: L10n.text("Tool catalog"), isHealthy: true, detail: L10n.text("No measurement (monitoring off or not refreshed)"))
         }
         let exceeded = (catalog.budgetChecks ?? []).filter(\.exceeded)
         guard !exceeded.isEmpty else {
-            return ManagerHealthFacet(id: "catalog", name: "Tool catalog", isHealthy: true, detail: "Within declared budgets")
+            return ManagerHealthFacet(id: "catalog", name: L10n.text("Tool catalog"), isHealthy: true, detail: L10n.text("Within declared budgets"))
         }
         let names = exceeded.map { budgetName($0.metric) }.joined(separator: ", ")
         return ManagerHealthFacet(
             id: "catalog",
-            name: "Tool catalog",
+            name: L10n.text("Tool catalog"),
             isHealthy: false,
-            detail: "Over budget: \(names)"
+            detail: L10n.format("Over budget: {items}", ["items": names])
         )
     }
 
     var catalogBudgetSummary: String? {
         guard let catalog = snapshot?.observability?.catalog, let bytes = catalog.canonicalUtf8Bytes else { return nil }
         var parts = [
-            "\(catalog.tools ?? 0) Agent operations",
-            "\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary)) catalog",
+            L10n.format((catalog.tools ?? 0) == 1 ? "{count} Agent operation" : "{count} Agent operations", ["count": (catalog.tools ?? 0).formatted()]),
+            L10n.format("{size} catalog", ["size": ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary)]),
         ]
         if let largest = catalog.largestToolUtf8Bytes {
-            parts.append("largest operation \(ByteCountFormatter.string(fromByteCount: Int64(largest), countStyle: .binary))")
+            parts.append(L10n.format("largest operation {size}", ["size": ByteCountFormatter.string(fromByteCount: Int64(largest), countStyle: .binary)]))
         }
         let exceeded = (catalog.budgetChecks ?? []).filter(\.exceeded)
         if let catalogBudget = (catalog.budgetChecks ?? []).first(where: { $0.metric == "catalog.canonicalUtf8Bytes" }) {
-            parts.append("budget \(ByteCountFormatter.string(fromByteCount: Int64(catalogBudget.limit), countStyle: .binary))")
+            parts.append(L10n.format("budget {size}", ["size": ByteCountFormatter.string(fromByteCount: Int64(catalogBudget.limit), countStyle: .binary)]))
         }
         if !exceeded.isEmpty {
-            parts.append("OVER BUDGET (\(exceeded.count))")
+            parts.append(L10n.format("OVER BUDGET ({count})", ["count": exceeded.count.formatted()]))
         }
         return parts.joined(separator: " · ")
     }
 
     var monitoringSummary: String {
-        guard let observations, observations.enabled else { return "Off" }
+        guard let observations, observations.enabled else { return L10n.text("Off") }
         let facet = monitoringFacet
         return facet.detail
     }
@@ -161,9 +165,9 @@ final class AgentHostStore: ObservableObject {
         guard let bytes = snapshot?.storage?.allocatedBytes else { return nil }
         var parts = [ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary)]
         if let processes = snapshot?.processes, let count = processes.processCount {
-            var baseline = "\(count) live suite process\(count == 1 ? "" : "es")"
+            var baseline = L10n.format(count == 1 ? "{count} live suite process" : "{count} live suite processes", ["count": count.formatted()])
             if let rss = processes.totalRssBytes {
-                baseline += " · \(ByteCountFormatter.string(fromByteCount: Int64(rss), countStyle: .binary)) resident"
+                baseline += " · \(L10n.format("{size} resident", ["size": ByteCountFormatter.string(fromByteCount: Int64(rss), countStyle: .binary)]))"
             }
             parts.append(baseline)
         }
@@ -177,7 +181,11 @@ final class AgentHostStore: ObservableObject {
             activeAgentComponents: suite?.agentComponents,
             orderedIDs: Self.toolOrder
         ).compactMap { id in
-            let metadata = Self.toolMetadata[id]!
+            let metadata = Self.toolMetadata[id] ?? (
+                name: suite?.components?[id]?.displayName ?? id.replacingOccurrences(of: "-", with: " ").localizedCapitalized,
+                summary: suite?.components?[id]?.summary ?? L10n.text("Installed Agent tool"),
+                systemImage: "shippingbox.fill"
+            )
             return tool(id: id, name: suite?.components?[id]?.displayName ?? metadata.name, summary: suite?.components?[id]?.summary ?? metadata.summary, systemImage: metadata.systemImage)
         }
     }
@@ -186,10 +194,14 @@ final class AgentHostStore: ObservableObject {
         suite?.hosts?.values.filter(\.installed).count ?? 0
     }
 
+    var selectedSetupHostName: String {
+        ManagerAgentApp.named(selectedSetupHost).name
+    }
+
     var localExecutionStatus: String {
-        guard suite?.service != nil else { return "Stopped" }
-        guard let service = doctor?.check("runtime.service") else { return "Checking" }
-        return service.status == "ok" ? "Running" : "Needs attention"
+        guard suite?.service != nil else { return L10n.text("Stopped") }
+        guard let service = doctor?.check("runtime.service") else { return L10n.text("Checking") }
+        return L10n.text(service.status == "ok" ? "Running" : "Needs attention")
     }
 
     var isRefreshing: Bool {
@@ -217,16 +229,20 @@ final class AgentHostStore: ObservableObject {
 
     func refresh() async {
         await work("Checking environment", blocksInterface: suite == nil) {
+            self.traceSourceCatalog = nil
             let status = try await cli.run(["status"], as: SuiteStatus.self)
             self.suite = status
 
             async let codex = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("codex"), as: HostStatusResult.self)
             async let claude = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("claude"), as: HostStatusResult.self)
+            async let zcode = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("zcode"), as: HostStatusResult.self)
             async let activity = self.cli.run(["activity"], as: ActivityResult.self)
             async let snapshot = self.cli.run(["snapshot"], as: SuiteSnapshot.self)
+            async let usage = self.cli.run(["usage"], as: UsageSummary.self)
 
-            let hostValues = try await [codex, claude]
+            let hostValues = try await [zcode, codex, claude]
             self.hostStatuses = Dictionary(uniqueKeysWithValues: hostValues.map { ($0.host, $0) })
+            self.selectDefaultSetupHostIfNeeded()
 
             if status.configured {
                 self.observations = try await self.cli.run(["observability", "status"], as: ObservabilityStatus.self)
@@ -237,11 +253,13 @@ final class AgentHostStore: ObservableObject {
                 self.doctor = try await self.cli.run(ManagerCheckPolicy.foregroundDoctorArguments, as: DoctorResult.self)
             } else {
                 self.observations = nil
+                self.usage = nil
                 self.doctor = nil
             }
 
             self.activity = try await activity.entries
             self.snapshot = try? await snapshot
+            self.usage = try? await usage
             self.lastSuccessfulRefreshAt = Date()
         }
     }
@@ -263,8 +281,12 @@ final class AgentHostStore: ObservableObject {
 
     func runDoctor(deep: Bool = true) async {
         await work(deep ? "Running full check" : "Checking environment") {
-            self.doctor = try await self.cli.run(deep ? ManagerCheckPolicy.fullDoctorArguments : ["doctor"], as: DoctorResult.self)
-            try await self.reloadStatus()
+            let checked = try await self.cli.run(deep ? ManagerCheckPolicy.fullDoctorArguments : ["doctor"], as: DoctorResult.self)
+            // A full check can run after an external CLI update or working-set
+            // change. Reload every displayed surface so the new status is not
+            // combined with an old snapshot, activity list, or host summary,
+            // while preserving the explicit Agent-app checks just completed.
+            try await self.reloadAll(preserving: checked)
         }
     }
 
@@ -279,8 +301,7 @@ final class AgentHostStore: ObservableObject {
                 self.environmentChangePlan = .update(plan, profile: profile, replaceHostConflicts: replacingHostConflicts)
                 self.isPresentingEnvironmentChangePlan = true
             } catch let error as CLIError {
-                if case let CLIError.failed(code, _) = error,
-                   code == "CODEX_PLUGIN_CONFLICT" || code == "CODEX_MARKETPLACE_CONFLICT" {
+                if case let CLIError.failed(code, _) = error, Self.isHostConflict(code) {
                     self.recovery = .replaceHostConflicts
                 }
                 throw error
@@ -320,8 +341,52 @@ final class AgentHostStore: ObservableObject {
         await action(["observability", enabled ? "enable" : "disable"], label: enabled ? "Turning on monitoring" : "Turning off monitoring")
     }
 
+    func loadTraceSources(provider: String) async {
+        await work("Loading trace sessions", blocksInterface: false) {
+            self.traceSourceCatalog = nil
+            let catalog = try await self.cli.run(
+                ["observability", "trace-sources", "--provider", provider, "--limit", "25"],
+                as: TraceSourceCatalog.self
+            )
+            guard catalog.isValid(expectedProvider: provider) else {
+                throw CLIError.failed(
+                    code: "TRACE_SOURCE_CATALOG_INVALID",
+                    message: "Agent Host returned an invalid retained trace catalog."
+                )
+            }
+            self.traceSourceCatalog = catalog
+        }
+    }
+
+    func prepareTraceExport(provider: String, sessionHash: String) async -> Data? {
+        await workResult("Preparing trace export", blocksInterface: false) {
+            try await self.cli.exportRetainedTrace(provider: provider, sessionHash: sessionHash)
+        }
+    }
+
     func setHost(_ id: String, connected: Bool) async {
-        await action(["host", connected ? "add" : "remove", id], label: connected ? "Connecting Agent app" : "Disconnecting Agent app")
+        guard connected else {
+            await action(["host", "remove", id], label: "Disconnecting Agent app")
+            return
+        }
+        await work("Connecting Agent app") {
+            do {
+                _ = try await self.cli.run(["host", "add", id], as: GenericResult.self)
+            } catch let error as CLIError {
+                if case let CLIError.failed(code, _) = error, Self.isHostConflict(code) {
+                    self.recovery = .replaceHostConnection(id)
+                }
+                throw error
+            }
+            self.doctor = nil
+            try await self.reloadAll()
+        }
+    }
+
+    func replaceConflictingHostConnection() async {
+        guard case let .replaceHostConnection(id) = recovery else { return }
+        recovery = nil
+        await action(["host", "add", id, "--replace-host-conflicts"], label: "Connecting \(ManagerAgentApp.named(id).name)")
     }
 
     func setTool(_ id: String, active: Bool) async {
@@ -330,7 +395,7 @@ final class AgentHostStore: ObservableObject {
         guard !next.isEmpty else { return }
         await work(active ? "Making tool available" : "Removing tool from Agent apps") {
             var arguments = ["tools", "set"]
-            for component in Self.toolOrder where next.contains(component) {
+            for component in ManagerToolPolicy.orderedToolIDs(next, preferredOrder: Self.toolOrder) {
                 arguments += ["--tool", component]
             }
             let result = try await self.cli.run(arguments, as: ToolSetChangeResult.self)
@@ -350,9 +415,9 @@ final class AgentHostStore: ObservableObject {
     }
 
     private func setupArguments(dryRun: Bool) -> [String] {
-        var arguments = ["setup", "--profile", "standard", "--host", "codex"]
-        if let root = environment["AGENT_HOST_DEVELOPMENT_ROOT"], !root.isEmpty {
-            arguments += ["--development-root", root]
+        var arguments = ["setup", "--profile", "standard", "--host", selectedSetupHost]
+        if let manifest = environment["AGENT_HOST_RELEASE_MANIFEST"], !manifest.isEmpty {
+            arguments += ["--release-manifest", manifest]
         }
         if dryRun { arguments.append("--dry-run") }
         return arguments
@@ -363,8 +428,7 @@ final class AgentHostStore: ObservableObject {
             do {
                 _ = try await self.cli.run(arguments, as: GenericResult.self)
             } catch let error as CLIError {
-                if conflictRecovery, case let CLIError.failed(code, _) = error,
-                   code == "CODEX_PLUGIN_CONFLICT" || code == "CODEX_MARKETPLACE_CONFLICT" {
+                if conflictRecovery, case let CLIError.failed(code, _) = error, Self.isHostConflict(code) {
                     self.recovery = .replaceHostConflicts
                 }
                 throw error
@@ -374,10 +438,13 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
-    private func reloadAll() async throws {
+    private func reloadAll(preserving checkedDoctor: DoctorResult? = nil) async throws {
         try await reloadStatus()
+        traceSourceCatalog = nil
         guard suite?.configured == true else {
             observations = nil
+            usage = nil
+            traceSourceCatalog = nil
             doctor = nil
             snapshot = nil
             hostStatuses = [:]
@@ -386,14 +453,23 @@ final class AgentHostStore: ObservableObject {
         }
         async let codex = cli.run(ManagerCheckPolicy.quickHostStatusArguments("codex"), as: HostStatusResult.self)
         async let claude = cli.run(ManagerCheckPolicy.quickHostStatusArguments("claude"), as: HostStatusResult.self)
+        async let zcode = cli.run(ManagerCheckPolicy.quickHostStatusArguments("zcode"), as: HostStatusResult.self)
         async let activity = cli.run(["activity"], as: ActivityResult.self)
         async let snapshot = cli.run(["snapshot"], as: SuiteSnapshot.self)
-        let hosts = await [try? codex, try? claude].compactMap { $0 }
+        async let usage = cli.run(["usage"], as: UsageSummary.self)
+        let hosts = await [try? zcode, try? codex, try? claude].compactMap { $0 }
         self.hostStatuses = Dictionary(uniqueKeysWithValues: hosts.map { ($0.host, $0) })
+        self.selectDefaultSetupHostIfNeeded()
         self.observations = try? await cli.run(["observability", "status"], as: ObservabilityStatus.self)
-        self.doctor = try? await cli.run(ManagerCheckPolicy.foregroundDoctorArguments, as: DoctorResult.self)
+        if let checkedDoctor {
+            self.doctor = checkedDoctor
+        } else {
+            self.doctor = try? await cli.run(ManagerCheckPolicy.foregroundDoctorArguments, as: DoctorResult.self)
+        }
         self.activity = (try? await activity.entries) ?? []
         self.snapshot = try? await snapshot
+        self.usage = try? await usage
+        self.lastSuccessfulRefreshAt = Date()
     }
 
     private func reloadStatus() async throws {
@@ -419,10 +495,34 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
+    private func workResult<T>(
+        _ label: String,
+        blocksInterface: Bool = true,
+        _ operation: () async throws -> T
+    ) async -> T? {
+        guard !isBusy else { return nil }
+        isBusy = true
+        isBlockingWork = blocksInterface
+        currentAction = label
+        errorMessage = nil
+        recovery = nil
+        defer {
+            isBusy = false
+            isBlockingWork = false
+            currentAction = nil
+        }
+        do {
+            return try await operation()
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     private func tool(id: String, name: String, summary: String, systemImage: String) -> ManagedTool {
         let component = suite?.components?[id]
         let componentFailed = doctor?.check("component.\(id)")?.status == "error"
-        let hostFailed = doctor?.hasFailure(prefix: "host.codex.\(id)") == true || doctor?.hasFailure(prefix: "host.claude.\(id)") == true
+        let hostFailed = (suite?.hosts ?? [:]).keys.contains { doctor?.hasFailure(prefix: "host.\($0).\(id)") == true }
         let runtimeFailed = doctor?.hasFailure(prefix: "tool.\(id).") == true
         let state: ManagedItemState
         let active = suite?.agentComponents?.contains(id) ?? false
@@ -442,7 +542,7 @@ final class AgentHostStore: ObservableObject {
             value.entries?.contains { $0.component == id } == true ? displayName(for: host) : nil
         }.sorted()
         let ownershipValues = (suite?.hosts ?? [:]).flatMap { $0.value.entries ?? [] }.filter { $0.component == id }.map(\.ownership)
-        let ownership = ownershipValues.contains("suite") ? "Managed by Agent Host" : ownershipValues.isEmpty ? "Kept in this environment" : "Installed by you"
+        let ownership = L10n.text(ownershipValues.contains("suite") ? "Managed by Agent Host" : ownershipValues.isEmpty ? "Kept in this environment" : "Installed by you")
 
         return ManagedTool(
             id: id,
@@ -451,7 +551,7 @@ final class AgentHostStore: ObservableObject {
             systemImage: systemImage,
             version: component?.version,
             state: state,
-            availability: availableHosts.isEmpty ? "Not available in an Agent app" : "Available in \(availableHosts.joined(separator: " and "))",
+            availability: availableHosts.isEmpty ? L10n.text("Not available in an Agent app") : L10n.format("Available in {apps}", ["apps": availableHosts.joined(separator: L10n.text(" and "))]),
             ownership: ownership,
             active: active
         )
@@ -462,7 +562,7 @@ final class AgentHostStore: ObservableObject {
     }
 
     private func displayName(for host: String) -> String {
-        host == "claude" ? "Claude Code" : "Codex"
+        ManagerAgentApp.named(host).name
     }
 
     private var attentionLabels: [String] {
@@ -474,6 +574,7 @@ final class AgentHostStore: ObservableObject {
             if errors.contains(where: { $0.id == "runtime.service" }) { labels.insert("Local execution") }
             if errors.contains(where: { $0.id == "host.codex" }) && !errors.contains(where: { $0.id.hasPrefix("host.codex.") }) { labels.insert("Codex") }
             if errors.contains(where: { $0.id == "host.claude" }) && !errors.contains(where: { $0.id.hasPrefix("host.claude.") }) { labels.insert("Claude Code") }
+            if errors.contains(where: { $0.id == "host.zcode" }) && !errors.contains(where: { $0.id.hasPrefix("host.zcode.") }) { labels.insert("ZCode") }
         }
         if !monitoringFacet.isHealthy { labels.insert("Monitoring") }
         if !catalogFacet.isHealthy { labels.insert("Tool catalog") }
@@ -486,6 +587,21 @@ final class AgentHostStore: ObservableObject {
         case "counts.tools": "tool count"
         case "catalog.largestToolUtf8Bytes": "largest tool bytes"
         default: metric
+        }
+    }
+
+    private static func isHostConflict(_ code: String) -> Bool {
+        [
+            "CODEX_PLUGIN_CONFLICT", "CODEX_MARKETPLACE_CONFLICT",
+            "CLAUDE_MCP_CONFLICT", "ZCODE_MCP_CONFLICT",
+            "DEVELOPER_SKILL_CONFLICT", "PRODUCT_SKILL_CONFLICT",
+        ].contains(code)
+    }
+
+    private func selectDefaultSetupHostIfNeeded() {
+        guard suite?.configured != true, hostStatuses[selectedSetupHost]?.appInstalled != true else { return }
+        if let available = ManagerAgentApp.all.first(where: { hostStatuses[$0.id]?.appInstalled == true }) {
+            selectedSetupHost = available.id
         }
     }
 

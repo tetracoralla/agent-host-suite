@@ -1,0 +1,36 @@
+{
+  "name": "@openadam/capability-http-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent Host internal Capability JSONL bridge for explicitly configured remote HTTPS providers.",
+  "author": "openAdam",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tetracoralla/agent-host-suite.git",
+    "directory": "packages/capability-http-bridge"
+  },
+  "homepage": "https://github.com/tetracoralla/agent-host-suite/tree/main/packages/capability-http-bridge#readme",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "bin": {
+    "openadam-capability-http-bridge": "src/adapter.mjs"
+  },
+  "files": [
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "src/",
+    "schemas/",
+    "docs/",
+    "examples/"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check:syntax": "node --check src/*.mjs && node --check scripts/*.mjs && node --check test/*.mjs",
+    "check:direct-runtime": "node scripts/check-direct-runtime.mjs",
+    "check": "npm run check:syntax && npm test && npm run check:direct-runtime && node scripts/check-repository.mjs"
+  }
+}

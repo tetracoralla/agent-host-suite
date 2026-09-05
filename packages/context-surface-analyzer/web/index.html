@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Context Surface</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Context Surface</h1>
+        <div class="mode" role="group" aria-label="Operation">
+          <button class="mode-button active" type="button" data-mode="analyze" aria-pressed="true">Analyze</button>
+          <button class="mode-button" type="button" data-mode="diff" aria-pressed="false">Compare</button>
+        </div>
+      </header>
+
+      <form id="surface-form">
+        <div class="field-heading">
+          <label for="snapshot-a">Snapshot</label>
+          <label class="file-picker" for="snapshot-a-file">
+            Load JSON
+            <input id="snapshot-a-file" type="file" accept="application/json,.json">
+          </label>
+        </div>
+        <textarea id="snapshot-a" name="snapshot-a" spellcheck="false" required></textarea>
+
+        <div id="comparison-input" hidden>
+          <div class="field-heading">
+            <label for="snapshot-b">Updated snapshot</label>
+            <label class="file-picker" for="snapshot-b-file">
+              Load JSON
+              <input id="snapshot-b-file" type="file" accept="application/json,.json">
+            </label>
+          </div>
+          <textarea id="snapshot-b" name="snapshot-b" spellcheck="false"></textarea>
+        </div>
+
+        <button class="primary" type="submit" id="submit-button">Analyze snapshot</button>
+      </form>
+
+      <section id="result" aria-live="polite" hidden>
+        <div id="summary" class="summary"></div>
+        <details>
+          <summary>Full result</summary>
+          <pre id="details"></pre>
+        </details>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

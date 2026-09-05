@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "openadam.agent-shell-adapter.v0.1",
+  "id": "openadam.codex-session-events",
+  "version": "0.1.0",
+  "provider": "codex",
+  "transport": "stable-local-records",
+  "collection": { "passiveMetadata": true, "explicitAnalysisPack": false },
+  "signals": {
+    "modelSteps": "unavailable",
+    "toolOffers": "unavailable",
+    "toolCalls": "available",
+    "toolResults": "partial",
+    "usage": "partial",
+    "turnEnds": "unavailable",
+    "selfReportedRationalePresence": "unavailable"
+  },
+  "content": { "passiveStorage": "metadata-only", "explicitPack": "metadata-only" },
+  "runtime": { "platforms": ["darwin", "win32", "linux"], "sourceFormats": ["codex-session-jsonl"] }
+}

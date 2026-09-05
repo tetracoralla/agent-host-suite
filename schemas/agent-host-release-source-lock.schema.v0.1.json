@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-release-source-lock.schema.v0.1.json",
+  "title": "Agent Host release source lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sources"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-release-source-lock.v0.1" },
+    "sources": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "ref", "revision"],
+        "properties": {
+          "repository": { "type": "string", "format": "uri", "pattern": "^https://" },
+          "ref": { "type": "string", "pattern": "^refs/tags/" },
+          "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        }
+      }
+    }
+  }
+}

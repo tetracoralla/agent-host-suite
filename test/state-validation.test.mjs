@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
-import { STATE_SCHEMA, validateState } from '../src/state.mjs'
+import { STATE_SCHEMA, loadState, prepareStatePaths, saveState, validateState } from '../src/state.mjs'
 
 const now = '2026-08-30T00:00:00.000Z'
 const valid = {
@@ -15,6 +17,11 @@ const valid = {
   bindingsActivatedAt: now,
   releaseId: 'fixture-release',
   releaseManifest: { schemaVersion: 'openadam.agent-host-release.v0.2' },
+  releaseSourceProvenance: {
+    policy: 'local-clean',
+    recordSha256: `sha256:${'a'.repeat(64)}`,
+    remoteConfirmedAtBuildTime: false,
+  },
   workspaceRoot: null,
   components: { 'math-anchor': { version: '0.4.0' } },
   availableAgentComponents: ['math-anchor'],
@@ -44,4 +51,15 @@ test('saved state validation rejects structural corruption before lifecycle work
       (error) => error.code === 'STATE_SCHEMA_INVALID' && fields.every((field) => error.details.fields.includes(field)),
     )
   }
+})
+
+test('concurrent private state writes in one process do not collide on temporary names', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-state-write-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const paths = await prepareStatePaths(root)
+  const versions = ['0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.1.5', '0.1.6']
+  await Promise.all(versions.map((suiteVersion) => saveState(paths, { ...structuredClone(valid), suiteVersion })))
+  const loaded = await loadState(paths)
+  assert.equal(versions.includes(loaded.suiteVersion), true)
+  assert.deepEqual((await readdir(paths.root)).filter((name) => name.includes('.tmp-')), [])
 })

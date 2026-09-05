@@ -14,10 +14,10 @@ released tools, and their Agent-app integrations.
 | **Agent Host Manager** | **Agent Host 管理器** | The macOS management application when it must be distinguished from the whole product. Its displayed application name remains **Agent Host**. Do not call it a client. |
 | **Agent environment** | **Agent 环境** | The installed compatibility set on one device: one Agent Host release, selected tool versions, Agent-app integrations, local execution state, and optional monitoring state. This is the main object the Manager installs and checks. |
 | **Agent Host components** | **Agent Host 基础组件** | Installation, compatibility, Agent-app connection, health, lifecycle, and Direct Runtime components. These support the environment; they are not Agent tools and are not a separate user-facing product. |
-| **Agent app** | **Agent 应用** | A product such as Codex or Claude Code that hosts an Agent and loads tool integrations. Use **host** only in technical contracts, adapters, commands, and stable data fields. Do not describe an Agent app as an Agent Host client. |
+| **Agent app** | **Agent 应用** | A product such as Codex, ZCode, or Claude Code that hosts an Agent and loads tool integrations. Use **host** only in technical contracts, adapters, commands, and stable data fields. Do not describe an Agent app as an Agent Host client. |
 | **Agent tool** | **Agent 工具** | An independently released product that an Agent calls to perform domain work, such as Math Anchor or Migratory Time. Each tool retains its own name, release, license, and semantics. |
 | **Standard tool set** | **标准工具集** | The small set of Agent tools selected by the `standard` profile. Direct Runtime is an infrastructure component and is not counted as a Standard tool. |
-| **tool integration** | **工具接入** or **工具集成包** | The supported carrier that makes one Agent tool available in one Agent app, such as a Codex Plugin or Claude MCP binding. A plugin or binding is not the tool itself. |
+| **tool integration** | **工具接入** or **工具集成包** | The supported carrier that makes one Agent tool available in one Agent app, such as a Codex Plugin or ZCode/Claude MCP binding. A plugin or binding is not the tool itself. |
 | **Direct Execution Runtime** / **Direct Runtime** | **直接执行运行时** | The infrastructure component that runs already-selected structured work without another model relay. It is not a generic model-facing Agent tool. |
 | **compatibility set** | **兼容集** | The exact versions, artifacts, hashes, integrations, and local state intended to work together. An installed compatibility set is the device's Agent environment. |
 | **compatibility release** | **兼容版本** | An immutable, distributable compatibility set. It coordinates releases; it does not certify universal tool value or live health. |
@@ -36,9 +36,9 @@ Agent-Host Execution Architecture
    ├─ Agent Host Manager       human management application
    ├─ Agent Host components    installation, health, lifecycle, Direct Runtime
    └─ Agent environment        installed state on one device
-      ├─ Agent apps             Codex, Claude Code
+      ├─ Agent apps             Codex, ZCode, Claude Code
       ├─ Agent tools            Math Anchor, Migratory Time
-      └─ tool integrations      Codex Plugin, Claude MCP binding
+      └─ tool integrations      Codex Plugin, ZCode/Claude MCP binding
 ```
 
 The Manager controls installation and lifecycle through each Agent app's

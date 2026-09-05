@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "openadam.agent-shell-adapter.v0.1",
+  "id": "openadam.deepseek-harness-session-events",
+  "version": "0.1.0",
+  "provider": "deepseek-harness",
+  "transport": "public-events",
+  "collection": { "passiveMetadata": true, "explicitAnalysisPack": false },
+  "signals": {
+    "modelSteps": "partial",
+    "toolOffers": "partial",
+    "toolCalls": "available",
+    "toolResults": "available",
+    "usage": "partial",
+    "turnEnds": "available",
+    "selfReportedRationalePresence": "partial"
+  },
+  "content": { "passiveStorage": "metadata-only", "explicitPack": "metadata-only" },
+  "runtime": { "platforms": ["darwin", "win32", "linux"], "sourceFormats": ["openadam.agent-shell-trace-bridge.v0.1", "deepseek-harness-session-event-v0"] }
+}

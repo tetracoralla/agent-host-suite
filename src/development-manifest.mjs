@@ -58,11 +58,21 @@ function pythonProjectVersion(text) {
 }
 
 export async function buildDevelopmentManifest(developmentRoot) {
+  const suitePackage = await jsonFile(new URL('../package.json', import.meta.url))
+  if (suitePackage.name !== '@openadam/agent-host-suite'
+    || typeof suitePackage.version !== 'string'
+    || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(suitePackage.version)) {
+    throw new AgentHostError('DEVELOPMENT_COMPONENT_INVALID', 'The current Agent Host package identity is invalid')
+  }
   const root = await requireContainedRealPath(developmentRoot, resolve(developmentRoot), 'development root')
   const roots = {
     math: await requireContainedRealPath(root, join(root, 'calculator'), 'Math Anchor root'),
     time: await requireContainedRealPath(root, join(root, 'migratory-time'), 'Migratory Time root'),
-    runtime: await requireContainedRealPath(root, join(root, 'direct-execution-runtime'), 'Direct Runtime root'),
+    runtime: await requireContainedRealPath(
+      root,
+      join(root, 'agent-host-suite', 'packages', 'direct-execution-runtime'),
+      'Direct Runtime root',
+    ),
     capability: await requireContainedRealPath(root, join(root, 'capability-contracts'), 'Capability Contracts root'),
   }
 
@@ -125,6 +135,9 @@ export async function buildDevelopmentManifest(developmentRoot) {
     ['mcp-session', 'src/sessions/mcp-session.mjs'],
     ['schema-loader', 'src/schema.mjs'],
     ['config-schema', 'schemas/provider-config.schema.json'],
+    ['legacy-config-schema', 'schemas/provider-config.schema.v0.2.json'],
+    ['service-observation-schema', 'schemas/host-service-observation.schema.json'],
+    ['legacy-service-observation-schema', 'schemas/host-service-observation.schema.v0.1.json'],
     ['work-order-schema', 'schemas/work-order.schema.json'],
     ['selection-schema', 'schemas/contract-selection.schema.json'],
     ['host-request-schema', 'schemas/host-request.schema.json'],
@@ -136,7 +149,7 @@ export async function buildDevelopmentManifest(developmentRoot) {
 
   return {
     schemaVersion: 'openadam.agent-host-development-set.v0.1',
-    suiteVersion: '0.1.0-dev',
+    suiteVersion: suitePackage.version,
     channel: 'development',
     developmentRoot: root,
     components: {
@@ -151,6 +164,7 @@ export async function buildDevelopmentManifest(developmentRoot) {
         pluginIdentityFingerprint: await fingerprintRelativeFiles(join(roots.math, 'plugins/math-anchor'), mathPluginIdentityRelativeFiles),
         command: mathIdentity.find((item) => item.name === 'runtime').path,
         args: ['mcp'],
+        cwd: join(roots.math, 'plugins/math-anchor'),
         identityFiles: mathIdentity.map((item) => item.path),
         fingerprint: await fingerprint(mathIdentity),
       },
@@ -165,6 +179,7 @@ export async function buildDevelopmentManifest(developmentRoot) {
         pluginIdentityFingerprint: await fingerprintRelativeFiles(join(roots.time, 'plugins/migratory-time'), timePluginIdentityRelativeFiles),
         command: process.execPath,
         args: [timeIdentity.find((item) => item.name === 'server').path],
+        cwd: join(roots.time, 'plugins/migratory-time'),
         manifestPath: timeIdentity.find((item) => item.name === 'manifest').path,
         adapterPath: timeIdentity.find((item) => item.name === 'adapter').path,
         inputSchemaPath: timeIdentity.find((item) => item.name === 'input-schema').path,
@@ -201,8 +216,16 @@ async function sourceInventory(root, directory, extensions) {
 
 export async function buildDevelopmentObservabilityManifest(developmentRoot) {
   const root = await requireContainedRealPath(developmentRoot, resolve(developmentRoot), 'development root')
-  const observerRoot = await requireContainedRealPath(root, join(root, 'agent-tool-observer'), 'Agent Tool Observer root')
-  const analyzerRoot = await requireContainedRealPath(root, join(root, 'context-surface-analyzer'), 'Context Surface Analyzer root')
+  const observerRoot = await requireContainedRealPath(
+    root,
+    join(root, 'agent-host-suite', 'packages', 'agent-tool-observer'),
+    'Agent Tool Observer root',
+  )
+  const analyzerRoot = await requireContainedRealPath(
+    root,
+    join(root, 'agent-host-suite', 'packages', 'context-surface-analyzer'),
+    'Context Surface Analyzer root',
+  )
   const observerPackagePath = await requireFile(observerRoot, 'package.json', 'Agent Tool Observer package')
   const analyzerPackagePath = await requireFile(analyzerRoot, 'package.json', 'Context Surface Analyzer package')
   const observerPackage = await jsonFile(observerPackagePath)

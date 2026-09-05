@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "openadam.http-capability-instance.v0.1",
+  "endpoint": "https://provider.example.invalid/v1/capability",
+  "capability": {
+    "id": "org.example.capability",
+    "version": "1.0.0"
+  },
+  "operations": ["run"],
+  "auth": {
+    "kind": "macos-keychain-bearer",
+    "service": "org.example.capability-provider",
+    "account": "default"
+  },
+  "timeoutMs": 10000,
+  "maxResponseBytes": 262144
+}

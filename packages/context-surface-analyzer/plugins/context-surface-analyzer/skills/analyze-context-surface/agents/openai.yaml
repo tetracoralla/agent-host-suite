@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyze Context Surface"
+  short_description: "Measure and compare Agent tool catalogs."
+  default_prompt: "Use $analyze-context-surface to measure this explicit tool catalog snapshot."

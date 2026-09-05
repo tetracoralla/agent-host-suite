@@ -45,8 +45,19 @@ enum ManagerToolPolicy {
         orderedIDs: [String]
     ) -> [String] {
         guard let components else { return [] }
-        let available = Set(availableAgentComponents ?? activeAgentComponents ?? [])
-        return orderedIDs.filter { available.contains($0) && components[$0] != nil }
+        let available = availableAgentComponents ?? activeAgentComponents ?? []
+        let availableSet = Set(available)
+        let preferred = orderedIDs.filter { availableSet.contains($0) && components[$0] != nil }
+        let preferredSet = Set(preferred)
+        let additional = available.filter { !preferredSet.contains($0) && components[$0] != nil }
+        return preferred + additional
+    }
+
+    static func orderedToolIDs(_ ids: [String], preferredOrder: [String]) -> [String] {
+        let selected = Set(ids)
+        let preferred = preferredOrder.filter(selected.contains)
+        let preferredSet = Set(preferred)
+        return preferred + ids.filter { !preferredSet.contains($0) }
     }
 }
 
@@ -56,6 +67,32 @@ enum ManagerCheckPolicy {
 
     static func quickHostStatusArguments(_ id: String) -> [String] {
         ["host", "status", id, "--quick"]
+    }
+}
+
+struct ManagerAgentApp: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let systemImage: String
+
+    static let all = [
+        ManagerAgentApp(id: "zcode", name: "ZCode", systemImage: "z.square.fill"),
+        ManagerAgentApp(id: "codex", name: "Codex", systemImage: "bubble.left.and.bubble.right.fill"),
+        ManagerAgentApp(id: "claude", name: "Claude Code", systemImage: "terminal.fill"),
+    ]
+
+    private static let traceOnly = [
+        ManagerAgentApp(id: "deepseek-harness", name: "DeepSeek Harness", systemImage: "point.3.connected.trianglepath.dotted"),
+        ManagerAgentApp(id: "gemini-cli", name: "Gemini CLI", systemImage: "sparkles"),
+        ManagerAgentApp(id: "github-copilot-cli", name: "GitHub Copilot CLI", systemImage: "chevron.left.forwardslash.chevron.right"),
+    ]
+
+    static func named(_ id: String) -> ManagerAgentApp {
+        (all + traceOnly).first(where: { $0.id == id }) ?? ManagerAgentApp(
+            id: id,
+            name: id.replacingOccurrences(of: "-", with: " ").localizedCapitalized,
+            systemImage: "app.fill"
+        )
     }
 }
 
@@ -156,6 +193,22 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
         return formatter.date(from: occurredAt)
     }
 
+    var localizedSummary: String {
+        switch type {
+        case "monitoring.enabled": L10n.text("Local monitoring turned on")
+        case "monitoring.disabled": L10n.text("Local monitoring turned off")
+        case "environment.maintained": L10n.text("Local observation and package storage maintained")
+        case "environment.installed": L10n.text("Standard tools installed")
+        case "environment.updated": L10n.text(summary == "Environment checked for updates" ? "Environment checked for updates" : "Environment updated")
+        case "environment.rolled-back": L10n.text("Previous environment restored")
+        case "tool-set.changed": L10n.text("Agent tool availability changed")
+        case "environment.uninstalled": L10n.text("Agent Host removed")
+        case "agent-app.added": L10n.format("{app} connected", ["app": Self.agentAppName(detail?["host"]?.displayText ?? "Agent")])
+        case "agent-app.removed": L10n.format("{app} disconnected", ["app": Self.agentAppName(detail?["host"]?.displayText ?? "Agent")])
+        default: L10n.text(summary)
+        }
+    }
+
     var orderedDetail: [(key: String, value: String)] {
         (detail ?? [:])
             .sorted { $0.key < $1.key }
@@ -245,6 +298,7 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
         switch id {
         case "codex": return "Codex"
         case "claude": return "Claude Code"
+        case "zcode": return "ZCode"
         default: return id.localizedCapitalized
         }
     }
@@ -415,6 +469,311 @@ struct SuiteSnapshot: Decodable, Equatable, Sendable {
     let processes: SnapshotProcesses?
 }
 
+struct UsageFreshness: Decodable, Equatable, Sendable {
+    let status: String?
+    let ageMs: Int?
+    let overdueAfterMs: Int?
+}
+
+struct UsageProviderHealth: Decodable, Equatable, Identifiable, Sendable {
+    let provider: String?
+    let status: String?
+    let errorCode: String?
+    let scannedAtMs: Int64?
+    var id: String { provider ?? "unknown" }
+}
+
+struct UsageProviderTokens: Decodable, Equatable, Identifiable, Sendable {
+    let provider: String?
+    let records: Int?
+    let inputTokens: Int64?
+    let cachedInputTokens: Int64?
+    let outputTokens: Int64?
+    let reasoningTokens: Int64?
+    let totalTokens: Int64?
+    let averageDurationMs: Double?
+    let semantics: String?
+    let peakObservedDailyTokens: Int64?
+    let peakObservedDailyDate: String?
+    let dailyTokenSemantics: String?
+    var id: String { provider ?? "unknown" }
+}
+
+struct UsageProviderActivity: Decodable, Equatable, Identifiable, Sendable {
+    let provider: String?
+    let observedSessions: Int?
+    let observedTurns: Int?
+    let observedActiveDays: Int?
+    let firstObservedAtMs: Int64?
+    let lastObservedAtMs: Int64?
+    let longestObservedSessionSpanMs: Int64?
+    let currentObservedDayStreak: Int?
+    let longestObservedDayStreak: Int?
+    var id: String { provider ?? "unknown" }
+}
+
+struct UsageDailyEntry: Decodable, Equatable, Identifiable, Sendable {
+    let provider: String?
+    let utcDate: String?
+    let toolCalls: Int?
+    let usageRecords: Int?
+    let observedSessions: Int?
+    let observedTurns: Int?
+    let inputTokens: Int64?
+    let cachedInputTokens: Int64?
+    let outputTokens: Int64?
+    let reasoningTokens: Int64?
+    let totalTokens: Int64?
+    var id: String { "\(provider ?? "unknown"):\(utcDate ?? "unknown")" }
+}
+
+struct UsageDailyList: Decodable, Equatable, Sendable {
+    let returned: Int
+    let available: Int
+    let limit: Int
+    let truncated: Bool
+    let entries: [UsageDailyEntry]
+}
+
+struct UsageToolEntry: Decodable, Equatable, Identifiable, Sendable {
+    let provider: String?
+    let toolName: String?
+    let historicalCalls: Int?
+    let measuredCalls: Int?
+    let completed: Int?
+    let errors: Int?
+    let cancelled: Int?
+    let averageDurationMs: Double?
+    let currentReleaseCalls: Int?
+    let currentReleaseFreshSessionCalls: Int?
+    let currentReleaseStatus: String?
+    let firstObservedAtMs: Int64?
+    let lastObservedAtMs: Int64?
+    var id: String { "\(provider ?? "unknown"):\(toolName ?? "unknown")" }
+}
+
+struct UsageToolList: Decodable, Equatable, Sendable {
+    let returned: Int
+    let available: Int
+    let limit: Int
+    let entries: [UsageToolEntry]
+}
+
+struct UsageTraceAdapter: Decodable, Equatable, Identifiable, Sendable {
+    let id: String?
+    let provider: String?
+    let transport: String?
+    let status: String
+    let errorCode: String?
+    let scannedAtMs: Int64?
+    let eventsWritten: Int?
+    let backlogSources: Int?
+    var identifier: String { id ?? "\(provider ?? "unknown"):\(transport ?? "unknown")" }
+}
+
+struct UsageTraceSummary: Decodable, Equatable, Sendable {
+    let adaptersReturned: Int
+    let adaptersAvailable: Int
+    let adapters: [UsageTraceAdapter]
+    let providersObserved: Int
+    let modelSteps: Int
+    let toolOffers: Int
+    let toolCalls: Int
+    let toolResults: Int
+    let turnEnds: Int
+    let passiveStorage: String
+    let interpretationStatus: String
+}
+
+struct UsageReliability: Decodable, Equatable, Sendable {
+    let measuredToolCalls: Int
+    let completedToolCalls: Int
+    let toolErrors: Int
+    let toolCancellations: Int
+    let semanticExecutions: Int
+    let semanticCompleted: Int
+    let semanticProviderErrors: Int
+    let semanticHostErrors: Int
+}
+
+struct UsageCoverageItem: Decodable, Equatable, Sendable {
+    let status: String
+    let basis: String?
+    let reason: String?
+}
+
+struct UsageCoverage: Decodable, Equatable, Sendable {
+    let toolInvocation: UsageCoverageItem
+    let runtimeOutcome: UsageCoverageItem
+    let tokenUsage: UsageCoverageItem
+    let skillUse: UsageCoverageItem
+    let semanticEffect: UsageCoverageItem
+    let resultAdoption: UsageCoverageItem
+    let nonUseReason: UsageCoverageItem
+}
+
+struct UsageSummary: Decodable, Equatable, Sendable {
+    let configured: Bool
+    let enabled: Bool
+    let generatedAt: String
+    let windowDays: Int?
+    let observationSource: String
+    let currentReadErrorCode: String?
+    let freshness: UsageFreshness?
+    let providerHealth: [UsageProviderHealth]
+    let providerUsage: [UsageProviderTokens]
+    let providerActivity: [UsageProviderActivity]
+    let dailyActivity: UsageDailyList?
+    let tools: UsageToolList
+    let trace: UsageTraceSummary
+    let reliability: UsageReliability
+    let coverage: UsageCoverage
+    let assessmentBoundary: String
+}
+
+struct TraceSourceRange: Decodable, Equatable, Sendable {
+    let fromMs: Int64?
+    let toMs: Int64?
+}
+
+struct TraceSourceRetention: Decodable, Equatable, Sendable {
+    let retentionDays: Int
+    let currentCutoffMs: Int64
+    let eventsBeforeCutoffMayHaveBeenRemoved: Bool
+    let collectionBeforeMonitoringWasEnabled: String
+}
+
+struct TraceSourceLimits: Decodable, Equatable, Sendable {
+    let maxSources: Int
+    let sourceLimitReached: Bool
+    let sourcesReturned: Int
+}
+
+struct TraceSourcePrivacy: Decodable, Equatable, Sendable {
+    let contentPolicy: String
+    let sourcePathIncluded: Bool
+    let rawConversationContentIncluded: Bool
+    let toolArgumentsIncluded: Bool
+    let toolResultsIncluded: Bool
+}
+
+struct TraceSourceEntry: Decodable, Equatable, Identifiable, Sendable {
+    let sessionHash: String
+    let firstEventAtMs: Int64
+    let lastEventAtMs: Int64
+    let totalEvents: Int
+    let modelSteps: Int
+    let toolCalls: Int
+    let toolResults: Int
+    let turnEnds: Int
+    let completeness: String
+
+    var id: String { sessionHash }
+}
+
+struct TraceSourceCatalog: Decodable, Equatable, Sendable {
+    let schemaVersion: String
+    let status: String
+    let generatedAt: String
+    let provider: String
+    let requestedRange: TraceSourceRange
+    let retention: TraceSourceRetention
+    let privacy: TraceSourcePrivacy
+    let limits: TraceSourceLimits
+    let sources: [TraceSourceEntry]
+    let unknowns: [String]
+    let interpretationStatus: String
+
+    func isValid(expectedProvider: String) -> Bool {
+        schemaVersion == "openadam.agent-host-trace-source-catalog.v0.1"
+            && status == "ok"
+            && provider == expectedProvider
+            && privacy.contentPolicy == "metadata-only"
+            && !privacy.sourcePathIncluded
+            && !privacy.rawConversationContentIncluded
+            && !privacy.toolArgumentsIncluded
+            && !privacy.toolResultsIncluded
+            && interpretationStatus == "not-performed"
+            && limits.maxSources > 0
+            && limits.sourcesReturned == sources.count
+            && sources.count <= limits.maxSources
+            && sources.allSatisfy { source in
+                source.sessionHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+                    && source.firstEventAtMs >= 0
+                    && source.lastEventAtMs >= source.firstEventAtMs
+                    && source.totalEvents >= 1
+                    && source.modelSteps >= 0
+                    && source.toolCalls >= 0
+                    && source.toolResults >= 0
+                    && source.turnEnds >= 0
+                    && source.totalEvents == source.modelSteps + source.toolCalls + source.toolResults + source.turnEnds
+                    && source.completeness == "unknown"
+            }
+    }
+}
+
+struct TraceExportReceipt: Decodable, Equatable, Sendable {
+    let status: String
+    let schemaVersion: String
+    let outputPath: String
+    let outputBytes: Int
+    let eventsReturned: Int
+    let eventsAvailable: Int
+    let contentPolicy: String
+    let observerPackRetained: Bool
+    let sourcePathStoredInPack: Bool
+    let interpretationStatus: String
+}
+
+enum TraceContractValidator {
+    static let retainedPackVersion = "openadam.agent-host-trace-analysis-pack.v0.2"
+
+    static func isValidRetainedExport(
+        data: Data,
+        receipt: TraceExportReceipt,
+        outputPath: String,
+        provider: String,
+        sessionHash: String
+    ) -> Bool {
+        guard receipt.status == "completed",
+              receipt.schemaVersion == retainedPackVersion,
+              receipt.outputPath == outputPath,
+              receipt.outputBytes == data.count,
+              receipt.eventsReturned >= 0,
+              receipt.eventsAvailable >= receipt.eventsReturned,
+              receipt.contentPolicy == "metadata-only",
+              receipt.observerPackRetained == false,
+              receipt.sourcePathStoredInPack == false,
+              receipt.interpretationStatus == "not-performed",
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value["schemaVersion"] as? String == retainedPackVersion,
+              value["interpretationStatus"] as? String == "not-performed",
+              let source = value["source"] as? [String: Any],
+              source["provider"] as? String == provider,
+              source["selectionKind"] as? String == "observer-retained-session",
+              source["sessionHash"] as? String == sessionHash,
+              let privacy = value["privacy"] as? [String: Any],
+              privacy["contentPolicy"] as? String == "metadata-only",
+              privacy["selectedConversationContentIncluded"] as? Bool == false,
+              privacy["sensitiveContentConfirmed"] as? Bool == false,
+              privacy["transportSecretsExcluded"] as? Bool == true,
+              privacy["selectedContentMayContainUserSecrets"] as? Bool == false,
+              privacy["observerPackRetained"] as? Bool == false,
+              privacy["sourceUsesObserverRetainedMetadata"] as? Bool == true,
+              privacy["sourcePathIncluded"] as? Bool == false,
+              privacy["toolArgumentsIncluded"] as? Bool == false,
+              privacy["toolResultsIncluded"] as? Bool == false,
+              let limits = value["limits"] as? [String: Any],
+              limits["eventsReturned"] as? Int == receipt.eventsReturned,
+              limits["eventsAvailable"] as? Int == receipt.eventsAvailable,
+              let events = value["events"] as? [Any],
+              events.count == receipt.eventsReturned else {
+            return false
+        }
+        return true
+    }
+}
+
 struct DoctorCheck: Decodable, Equatable, Identifiable, Sendable {
     var id: String
     let status: String
@@ -435,9 +794,38 @@ struct DoctorResult: Decodable, Equatable, Sendable {
 }
 
 struct PublicFailure: Decodable, Error, Sendable {
+    struct RecoveryAction: Decodable, Sendable {
+        let command: String
+        let arguments: [String]
+    }
+    struct RecoveryReference: Decodable, Sendable {
+        let action: RecoveryAction?
+    }
+    struct ErrorDetails: Decodable, Sendable {
+        let recovery: RecoveryReference?
+    }
     struct Detail: Decodable, Sendable {
         let code: String
         let message: String
+        let details: ErrorDetails?
+
+        var recoveryInstruction: String? {
+            guard code == "SERVICE_INSTALL_ROLLBACK_FAILED",
+                  let action = details?.recovery?.action,
+                  action.command == "agent-host",
+                  action.arguments.count == 6,
+                  action.arguments[0] == "service",
+                  action.arguments[1] == "recover",
+                  action.arguments[2] == "--recovery",
+                  action.arguments[4] == "--manifest-sha256",
+                  action.arguments[3].hasPrefix("service-recovery-v2-"),
+                  UUID(uuidString: String(action.arguments[3].dropFirst("service-recovery-v2-".count))) != nil,
+                  action.arguments[5].hasPrefix("sha256:"),
+                  action.arguments[5].dropFirst("sha256:".count).count == 64,
+                  action.arguments[5].dropFirst("sha256:".count).allSatisfy({ $0.isHexDigit && !$0.isUppercase })
+            else { return nil }
+            return ([action.command] + action.arguments).joined(separator: " ")
+        }
     }
     let status: String
     let error: Detail
@@ -461,6 +849,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     case overview
     case tools
     case agentApps
+    case usage
     case activity
 
     var id: String { rawValue }
@@ -470,6 +859,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
         case .overview: "Environment"
         case .tools: "Tools"
         case .agentApps: "Agent Apps"
+        case .usage: "Usage & Reliability"
         case .activity: "Activity"
         }
     }
@@ -479,6 +869,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
         case .overview: "square.stack.3d.up"
         case .tools: "wrench.and.screwdriver"
         case .agentApps: "bubble.left.and.bubble.right"
+        case .usage: "chart.bar.xaxis"
         case .activity: "clock.arrow.circlepath"
         }
     }

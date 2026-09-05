@@ -1,0 +1,180 @@
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+export const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
+export const fakeRoot = resolve(repositoryRoot, 'test/fixtures/fake-capability')
+export const fakeMcpRoot = resolve(repositoryRoot, 'test/fixtures/fake-mcp')
+
+export function fakeConfig(overrides = {}) {
+  const rootPath = overrides.rootPath ?? fakeRoot
+  const limits = {
+    maxConcurrentCalls: 2,
+    maxQueuedCalls: 4,
+    maxWorkOrderCalls: 16,
+    maxWorkOrderBytes: 262144,
+    maxProviderResponseBytes: 65536,
+    maxResultBytes: 262144,
+    maxProtocolLineBytes: 1048576,
+    maxStderrBytes: 4096,
+    defaultTimeoutMs: 10000,
+    circuitBreakerFailureThreshold: 3,
+    circuitBreakerCooldownMs: 50,
+    ...(overrides.limits ?? {}),
+  }
+  return {
+    schemaVersion: 'openadam.direct-provider-config.v0.2',
+    limits,
+    providers: [{
+      providerId: 'test.fake-capability',
+      transport: 'capability-jsonl-v0.1',
+      lifecycle: overrides.lifecycle ?? 'persistent',
+      rootPath,
+      profilePath: overrides.profilePath ?? resolve(rootPath, 'capability-profile.json'),
+      manifestPath: overrides.manifestPath ?? resolve(rootPath, 'provider.json'),
+      identityFiles: overrides.identityFiles ?? [resolve(rootPath, 'adapter.mjs')],
+      ...(overrides.workspaceRoot === undefined ? {} : { workspaceRoot: overrides.workspaceRoot }),
+      capabilityId: 'org.openadam.test.echo',
+      capabilityVersion: '0.1.0',
+      contracts: [{
+        operationId: 'echo',
+        inputSchemaPath: resolve(rootPath, 'echo.input.schema.json'),
+        outputSchemaPath: resolve(rootPath, 'echo.output.schema.json'),
+      }],
+    }],
+  }
+}
+
+export function fakeProcedureConfig(overrides = {}) {
+  const config = fakeConfig(overrides)
+  const rootPath = overrides.rootPath ?? fakeRoot
+  config.providers = [{
+    providerId: 'test.fake-procedure',
+    transport: 'procedure-jsonl-v0.2',
+    lifecycle: overrides.lifecycle ?? 'persistent',
+    rootPath,
+    profilePath: resolve(rootPath, 'procedure-profile.json'),
+    implementationManifestPath: resolve(rootPath, 'procedure-manifest.json'),
+    identityFiles: overrides.identityFiles ?? [resolve(rootPath, 'procedure-adapter.mjs')],
+    procedureId: 'org.openadam.test.echo-procedure',
+    procedureVersion: '0.1.0',
+    inputSchemaPath: resolve(rootPath, 'echo.input.schema.json'),
+    outputSchemaPath: resolve(rootPath, 'echo.output.schema.json'),
+  }]
+  return config
+}
+
+export function fakeMcpConfig(overrides = {}) {
+  const config = fakeConfig(overrides)
+  const rootPath = overrides.rootPath ?? fakeMcpRoot
+  const serverPath = overrides.command ?? resolve(rootPath, 'server.mjs')
+  config.providers = [{
+    providerId: overrides.providerId ?? 'test.fake-mcp',
+    transport: 'mcp-stdio',
+    lifecycle: overrides.lifecycle ?? 'persistent',
+    rootPath,
+    command: serverPath,
+    args: overrides.args ?? [],
+    cwd: overrides.cwd ?? rootPath,
+    identityFiles: overrides.identityFiles ?? [serverPath],
+    expectedServer: { name: 'direct-execution-fake-mcp', version: '0.1.0' },
+    allowedTools: ['echo'],
+  }]
+  return config
+}
+
+export function fakeDualCapabilityConfig(overrides = {}) {
+  const config = fakeConfig(overrides)
+  const second = structuredClone(config.providers[0])
+  second.providerId = 'test.fake-capability-second'
+  second.manifestPath = resolve(overrides.rootPath ?? fakeRoot, 'provider-second.json')
+  config.providers.push(second)
+  return config
+}
+
+export function fakeProjectedMcpConfig(overrides = {}) {
+  const config = fakeMcpConfig(overrides)
+  config.providers[0].allowedTools = ['dispatch', 'dispatch.batch']
+  config.providers[0].operationProjections = [{
+    toolName: 'dispatch',
+    operationField: 'operation',
+    argumentsField: 'arguments',
+    batchToolName: 'dispatch.batch',
+    batchItemsField: 'items',
+  }]
+  return config
+}
+
+export function fakeLookupProjectedMcpConfig(overrides = {}) {
+  const config = fakeMcpConfig(overrides)
+  config.providers[0].allowedTools = ['dispatch.compact', 'dispatch.batch', 'dispatch.describe']
+  config.providers[0].operationProjections = [{
+    toolName: 'dispatch.compact',
+    operationField: 'operation',
+    argumentsField: 'arguments',
+    batchToolName: 'dispatch.batch',
+    batchItemsField: 'items',
+    schemaLookup: {
+      toolName: 'dispatch.describe',
+      operationField: 'operation',
+      resultPath: ['operation', 'inputSchema'],
+    },
+  }]
+  return config
+}
+
+export function fakeCall(id, input, timeoutMs) {
+  const call = {
+    id,
+    providerId: 'test.fake-capability',
+    target: {
+      kind: 'capability',
+      capabilityId: 'org.openadam.test.echo',
+      capabilityVersion: '0.1.0',
+      operationId: 'echo',
+    },
+    input,
+  }
+  if (timeoutMs !== undefined) call.timeoutMs = timeoutMs
+  return call
+}
+
+export function fakeProcedureCall(id, input, timeoutMs) {
+  const call = {
+    id,
+    providerId: 'test.fake-procedure',
+    target: {
+      kind: 'procedure',
+      procedureId: 'org.openadam.test.echo-procedure',
+      procedureVersion: '0.1.0',
+    },
+    input,
+  }
+  if (timeoutMs !== undefined) call.timeoutMs = timeoutMs
+  return call
+}
+
+export function fakeMcpCall(id, input, timeoutMs) {
+  const call = {
+    id,
+    providerId: 'test.fake-mcp',
+    target: { kind: 'mcp-tool', toolName: 'echo' },
+    input,
+  }
+  if (timeoutMs !== undefined) call.timeoutMs = timeoutMs
+  return call
+}
+
+export function fakeProjectedMcpCall(id, operationId, arguments_, timeoutMs) {
+  const call = {
+    id,
+    providerId: 'test.fake-mcp',
+    target: { kind: 'mcp-operation', toolName: 'dispatch', operationId },
+    input: { operation: operationId, arguments: arguments_ },
+  }
+  if (timeoutMs !== undefined) call.timeoutMs = timeoutMs
+  return call
+}
+
+export function workOrder(id, calls) {
+  return { schemaVersion: 'openadam.direct-work-order.v0.1', id, calls }
+}

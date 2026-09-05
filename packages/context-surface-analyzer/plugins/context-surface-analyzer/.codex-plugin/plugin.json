@@ -1,0 +1,31 @@
+{
+  "name": "context-surface-analyzer",
+  "version": "0.1.2+codex.20260830005023",
+  "description": "Deterministically measure and compare explicit Agent tool-catalog snapshots.",
+  "author": {
+    "name": "openAdam"
+  },
+  "keywords": [
+    "agent-tools",
+    "context",
+    "schemas",
+    "catalog-analysis"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Context Surface Analyzer",
+    "shortDescription": "Measure and compare explicit Agent tool catalogs.",
+    "longDescription": "Analyze one bounded tool-catalog snapshot or compare two snapshots for exact canonical UTF-8 bytes, tool and schema counts, hard name collisions, exact duplicate schemas, declared budget checks, and matched caller-supplied token measurements.",
+    "developerName": "openAdam",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Analyze this explicit Agent tool-catalog snapshot.",
+      "Compare these two explicit tool-catalog snapshots.",
+      "Check this snapshot for collisions, duplicate schemas, and budget overruns."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { assessCostExperimentTask } from './local-dogfood-cost-assessment.mjs'
 
 const suiteRoot = fileURLToPath(new URL('../', import.meta.url))
 const outputRoot = join(suiteRoot, '.build', 'cost-experiment')
@@ -21,7 +22,7 @@ const corpus = [
 const tasks = requestedTaskIds.size === 0 ? corpus : corpus.filter((task) => requestedTaskIds.has(task.id))
 if (tasks.length === 0 || tasks.length !== (requestedTaskIds.size || tasks.length)) throw new Error('AGENT_HOST_COST_EXPERIMENT_TASKS contains an unknown task id')
 
-const standardPlugins = new Set(['math-anchor@openadam', 'migratory-time@migratory-time'])
+const standardPlugins = new Set(['math-anchor@math-anchor-agent-host', 'migratory-time@migratory-time'])
 const localPlugins = new Set([
   ...standardPlugins,
   'context-surface-analyzer@context-surface-analyzer',
@@ -72,15 +73,6 @@ function summarizeEvents(stdout) {
   }
 }
 
-function assess(condition, task, summary) {
-  const final = summary.finalText.trim()
-  if (task.expected === 'no-tool') return summary.toolCallCount === 0 && final === '收到'
-  if (task.expected === 'math') return summary.toolSequence.some((name) => String(name).includes('math')) && /3\s*\*?\s*x(?:\^2|\*\*2|²|2)/iu.test(final)
-  if (task.expected === 'time') return summary.toolSequence.some((name) => /time|convert/iu.test(String(name))) && /2026-11-01|16:30/iu.test(final)
-  if (task.expected === 'file') return final.includes('@openadam/agent-host-suite')
-  return false
-}
-
 const profileRoot = process.env.CODEX_HOME ?? join(homedir(), '.codex')
 const profilePaths = []
 
@@ -90,7 +82,7 @@ function profileDocument(enabled) {
 
 function pluginSkillMarker(pluginId) {
   return new Map([
-    ['math-anchor@openadam', 'math-anchor:calculate'],
+    ['math-anchor@math-anchor-agent-host', 'math-anchor:calculate'],
     ['migratory-time@migratory-time', 'migratory-time:convert-time-zones'],
     ['context-surface-analyzer@context-surface-analyzer', 'context-surface-analyzer:analyze-context-surface'],
     ['data-transformer@data-transformer-local', 'data-transformer:data-transformer'],
@@ -143,7 +135,7 @@ try {
           task: task.id,
           repetition,
           status: execution.status,
-          passed: execution.status === 0 && assess(condition, task, summary),
+          passed: execution.status === 0 && assessCostExperimentTask(task, summary),
           latencyMs: Date.now() - startedAt,
           usage: summary.usage,
           toolSequence: summary.toolSequence,

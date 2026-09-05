@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
-import { readFile, rename, writeFile, chmod } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { chmod, open, readFile, rename, rm } from 'node:fs/promises'
 import { AgentHostError } from './errors.mjs'
 
 export async function readJson(path) {
@@ -18,8 +18,17 @@ export async function readJson(path) {
 }
 
 export async function writePrivateJson(path, value) {
-  const temporary = `${path}.tmp-${process.pid}-${Date.now()}`
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`
+  const handle = await open(temporary, 'wx', 0o600)
+  try {
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`)
+    await handle.sync()
+  } catch (error) {
+    await handle.close().catch(() => {})
+    await rm(temporary, { force: true }).catch(() => {})
+    throw error
+  }
+  await handle.close()
   await chmod(temporary, 0o600)
   await rename(temporary, path)
 }

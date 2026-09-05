@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openadam:schema:http-capability-instance:v0.1",
+  "title": "OpenAdam HTTP Capability Provider Instance v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "endpoint", "capability", "operations", "auth", "timeoutMs", "maxResponseBytes"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.http-capability-instance.v0.1" },
+    "endpoint": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", "maxLength": 160 },
+        "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$", "maxLength": 100 }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", "maxLength": 160 }
+    },
+    "auth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "service", "account"],
+          "properties": {
+            "kind": { "const": "macos-keychain-bearer" },
+            "service": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "account": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        }
+      ]
+    },
+    "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 60000 },
+    "maxResponseBytes": { "type": "integer", "minimum": 1024, "maximum": 1048576 }
+  }
+}

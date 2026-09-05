@@ -1,24 +1,34 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { buildDevelopmentManifest, fingerprintIdentityFiles } from '../src/development-manifest.mjs'
+import {
+  buildDevelopmentManifest,
+  buildDevelopmentObservabilityManifest,
+  fingerprintIdentityFiles,
+} from '../src/development-manifest.mjs'
 import { createRuntimeConfig, mathProjectionSelection, semanticProbeOrder } from '../src/runtime-config.mjs'
-import { createDevelopmentWorkspace } from './helpers.mjs'
+import { createDevelopmentObservabilityWorkspace, createDevelopmentWorkspace } from './helpers.mjs'
 
 test('development manifest binds runnable files and two different provider transports', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-workspace-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  await createDevelopmentWorkspace(root)
+  const fixture = await createDevelopmentWorkspace(root)
   const manifest = await buildDevelopmentManifest(root)
+  const suitePackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(manifest.suiteVersion, suitePackage.version)
+  assert.equal(manifest.components['direct-execution-runtime'].root, await realpath(fixture.runtime))
+  assert.equal(fixture.runtime, join(root, 'agent-host-suite', 'packages', 'direct-execution-runtime'))
   assert.equal(manifest.components['math-anchor'].version, '0.3.0')
   assert.equal(manifest.components['migratory-time'].marketplace, 'migratory-time')
+  assert.equal(manifest.components['math-anchor'].cwd, manifest.components['math-anchor'].pluginRoot)
+  assert.equal(manifest.components['migratory-time'].cwd, manifest.components['migratory-time'].pluginRoot)
   assert.equal(await fingerprintIdentityFiles(manifest.components['math-anchor'].identityFiles), manifest.components['math-anchor'].fingerprint)
   const config = createRuntimeConfig(manifest)
   assert.equal(config.limits.defaultTimeoutMs, 30000)
   assert.deepEqual(config.providers.map((item) => item.transport), ['mcp-stdio', 'capability-jsonl-v0.1'])
-  assert.deepEqual(config.providers.map((item) => item.lifecycle), ['per-call', 'per-call'])
+  assert.deepEqual(config.providers.map((item) => item.lifecycle), ['persistent', 'persistent'])
   assert.deepEqual(config.providers[0].allowedTools, ['math.run', 'math.batch', 'math.describe'])
   assert.deepEqual(config.providers[0].operationProjections, [{
     toolName: 'math.run',
@@ -58,4 +68,15 @@ test('development manifest reports a stable package error when a required runtim
     buildDevelopmentManifest(root),
     (error) => error.code === 'COMPONENT_PACKAGE_UNAVAILABLE' && !error.message.includes(root),
   )
+})
+
+test('development observability manifest resolves Host-owned package roots', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-workspace-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const fixture = await createDevelopmentObservabilityWorkspace(root)
+  const manifest = await buildDevelopmentObservabilityManifest(root)
+  assert.equal(manifest['agent-tool-observer'].root, await realpath(fixture.observer))
+  assert.equal(manifest['context-surface-analyzer'].root, await realpath(fixture.analyzer))
+  assert.equal(manifest['agent-tool-observer'].args[0].endsWith('/packages/agent-tool-observer/src/cli.mjs'), true)
+  assert.equal(manifest['context-surface-analyzer'].args[0].endsWith('/packages/context-surface-analyzer/src/cli.js'), true)
 })

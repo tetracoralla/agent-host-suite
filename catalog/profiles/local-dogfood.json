@@ -9,7 +9,8 @@
     "laniakea",
     "projective",
     "equatorium",
-    "file-vitals"
+    "file-vitals",
+    "agent-tool-development-kit"
   ],
   "agentComponents": [
     "data-transformer",
@@ -18,5 +19,8 @@
     "projective",
     "equatorium",
     "file-vitals"
+  ],
+  "defaultAgentComponents": [
+    "math-anchor"
   ]
 }

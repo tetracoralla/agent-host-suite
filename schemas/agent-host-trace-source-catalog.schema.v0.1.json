@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-trace-source-catalog.schema.v0.1.json",
+  "title": "Agent Host Trace Source Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "generatedAt", "provider", "requestedRange", "retention", "privacy", "limits", "sources", "unknowns", "interpretationStatus"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-trace-source-catalog.v0.1" },
+    "status": { "const": "ok" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "provider": { "$ref": "#/$defs/provider" },
+    "requestedRange": { "$ref": "#/$defs/range" },
+    "retention": { "$ref": "#/$defs/retention" },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentPolicy", "sourcePathIncluded", "rawConversationContentIncluded", "toolArgumentsIncluded", "toolResultsIncluded"],
+      "properties": {
+        "contentPolicy": { "const": "metadata-only" },
+        "sourcePathIncluded": { "const": false },
+        "rawConversationContentIncluded": { "const": false },
+        "toolArgumentsIncluded": { "const": false },
+        "toolResultsIncluded": { "const": false }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxSources", "sourceLimitReached", "sourcesReturned"],
+      "properties": {
+        "maxSources": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "sourceLimitReached": { "type": "boolean" },
+        "sourcesReturned": { "type": "integer", "minimum": 0, "maximum": 500 }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessionHash", "firstEventAtMs", "lastEventAtMs", "totalEvents", "modelSteps", "toolCalls", "toolResults", "turnEnds", "completeness"],
+        "properties": {
+          "sessionHash": { "$ref": "#/$defs/hash" },
+          "firstEventAtMs": { "$ref": "#/$defs/time" },
+          "lastEventAtMs": { "$ref": "#/$defs/time" },
+          "totalEvents": { "type": "integer", "minimum": 1 },
+          "modelSteps": { "type": "integer", "minimum": 0 },
+          "toolCalls": { "type": "integer", "minimum": 0 },
+          "toolResults": { "type": "integer", "minimum": 0 },
+          "turnEnds": { "type": "integer", "minimum": 0 },
+          "completeness": { "const": "unknown" }
+        }
+      }
+    },
+    "unknowns": { "$ref": "#/$defs/unknowns" },
+    "interpretationStatus": { "const": "not-performed" }
+  },
+  "$defs": {
+    "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "time": { "type": "integer", "minimum": 0 },
+    "nullableTime": { "type": ["integer", "null"], "minimum": 0 },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromMs", "toMs"],
+      "properties": { "fromMs": { "$ref": "#/$defs/nullableTime" }, "toMs": { "$ref": "#/$defs/nullableTime" } }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retentionDays", "currentCutoffMs", "eventsBeforeCutoffMayHaveBeenRemoved", "collectionBeforeMonitoringWasEnabled"],
+      "properties": {
+        "retentionDays": { "type": "integer", "minimum": 1 },
+        "currentCutoffMs": { "$ref": "#/$defs/time" },
+        "eventsBeforeCutoffMayHaveBeenRemoved": { "const": true },
+        "collectionBeforeMonitoringWasEnabled": { "const": "unavailable" }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["authoritative-skill-activation", "semantic-correctness", "result-adoption", "non-use-reason", "task-quality", "product-opportunity"] }
+    }
+  }
+}

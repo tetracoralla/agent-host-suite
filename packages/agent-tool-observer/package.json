@@ -1,0 +1,25 @@
+{
+  "name": "@openadam/agent-tool-observer",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent Host internal local-only observation of Agent tool usage across supported clients.",
+  "license": "Apache-2.0",
+  "author": "openAdam",
+  "homepage": "https://github.com/tetracoralla/agent-host-suite/tree/main/packages/agent-tool-observer#readme",
+  "repository": { "type": "git", "url": "https://github.com/tetracoralla/agent-host-suite.git", "directory": "packages/agent-tool-observer" },
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "bin": {
+    "agent-tool-observer": "src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node --no-warnings --test test/*.test.mjs",
+    "check:contracts": "node --no-warnings scripts/check-contracts.mjs",
+    "check:release": "node --no-warnings scripts/check-public-release.mjs",
+    "measure:trace-plane": "node --no-warnings scripts/measure-trace-plane.mjs",
+    "smoke": "node --no-warnings scripts/smoke.mjs",
+    "check": "npm test && npm run check:contracts && npm run check:release && npm run smoke"
+  }
+}

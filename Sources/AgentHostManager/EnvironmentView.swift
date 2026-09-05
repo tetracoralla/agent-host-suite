@@ -6,7 +6,7 @@ struct EnvironmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Agent environment", subtitle: "\(toolSetName) on this Mac") {
+                PageHeader(title: "Agent environment", subtitle: L10n.format("{toolSet} on this Mac", ["toolSet": toolSetName])) {
                     HealthPill(health: store.health)
                 }
 
@@ -19,9 +19,9 @@ struct EnvironmentView: View {
                             color: .orange
                         )
                         HStack {
-                            Button("Review Repair") { Task { await store.prepareUpdate() } }
+                            Button(L10n.text("Review Repair")) { Task { await store.prepareUpdate() } }
                                 .buttonStyle(.borderedProminent)
-                            Button("Run Full Check") { Task { await store.runDoctor() } }
+                            Button(L10n.text("Run Full Check")) { Task { await store.runDoctor() } }
                         }
                     }
                 } else if store.health == .ready {
@@ -38,50 +38,50 @@ struct EnvironmentView: View {
                 }
 
                 Panel {
-                    Text("Health").font(.headline)
+                    Text(L10n.text("Health")).font(.headline)
                     ForEach(store.healthFacets) { facet in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Image(systemName: facet.isHealthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                                 .foregroundStyle(facet.isHealthy ? .green : .orange)
                                 .frame(width: 18)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(facet.name)
-                                Text(facet.detail)
+                                Text(L10n.text(facet.name))
+                                Text(L10n.text(facet.detail))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         .accessibilityElement(children: .combine)
-                        .accessibilityLabel("\(facet.name): \(facet.detail)")
+                        .accessibilityLabel("\(L10n.text(facet.name)): \(L10n.text(facet.detail))")
                     }
                 }
 
                 Panel {
-                    Text("Current environment").font(.headline)
-                    LabeledContent("Tool set", value: toolSetName)
-                    LabeledContent("Tools", value: store.managedTools.count.formatted())
-                    LabeledContent("Agent apps", value: store.connectedAgentAppCount.formatted())
-                    LabeledContent("Local execution", value: store.localExecutionStatus)
-                    LabeledContent("Monitoring", value: store.monitoringSummary)
+                    Text(L10n.text("Current environment")).font(.headline)
+                    LabeledContent(L10n.text("Tool set"), value: toolSetName)
+                    LabeledContent(L10n.text("Tools"), value: store.managedTools.count.formatted())
+                    LabeledContent(L10n.text("Agent apps"), value: store.connectedAgentAppCount.formatted())
+                    LabeledContent(L10n.text("Local execution"), value: L10n.text(store.localExecutionStatus))
+                    LabeledContent(L10n.text("Monitoring"), value: L10n.text(store.monitoringSummary))
                     if store.isRefreshing {
-                        LabeledContent("Status checked", value: "Refreshing…")
+                        LabeledContent(L10n.text("Status checked"), value: L10n.text("Refreshing…"))
                     } else if let refreshedAt = store.lastSuccessfulRefreshAt {
-                        LabeledContent("Status checked") {
-                            Text(refreshedAt, format: .relative(presentation: .named))
+                        LabeledContent(L10n.text("Status checked")) {
+                            Text(L10n.relativeAge(since: refreshedAt))
                         }
                     }
                     if let storage = store.storageSummary {
-                        LabeledContent("Storage · live processes", value: storage)
+                        LabeledContent(L10n.text("Storage · live processes"), value: storage)
                     }
                     if let catalog = store.catalogBudgetSummary {
-                        LabeledContent("Tool catalog", value: catalog)
+                        LabeledContent(L10n.text("Tool catalog"), value: catalog)
                     }
                 }
 
                 HStack {
-                    Button("Run Full Check") { Task { await store.runDoctor() } }
+                    Button(L10n.text("Run Full Check")) { Task { await store.runDoctor() } }
                         .disabled(store.isBusy)
-                    Button("Review Update") { Task { await store.prepareUpdate() } }
+                    Button(L10n.text("Review Update")) { Task { await store.prepareUpdate() } }
                         .disabled(store.isBusy)
                 }
             }
@@ -97,9 +97,9 @@ struct EnvironmentView: View {
 
     private var toolSetName: String {
         switch store.suite?.profile {
-        case "local-dogfood": "Standard + Local tools"
-        case "observability": "Standard + monitoring"
-        default: "Standard"
+        case "local-dogfood": L10n.text("Standard + Local tools")
+        case "observability": L10n.text("Standard + Monitoring")
+        default: L10n.text("Standard")
         }
     }
 }

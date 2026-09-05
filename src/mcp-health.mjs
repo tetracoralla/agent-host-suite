@@ -1,6 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { createHash } from 'node:crypto'
 import { AgentHostError } from './errors.mjs'
+import { componentEnvironment } from './component-environment.mjs'
+import { ManagedMcpStdioTransport } from './managed-mcp-stdio-transport.mjs'
+import { closeMcpProbeTransport } from './mcp-probe-cleanup.mjs'
 
 export async function probeMcpTools(component) {
   if (typeof component.command !== 'string' || !Array.isArray(component.args) || typeof component.cwd !== 'string') {
@@ -8,8 +12,8 @@ export async function probeMcpTools(component) {
   }
   const timeoutMs = component.healthTimeoutMs ?? 10000
   const env = getDefaultEnvironment()
-  for (const name of component.workspaceEnvironment ?? []) env[name] = component.healthWorkspaceRoot ?? component.cwd
-  const transport = new StdioClientTransport({
+  Object.assign(env, componentEnvironment(component, component.healthWorkspaceRoot ?? component.cwd))
+  const transport = new ManagedMcpStdioTransport({
     command: component.command,
     args: component.args,
     cwd: component.cwd,
@@ -19,6 +23,7 @@ export async function probeMcpTools(component) {
   })
   const client = new Client({ name: 'agent-host-health', version: '0.1.0' }, { capabilities: {} })
   let timer
+  let primaryError = null
   try {
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => reject(new AgentHostError('TOOL_HEALTH_TIMEOUT', `The ${component.displayName ?? 'installed tool'} health check timed out`)), timeoutMs)
@@ -35,10 +40,28 @@ export async function probeMcpTools(component) {
     if (incomplete.length > 0) {
       throw new AgentHostError('TOOL_HEALTH_CATALOG_INCOMPLETE', `${component.displayName ?? 'Installed tool'} lacks complete typed tool catalog entries`, { tools: incomplete })
     }
-    return { status: 'ok', tools: names, expectedTools: component.expectedTools ?? [], server: client.getServerVersion() ?? null }
+    const serializedCatalog = JSON.stringify(response.tools)
+    const toolUtf8Bytes = response.tools.map((tool) => Buffer.byteLength(JSON.stringify(tool), 'utf8'))
+    return {
+      status: 'ok',
+      tools: names,
+      expectedTools: component.expectedTools ?? [],
+      server: client.getServerVersion() ?? null,
+      catalogUtf8Bytes: Buffer.byteLength(serializedCatalog, 'utf8'),
+      largestToolUtf8Bytes: Math.max(0, ...toolUtf8Bytes),
+      catalogSha256: `sha256:${createHash('sha256').update(serializedCatalog).digest('hex')}`,
+    }
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
     clearTimeout(timer)
-    await transport.close().catch(() => {})
+    await closeMcpProbeTransport(
+      transport,
+      primaryError,
+      'TOOL_HEALTH_CLEANUP_FAILED',
+      `The ${component.displayName ?? 'installed tool'} health process scope could not be removed`,
+    )
   }
 }
 
@@ -59,7 +82,8 @@ export async function probeMcpToolsFirstAndRepeat(component, options = {}) {
   const repeatLaunchMs = Math.max(0, now() - repeatStartedAt)
   if (
     JSON.stringify(first.tools) !== JSON.stringify(repeat.tools) ||
-    JSON.stringify(first.server) !== JSON.stringify(repeat.server)
+    JSON.stringify(first.server) !== JSON.stringify(repeat.server) ||
+    first.catalogSha256 !== repeat.catalogSha256
   ) {
     throw new AgentHostError(
       'TOOL_HEALTH_CATALOG_UNSTABLE',

@@ -34,13 +34,108 @@ function fixture() {
 
 test('Claude adapter adopts equivalent existing aliases without mutating user configuration', async () => {
   const fake = fixture()
+  fake.manifest.components.armorial = { command: process.execPath, args: ['/provider/armorial.mjs'] }
   const installed = await installClaude(fake.manifest, fake.runner)
   assert.deepEqual(installed.entries.map((entry) => [entry.actualName, entry.created, entry.adopted]), [
     ['math-anchor', false, true],
     ['migratory_time', false, true],
+    ['armorial', true, false],
   ])
   await uninstallClaude(installed, fake.runner)
+  assert.deepEqual(fake.mutations.map(([, args]) => args), [
+    ['mcp', 'add', '--scope', 'user', 'armorial', '--', process.execPath, '/provider/armorial.mjs'],
+    ['mcp', 'remove', '--scope', 'user', 'armorial'],
+  ])
+})
+
+test('Claude adapter binds a generic workspace-aware component with exact environment', async () => {
+  const fake = fixture()
+  fake.manifest.components['data-transformer'] = {
+    command: process.execPath,
+    args: ['/provider/data.mjs'],
+    workspaceEnvironment: ['ADT_WORKSPACE_ROOT'],
+  }
+  const workspaceRoot = '/work/approved'
+  const installed = await installClaude(fake.manifest, fake.runner, null, { workspaceRoot })
+  assert.equal(installed.workspaceRoot, workspaceRoot)
+  assert.deepEqual(
+    fake.mutations.map(([, args]) => args).find((args) => args.includes('data-transformer')),
+    ['mcp', 'add', '--scope', 'user', 'data-transformer', '-e', `ADT_WORKSPACE_ROOT=${workspaceRoot}`, '--', process.execPath, '/provider/data.mjs'],
+  )
+})
+
+test('Claude adapter retains the managed workspace grant when a caller omits an unchanged option', async () => {
+  const fake = fixture()
+  fake.manifest.components['data-transformer'] = {
+    command: process.execPath,
+    args: ['/provider/data.mjs'],
+    workspaceEnvironment: ['ADT_WORKSPACE_ROOT'],
+  }
+  const installed = await installClaude(fake.manifest, fake.runner, { workspaceRoot: '/work/managed', entries: [] })
+  assert.equal(installed.workspaceRoot, '/work/managed')
+  assert.deepEqual(
+    fake.mutations.map(([, args]) => args).find((args) => args.includes('data-transformer')),
+    ['mcp', 'add', '--scope', 'user', 'data-transformer', '-e', 'ADT_WORKSPACE_ROOT=/work/managed', '--', process.execPath, '/provider/data.mjs'],
+  )
+})
+
+test('Claude adapter rejects a workspace-aware component without an explicit grant', async () => {
+  const fake = fixture()
+  fake.manifest.components['data-transformer'] = {
+    command: process.execPath,
+    args: ['/provider/data.mjs'],
+    workspaceEnvironment: ['ADT_WORKSPACE_ROOT'],
+  }
+  await assert.rejects(inspectClaude(fake.manifest, fake.runner), (error) => error.code === 'WORKSPACE_GRANT_REQUIRED')
   assert.deepEqual(fake.mutations, [])
+})
+
+test('Claude adapter reads environment entries independently of reported order', async () => {
+  const fake = fixture()
+  fake.manifest.components.armorial = {
+    command: process.execPath,
+    args: ['/provider/armorial.mjs'],
+    workspaceEnvironment: ['ALPHA', 'BETA'],
+  }
+  const base = fake.runner
+  fake.runner = async (command, args, options) => {
+    const commandArgs = command === '/usr/bin/claude' ? userConfigCommand(args) : args
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get' && commandArgs[2] === 'armorial') {
+      return {
+        status: 0,
+        stdout: `Command: ${process.execPath}\nArgs: /provider/armorial.mjs\nEnvironment:\n  BETA=/work/approved\n  ALPHA=/work/approved\n\nTo remove this server, run: claude mcp remove armorial -s user\n`,
+        stderr: '',
+      }
+    }
+    return base(command, args, options)
+  }
+  const inspected = await inspectClaude(fake.manifest, fake.runner, null, { workspaceRoot: '/work/approved' })
+  assert.equal(inspected.entries.find((entry) => entry.name === 'armorial').identityMatched, true)
+})
+
+test('Claude adapter keeps an empty Args line separate from the Environment heading', async () => {
+  const fake = fixture()
+  fake.manifest.components['release-parity'] = {
+    command: process.execPath,
+    args: [],
+    workspaceEnvironment: ['RELEASE_PARITY_WORKSPACE_ROOT'],
+  }
+  const base = fake.runner
+  fake.runner = async (command, args, options) => {
+    const commandArgs = command === '/usr/bin/claude' ? userConfigCommand(args) : args
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get' && commandArgs[2] === 'release-parity') {
+      return {
+        status: 0,
+        stdout: `Command: ${process.execPath}\nArgs:\nEnvironment:\n  RELEASE_PARITY_WORKSPACE_ROOT=/work/approved\n\nTo remove this server, run: claude mcp remove release-parity -s user\n`,
+        stderr: '',
+      }
+    }
+    return base(command, args, options)
+  }
+  const inspected = await inspectClaude(fake.manifest, fake.runner, null, { workspaceRoot: '/work/approved' })
+  const entry = inspected.entries.find((value) => value.name === 'release-parity')
+  assert.deepEqual(entry.existingBinding.args, [])
+  assert.equal(entry.identityMatched, true)
 })
 
 test('Claude adapter refuses a different unmanaged binding', async () => {
@@ -97,7 +192,7 @@ test('Claude adapter restores a removed binding when replacement fails', async (
 
 test('Claude adapter preserves an expected single argument containing spaces', async () => {
   const fake = fixture()
-  const path = '/Users/example/Agent Host/server.mjs'
+  const path = '/opt/openadam-example/Agent Host/server.mjs'
   fake.manifest.components['migratory-time'].args = [path]
   const base = fake.runner
   fake.runner = async (command, args, options) => {
@@ -114,8 +209,8 @@ test('Claude adapter preserves an expected single argument containing spaces', a
 
 test('Claude adapter preserves the previous managed argument containing spaces during a release update', async () => {
   const fake = fixture()
-  const previousPath = '/Users/example/Agent Host/old-server.mjs'
-  const nextPath = '/Users/example/Agent Host/new-server.mjs'
+  const previousPath = '/opt/openadam-example/Agent Host/old-server.mjs'
+  const nextPath = '/opt/openadam-example/Agent Host/new-server.mjs'
   fake.manifest.components['migratory-time'].args = [nextPath]
   const base = fake.runner
   fake.runner = async (command, args, options) => {
@@ -131,4 +226,25 @@ test('Claude adapter preserves the previous managed argument containing spaces d
   const entry = current.entries.find((item) => item.component === 'migratory-time')
   assert.deepEqual(entry.existingBinding.args, [previousPath])
   assert.equal(entry.identityMatched, false)
+})
+
+test('a displaced binding whose Args line cannot map to exact argv is restored with an explicit lossy marker', async () => {
+  const fake = fixture()
+  const argsText = 'mcp --header X Custom'
+  const base = fake.runner
+  fake.runner = async (command, args, options) => {
+    const commandArgs = command === '/usr/bin/claude' ? userConfigCommand(args) : args
+    if (commandArgs[0] === 'mcp' && commandArgs[1] === 'get' && commandArgs[2] === 'math-anchor') {
+      return { status: 0, stdout: `Command: ${process.execPath}\nArgs: ${argsText}\n`, stderr: '' }
+    }
+    return base(command, args, options)
+  }
+  const installed = await installClaude(fake.manifest, fake.runner, null, { replaceConflicts: true })
+  const math = installed.entries.find((entry) => entry.name === 'math-anchor')
+  assert.equal(math.displaced.argsExact, false)
+  assert.equal(math.displaced.argsText, argsText)
+  const removed = await uninstallClaude(installed, fake.runner)
+  const restored = removed.removed.find((item) => item.target === 'math-anchor' && item.kind === 'restored-mcp')
+  assert.equal(restored.argsExact, false)
+  assert.equal(restored.originalArgs, argsText)
 })

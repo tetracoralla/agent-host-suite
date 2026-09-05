@@ -1,0 +1,33 @@
+{
+  "name": "@openadam/context-surface-analyzer",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Agent Host internal analysis and comparison of explicit Agent tool catalog snapshots.",
+  "type": "module",
+  "bin": {
+    "context-surface": "./src/cli.js",
+    "context-surface-mcp": "./src/mcp-server.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.js",
+    "start": "node src/ui-server.js",
+    "mcp": "node src/mcp-server.js",
+    "test": "node --test test/*.test.js",
+    "check:syntax": "node scripts/check-syntax.js",
+    "check:plugin": "node scripts/check-plugin.js",
+    "check:release": "node scripts/check-public-release.mjs",
+    "check:smoke": "node scripts/smoke.js",
+    "check": "npm run check:syntax && npm run build && npm run check:plugin && npm run check:release && npm test && npm run check:smoke"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "author": "openAdam",
+  "homepage": "https://github.com/tetracoralla/agent-host-suite/tree/main/packages/context-surface-analyzer#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tetracoralla/agent-host-suite.git",
+    "directory": "packages/context-surface-analyzer"
+  }
+}

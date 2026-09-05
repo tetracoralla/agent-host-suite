@@ -1,150 +1,129 @@
 # Agent Host
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 Agent Host installs and manages one compatible local environment for a small
-set of independently released Agent tools. It connects those tools to supported
-Agent apps and operates local execution without modifying the Agent apps
-themselves.
+set of Agent tools. It connects those tools to supported Agent apps through
+their public extension points and operates local execution without modifying
+the Agent apps themselves.
 
 This repository contains the **Agent Host Suite** distribution unit. The npm
 package, CLI, schemas, and other stable technical identifiers retain that name.
 
-The standards and the suite are separate:
+## Scope
 
 - Capability contracts define stable typed operation meaning.
 - Procedure contracts define stable multi-stage method when one exists.
-- Providers implement those contracts and remain separate products.
-- Direct Execution Runtime runs already selected structured work without a
-  model relay.
-- Agent Host installs compatible artifacts, connects them through each Agent
-  app's public extension points, manages the local runtime, and reports the
-  current Agent environment.
+- Independently useful Providers own their domain behavior and releases.
+- Agent Host verifies and installs compatible artifacts, projects selected
+  tools and thin Skills into supported Agent apps, manages the local runtime,
+  and reports the environment it can currently observe.
+- Host-owned execution, transport, observation, and routing-support packages
+  remain behind explicit package, protocol, version, process, and failure
+  boundaries.
 
-An Agent vendor can adopt the standards without installing Agent Host. Today,
-Agent Host is the practical bridge for Agent apps that do not natively
-understand Capability and Procedure contracts.
+Agent Host is not required for standards adoption, does not vendor external
+Provider source, and never exposes a generic model-facing provider invocation
+tool.
 
-For broad Providers, the host can keep the public tool identity while selecting
-one inner operation. In the current Math Anchor integration, Direct Runtime
-uses the provider's declared read-only description route to acquire, project,
-and compile only the chosen `math.run` operation after selection, then validates
-every `math.batch` item against its own operation contract. This does
-not rewrite the initial tool catalog already supplied to a current Codex or
-Claude model turn; those Agent apps still receive Math Anchor's compact
-advertised schema through their public plugin/MCP interface.
+## Authority for current facts
 
-## Current release boundary
+This README describes durable product boundaries. It is not an installation
+report or release manifest.
 
-The repository is an Apache-2.0 developer preview. The current self-contained
-internal macOS Beta binds twelve components—including Node, Direct Execution
-Runtime, local monitoring, and eight Agent tools—to immutable archives and
-installs them without a `tools-dev` checkout. It is ad-hoc signed for internal
-validation. Public binary
-distribution remains blocked on Developer ID signing, Apple notarization,
-Gatekeeper acceptance, and a full App-driven run on a separate clean Mac.
+- `catalog/profiles/*.json` defines profile membership.
+- A bound release catalog defines one compatibility release: its manifest owns
+  the exact artifacts, versions, and hashes, while its separately validated
+  `build-provenance.json` record owns build-source provenance.
+- Installed `status`, `snapshot`, `usage`, and `doctor` results describe one
+  machine at the time they are run.
+- Source checks, installed Agent flows, Direct Runtime behavior, Manager
+  behavior, distribution acceptance, and owner experience are separate verdict
+  lanes; success in one does not establish another.
+
+The tracked release catalog is deliberately unbound, so the source checkout
+does not silently claim a public installable release.
+
+## Profiles
+
+- `standard` is the small default Agent-visible tool set.
+- `observability` adds explicitly consented local monitoring without adding
+  monitoring tools to the ordinary Agent catalog.
+- `local-dogfood` adds the wider development inventory while retaining a
+  smaller active set.
+- `developer` installs the Agent Tool Development Kit as a Skill-only backstage
+  component with no Agent MCP tools enabled by the profile.
+
+Evaluation helpers are development and CI tooling, not an installable profile
+or an ordinary Agent catalog.
+
+Exact membership must be read from the profile files and the selected bound
+release, not copied from prose. Installed inventory and active Agent-visible
+tools are separate; after a binding change, start a fresh Agent task before
+assessing discovery or natural tool selection.
+
+## Typical operator flow
 
 ```text
-agent-host setup --profile standard --host codex
-agent-host setup --profile local-dogfood --host codex --workspace-root /absolute/workspace
-agent-host snapshot
-agent-host doctor --deep
-agent-host doctor --deep --skip-agent-apps
-agent-host status
-agent-host activity
-agent-host storage
-agent-host cleanup --dry-run
-agent-host cleanup
+agent-host setup --profile standard --host zcode --release-manifest /absolute/current.json
+agent-host snapshot --json
+agent-host usage --json
+agent-host doctor --deep --skip-agent-apps --json
 agent-host tools status
-agent-host tools set --tool file-vitals
-agent-host tools reset
-agent-host component preview --artifact /absolute/private-tool.tar.gz --license-spdx Apache-2.0 --json
-agent-host component import --artifact /absolute/private-tool.tar.gz --binding /absolute/preview-binding.json --activate
-agent-host component list
-agent-host component remove private-tool --dry-run
-agent-host component rollback private-tool
-agent-host host add claude
-agent-host observability enable
-agent-host observability refresh
-agent-host update
+agent-host manager
+agent-host update --release-manifest /absolute/new-current.json
 agent-host rollback
 agent-host uninstall
+agent-host uninstall --purge-data
 ```
 
-`doctor --deep --skip-agent-apps` verifies installed packages, live tool
-contracts, Direct Runtime, semantic probes, and catalog budgets without
-starting Codex or Claude Code. The Manager uses that route for startup and
-foreground refresh. An explicit **Run Full Check** additionally asks each
-connected Agent app to verify its current bindings.
+Use explicit Full Check or `doctor --deep` without `--skip-agent-apps` only when
+current Agent-app binding verification is needed. If a failed service
+replacement returns a structured recovery action, use that opaque recovery
+identity and manifest digest against the same private Agent Host state; do not
+construct or pass a recovery-directory path.
 
-Uninstall preserves both Agent Host history and the Observer database by
-default. `--purge-data` removes only Agent Host's private state; it never erases a
-pre-existing Observer database.
+Agent Host preserves user-owned host entries and data by default. Monitoring is
+opt-in and passive collection is metadata-only. `uninstall --purge-data`
+removes Suite-owned snapshots and history, but the Observer's shared database
+has its own data lifecycle and is retained. A recorded call or offered tool
+does not establish Skill activation, result adoption, correctness, quality, or value. See
+[Trace Plane](docs/TRACE_PLANE.md) for the observation and export boundary.
 
-Profiles distinguish immutable components kept on disk from the smaller set of
-plugins exposed to each fresh Agent session. Local monitoring remains installed
-and runs through Agent Host maintenance, while Observer and Context Surface
-Analyzer do not occupy the ordinary Agent tool catalog. Weekly maintenance
-keeps the active release plus one byte-verifiable rollback, removes older
-suite-owned packages and completed downloads, applies Observer retention, and
-compacts its database.
+The explicit manifest on `update` selects a new release catalog. An
+unparameterized `update` is appropriate only for a packaged carrier whose
+built-in catalog is already bound.
 
-The active tool set can be narrowed without uninstalling packages. Agent Host
-keeps displaced user plugins suspended during that temporary reduction, so a
-source-checkout route cannot silently replace an inactive managed tool. A fresh
-Agent task is required after every binding change.
+## Distribution boundary
 
-An owner may also import one already-built private Agent tool without turning
-Agent Host into a registry. The input must be a self-contained component
-archive with the existing component v0.1 descriptor and tool integration v0.1
-or v0.2. Preview validates bounded sealed bytes and the live typed MCP catalog,
-then returns exact binding facts; import requires those unchanged facts from an
-absolute JSON file. Imported tools default inactive, use immutable package
-storage and the Codex thin projection, and retain one component-level rollback.
-This route never accepts a source checkout or caller-supplied command and is not
-available as an Agent-facing management tool. Preview does start the selected
-component to list its MCP tools; it persists no Agent Host state, but it is not
-a sandbox and does not establish that the component caused no external effect.
+The repository is an Apache-2.0 developer preview. Public binary readiness is
+determined per release candidate:
 
-`agent-host storage` prints the combined Manager App plus private installed
-footprint, their split, storage classes including package bytes and thin host
-projections, and exact cleanup candidates in ordinary human mode; `--json`
-retains the complete machine-readable inventory.
+- Windows packaging and clean-device requirements are in
+  [Windows distribution](docs/WINDOWS.md).
+- macOS public binaries require Developer ID signing, notarization, stapling,
+  Gatekeeper assessment, and clean-device acceptance.
+- Local or internal ad-hoc-signed builds are validation artifacts, not public
+  downloads.
 
-Every connected Agent app also receives the packaged `agent-host-operations`
-Skill. Its default `agent-host snapshot --json` route returns one path-free,
-16 KiB-bounded environment, storage, activity, catalog, collection,
-fresh-session, and top-eight historical tool-usage summary. Codex receives
-that Skill through a Skill-only managed
-plugin with no MCP server; Claude receives a link to one immutable private
-projection. The Skill directs the external Agent to make any causal, adoption,
-quality, or cleanup assessment itself and never to read Agent Host source or
-Observer storage as a substitute.
+Repository maintainers can read the
+[release boundary](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/RELEASE.md)
+for source, compatibility, internal, and public release requirements.
 
-If setup finds an enabled plugin with the same product name but different
-bytes, it stops. A deliberate migration uses `--replace-host-conflicts`; the
-displaced entry is recorded and restored by uninstall.
+## Source-repository documentation
 
-The development route remains available only when explicitly selected with
-`--development-root`; it records current local paths only in private user
-state. Tracked files never contain a developer's machine paths.
+These maintainer documents are not bundled in the npm package; the links point
+to the source repository:
 
-Local dogfood isolates installed execution provenance, not Agent access to the
-workspace. Agents can continue implementing anywhere under `tools-dev` while
-the installed tools load from private immutable packages. Codex caches only a
-small Suite-owned projection of plugin identity and Skills; workspace-aware
-tools receive the canonical root supplied by `--workspace-root`. The current
-admission rules, catalog measurement, and routing observations are recorded in
-[`docs/LOCAL_DOGFOOD.md`](docs/LOCAL_DOGFOOD.md).
-
-The optional macOS manager has one canonical development run action:
-
-```text
-./script/build_and_run.sh
-```
-
-The packaged development app is ad-hoc signed for local testing. Public app
-artifacts require Developer ID signing and notarization; the release workflow
-fails if those credentials are unavailable.
-
-See [the product model](docs/PRODUCT_MODEL.md),
-[terminology](docs/TERMINOLOGY.md), [architecture](docs/ARCHITECTURE.md), and
-[release boundary](docs/RELEASE.md).
+- [Product model](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/PRODUCT_MODEL.md) — user, product object, profiles, and
+  human surface.
+- [Architecture](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ARCHITECTURE.md) — Host, carrier, lifecycle, runtime, and
+  state boundaries.
+- [Tool integration](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TOOL_INTEGRATION.md) — supported integration record
+  versions and admission semantics.
+- [Local dogfood](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/LOCAL_DOGFOOD.md) — isolated installation and current
+  runtime verification method.
+- [Review contract](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md) — minimum high-risk review seams,
+  not a completion claim.
+- [Terminology](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TERMINOLOGY.md) — canonical product language and stable
+  technical identifiers.

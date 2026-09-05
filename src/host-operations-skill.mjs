@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, symlink } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { platform } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { resolveLinkedSkillsRoot } from './agent-skill-location.mjs'
 import { fingerprintRelativeFiles } from './development-manifest.mjs'
 import { AgentHostError } from './errors.mjs'
 import { inspectCodex, installCodex, uninstallCodex } from './hosts/codex.mjs'
@@ -44,7 +45,7 @@ async function sourceIdentity() {
   const info = await lstat(SOURCE_ROOT)
   if (info.isSymbolicLink() || !info.isDirectory()) throw new AgentHostError('HOST_SKILL_SOURCE_INVALID', 'The packaged Agent Host Skill is unavailable')
   const files = await inventory(SOURCE_ROOT)
-  if (!files.includes('SKILL.md') || !files.includes('scripts/agent-host')) {
+  if (!files.includes('SKILL.md') || !files.includes('scripts/agent-host') || !files.includes('scripts/agent-host.cmd')) {
     throw new AgentHostError('HOST_SKILL_SOURCE_INVALID', 'The packaged Agent Host Skill is incomplete')
   }
   return { files, fingerprint: await fingerprint(SOURCE_ROOT, files) }
@@ -75,8 +76,8 @@ async function ensureRealDirectory(path) {
   if (info.isSymbolicLink() || !info.isDirectory()) throw new AgentHostError('HOST_SKILL_PATH_UNSAFE', `Agent Skill directory is unsafe: ${path}`)
 }
 
-async function materializeClaudeSkill(paths, identity) {
-  const componentRoot = join(paths.hostProjections, 'operations-skills', 'claude', OPERATIONS_SKILL_ID)
+async function materializeLinkedSkill(paths, identity, host) {
+  const componentRoot = join(paths.hostProjections, 'operations-skills', host, OPERATIONS_SKILL_ID)
   const projectionRoot = join(componentRoot, identity.fingerprint.slice(0, 16))
   const current = await existing(projectionRoot)
   if (current !== null) {
@@ -247,20 +248,19 @@ export async function preflightOperationsSkill(host, paths, runner, options = {}
       replacementRequired: entry.marketplaceNeedsReplacement || entry.migratableDuplicates.length > 0,
     }
   }
-  if (host !== 'claude') throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Agent Host Skill target: ${host}`)
-  const homeRoot = options.homeRoot ?? homedir()
-  const exposurePath = options.previous?.exposurePath ?? join(homeRoot, '.claude', 'skills', OPERATIONS_SKILL_ID)
+  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Agent Host Skill target: ${host}`)
+  const exposurePath = options.previous?.exposurePath ?? join(resolveLinkedSkillsRoot(host, options), OPERATIONS_SKILL_ID)
   const info = await existing(exposurePath)
   const managedTarget = await resolvedSymlink(exposurePath, info)
   const expectedTarget = options.previous?.projectionRoot ?? null
   const alreadyManaged = expectedTarget !== null && managedTarget === expectedTarget
   const conflict = info !== null && !alreadyManaged
   if (conflict && options.replaceConflicts !== true) {
-    throw new AgentHostError('HOST_SKILL_CONFLICT', `claude already exposes ${OPERATIONS_SKILL_ID} from another source`, { exposurePath })
+    throw new AgentHostError('HOST_SKILL_CONFLICT', `${host} already exposes ${OPERATIONS_SKILL_ID} from another source`, { exposurePath })
   }
   return {
     id: OPERATIONS_SKILL_ID,
-    carrier: 'claude-skill-link',
+    carrier: `${host}-skill-link`,
     fingerprint: identity.fingerprint,
     exposurePath,
     present: info !== null,
@@ -285,10 +285,9 @@ export async function installOperationsSkill(host, paths, runner, previous = nul
       binding: mergeCodexOwnership(previous?.binding, binding),
     }
   }
-  if (host !== 'claude') throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Agent Host Skill target: ${host}`)
-  const projectionRoot = await materializeClaudeSkill(paths, identity)
-  const homeRoot = options.homeRoot ?? homedir()
-  const exposurePath = previous?.exposurePath ?? join(homeRoot, '.claude', 'skills', OPERATIONS_SKILL_ID)
+  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Agent Host Skill target: ${host}`)
+  const projectionRoot = await materializeLinkedSkill(paths, identity, host)
+  const exposurePath = previous?.exposurePath ?? join(resolveLinkedSkillsRoot(host, options), OPERATIONS_SKILL_ID)
   await ensureRealDirectory(dirname(exposurePath))
   const info = await existing(exposurePath)
   const managedTarget = await resolvedSymlink(exposurePath, info)
@@ -297,9 +296,9 @@ export async function installOperationsSkill(host, paths, runner, previous = nul
     const previousManaged = previous?.projectionRoot !== undefined && managedTarget === previous.projectionRoot
     if (info !== null && !previousManaged) {
       if (options.replaceConflicts !== true) {
-        throw new AgentHostError('HOST_SKILL_CONFLICT', `claude already exposes ${OPERATIONS_SKILL_ID} from another source`, { exposurePath })
+        throw new AgentHostError('HOST_SKILL_CONFLICT', `${host} already exposes ${OPERATIONS_SKILL_ID} from another source`, { exposurePath })
       }
-      const backupPath = join(paths.backups, `claude-${OPERATIONS_SKILL_ID}-${randomUUID()}`)
+      const backupPath = join(paths.backups, `${host}-${OPERATIONS_SKILL_ID}-${randomUUID()}`)
       await rename(exposurePath, backupPath)
       displaced = { backupPath }
     } else if (info !== null) {
@@ -307,21 +306,21 @@ export async function installOperationsSkill(host, paths, runner, previous = nul
     }
     const temporary = `${exposurePath}.tmp-${process.pid}-${randomUUID()}`
     try {
-      await symlink(projectionRoot, temporary, 'dir')
+      await symlink(projectionRoot, temporary, platform() === 'win32' ? 'junction' : 'dir')
       await rename(temporary, exposurePath)
     } finally {
       await rm(temporary, { force: true })
     }
   }
   if (previous?.projectionRoot !== undefined && previous.projectionRoot !== projectionRoot) {
-    const componentRoot = join(paths.hostProjections, 'operations-skills', 'claude', OPERATIONS_SKILL_ID)
+    const componentRoot = join(paths.hostProjections, 'operations-skills', host, OPERATIONS_SKILL_ID)
     if (!isContained(componentRoot, previous.projectionRoot)) {
       throw new AgentHostError('HOST_SKILL_PROJECTION_INVALID', 'Previous Agent Host Skill projection escaped private host storage')
     }
     await rm(previous.projectionRoot, { recursive: true, force: true })
   }
   return {
-    kind: 'claude-skill-link',
+    kind: `${host}-skill-link`,
     id: OPERATIONS_SKILL_ID,
     exposurePath,
     projectionRoot,
@@ -355,13 +354,13 @@ export async function inspectOperationsSkill(managed, runner) {
   }
   const projectionInfo = await existing(managed.projectionRoot)
   if (projectionInfo === null || projectionInfo.isSymbolicLink() || !projectionInfo.isDirectory()) {
-    return { status: 'error', id: OPERATIONS_SKILL_ID, carrier: 'claude-skill-link', code: 'HOST_SKILL_PROJECTION_MISSING' }
+    return { status: 'error', id: OPERATIONS_SKILL_ID, carrier: managed.kind, code: 'HOST_SKILL_PROJECTION_MISSING' }
   }
   let actualFingerprint
   try {
     actualFingerprint = await fingerprint(managed.projectionRoot, managed.files)
   } catch {
-    return { status: 'error', id: OPERATIONS_SKILL_ID, carrier: 'claude-skill-link', code: 'HOST_SKILL_PROJECTION_INVALID' }
+    return { status: 'error', id: OPERATIONS_SKILL_ID, carrier: managed.kind, code: 'HOST_SKILL_PROJECTION_INVALID' }
   }
   const exposureInfo = await existing(managed.exposurePath)
   const exposureTarget = await resolvedSymlink(managed.exposurePath, exposureInfo)
@@ -369,7 +368,7 @@ export async function inspectOperationsSkill(managed, runner) {
   return {
     status: healthy ? 'ok' : 'error',
     id: OPERATIONS_SKILL_ID,
-    carrier: 'claude-skill-link',
+    carrier: managed.kind,
     exposurePath: managed.exposurePath,
     projectionRoot: managed.projectionRoot,
     fingerprintMatched: actualFingerprint === managed.fingerprint,

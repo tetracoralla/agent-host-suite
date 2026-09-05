@@ -1,6 +1,7 @@
 import { AgentHostError } from '../errors.mjs'
 import { resolveExecutable, runFile } from '../process.mjs'
 import { realpath } from 'node:fs/promises'
+import { componentEnvironment } from '../component-environment.mjs'
 
 export const CLAUDE_USER_CONFIG_ARGUMENTS = Object.freeze([
   '--disable-slash-commands',
@@ -12,22 +13,55 @@ function userConfigArguments(...args) {
   return [...CLAUDE_USER_CONFIG_ARGUMENTS, ...args]
 }
 
-function targets(manifest) {
-  return [
-    { name: 'math-anchor', aliases: ['math-anchor', 'math_anchor'], component: manifest.components['math-anchor'] },
-    { name: 'migratory-time', aliases: ['migratory-time', 'migratory_time'], component: manifest.components['migratory-time'] },
-  ].filter((target) => target.component !== undefined)
+function sameEnvironment(left, right) {
+  const leftEntries = Object.entries(left ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  const rightEntries = Object.entries(right ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  return JSON.stringify(leftEntries) === JSON.stringify(rightEntries)
+}
+
+function targets(manifest, workspaceRoot) {
+  return Object.entries(manifest.components ?? {})
+    .filter(([, component]) => component.skillOnly !== true && typeof component.command === 'string' && Array.isArray(component.args))
+    .map(([name, component]) => {
+      const variables = component.workspaceEnvironment ?? []
+      if (variables.length > 0 && workspaceRoot === null) {
+        throw new AgentHostError('WORKSPACE_GRANT_REQUIRED', `${component.displayName ?? name} requires --workspace-root so Claude Code can grant its deterministic tools an explicit local workspace`, {
+          component: name,
+          variables,
+        })
+      }
+      return {
+        name,
+        aliases: [...new Set([name, name.replaceAll('-', '_')])],
+        component,
+        environment: componentEnvironment(component, workspaceRoot),
+      }
+    })
 }
 
 function parseEntry(name, output, expectedArgumentSets = []) {
-  const command = output.match(/^\s*Command:\s*(.+?)\s*$/mu)?.[1]
-  const argsText = output.match(/^\s*Args:\s*(.*?)\s*$/mu)?.[1] ?? ''
+  const command = output.match(/^[ \t]*Command:[ \t]*(.*?)[ \t]*\r?$/mu)?.[1]
+  const argsText = output.match(/^[ \t]*Args:[ \t]*(.*?)[ \t]*\r?$/mu)?.[1] ?? ''
   if (command === undefined) throw new AgentHostError('CLAUDE_MCP_PROTOCOL_INVALID', `Claude Code did not report the command for ${name}`)
   const exact = expectedArgumentSets.find((candidate) => Array.isArray(candidate) && argsText === candidate.join(' '))
   const args = exact !== undefined
     ? [...exact]
     : argsText === '' ? [] : argsText.split(/\s+/u)
-  return { actualName: name, command, args }
+  // Claude Code renders arguments space-joined without quoting, so a non-exact
+  // Args line cannot be split back into the original argv faithfully.
+  const environment = {}
+  // Keep the match line-bounded. `\s` also consumes newlines, which allowed a
+  // blank separator to pull Claude's following unindented help text into the
+  // environment block.
+  const environmentBlock = output.match(/^[ \t]*Environment:[ \t]*\r?\n((?:[ \t]+[^\r\n]+(?:\r?\n|$))*)/mu)?.[1] ?? ''
+  for (const line of environmentBlock.split('\n')) {
+    const entry = line.trim()
+    if (entry.length === 0) continue
+    const separator = entry.indexOf('=')
+    if (separator <= 0) throw new AgentHostError('CLAUDE_MCP_PROTOCOL_INVALID', `Claude Code reported an invalid environment entry for ${name}`)
+    environment[entry.slice(0, separator)] = entry.slice(separator + 1)
+  }
+  return { actualName: name, command, args, argsText, argsExact: exact !== undefined, environment }
 }
 
 async function existingAliases(executable, target, runner, managedEntry = null) {
@@ -53,6 +87,7 @@ async function sameBinding(existing, target) {
     return existingCommand === requestedCommand
       && existing.args.length === target.component.args.length
       && existing.args.every((value, index) => value === target.component.args[index])
+      && sameEnvironment(existing.environment, target.environment)
   } catch {
     return false
   }
@@ -63,7 +98,7 @@ export async function inspectClaude(manifest, runner = runFile, managedState = n
   if (executable === null) throw new AgentHostError('CLAUDE_NOT_INSTALLED', 'Claude Code is not installed or not on PATH')
   const versionResult = await runner(executable, userConfigArguments('--version'))
   const entries = []
-  for (const target of targets(manifest)) {
+  for (const target of targets(manifest, options.workspaceRoot ?? managedState?.workspaceRoot ?? null)) {
     const managedEntry = managedState?.entries?.find((entry) => entry.component === target.name)
     const existing = await existingAliases(executable, target, runner, managedEntry)
     const owned = managedEntry?.created === true
@@ -80,6 +115,7 @@ export async function inspectClaude(manifest, runner = runFile, managedState = n
       identityMatched,
       command: target.component.command,
       args: target.component.args,
+      environment: target.environment,
       existingBinding: existing,
     })
   }
@@ -96,24 +132,42 @@ export async function installClaude(manifest, runner = runFile, managedState = n
     }
     let displaced = null
     if (entry.present) {
-      if (!entry.owned) displaced = { name: entry.actualName, command: entry.existingBinding.command, args: entry.existingBinding.args, identityMatched: entry.identityMatched }
+      if (!entry.owned) displaced = {
+        name: entry.actualName,
+        command: entry.existingBinding.command,
+        args: entry.existingBinding.args,
+        argsText: entry.existingBinding.argsText,
+        argsExact: entry.existingBinding.argsExact,
+        environment: entry.existingBinding.environment,
+        identityMatched: entry.identityMatched,
+      }
       await runner(inspection.executable, userConfigArguments('mcp', 'remove', '--scope', 'user', entry.actualName))
     }
     try {
       await runner(inspection.executable, userConfigArguments(
-        'mcp', 'add', '--scope', 'user', entry.name, '--', entry.command, ...entry.args,
+        'mcp', 'add', '--scope', 'user', entry.name,
+        ...Object.entries(entry.environment).flatMap(([name, value]) => ['-e', `${name}=${value}`]),
+        '--', entry.command, ...entry.args,
       ))
     } catch (error) {
       if (entry.present) {
         await runner(inspection.executable, userConfigArguments(
-          'mcp', 'add', '--scope', 'user', entry.actualName, '--', entry.existingBinding.command, ...entry.existingBinding.args,
+          'mcp', 'add', '--scope', 'user', entry.actualName,
+          ...Object.entries(entry.existingBinding.environment).flatMap(([name, value]) => ['-e', `${name}=${value}`]),
+          '--', entry.existingBinding.command, ...entry.existingBinding.args,
         ), { allowFailure: true })
       }
       throw error
     }
     installed.push({ ...entry, actualName: entry.name, created: true, adopted: false, displaced })
   }
-  return { kind: 'claude', version: inspection.version, entries: installed, restartRequired: true }
+  return {
+    kind: 'claude',
+    version: inspection.version,
+    workspaceRoot: options.workspaceRoot ?? managedState?.workspaceRoot ?? null,
+    entries: installed,
+    restartRequired: true,
+  }
 }
 
 export async function uninstallClaude(hostState, runner = runFile) {
@@ -127,8 +181,19 @@ export async function uninstallClaude(hostState, runner = runFile) {
     }
     if (entry.displaced !== null && entry.displaced !== undefined) {
       const displaced = entry.displaced
-      const result = await runner(executable, userConfigArguments('mcp', 'add', '--scope', 'user', displaced.name, '--', displaced.command, ...displaced.args), { allowFailure: true })
-      removed.push({ target: displaced.name, kind: 'restored-mcp', status: result.status })
+      const result = await runner(executable, userConfigArguments(
+        'mcp', 'add', '--scope', 'user', displaced.name,
+        ...Object.entries(displaced.environment ?? {}).flatMap(([name, value]) => ['-e', `${name}=${value}`]),
+        '--', displaced.command, ...displaced.args,
+      ), { allowFailure: true })
+      removed.push({
+        target: displaced.name,
+        kind: 'restored-mcp',
+        status: result.status,
+        // A restored binding whose Args line could not be mapped back to exact
+        // argv may need manual correction; the original rendering is retained.
+        ...(displaced.argsExact === false ? { argsExact: false, originalArgs: displaced.argsText } : {}),
+      })
     }
   }
   return { kind: 'claude', removed }

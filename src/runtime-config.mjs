@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, rm, rmdir } from 'node:fs/promises'
+import { mkdir, realpath, rm, rmdir } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
 import { AgentHostError } from './errors.mjs'
@@ -9,16 +9,87 @@ import { ensurePrivateDirectory } from './paths.mjs'
 const MAX_SOCKET_PATH_BYTES = 103
 
 export function runtimeSocketDirectory(paths) {
+  if (platform() === 'win32') return null
   if (platform() !== 'darwin') return join(paths.runtime, 'socket')
   const stateId = createHash('sha256').update(paths.root).digest('hex').slice(0, 16)
   return join(homedir(), 'Library', 'Caches', 'openAdam', 'AgentHost', stateId)
 }
 
-export function createRuntimeConfig(manifest) {
+export function createRuntimeConfig(manifest, options = {}) {
   const math = manifest.components['math-anchor']
   const time = manifest.components['migratory-time']
+  const activeComponentIds = new Set(manifest.agentComponents ?? Object.keys(manifest.components))
+  const installedCapabilityProviderEntries = Object.entries(manifest.components)
+    .flatMap(([componentId, component]) => component.capabilityProvider === undefined
+      ? []
+      : [{ componentId, provider: component.capabilityProvider }])
+  const installedCapabilityProviders = installedCapabilityProviderEntries
+    .map(({ provider: { workspaceRootRequired = false, ...provider } }) => ({
+      ...provider,
+      ...(workspaceRootRequired ? { workspaceRoot: options.workspaceRoot } : {}),
+    }))
+  if (installedCapabilityProviders.some((provider) => Object.hasOwn(provider, 'workspaceRoot') && typeof provider.workspaceRoot !== 'string')) {
+    throw new AgentHostError('RUNTIME_WORKSPACE_REQUIRED', 'An installed Direct Capability requires an explicit Host workspace root')
+  }
+  const providers = [
+    {
+      providerId: 'io.github.tetracoralla.math-anchor',
+      transport: 'mcp-stdio',
+      lifecycle: 'persistent',
+      rootPath: math.pluginRoot,
+      command: math.command,
+      args: math.args,
+      cwd: math.pluginRoot,
+      identityFiles: math.identityFiles.filter((path) => path.startsWith(math.pluginRoot)),
+      expectedServer: { name: 'Math Anchor', version: math.version },
+      allowedTools: ['math.run', 'math.batch', 'math.describe'],
+      operationProjections: [{
+        toolName: 'math.run',
+        operationField: 'operation',
+        argumentsField: 'arguments',
+        batchToolName: 'math.batch',
+        batchItemsField: 'items',
+        schemaLookup: {
+          toolName: 'math.describe',
+          operationField: 'operation',
+          resultPath: ['operation', 'inputSchema'],
+        },
+      }],
+    },
+    {
+      providerId: 'io.github.tetracoralla.migratory-time',
+      transport: 'capability-jsonl-v0.1',
+      lifecycle: 'persistent',
+      rootPath: time.root,
+      profilePath: time.profilePath,
+      manifestPath: time.manifestPath,
+      identityFiles: [time.adapterPath],
+      capabilityId: 'org.openadam.time-zone.convert',
+      capabilityVersion: '0.2.0',
+      contracts: [{
+        operationId: 'convert',
+        inputSchemaPath: time.inputSchemaPath,
+        outputSchemaPath: time.outputSchemaPath,
+      }],
+    },
+    ...installedCapabilityProviders,
+  ]
+  const preparedProviderIds = [
+    ...(activeComponentIds.has('math-anchor') ? ['io.github.tetracoralla.math-anchor'] : []),
+    ...(activeComponentIds.has('migratory-time') ? ['io.github.tetracoralla.migratory-time'] : []),
+    ...installedCapabilityProviderEntries
+      .filter(({ componentId, provider }) => activeComponentIds.has(componentId) && provider.lifecycle === 'persistent')
+      .map(({ provider }) => provider.providerId),
+  ]
+  const runtimeVersion = manifest.components['direct-execution-runtime']?.version ?? '0.0.0'
+  const version = runtimeVersion.match(/^(\d+)\.(\d+)\.(\d+)/u)?.slice(1).map(Number)
+  const supportsPreparation = version !== undefined && (
+    version[0] > 0 || version[1] > 2 || (version[1] === 2 && version[2] >= 1)
+  )
   return {
-    schemaVersion: 'openadam.direct-provider-config.v0.2',
+    schemaVersion: supportsPreparation
+      ? 'openadam.direct-provider-config.v0.3'
+      : 'openadam.direct-provider-config.v0.2',
     limits: {
       maxConcurrentCalls: 4,
       maxQueuedCalls: 32,
@@ -32,66 +103,50 @@ export function createRuntimeConfig(manifest) {
       circuitBreakerFailureThreshold: 3,
       circuitBreakerCooldownMs: 1000,
     },
-    providers: [
-      {
-        providerId: 'io.github.tetracoralla.math-anchor',
-        transport: 'mcp-stdio',
-        lifecycle: 'per-call',
-        rootPath: math.pluginRoot,
-        command: math.command,
-        args: math.args,
-        cwd: math.pluginRoot,
-        identityFiles: math.identityFiles.filter((path) => path.startsWith(math.pluginRoot)),
-        expectedServer: { name: 'Math Anchor', version: math.version },
-        allowedTools: ['math.run', 'math.batch', 'math.describe'],
-        operationProjections: [{
-          toolName: 'math.run',
-          operationField: 'operation',
-          argumentsField: 'arguments',
-          batchToolName: 'math.batch',
-          batchItemsField: 'items',
-          schemaLookup: {
-            toolName: 'math.describe',
-            operationField: 'operation',
-            resultPath: ['operation', 'inputSchema'],
-          },
-        }],
+    ...(supportsPreparation ? {
+      servicePreparation: {
+        mode: preparedProviderIds.length === 0 ? 'lazy' : 'persistent-providers',
+        totalTimeoutMs: 60000,
+        providerIds: preparedProviderIds,
       },
-      {
-        providerId: 'io.github.tetracoralla.migratory-time',
-        transport: 'capability-jsonl-v0.1',
-        lifecycle: 'per-call',
-        rootPath: time.root,
-        profilePath: time.profilePath,
-        manifestPath: time.manifestPath,
-        identityFiles: [time.adapterPath],
-        capabilityId: 'org.openadam.time-zone.convert',
-        capabilityVersion: '0.2.0',
-        contracts: [{
-          operationId: 'convert',
-          inputSchemaPath: time.inputSchemaPath,
-          outputSchemaPath: time.outputSchemaPath,
-        }],
-      },
-    ],
+    } : {}),
+    providers,
   }
 }
 
-export async function writeRuntimeFiles(paths, manifest) {
-  const socketDirectory = await ensurePrivateDirectory(runtimeSocketDirectory(paths))
-  const configPath = join(paths.runtime, 'provider-config.json')
-  const socketPath = join(socketDirectory, 'direct-runtime.sock')
-  if (Buffer.byteLength(socketPath, 'utf8') > MAX_SOCKET_PATH_BYTES) {
+export async function writeRuntimeFiles(paths, manifest, options = {}) {
+  const config = createRuntimeConfig(manifest, options)
+  const configDigest = createHash('sha256').update(JSON.stringify(config)).digest('hex').slice(0, 24)
+  const configPath = join(paths.runtime, `provider-config-${configDigest}.json`)
+  const windowsPipe = platform() === 'win32'
+  const socketDirectory = windowsPipe ? null : await ensurePrivateDirectory(options.socketDirectory ?? runtimeSocketDirectory(paths))
+  const stateId = createHash('sha256').update(paths.root).digest('hex').slice(0, 24)
+  const socketPath = windowsPipe ? `\\\\.\\pipe\\openadam-agent-host-${stateId}` : join(socketDirectory, 'direct-runtime.sock')
+  if (!windowsPipe && Buffer.byteLength(socketPath, 'utf8') > MAX_SOCKET_PATH_BYTES) {
     throw new AgentHostError('RUNTIME_SOCKET_PATH_TOO_LONG', 'The private Direct Runtime socket path exceeds the platform limit')
   }
   const observationLog = join(paths.observations, 'direct-runtime.jsonl')
   await mkdir(paths.runtime, { recursive: true, mode: 0o700 })
-  await writePrivateJson(configPath, createRuntimeConfig(manifest))
+  await writePrivateJson(configPath, config)
   return { configPath, socketDirectory, socketPath, observationLog }
 }
 
-export async function cleanupRuntimeSocket(paths, runtime) {
-  const expectedDirectory = runtimeSocketDirectory(paths)
+export async function cleanupRuntimeSocket(paths, runtime, options = {}) {
+  if (platform() === 'win32') {
+    const stateId = createHash('sha256').update(paths.root).digest('hex').slice(0, 24)
+    const expectedPipe = `\\\\.\\pipe\\openadam-agent-host-${stateId}`
+    return runtime?.socketPath === expectedPipe
+      ? { removed: false, reason: 'named-pipe-has-no-filesystem-entry' }
+      : { removed: false, reason: 'unmanaged-path' }
+  }
+  const configuredDirectory = options.socketDirectory ?? runtimeSocketDirectory(paths)
+  let expectedDirectory
+  try {
+    expectedDirectory = await realpath(configuredDirectory)
+  } catch (error) {
+    if (error.code === 'ENOENT') return { removed: false, reason: 'missing' }
+    throw error
+  }
   const expectedSocket = join(expectedDirectory, 'direct-runtime.sock')
   if (runtime?.socketPath !== expectedSocket) return { removed: false, reason: 'unmanaged-path' }
   await rm(expectedSocket, { force: true })

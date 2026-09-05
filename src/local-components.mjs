@@ -5,15 +5,17 @@ import { AgentHostError } from './errors.mjs'
 import { fingerprintIdentityFiles, fingerprintRelativeFiles } from './development-manifest.mjs'
 import { recordActivity } from './activity.mjs'
 import { containedComponentPath, currentReleasePlatform, installDirectoryName } from './release-manifest.mjs'
-import { materializeLocalComponentArtifact, observeLocalComponentArtifact, verifyReleaseComponent } from './release-artifacts.mjs'
+import { materializeObservedLocalComponentArtifact, observeLocalComponentArtifact, verifyReleaseComponent } from './release-artifacts.mjs'
 import { probeMcpToolsFirstAndRepeat } from './mcp-health.mjs'
 import { resolveStateRoot } from './paths.mjs'
-import { loadState, prepareStatePaths } from './state.mjs'
+import { loadState, prepareStatePaths, readStatePaths, statePaths } from './state.mjs'
 import { transitionComponentInventory } from './lifecycle.mjs'
-import { TOOL_INTEGRATION_SCHEMA_V2 } from './tool-integration.mjs'
+import { TOOL_INTEGRATION_SCHEMA_V2, TOOL_INTEGRATION_SCHEMA_V3, TOOL_INTEGRATION_SCHEMA_V4, TOOL_INTEGRATION_SCHEMA_V5 } from './tool-integration.mjs'
 import { resolveWorkspaceRoot } from './hosts/codex-projection.mjs'
+import { resolvePathGrant, validateComponentPathGrants } from './component-environment.mjs'
 import { readJson } from './json.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
+import { withLifecycleMutation } from './lifecycle-lock.mjs'
 
 const PRIVATE_COMPONENT_STATE_SCHEMA = 'openadam.agent-host-private-component-state.v0.1'
 const PREVIEW_SCHEMA = 'openadam.agent-host-local-component-preview.v0.1'
@@ -96,10 +98,50 @@ async function runtimeComponent(installed, releaseComponent, state) {
   const pluginRoot = directoryPath(installed.root, integration.codex.pluginRoot, `${integration.displayName} plugin root`)
   const marketplaceRoot = directoryPath(installed.root, integration.codex.marketplaceRoot, `${integration.displayName} marketplace root`)
   const runtimeEntrypoint = containedComponentPath(installed.root, integration.runtime.command, `${integration.displayName} runtime command`)
-  const usesSuiteNode = integration.schemaVersion === TOOL_INTEGRATION_SCHEMA_V2 && integration.runtime.executor === 'suite-node'
+  const usesSuiteNode = [TOOL_INTEGRATION_SCHEMA_V2, TOOL_INTEGRATION_SCHEMA_V3, TOOL_INTEGRATION_SCHEMA_V4, TOOL_INTEGRATION_SCHEMA_V5].includes(integration.schemaVersion) && integration.runtime.executor === 'suite-node'
   const nodeCommand = state.components['node-runtime']?.command
   if (usesSuiteNode && typeof nodeCommand !== 'string') {
     fail('LOCAL_COMPONENT_EXECUTOR_UNAVAILABLE', 'The installed Agent environment has no verified Suite Node executor')
+  }
+  let providerSkill = null
+  if (integration.schemaVersion === TOOL_INTEGRATION_SCHEMA_V3) {
+    const discovery = integration.discovery
+    const skillRoot = directoryPath(installed.root, discovery.skill.root, `${integration.displayName} discovery Skill root`)
+    const discoveryEntrypoint = containedComponentPath(installed.root, discovery.runtime.command, `${integration.displayName} discovery CLI entrypoint`)
+    providerSkill = {
+      id: discovery.skill.id,
+      root: skillRoot,
+      identityRelativeFiles: discovery.skill.identityFiles,
+      identityFingerprint: await fingerprintRelativeFiles(skillRoot, discovery.skill.identityFiles),
+      launcherRelativePath: discovery.skill.launcher,
+      command: discovery.runtime.executor === 'suite-node' ? nodeCommand : discoveryEntrypoint,
+      args: discovery.runtime.executor === 'suite-node'
+        ? [discoveryEntrypoint, ...discovery.runtime.args]
+        : discovery.runtime.args,
+      versionArguments: discovery.runtime.versionArguments,
+      expectedVersion: installed.descriptor.version,
+    }
+  }
+  let capabilityProvider = null
+  if (integration.schemaVersion === TOOL_INTEGRATION_SCHEMA_V4) {
+    const capability = integration.directCapability
+    capabilityProvider = {
+      providerId: capability.providerId,
+      transport: capability.transport,
+      lifecycle: capability.lifecycle,
+      workspaceRootRequired: capability.workspaceRoot === 'host-required',
+      rootPath: pluginRoot,
+      profilePath: containedComponentPath(installed.root, capability.profile, `${integration.displayName} Capability Profile`),
+      manifestPath: containedComponentPath(installed.root, capability.manifest, `${integration.displayName} Provider Manifest`),
+      identityFiles: capability.identityFiles.map((path) => containedComponentPath(installed.root, path, `${integration.displayName} Capability identity file`)),
+      capabilityId: capability.capabilityId,
+      capabilityVersion: capability.capabilityVersion,
+      contracts: capability.contracts.map((contract) => ({
+        operationId: contract.operationId,
+        inputSchemaPath: containedComponentPath(installed.root, contract.inputSchema, `${integration.displayName} Capability input schema`),
+        outputSchemaPath: containedComponentPath(installed.root, contract.outputSchema, `${integration.displayName} Capability output schema`),
+      })),
+    }
   }
   return {
     version: installed.descriptor.version,
@@ -120,10 +162,42 @@ async function runtimeComponent(installed, releaseComponent, state) {
     args: usesSuiteNode ? [runtimeEntrypoint, ...integration.runtime.args] : integration.runtime.args,
     cwd: directoryPath(installed.root, integration.runtime.cwd, `${integration.displayName} runtime directory`),
     workspaceEnvironment: integration.runtime.workspaceEnvironment ?? [],
+    optionalPathEnvironment: integration.runtime.optionalPathEnvironment ?? [],
     expectedTools: integration.runtime.expectedTools,
     healthTimeoutMs: integration.runtime.timeoutMs,
     toolIntegrationSchema: integration.schemaVersion,
+    ...(providerSkill === null ? {} : { providerSkill }),
+    ...(capabilityProvider === null ? {} : { capabilityProvider }),
   }
+}
+
+async function bindOptionalPathGrants(component, inputs, previous = {}) {
+  const declared = new Set(component.optionalPathEnvironment ?? [])
+  const retained = Object.fromEntries(
+    Object.entries(previous ?? {}).filter(([name, roots]) => declared.has(name) && Array.isArray(roots)),
+  )
+  if (inputs === undefined || inputs.length === 0) {
+    const result = { ...component, pathGrants: retained }
+    await validateComponentPathGrants(result)
+    return result
+  }
+  if (!Array.isArray(inputs) || inputs.length > 64) fail('PATH_GRANT_INVALID', 'Optional path grants must be a bounded list of NAME=PATH values')
+  const grants = {}
+  for (const input of inputs) {
+    if (typeof input !== 'string') fail('PATH_GRANT_INVALID', 'Optional path grants must use NAME=PATH syntax')
+    const separator = input.indexOf('=')
+    const name = separator > 0 ? input.slice(0, separator) : ''
+    const path = separator > 0 ? input.slice(separator + 1) : ''
+    if (!declared.has(name)) {
+      fail('PATH_GRANT_UNDECLARED', `The component does not declare optional path environment ${name || 'unknown'}`, {
+        declared: [...declared].sort(),
+      })
+    }
+    const root = await resolvePathGrant(name, path)
+    if (!Array.isArray(grants[name])) grants[name] = []
+    if (!grants[name].includes(root)) grants[name].push(root)
+  }
+  return { ...component, pathGrants: grants }
 }
 
 function inventoryFromState(state) {
@@ -154,8 +228,8 @@ function publicRecord(id, record, active) {
   }
 }
 
-async function installedState(stateRoot) {
-  const paths = await prepareStatePaths(resolveStateRoot(stateRoot))
+async function installedState(stateRoot, preparedPaths = null) {
+  const paths = preparedPaths ?? await readStatePaths(resolveStateRoot(stateRoot))
   const state = await loadState(paths)
   if (state === null) fail('NOT_INSTALLED', 'No Agent environment is installed')
   return { paths, state }
@@ -166,8 +240,9 @@ async function materializeForPreview(options, state, dependencies) {
   const binding = bindingFromObservation(initial, options.licenseSpdx)
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'agent-host-component-admission-'))
   try {
-    const prepared = await materializeLocalComponentArtifact(options.artifact, binding, { packages: temporaryRoot }, { runner: dependencies.artifactRunner })
-    const component = await runtimeComponent(prepared.installed, prepared.releaseComponent, state)
+    const prepared = await materializeObservedLocalComponentArtifact(initial, binding, { packages: temporaryRoot }, { runner: dependencies.artifactRunner })
+    let component = await runtimeComponent(prepared.installed, prepared.releaseComponent, state)
+    component = await bindOptionalPathGrants(component, options.pathGrants)
     const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? state.workspaceRoot)
     if (component.workspaceEnvironment.length > 0 && workspaceRoot === null) {
       fail('WORKSPACE_GRANT_REQUIRED', `${component.displayName} requires --workspace-root before its private component can be admitted`)
@@ -180,7 +255,9 @@ async function materializeForPreview(options, state, dependencies) {
 }
 
 export async function previewLocalComponent(options, dependencies = {}) {
-  const { state } = await installedState(options.stateRoot)
+  const state = options.standalone === true
+    ? { components: { 'node-runtime': { command: process.execPath } }, workspaceRoot: null }
+    : (await installedState(options.stateRoot)).state
   const { initial, binding, health } = await materializeForPreview(options, state, dependencies)
   return {
     schemaVersion: PREVIEW_SCHEMA,
@@ -223,8 +300,8 @@ function assertImportCollision(state, id, replace) {
   return record
 }
 
-export async function importLocalComponent(options, dependencies = {}) {
-  const { paths, state } = await installedState(options.stateRoot)
+async function importLocalComponentUnlocked(options, dependencies = {}, preparedPaths = null) {
+  const { paths, state } = await installedState(options.stateRoot, preparedPaths)
   const runner = dependencies.runner
   const observation = await observeLocalComponentArtifact(options.artifact, { runner: dependencies.artifactRunner })
   const binding = options.binding
@@ -232,8 +309,9 @@ export async function importLocalComponent(options, dependencies = {}) {
   let prepared = null
   let inventoryAdopted = false
   try {
-    prepared = await materializeLocalComponentArtifact(options.artifact, binding, paths, { runner: dependencies.artifactRunner })
-    const component = await runtimeComponent(prepared.installed, prepared.releaseComponent, state)
+    prepared = await materializeObservedLocalComponentArtifact(observation, binding, paths, { runner: dependencies.artifactRunner })
+    let component = await runtimeComponent(prepared.installed, prepared.releaseComponent, state)
+    component = await bindOptionalPathGrants(component, options.pathGrants, record?.current?.component?.pathGrants)
     const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? state.workspaceRoot)
     if (component.workspaceEnvironment.length > 0 && workspaceRoot === null) {
       fail('WORKSPACE_GRANT_REQUIRED', `${component.displayName} requires --workspace-root before its private component can be admitted`)
@@ -310,8 +388,8 @@ export async function localComponentStatus(options = {}) {
   return { status: 'ok', components: records }
 }
 
-export async function removeLocalComponent(options, dependencies = {}) {
-  const { paths, state } = await installedState(options.stateRoot)
+async function removeLocalComponentUnlocked(options, dependencies = {}, preparedPaths = null) {
+  const { paths, state } = await installedState(options.stateRoot, preparedPaths)
   const record = state.privateComponents?.[options.target]
   if (record?.current === null || record?.current === undefined) fail('LOCAL_COMPONENT_UNKNOWN', `No imported component is installed for ${options.target}`)
   const inventory = inventoryFromState(state)
@@ -380,22 +458,22 @@ async function verifyRetainedRollbackTarget(paths, state, target, options, depen
     const descriptorPath = join(retainedRoot, 'component.json')
     const descriptor = await readJson(descriptorPath)
     component = await runtimeComponent({ root: retainedRoot, descriptor, descriptorPath }, release, state)
-    workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? state.workspaceRoot)
-    if (component.workspaceEnvironment.length > 0 && workspaceRoot === null) {
-      fail('WORKSPACE_GRANT_REQUIRED', `${component.displayName} requires --workspace-root before its private component can be restored`)
-    }
   } catch (error) {
-    if (error instanceof AgentHostError && ['WORKSPACE_GRANT_REQUIRED'].includes(error.code)) throw error
     fail('LOCAL_COMPONENT_ROLLBACK_BYTES_UNVERIFIED', `Retained bytes failed exact verification for ${target.binding.id}`, {
       cause: error instanceof AgentHostError ? error.code : 'PACKAGE_ROOT_INVALID',
     })
+  }
+  component = await bindOptionalPathGrants(component, options.pathGrants, target.component.pathGrants)
+  workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? state.workspaceRoot)
+  if (component.workspaceEnvironment.length > 0 && workspaceRoot === null) {
+    fail('WORKSPACE_GRANT_REQUIRED', `${component.displayName} requires --workspace-root before its private component can be restored`)
   }
   const health = await (dependencies.mcpProbe ?? probeMcpToolsFirstAndRepeat)({ ...component, healthWorkspaceRoot: workspaceRoot })
   return { component, health }
 }
 
-export async function rollbackLocalComponent(options, dependencies = {}) {
-  const { paths, state } = await installedState(options.stateRoot)
+async function rollbackLocalComponentUnlocked(options, dependencies = {}, preparedPaths = null) {
+  const { paths, state } = await installedState(options.stateRoot, preparedPaths)
   const record = state.privateComponents?.[options.target]
   if (record?.rollback === null || record?.rollback === undefined) fail('LOCAL_COMPONENT_ROLLBACK_UNAVAILABLE', `No private component rollback is retained for ${options.target}`)
   const target = record.rollback
@@ -453,4 +531,24 @@ export async function rollbackLocalComponent(options, dependencies = {}) {
     health: verified.health,
     ...(warnings.length === 0 ? {} : { warnings }),
   }
+}
+
+async function lockedComponentMutation(options, dependencies, operation, callback) {
+  const paths = statePaths(resolveStateRoot(options.stateRoot))
+  return await withLifecycleMutation(paths, operation, dependencies, callback)
+}
+
+export async function importLocalComponent(options, dependencies = {}) {
+  return await lockedComponentMutation(options, dependencies, 'private-component.import', (locked, paths) =>
+    importLocalComponentUnlocked(options, locked, paths))
+}
+
+export async function removeLocalComponent(options, dependencies = {}) {
+  return await lockedComponentMutation(options, dependencies, 'private-component.remove', (locked, paths) =>
+    removeLocalComponentUnlocked(options, locked, paths))
+}
+
+export async function rollbackLocalComponent(options, dependencies = {}) {
+  return await lockedComponentMutation(options, dependencies, 'private-component.rollback', (locked, paths) =>
+    rollbackLocalComponentUnlocked(options, locked, paths))
 }

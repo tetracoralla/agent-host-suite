@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-shell-adapter.schema.v0.1.json",
+  "title": "Agent Shell Adapter Descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "version", "provider", "transport", "collection", "signals", "content", "runtime"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-shell-adapter.v0.1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,99}$" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" },
+    "provider": { "type": "string", "enum": ["codex", "claude", "zcode", "deepseek-harness", "gemini-cli", "github-copilot-cli"] },
+    "transport": { "type": "string", "enum": ["public-events", "opentelemetry", "official-hooks", "stable-local-records", "aggregate-store"] },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passiveMetadata", "explicitAnalysisPack"],
+      "properties": {
+        "passiveMetadata": { "type": "boolean" },
+        "explicitAnalysisPack": { "type": "boolean" }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modelSteps", "toolOffers", "toolCalls", "toolResults", "usage", "turnEnds", "selfReportedRationalePresence"],
+      "properties": {
+        "modelSteps": { "$ref": "#/$defs/coverage" },
+        "toolOffers": { "$ref": "#/$defs/coverage" },
+        "toolCalls": { "$ref": "#/$defs/coverage" },
+        "toolResults": { "$ref": "#/$defs/coverage" },
+        "usage": { "$ref": "#/$defs/coverage" },
+        "turnEnds": { "$ref": "#/$defs/coverage" },
+        "selfReportedRationalePresence": { "$ref": "#/$defs/coverage" }
+      }
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passiveStorage", "explicitPack"],
+      "properties": {
+        "passiveStorage": { "const": "metadata-only" },
+        "explicitPack": { "type": "string", "enum": ["metadata-only", "selected-content"] }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platforms", "sourceFormats"],
+      "properties": {
+        "platforms": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["darwin", "win32", "linux"] } },
+        "sourceFormats": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 100 } }
+      }
+    }
+  },
+  "$defs": {
+    "coverage": { "type": "string", "enum": ["available", "partial", "unavailable"] }
+  }
+}

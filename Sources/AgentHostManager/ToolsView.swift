@@ -7,7 +7,7 @@ struct ToolsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 PageHeader(title: "Tools", subtitle: "Available in connected Agent apps") {
-                    Button("Check All") { Task { await store.runDoctor() } }
+                    Button(L10n.text("Check All")) { Task { await store.runDoctor() } }
                         .disabled(store.isBusy)
                 }
 
@@ -22,8 +22,8 @@ struct ToolsView: View {
 
                 if let catalog = store.catalogBudgetSummary {
                     Panel {
-                        LabeledContent("Context cost", value: catalog)
-                            .accessibilityLabel("Context cost: \(catalog)")
+                        LabeledContent(L10n.text("Context cost"), value: catalog)
+                            .accessibilityLabel("\(L10n.text("Context cost")): \(catalog)")
                     }
                 }
 
@@ -67,21 +67,21 @@ private struct ToolRow: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
-                Text(tool.summary).foregroundStyle(.secondary)
-                Text(tool.availability).font(.caption).foregroundStyle(.secondary)
-                Text(tool.ownership).font(.caption).foregroundStyle(.tertiary)
+                Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
+                Text(L10n.text(tool.availability)).font(.caption).foregroundStyle(.secondary)
+                Text(L10n.text(tool.ownership)).font(.caption).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 20)
             VStack(alignment: .trailing, spacing: 8) {
                 ItemStatePill(state: tool.state)
-                Toggle("Available", isOn: Binding(
+                Toggle(L10n.text("Available"), isOn: Binding(
                     get: { tool.active },
                     set: onChange
                 ))
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .disabled(isBusy || (tool.active && !canDeactivate))
-                .accessibilityLabel("Make \(tool.name) available in Agent apps")
+                .accessibilityLabel(L10n.format("Make {tool} available in Agent apps", ["tool": tool.name]))
             }
         }
         .padding(.vertical, 3)

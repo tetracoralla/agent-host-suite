@@ -47,6 +47,94 @@ test('tool integration v0.2 accepts a contained script executed by the shared Su
   assert.equal(validateToolIntegration(value, withScript).runtime.executor, 'suite-node')
 })
 
+test('tool integration v0.3 accepts one Skill and version-locked CLI discovery carrier', () => {
+  const value = fixture()
+  value.schemaVersion = 'openadam.agent-host-tool-integration.v0.3'
+  value.runtime.executor = 'suite-node'
+  value.runtime.command = 'marketplace/plugins/file-vitals/server/index.mjs'
+  value.discovery = {
+    kind: 'skill-cli',
+    skill: {
+      id: 'file-vitals',
+      root: 'marketplace/plugins/file-vitals/skills/file-vitals',
+      identityFiles: ['SKILL.md'],
+      launcher: 'scripts/file-vitals',
+    },
+    runtime: {
+      executor: 'suite-node',
+      command: 'marketplace/plugins/file-vitals/dist/cli.js',
+      args: [],
+      versionArguments: ['--version'],
+    },
+  }
+  const withDiscovery = new Set([
+    ...files,
+    value.runtime.command,
+    value.discovery.runtime.command,
+    'marketplace/plugins/file-vitals/skills/file-vitals/SKILL.md',
+  ])
+  assert.equal(validateToolIntegration(value, withDiscovery).discovery.kind, 'skill-cli')
+
+  const sourceOwnedLauncher = new Set([...withDiscovery, 'marketplace/plugins/file-vitals/skills/file-vitals/scripts/file-vitals'])
+  assert.throws(() => validateToolIntegration(value, sourceOwnedLauncher), (error) => error.code === 'TOOL_INTEGRATION_INVALID')
+})
+
+test('tool integration v0.3 requires a closed discovery carrier', () => {
+  const value = fixture()
+  value.schemaVersion = 'openadam.agent-host-tool-integration.v0.3'
+  value.runtime.executor = 'component'
+  assert.throws(() => validateToolIntegration(value, files), (error) => error.code === 'TOOL_INTEGRATION_INVALID')
+})
+
+test('tool integration v0.4 accepts one closed Direct Capability binding', () => {
+  const value = fixture()
+  value.schemaVersion = 'openadam.agent-host-tool-integration.v0.4'
+  value.runtime.executor = 'component'
+  value.directCapability = {
+    providerId: 'io.example.file-vitals',
+    transport: 'capability-jsonl-v0.1',
+    lifecycle: 'per-call',
+    workspaceRoot: 'host-required',
+    capabilityId: 'org.example.file.inspect',
+    capabilityVersion: '0.1.0',
+    adapter: {
+      command: 'marketplace/plugins/file-vitals/runtime/finspect',
+      args: ['capability'],
+      cwd: 'marketplace/plugins/file-vitals',
+    },
+    manifest: 'marketplace/plugins/file-vitals/capabilities/provider.json',
+    profile: 'capability-contracts/profile.json',
+    identityFiles: ['marketplace/plugins/file-vitals/runtime/finspect'],
+    contracts: [{
+      operationId: 'inspect',
+      inputSchema: 'capability-contracts/schemas/input.json',
+      outputSchema: 'capability-contracts/schemas/output.json',
+    }],
+  }
+  const withCapability = new Set([
+    ...files,
+    value.directCapability.manifest,
+    value.directCapability.profile,
+    value.directCapability.contracts[0].inputSchema,
+    value.directCapability.contracts[0].outputSchema,
+  ])
+  assert.equal(validateToolIntegration(value, withCapability).directCapability.transport, 'capability-jsonl-v0.1')
+
+  value.directCapability.identityFiles = [value.directCapability.manifest]
+  assert.throws(() => validateToolIntegration(value, withCapability), (error) => error.code === 'TOOL_INTEGRATION_INVALID')
+})
+
+test('tool integration v0.5 declares optional host path environments separately from the workspace', () => {
+  const value = fixture()
+  value.schemaVersion = 'openadam.agent-host-tool-integration.v0.5'
+  value.runtime.executor = 'component'
+  value.runtime.optionalPathEnvironment = ['PLUGIN_CACHE_ROOTS', 'APPLICATION_ROOTS']
+  assert.deepEqual(validateToolIntegration(value, files).runtime.optionalPathEnvironment, ['PLUGIN_CACHE_ROOTS', 'APPLICATION_ROOTS'])
+
+  value.runtime.optionalPathEnvironment.push('UFI_WORKSPACE_ROOT')
+  assert.throws(() => validateToolIntegration(value, files), (error) => error.code === 'TOOL_INTEGRATION_INVALID')
+})
+
 test('tool integration v0.1 rejects an undeclared executor', () => {
   const value = fixture()
   value.runtime.executor = 'suite-node'

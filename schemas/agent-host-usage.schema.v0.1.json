@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.example/schemas/agent-host-usage.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "generatedAt", "configured", "enabled", "windowDays", "observationSource", "freshness", "collection", "providerHealth", "providerUsage", "providerActivity", "dailyActivity", "tools", "semanticExecutions", "trace", "reliability", "coverage", "privacy", "assessmentBoundary", "response"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-usage.v0.1" },
+    "status": { "const": "ok" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "configured": { "type": "boolean" },
+    "enabled": { "type": "boolean" },
+    "windowDays": { "$ref": "#/$defs/nullableCount" },
+    "observationSource": { "enum": ["none", "current-observer-snapshots", "cached-agent-host-refresh"] },
+    "currentReadErrorCode": { "$ref": "#/$defs/nullableText" },
+    "freshness": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "latestCollectionCompletedAtMs", "ageMs", "overdueAfterMs"],
+          "properties": {
+            "status": { "$ref": "#/$defs/nullableText" },
+            "latestCollectionCompletedAtMs": { "$ref": "#/$defs/nullableCount" },
+            "ageMs": { "$ref": "#/$defs/nullableCount" },
+            "overdueAfterMs": { "$ref": "#/$defs/nullableCount" }
+          }
+        }
+      ]
+    },
+    "collection": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/collection" }] },
+    "providerHealth": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/providerHealth" } },
+    "providerUsage": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/providerUsage" } },
+    "providerActivity": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/providerActivity" } },
+    "activitySemantics": { "$ref": "#/$defs/activitySemantics" },
+    "dailyActivity": { "$ref": "#/$defs/dailyEntries" },
+    "tools": { "$ref": "#/$defs/toolEntries" },
+    "semanticExecutions": { "$ref": "#/$defs/semanticEntries" },
+    "trace": { "$ref": "#/$defs/trace" },
+    "reliability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["measuredToolCalls", "completedToolCalls", "toolErrors", "toolCancellations", "semanticExecutions", "semanticCompleted", "semanticProviderErrors", "semanticHostErrors"],
+      "properties": {
+        "measuredToolCalls": { "$ref": "#/$defs/count" },
+        "completedToolCalls": { "$ref": "#/$defs/count" },
+        "toolErrors": { "$ref": "#/$defs/count" },
+        "toolCancellations": { "$ref": "#/$defs/count" },
+        "semanticExecutions": { "$ref": "#/$defs/count" },
+        "semanticCompleted": { "$ref": "#/$defs/count" },
+        "semanticProviderErrors": { "$ref": "#/$defs/count" },
+        "semanticHostErrors": { "$ref": "#/$defs/count" }
+      }
+    },
+    "coverage": { "$ref": "#/$defs/coverage" },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rawPromptStored", "rawToolArgumentsStored", "rawToolResultsStored", "sourcePathsReturned", "networkUsedByObserver", "modelCallsByObserver"],
+      "properties": {
+        "rawPromptStored": { "const": false },
+        "rawToolArgumentsStored": { "const": false },
+        "rawToolResultsStored": { "const": false },
+        "sourcePathsReturned": { "const": false },
+        "networkUsedByObserver": { "const": false },
+        "modelCallsByObserver": { "const": 0 }
+      }
+    },
+    "assessmentBoundary": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serializedBytes", "limitBytes"],
+      "properties": {
+        "serializedBytes": { "$ref": "#/$defs/count" },
+        "limitBytes": { "const": 32768 }
+      }
+    }
+  },
+  "$defs": {
+    "count": { "type": "integer", "minimum": 0 },
+    "nullableCount": { "type": ["integer", "null"], "minimum": 0 },
+    "nullableText": { "type": ["string", "null"], "maxLength": 180 },
+    "nullableNumber": { "type": ["number", "null"], "minimum": 0 },
+    "collectionSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "status", "errorCode", "scannedAtMs", "backlogSources", "skippedLines"],
+      "properties": {
+        "source": { "$ref": "#/$defs/nullableText" },
+        "status": { "$ref": "#/$defs/nullableText" },
+        "errorCode": { "$ref": "#/$defs/nullableText" },
+        "scannedAtMs": { "$ref": "#/$defs/nullableCount" },
+        "backlogSources": { "$ref": "#/$defs/nullableCount" },
+        "skippedLines": { "$ref": "#/$defs/nullableCount" }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "startedAtMs", "completedAtMs", "providersOk", "providersPartial", "providersMissing", "providersError", "sources", "sourcesReturned", "sourcesAvailable"],
+      "properties": {
+        "status": { "$ref": "#/$defs/nullableText" },
+        "startedAtMs": { "$ref": "#/$defs/nullableCount" },
+        "completedAtMs": { "$ref": "#/$defs/nullableCount" },
+        "providersOk": { "$ref": "#/$defs/nullableCount" },
+        "providersPartial": { "$ref": "#/$defs/nullableCount" },
+        "providersMissing": { "$ref": "#/$defs/nullableCount" },
+        "providersError": { "$ref": "#/$defs/nullableCount" },
+        "sources": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/collectionSource" } },
+        "sourcesReturned": { "$ref": "#/$defs/count" },
+        "sourcesAvailable": { "$ref": "#/$defs/count" }
+      }
+    },
+    "providerHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "status", "errorCode", "scannedAtMs"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/nullableText" },
+        "status": { "$ref": "#/$defs/nullableText" },
+        "errorCode": { "$ref": "#/$defs/nullableText" },
+        "scannedAtMs": { "$ref": "#/$defs/nullableCount" }
+      }
+    },
+    "providerUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "records", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningTokens", "totalTokens", "averageDurationMs", "semantics", "peakObservedDailyTokens", "peakObservedDailyDate", "dailyTokenSemantics"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/nullableText" },
+        "records": { "$ref": "#/$defs/nullableCount" },
+        "inputTokens": { "$ref": "#/$defs/nullableCount" },
+        "cachedInputTokens": { "$ref": "#/$defs/nullableCount" },
+        "outputTokens": { "$ref": "#/$defs/nullableCount" },
+        "reasoningTokens": { "$ref": "#/$defs/nullableCount" },
+        "totalTokens": { "$ref": "#/$defs/nullableCount" },
+        "averageDurationMs": { "$ref": "#/$defs/nullableNumber" },
+        "semantics": { "$ref": "#/$defs/nullableText" },
+        "peakObservedDailyTokens": { "$ref": "#/$defs/nullableCount" },
+        "peakObservedDailyDate": { "$ref": "#/$defs/nullableText" },
+        "dailyTokenSemantics": { "$ref": "#/$defs/nullableText" }
+      }
+    },
+    "providerActivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "observedSessions", "observedTurns", "observedActiveDays", "firstObservedAtMs", "lastObservedAtMs", "longestObservedSessionSpanMs", "currentObservedDayStreak", "longestObservedDayStreak"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/nullableText" },
+        "observedSessions": { "$ref": "#/$defs/nullableCount" },
+        "observedTurns": { "$ref": "#/$defs/nullableCount" },
+        "observedActiveDays": { "$ref": "#/$defs/nullableCount" },
+        "firstObservedAtMs": { "$ref": "#/$defs/nullableCount" },
+        "lastObservedAtMs": { "$ref": "#/$defs/nullableCount" },
+        "longestObservedSessionSpanMs": { "$ref": "#/$defs/nullableCount" },
+        "currentObservedDayStreak": { "$ref": "#/$defs/nullableCount" },
+        "longestObservedDayStreak": { "$ref": "#/$defs/nullableCount" }
+      }
+    },
+    "activitySemantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions", "turns", "activeDays", "dayStreaks"],
+      "properties": {
+        "sessions": { "$ref": "#/$defs/nullableText" },
+        "turns": { "$ref": "#/$defs/nullableText" },
+        "activeDays": { "$ref": "#/$defs/nullableText" },
+        "dayStreaks": { "$ref": "#/$defs/nullableText" }
+      }
+    },
+    "dailyActivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "utcDate", "toolCalls", "usageRecords", "observedSessions", "observedTurns", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningTokens", "totalTokens"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/nullableText" },
+        "utcDate": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "toolCalls": { "$ref": "#/$defs/nullableCount" },
+        "usageRecords": { "$ref": "#/$defs/nullableCount" },
+        "observedSessions": { "$ref": "#/$defs/nullableCount" },
+        "observedTurns": { "$ref": "#/$defs/nullableCount" },
+        "inputTokens": { "$ref": "#/$defs/nullableCount" },
+        "cachedInputTokens": { "$ref": "#/$defs/nullableCount" },
+        "outputTokens": { "$ref": "#/$defs/nullableCount" },
+        "reasoningTokens": { "$ref": "#/$defs/nullableCount" },
+        "totalTokens": { "$ref": "#/$defs/nullableCount" }
+      }
+    },
+    "dailyEntries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["returned", "available", "limit", "truncated", "entries"],
+      "properties": {
+        "returned": { "$ref": "#/$defs/count" },
+        "available": { "$ref": "#/$defs/count" },
+        "limit": { "const": 120 },
+        "truncated": { "type": "boolean" },
+        "entries": { "type": "array", "maxItems": 120, "items": { "$ref": "#/$defs/dailyActivity" } }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "toolName", "historicalCalls", "measuredCalls", "completed", "errors", "cancelled", "averageDurationMs", "currentReleaseCalls", "currentReleaseFreshSessionCalls", "currentReleaseStatus", "firstObservedAtMs", "lastObservedAtMs"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/nullableText" },
+        "toolName": { "$ref": "#/$defs/nullableText" },
+        "historicalCalls": { "$ref": "#/$defs/nullableCount" },
+        "measuredCalls": { "$ref": "#/$defs/nullableCount" },
+        "completed": { "$ref": "#/$defs/nullableCount" },
+        "errors": { "$ref": "#/$defs/nullableCount" },
+        "cancelled": { "$ref": "#/$defs/nullableCount" },
+        "averageDurationMs": { "$ref": "#/$defs/nullableNumber" },
+        "currentReleaseCalls": { "$ref": "#/$defs/nullableCount" },
+        "currentReleaseFreshSessionCalls": { "$ref": "#/$defs/nullableCount" },
+        "currentReleaseStatus": { "$ref": "#/$defs/nullableText" },
+        "firstObservedAtMs": { "$ref": "#/$defs/nullableCount" },
+        "lastObservedAtMs": { "$ref": "#/$defs/nullableCount" }
+      }
+    },
+    "semanticTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/nullableText" },
+        "id": { "$ref": "#/$defs/nullableText" },
+        "version": { "$ref": "#/$defs/nullableText" },
+        "operationId": { "$ref": "#/$defs/nullableText" }
+      }
+    },
+    "semanticExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "providerId", "providerVersion", "transport", "executions", "completed", "providerErrors", "hostErrors", "averageDurationMs", "averageQueueMs", "averageProviderRoundTripMs", "lastObservedAtMs", "correctnessStatus"],
+      "properties": {
+        "target": { "$ref": "#/$defs/semanticTarget" },
+        "providerId": { "$ref": "#/$defs/nullableText" },
+        "providerVersion": { "$ref": "#/$defs/nullableText" },
+        "transport": { "$ref": "#/$defs/nullableText" },
+        "executions": { "$ref": "#/$defs/nullableCount" },
+        "completed": { "$ref": "#/$defs/nullableCount" },
+        "providerErrors": { "$ref": "#/$defs/nullableCount" },
+        "hostErrors": { "$ref": "#/$defs/nullableCount" },
+        "averageDurationMs": { "$ref": "#/$defs/nullableNumber" },
+        "averageQueueMs": { "$ref": "#/$defs/nullableNumber" },
+        "averageProviderRoundTripMs": { "$ref": "#/$defs/nullableNumber" },
+        "lastObservedAtMs": { "$ref": "#/$defs/nullableCount" },
+        "correctnessStatus": { "const": "unknown" }
+      }
+    },
+    "toolEntries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["returned", "available", "limit", "entries"],
+      "properties": {
+        "returned": { "$ref": "#/$defs/count" },
+        "available": { "$ref": "#/$defs/count" },
+        "limit": { "$ref": "#/$defs/count" },
+        "entries": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/tool" } }
+      }
+    },
+    "semanticEntries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["returned", "available", "limit", "entries"],
+      "properties": {
+        "returned": { "$ref": "#/$defs/count" },
+        "available": { "$ref": "#/$defs/count" },
+        "limit": { "$ref": "#/$defs/count" },
+        "entries": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/semanticExecution" } }
+      }
+    },
+    "traceAdapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider", "transport", "status", "errorCode", "scannedAtMs", "eventsWritten", "backlogSources"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nullableText" },
+        "provider": { "$ref": "#/$defs/nullableText" },
+        "transport": { "$ref": "#/$defs/nullableText" },
+        "status": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "errorCode": { "$ref": "#/$defs/nullableText" },
+        "scannedAtMs": { "$ref": "#/$defs/nullableCount" },
+        "eventsWritten": { "$ref": "#/$defs/nullableCount" },
+        "backlogSources": { "$ref": "#/$defs/nullableCount" }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adaptersReturned", "adaptersAvailable", "adapters", "providersObserved", "modelSteps", "toolOffers", "toolCalls", "toolResults", "turnEnds", "passiveStorage", "interpretationStatus"],
+      "properties": {
+        "adaptersReturned": { "$ref": "#/$defs/count" },
+        "adaptersAvailable": { "$ref": "#/$defs/count" },
+        "adapters": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/traceAdapter" } },
+        "providersObserved": { "$ref": "#/$defs/count" },
+        "modelSteps": { "$ref": "#/$defs/count" },
+        "toolOffers": { "$ref": "#/$defs/count" },
+        "toolCalls": { "$ref": "#/$defs/count" },
+        "toolResults": { "$ref": "#/$defs/count" },
+        "turnEnds": { "$ref": "#/$defs/count" },
+        "passiveStorage": { "const": "metadata-only" },
+        "interpretationStatus": { "const": "not-performed" }
+      }
+    },
+    "coverageItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "basis", "reason"],
+      "properties": {
+        "status": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "basis": { "$ref": "#/$defs/nullableText" },
+        "reason": { "$ref": "#/$defs/nullableText" }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolInvocation", "runtimeOutcome", "tokenUsage", "skillUse", "semanticEffect", "resultAdoption", "nonUseReason"],
+      "properties": {
+        "toolInvocation": { "$ref": "#/$defs/coverageItem" },
+        "runtimeOutcome": { "$ref": "#/$defs/coverageItem" },
+        "tokenUsage": { "$ref": "#/$defs/coverageItem" },
+        "skillUse": { "$ref": "#/$defs/coverageItem" },
+        "semanticEffect": { "$ref": "#/$defs/coverageItem" },
+        "resultAdoption": { "$ref": "#/$defs/coverageItem" },
+        "nonUseReason": { "$ref": "#/$defs/coverageItem" }
+      }
+    }
+  }
+}

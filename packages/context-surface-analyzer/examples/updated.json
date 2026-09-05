@@ -1,0 +1,37 @@
+{
+  "format": "context-surface.snapshot.v0.1",
+  "source": { "id": "sample-plugin", "revision": "1.1.0" },
+  "tools": [
+    {
+      "name": "sample.lookup",
+      "description": "Look up one record by its stable identifier and include its revision.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      }
+    },
+    {
+      "name": "sample.search",
+      "description": "Search records by a bounded text query.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": { "query": { "type": "string", "maxLength": 200 } }
+      }
+    }
+  ],
+  "measurements": [
+    {
+      "metric": "input_tokens",
+      "value": 438,
+      "source": "external-counter",
+      "provider": "example-provider",
+      "model": "example-model",
+      "serialization": "tools-list-json",
+      "tokenizerVersion": "example-1"
+    }
+  ]
+}

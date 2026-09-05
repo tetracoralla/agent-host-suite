@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-tool-integration.schema.v0.3.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "displayName", "summary", "codex", "runtime", "discovery", "ownership"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-tool-integration.v0.3" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 180 },
+    "codex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marketplaceRoot", "marketplace", "pluginRoot", "plugin", "identityFiles"],
+      "properties": {
+        "marketplaceRoot": { "type": "string", "minLength": 1 },
+        "marketplace": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "pluginRoot": { "type": "string", "minLength": 1 },
+        "plugin": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "identityFiles": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "executor", "command", "args", "cwd", "expectedTools", "timeoutMs"],
+      "properties": {
+        "transport": { "const": "mcp-stdio" },
+        "executor": { "enum": ["component", "suite-node"] },
+        "command": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "cwd": { "type": "string", "minLength": 1 },
+        "workspaceEnvironment": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+        },
+        "expectedTools": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 30000 }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "skill", "runtime"],
+      "properties": {
+        "kind": { "const": "skill-cli" },
+        "skill": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "root", "identityFiles", "launcher"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+            "root": { "type": "string", "minLength": 1 },
+            "identityFiles": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "contains": { "const": "SKILL.md" },
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "launcher": { "type": "string", "minLength": 1 }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["executor", "command", "args", "versionArguments"],
+          "properties": {
+            "executor": { "enum": ["component", "suite-node"] },
+            "command": { "type": "string", "minLength": 1 },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "versionArguments": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uninstall"],
+      "properties": {
+        "uninstall": { "const": "agent-host-created-only" }
+      }
+    }
+  }
+}

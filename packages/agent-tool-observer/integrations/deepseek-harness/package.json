@@ -1,0 +1,9 @@
+{
+  "name": "@openadam/deepseek-harness-observer-bridge",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Metadata-only DeepSeek Harness session/event bridge for the local Agent Host Observer.",
+  "license": "Apache-2.0",
+  "exports": "./index.mjs",
+  "files": ["index.mjs", "README.md", "README.zh-CN.md"]
+}

@@ -1,16 +1,25 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { AgentHostError } from './errors.mjs'
 import { canonicalJson, sha256 } from './json.mjs'
+import { ManagedMcpStdioTransport } from './managed-mcp-stdio-transport.mjs'
+import { closeMcpProbeTransport } from './mcp-probe-cleanup.mjs'
+
+export const MANAGED_CATALOG_BUDGETS = Object.freeze({
+  maxCatalogUtf8Bytes: 65_536,
+  maxToolCount: 64,
+  maxLargestToolUtf8Bytes: 40_000,
+  maxResultUtf8Bytes: 65_536,
+})
 
 async function listProviderToolsOnce(id, component) {
-  const transport = new StdioClientTransport({
+  const transport = new ManagedMcpStdioTransport({
     command: component.command,
     args: component.args,
     cwd: component.cwd ?? component.pluginRoot,
     stderr: 'pipe',
   })
   const client = new Client({ name: 'agent-host-context-exporter', version: '0.1.0' })
+  let primaryError = null
   try {
     await client.connect(transport, { timeout: 45_000, maxTotalTimeout: 45_000 })
     const result = await client.listTools(undefined, { timeout: 45_000, maxTotalTimeout: 45_000 })
@@ -28,8 +37,16 @@ async function listProviderToolsOnce(id, component) {
         outputSchema: tool.outputSchema,
       }
     })
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
-    await client.close().catch(() => {})
+    await closeMcpProbeTransport(
+      transport,
+      primaryError,
+      'CATALOG_EXPORT_CLEANUP_FAILED',
+      `${id} provider catalog process scope could not be removed`,
+    )
   }
 }
 
@@ -95,15 +112,49 @@ export async function exportManagedCatalogInventory(components) {
     },
     tools: catalogs,
     measurements: [],
-    budgets: {
-      maxCatalogUtf8Bytes: 65536,
-      maxToolCount: 64,
-      maxLargestToolUtf8Bytes: 40000,
-      maxResultUtf8Bytes: 65536,
-    },
+    budgets: MANAGED_CATALOG_BUDGETS,
   } }
 }
 
 export async function exportManagedCatalog(components) {
   return (await exportManagedCatalogInventory(components)).snapshot
+}
+
+export function assessManagedCatalog(snapshot) {
+  const toolBytes = snapshot.tools.map((tool) => Buffer.byteLength(canonicalJson(tool), 'utf8'))
+  const summary = {
+    canonicalUtf8Bytes: Buffer.byteLength(canonicalJson(snapshot.tools), 'utf8'),
+    largestToolUtf8Bytes: Math.max(0, ...toolBytes),
+    toolCount: snapshot.tools.length,
+    budgets: snapshot.budgets,
+  }
+  const headroom = {
+    catalogUtf8Bytes: snapshot.budgets.maxCatalogUtf8Bytes - summary.canonicalUtf8Bytes,
+    largestToolUtf8Bytes: snapshot.budgets.maxLargestToolUtf8Bytes - summary.largestToolUtf8Bytes,
+    toolCount: snapshot.budgets.maxToolCount - summary.toolCount,
+  }
+  const exceeded = [
+    ['catalog.canonicalUtf8Bytes', summary.canonicalUtf8Bytes, snapshot.budgets.maxCatalogUtf8Bytes],
+    ['catalog.largestToolUtf8Bytes', summary.largestToolUtf8Bytes, snapshot.budgets.maxLargestToolUtf8Bytes],
+    ['counts.tools', summary.toolCount, snapshot.budgets.maxToolCount],
+  ].filter(([, actual, limit]) => actual > limit).map(([metric, actual, limit]) => ({ metric, actual, limit }))
+  return { ...summary, headroom, status: exceeded.length === 0 ? 'within' : 'exceeded', exceeded }
+}
+
+export async function preflightManagedCatalog(components) {
+  const { bindings, snapshot } = await exportManagedCatalogInventory(components)
+  const expected = Object.keys(components).sort()
+  const measured = bindings.map((binding) => binding.id).sort()
+  if (JSON.stringify(expected) !== JSON.stringify(measured)) {
+    throw new AgentHostError('AGENT_TOOL_CATALOG_UNMEASURABLE', 'The proposed Agent tool set contains a component without a measurable live catalog', { expected, measured })
+  }
+  const assessment = assessManagedCatalog(snapshot)
+  if (assessment.status === 'exceeded') {
+    throw new AgentHostError(
+      'AGENT_TOOL_CATALOG_BUDGET_EXCEEDED',
+      'The proposed Agent tool set exceeds its declared context budget; activate a smaller working set',
+      { components: expected, ...assessment },
+    )
+  }
+  return assessment
 }
