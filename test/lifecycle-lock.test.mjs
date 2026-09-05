@@ -12,7 +12,7 @@ import { cleanupStorage } from '../src/storage.mjs'
 
 const lockWorkerSource = String.raw`
 import { access, appendFile } from 'node:fs/promises'
-const [moduleUrl, root, startSignal, eventsPath] = process.argv.slice(1)
+const [moduleUrl, root, startSignal, eventsPath, releaseSignal] = process.argv.slice(1)
 const { withLifecycleMutation } = await import(moduleUrl)
 process.stdout.write('READY\n')
 while (true) {
@@ -27,7 +27,13 @@ while (true) {
 try {
   await withLifecycleMutation({ root }, 'test.high-contention-worker', {}, async () => {
     await appendFile(eventsPath, 'S ' + process.pid + '\n')
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500))
+    process.stdout.write('ENTERED\n')
+    while (true) {
+      try { await access(releaseSignal); break } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 5))
+      }
+    }
     await appendFile(eventsPath, 'E ' + process.pid + '\n')
   })
   process.stdout.write('RESULT ok\n')
@@ -225,6 +231,7 @@ test('a killed published claimant does not block a high-contention recovery elec
   const directory = join(root, 'multiprocess-review')
   const lock = join(root, '.lifecycle-lock')
   const startSignal = join(directory, 'start')
+  const releaseSignal = join(directory, 'release')
   const eventsPath = join(directory, 'events')
   await mkdir(directory)
   await mkdir(lock)
@@ -263,7 +270,7 @@ test('a killed published claimant does not block a high-contention recovery elec
   assert.equal(interruptedOutput.includes('UNEXPECTED_CALLBACK'), false)
 
   const workers = Array.from({ length: 24 }, () => {
-    const child = spawn(process.execPath, ['--input-type=module', '-e', lockWorkerSource, moduleUrl, root, startSignal, eventsPath], {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', lockWorkerSource, moduleUrl, root, startSignal, eventsPath, releaseSignal], {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     t.after(() => {
@@ -271,6 +278,8 @@ test('a killed published claimant does not block a high-contention recovery elec
     })
     let stdout = ''
     let stderr = ''
+    let enteredResolve
+    const entered = new Promise((resolvePromise) => { enteredResolve = resolvePromise })
     let readyResolve
     let readyReject
     const ready = new Promise((resolvePromise, reject) => {
@@ -280,6 +289,7 @@ test('a killed published claimant does not block a high-contention recovery elec
     child.stdout.on('data', (chunk) => {
       stdout += chunk
       if (stdout.includes('READY\n')) readyResolve()
+      if (stdout.includes('ENTERED\n')) enteredResolve()
     })
     child.stderr.on('data', (chunk) => { stderr += chunk })
     child.once('error', readyReject)
@@ -287,10 +297,15 @@ test('a killed published claimant does not block a high-contention recovery elec
       child.once('error', reject)
       child.once('close', (status) => resolvePromise({ status, stdout, stderr }))
     })
-    return { ready, done }
+    return { ready, done, entered }
   })
   await Promise.all(workers.map((worker) => worker.ready))
   await writeFile(startSignal, 'start\n')
+  // Keep every successful lease live until every contender has either entered
+  // or returned. A fixed sleep can permit unrelated sequential acquisitions
+  // when a Windows process is scheduled late.
+  await Promise.all(workers.map((worker) => Promise.race([worker.done, worker.entered])))
+  await writeFile(releaseSignal, 'release\n')
   const results = await Promise.all(workers.map((worker) => worker.done))
   for (const result of results) assert.equal(result.status, 0, result.stderr)
   const outcomes = results.map((result) => result.stdout.match(/RESULT ([A-Z0-9_]+|ok)/u)?.[1])
