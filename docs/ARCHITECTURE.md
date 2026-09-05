@@ -133,7 +133,9 @@ and garbage cleanup is bounded per attempt. A published final claim or ticket
 whose JSON value is `null` is malformed; only a file that another contender
 removed after the directory snapshot is treated as absent. Ordinary publishers cannot fill a
 path gap before retirement, and after retirement their atomic publication race
-with the reaper admits only one lifecycle callback.
+with the reaper admits only one lifecycle callback. Windows removal of the
+uniquely retired directory tolerates transient open files with bounded retries;
+persistent cleanup failures prevent the recovering caller's mutation callback.
 When no state root exists, one private candidate containing the lock is renamed
 into place atomically, so losing contenders cannot create state subdirectories.
 Nested Suite operations may re-enter only with the authenticated in-process

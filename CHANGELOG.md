@@ -2,16 +2,14 @@
 
 ## Unreleased
 
+- Wait briefly for Windows readers to release an already retired lifecycle lock
+  before removing it; persistent file sharing still prevents the mutation.
 - Preserve a completed browser Manager action when its status refresh fails,
   display lifecycle warnings, and offer a separate refresh without replaying
   the change. Prevent overlapping changes and empty or unchanged tool-set
   submissions.
 - Verify installed package module imports through portable file URLs and
   check production dependencies against the npm registry in CI.
-
-All notable release changes will be recorded here.
-
-## Unreleased
 
 - Added path-free retained trace-session discovery and metadata-only Trace
   Analysis Pack v0.2 export for every session-bearing Agent-shell adapter.

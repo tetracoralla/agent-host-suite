@@ -177,49 +177,67 @@ test('stale retirement retries sharing failures and rechecks owner identity befo
   }
 })
 
-test('Windows retired lifecycle cleanup waits for an open file to close before entering the mutation', {
-  skip: process.platform !== 'win32', timeout: 30000,
+test('Windows retired lifecycle cleanup waits for transient readers and fails closed for a held file', {
+  skip: process.platform !== 'win32', timeout: 45000,
 }, async (t) => {
-  const root = await temporaryStateRoot(t)
-  const lock = join(root, '.lifecycle-lock')
-  await mkdir(lock)
-  await writeFile(join(lock, 'owner.json'), JSON.stringify({
-    schemaVersion: 'openadam.agent-host-lifecycle-lock.v0.1',
-    token: 'dead-owner-with-held-retired-file', pid: 2_147_483_647,
-    processStartedAt: '2026-01-01T00:00:00.000Z',
-    operation: 'test.crashed', acquiredAt: '2026-01-01T00:00:00.000Z',
-  }))
-  let retiredPath
-  let holderClosed
-  let entered = false
-  await withLifecycleMutation({ root }, 'test.retired-file-sharing', {
-    renameLifecycleLock: async (source, destination) => {
-      await rename(source, destination)
-      retiredPath = destination
-      const holder = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', [
-        '$file = [System.IO.File]::Open($env:OPENADAM_HELD_LOCK_FILE, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)',
-        "try { [Console]::Out.WriteLine('HELD'); [Console]::Out.Flush(); [System.Threading.Thread]::Sleep(350) } finally { $file.Dispose() }",
-      ].join('; ')], {
-        env: { ...process.env, OPENADAM_HELD_LOCK_FILE: join(destination, 'owner.json') },
-        stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
-      })
-      t.after(async () => { if (holder.exitCode === null) holder.kill(); await holderClosed })
-      let stderr = ''
-      holder.stderr.on('data', (bytes) => { stderr += bytes })
-      holderClosed = new Promise((resolve, reject) => { holder.once('close', resolve); holder.once('error', reject) })
-      await new Promise((resolve, reject) => {
-        let output = ''
-        holder.stdout.on('data', (bytes) => { output += bytes; if (output.includes('HELD')) resolve() })
-        holderClosed.then((code) => reject(new Error(`File holder exited before readiness (${code}): ${stderr}`)), reject)
-      })
-    },
-  }, async () => {
-    await assert.rejects(access(retiredPath), { code: 'ENOENT' })
-    entered = true
-  })
-  assert.equal(entered, true)
-  assert.equal(await holderClosed, 0)
-  await assert.rejects(access(lock), { code: 'ENOENT' })
+  for (const permanentlyHeld of [false, true]) {
+    const root = await temporaryStateRoot(t)
+    const lock = join(root, '.lifecycle-lock')
+    await mkdir(lock)
+    await writeFile(join(lock, 'owner.json'), JSON.stringify({
+      schemaVersion: 'openadam.agent-host-lifecycle-lock.v0.1',
+      token: 'dead-owner-with-held-retired-file', pid: 2_147_483_647,
+      processStartedAt: '2026-01-01T00:00:00.000Z',
+      operation: 'test.crashed', acquiredAt: '2026-01-01T00:00:00.000Z',
+    }))
+    let retiredPath
+    let holderClosed
+    let entered = false
+    const releaseHolder = join(root, 'release-file-holder')
+    const recovering = withLifecycleMutation({ root }, 'test.retired-file-sharing', {
+      renameLifecycleLock: async (source, destination) => {
+        await rename(source, destination)
+        retiredPath = destination
+        const holder = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', [
+          '$file = [System.IO.File]::Open($env:OPENADAM_HELD_LOCK_FILE, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)',
+          "try { [Console]::Out.WriteLine('HELD'); [Console]::Out.Flush()",
+          permanentlyHeld
+            ? "$deadline = [DateTime]::UtcNow.AddSeconds(15); while (-not [System.IO.File]::Exists($env:OPENADAM_RELEASE_FILE_HOLDER)) { if ([DateTime]::UtcNow -gt $deadline) { throw 'File holder release expired' }; [System.Threading.Thread]::Sleep(10) }"
+            : '[System.Threading.Thread]::Sleep(350)',
+          '} finally { $file.Dispose() }',
+        ].join('; ')], {
+          env: { ...process.env, OPENADAM_HELD_LOCK_FILE: join(destination, 'owner.json'), OPENADAM_RELEASE_FILE_HOLDER: releaseHolder },
+          stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+        })
+        t.after(async () => { if (holder.exitCode === null) holder.kill(); await holderClosed })
+        let stderr = ''
+        holder.stderr.on('data', (bytes) => { stderr += bytes })
+        holderClosed = new Promise((resolve, reject) => { holder.once('close', resolve); holder.once('error', reject) })
+        await new Promise((resolve, reject) => {
+          let output = ''
+          holder.stdout.on('data', (bytes) => { output += bytes; if (output.includes('HELD')) resolve() })
+          holderClosed.then((code) => reject(new Error(`File holder exited before readiness (${code}): ${stderr}`)), reject)
+        })
+      },
+    }, async () => {
+      await assert.rejects(access(retiredPath), { code: 'ENOENT' })
+      entered = true
+    })
+    try {
+      if (permanentlyHeld) {
+        await assert.rejects(recovering, { code: 'LIFECYCLE_RECOVERY_FAILED' })
+        assert.equal(entered, false)
+        await access(join(retiredPath, 'owner.json'))
+      } else {
+        await recovering
+        assert.equal(entered, true)
+      }
+    } finally {
+      await writeFile(releaseHolder, 'release\n')
+      if (holderClosed !== undefined) assert.equal(await holderClosed, 0)
+    }
+    await assert.rejects(access(lock), { code: 'ENOENT' })
+  }
 })
 
 test('a blocked retirement is busy only with fresh live contention and otherwise fails closed', async (t) => {
