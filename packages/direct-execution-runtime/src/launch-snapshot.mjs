@@ -211,9 +211,11 @@ export async function createLaunchSnapshot(binding) {
     await disposal
   }
 
+  let phase = 'private-directory'
   try {
     if (process.platform === 'win32') requirePrivateWindowsResults([await windowsAccessList(temporaryRoot, true)])
     else await chmod(temporaryRoot, 0o700)
+    phase = 'identity-copy'
     await mkdir(filesystemRoot, { mode: 0o700 })
     const fields = launchFields(binding)
     const volumes = new Map()
@@ -287,6 +289,11 @@ export async function createLaunchSnapshot(binding) {
     throw new HostError('HOST_PROVIDER_REPLACED', 'Provider execution identity could not be frozen before launch', {
       cause: error,
       retryable: true,
+      details: {
+        phase,
+        causeCode: typeof error?.code === 'string' && /^[A-Z_0-9]{1,80}$/u.test(error.code) ? error.code : null,
+        timedOut: error?.code === 'ETIMEDOUT' || (error?.killed === true && error?.signal === 'SIGTERM'),
+      },
     })
   }
 }
