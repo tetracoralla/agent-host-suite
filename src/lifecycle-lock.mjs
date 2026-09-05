@@ -397,9 +397,27 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
         break
       } catch (error) {
         if (error?.code === 'ENOENT') return false
-        if (['EPERM', 'EACCES', 'EBUSY'].includes(error?.code) && Date.now() < retirementDeadline) {
-          await new Promise((resolvePromise) => setTimeout(resolvePromise, 25))
-          continue
+        if (['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) {
+          if (Date.now() < retirementDeadline) {
+            await new Promise((resolvePromise) => setTimeout(resolvePromise, 25))
+            continue
+          }
+          // Windows can keep a directory busy while another live contender is
+          // accessing its election files. Report contention only when a fresh
+          // owner/claim observation establishes it; an unexplained permission
+          // failure remains a recovery failure and never grants a lease.
+          const finalOwner = await readJson(join(lockPath, OWNER_FILE)).catch((failure) => {
+            if (failure?.code === 'ENOENT') return null
+            throw failure
+          })
+          if (finalOwner === null) return false
+          if (!validOwner(finalOwner)) throw recoveryInvalid('The stale lock owner changed during retirement')
+          if (finalOwner.token !== retained.token || await ownerProcessMatches(finalOwner)) throw lifecycleBusy(finalOwner)
+          const active = await inspectRecoveryClaims(claimsPath, claim.token)
+          if (active === null || !active.some((item) => item.value.token === claim.token)) return false
+          if (active.some((item) => item.value.token !== claim.token)) {
+            throw new AgentHostError('LIFECYCLE_RECOVERY_BUSY', 'Other live recovery claimants still hold the stale lock directory', { causeCode: error.code })
+          }
         }
         throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The elected stale Agent Host lifecycle lock could not be retired', { causeCode: error?.code ?? null })
       }

@@ -177,6 +177,47 @@ test('stale retirement retries sharing failures and rechecks owner identity befo
   }
 })
 
+test('a blocked retirement is busy only with fresh live contention and otherwise fails closed', async (t) => {
+  for (const contended of [false, true]) {
+    const root = await temporaryStateRoot(t)
+    const lock = join(root, '.lifecycle-lock')
+    const owner = {
+      schemaVersion: 'openadam.agent-host-lifecycle-lock.v0.1',
+      token: 'stale-owner', pid: 2_147_483_647,
+      processStartedAt: '2026-01-01T00:00:00.000Z',
+      operation: 'test.crashed', acquiredAt: '2026-01-01T00:00:00.000Z',
+    }
+    await mkdir(lock)
+    await writeFile(join(lock, 'owner.json'), JSON.stringify(owner))
+    const token = randomUUID()
+    let published = false
+    let entered = false
+    await assert.rejects(withLifecycleMutation({ root }, 'test.blocked-retirement', {
+      renameLifecycleLock: async () => {
+        if (contended && !published) {
+          published = true
+          const claimsPath = join(lock, '.recovery-claims')
+          await writeFile(join(claimsPath, `claim-${token}.json`), JSON.stringify({
+            ...owner, schemaVersion: 'openadam.agent-host-lifecycle-recovery-claim.v0.1',
+            token, targetOwnerToken: owner.token, pid: process.pid,
+            processStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+          }))
+          await writeFile(join(claimsPath, `ticket-${token}.json`), JSON.stringify({
+            schemaVersion: 'openadam.agent-host-lifecycle-recovery-ticket.v0.1',
+            token, targetOwnerToken: owner.token, ticket: 128,
+          }))
+        }
+        throw Object.assign(new Error('blocked rename'), { code: 'EPERM' })
+      },
+    }, async () => { entered = true }), {
+      code: contended ? 'LIFECYCLE_RECOVERY_BUSY' : 'LIFECYCLE_RECOVERY_FAILED',
+    })
+    assert.equal(entered, false)
+    assert.deepEqual(JSON.parse(await readFile(join(lock, 'owner.json'), 'utf8')), owner)
+    if (contended) await access(join(lock, '.recovery-claims', `claim-${token}.json`))
+  }
+})
+
 test('lifecycle mutation lock rejects a reused live PID whose recorded start identity does not match', async (t) => {
   const root = await temporaryStateRoot(t)
   const lock = join(root, '.lifecycle-lock')
