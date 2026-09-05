@@ -49,3 +49,43 @@ test('Windows Job retires descendants after root exit and explicit cancellation'
     assert.throws(() => process.kill(pid, 0), (error) => error.code === 'ESRCH')
   }
 })
+
+async function waitForExit(pid) {
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    try { process.kill(pid, 0) } catch (error) { if (error.code === 'ESRCH') return; throw error }
+    await new Promise((done) => setTimeout(done, 20))
+  }
+  throw new Error(`Owned process ${pid} survived Host exit`)
+}
+
+test('Windows Provider Job retires even when its creating Host is forcibly terminated', {
+  skip: process.platform !== 'win32', timeout: 45000,
+}, async (t) => {
+  const { spawn } = await import('node:child_process')
+  const directory = await mkdtemp(join(tmpdir(), 'provider-host-exit-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const providerFile = join(directory, 'provider.mjs')
+  const hostFile = join(directory, 'host.mjs')
+  const pidFile = join(directory, 'provider.pid')
+  const guardianPidFile = join(directory, 'guardian.pid')
+  await writeFile(providerFile, "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000)")
+  await writeFile(hostFile, [
+    `import { spawnManagedProvider } from ${JSON.stringify(new URL('../src/process-tree.mjs', import.meta.url).href)}`,
+    "import { writeFileSync } from 'node:fs'",
+    'const [provider, pidFile, guardianPidFile] = process.argv.slice(2)',
+    "const child = spawnManagedProvider(process.execPath, [provider, pidFile], { env: process.env, cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] })",
+    'child.stdout.resume(); child.stderr.pipe(process.stderr)',
+    'writeFileSync(guardianPidFile, String(child.pid))',
+  ].join('\n'))
+  const host = spawn(process.execPath, [hostFile, providerFile, pidFile, guardianPidFile], { stdio: ['ignore', 'ignore', 'pipe'] })
+  let errors = ''
+  host.stderr.on('data', (bytes) => { errors += bytes })
+  t.after(() => { if (host.exitCode === null) host.kill('SIGKILL') })
+  const closed = new Promise((resolve, reject) => { host.once('close', resolve); host.once('error', reject) })
+  const providerPid = await Promise.race([waitForPid(pidFile), closed.then(() => { throw new Error(`Host exited early: ${errors}`) })])
+  const guardianPid = await waitForPid(guardianPidFile)
+  host.kill('SIGKILL')
+  await closed
+  await Promise.all([waitForExit(providerPid), waitForExit(guardianPid)])
+})

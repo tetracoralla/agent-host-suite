@@ -47,6 +47,10 @@ public static class OpenAdamProviderJob {
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateProcess(IntPtr process, uint code);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process, out uint code);
   [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForMultipleObjects(uint count, IntPtr[] handles, bool all, uint milliseconds);
   [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int id);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
@@ -61,11 +65,20 @@ public static class OpenAdamProviderJob {
     }
     return result.Append('\\', slashes * 2).Append('"').ToString();
   }
-  public static int Run(string command, string[] args, string cwd) {
+  public static int Run(string command, string[] args, string cwd, uint ownerPid) {
     IntPtr job = CreateJobObject(IntPtr.Zero, null);
     if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
     ProcessInfo process = new ProcessInfo();
+    IntPtr owner = IntPtr.Zero;
     try {
+      owner = OpenProcess(0x00101000, false, ownerPid);
+      if (owner == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+      long ownerCreated, guardianCreated, exited, kernel, user;
+      Require(GetProcessTimes(owner, out ownerCreated, out exited, out kernel, out user));
+      Require(GetProcessTimes(GetCurrentProcess(), out guardianCreated, out exited, out kernel, out user));
+      // A recycled PID is younger than the guardian that the original Host
+      // already created. Keep the process handle after this check, not its PID.
+      if (ownerCreated > guardianCreated || WaitForSingleObject(owner, 0) != 258) throw new Exception("Host owner is gone");
       var limits = new ExtendedLimits(); limits.Basic.Flags = 0x2000;
       Require(SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(ExtendedLimits))));
       var startup = new Startup(); startup.Size = Marshal.SizeOf(typeof(Startup)); startup.Flags = 0x100;
@@ -77,8 +90,10 @@ public static class OpenAdamProviderJob {
       // The root is suspended until admission, so no descendant can escape the Job.
       Require(AssignProcessToJobObject(job, process.Process));
       if (ResumeThread(process.Thread) == 0xffffffff) throw new Win32Exception(Marshal.GetLastWin32Error());
-      if (WaitForSingleObject(process.Process, 0xffffffff) != 0) throw new Win32Exception(Marshal.GetLastWin32Error());
-      uint code; Require(GetExitCodeProcess(process.Process, out code));
+      uint observed = WaitForMultipleObjects(2, new [] { process.Process, owner }, false, 0xffffffff);
+      if (observed > 1) throw new Win32Exception(Marshal.GetLastWin32Error());
+      uint code = 125;
+      if (observed == 0) Require(GetExitCodeProcess(process.Process, out code));
       Require(TerminateJobObject(job, code));
       for (int attempt = 0; attempt < 500; attempt++) {
         Accounting status;
@@ -90,12 +105,13 @@ public static class OpenAdamProviderJob {
     } finally {
       if (process.Process != IntPtr.Zero) { TerminateProcess(process.Process, 125); CloseHandle(process.Process); }
       if (process.Thread != IntPtr.Zero) CloseHandle(process.Thread);
+      if (owner != IntPtr.Zero) CloseHandle(owner);
       CloseHandle(job);
     }
   }
 }
 '@
-  $status = [OpenAdamProviderJob]::Run([string]$launch.command, [string[]]@($launch.args), [string]$launch.cwd)
+  $status = [OpenAdamProviderJob]::Run([string]$launch.command, [string[]]@($launch.args), [string]$launch.cwd, [uint32]$launch.ownerPid)
   exit $status
 } catch {
   $cause = $_.Exception.GetBaseException()

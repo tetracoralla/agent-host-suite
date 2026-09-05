@@ -349,3 +349,8 @@ verifies the remaining Job members when the root exits; forced guardian cleanup
 closes the Job handle and retires its descendants. No generic shell executes the
 Provider command. This closes the gap where `taskkill /T` alone cannot identify
 descendants after their root has already exited.
+
+The guardian also holds a handle to the creating Host process. If that Host is
+forcibly terminated, the guardian retires the Job before exiting. Creation-time
+ordering rejects a reused Host PID before launch; cleanup waits on the original
+process handle. This covers abrupt Host exit as well as explicit session close.

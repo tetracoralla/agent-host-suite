@@ -25,7 +25,7 @@ export function spawnManagedProvider(command, args, options) {
   if (platform() !== 'win32') return spawn(command, args, options)
   const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsGuardian], {
     ...options,
-    env: { ...options.env, OPENADAM_PROVIDER_LAUNCH: JSON.stringify({ command, args, cwd: options.cwd }) },
+    env: { ...options.env, OPENADAM_PROVIDER_LAUNCH: JSON.stringify({ command, args, cwd: options.cwd, ownerPid: process.pid }) },
     shell: false,
   })
   guardedWindowsChildren.add(child)

@@ -11,6 +11,35 @@ const execFileAsync = promisify(execFile)
 const root = fileURLToPath(new URL('../', import.meta.url))
 const directory = await mkdtemp(resolve(tmpdir(), 'direct-execution-package-'))
 
+async function windowsDescendants(ownerPid) {
+  if (process.platform !== 'win32') return []
+  const { stdout } = await execFileAsync('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules'); Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress",
+  ], { timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true })
+  const rows = JSON.parse(stdout)
+  const owned = new Set([ownerPid])
+  for (let pass = 0; pass < rows.length; pass += 1) {
+    const before = owned.size
+    for (const row of rows) if (owned.has(row.ParentProcessId)) owned.add(row.ProcessId)
+    if (owned.size === before) break
+  }
+  owned.delete(ownerPid)
+  return [...owned]
+}
+
+async function assertProcessesExited(pids) {
+  const deadline = Date.now() + 15000
+  for (;;) {
+    const live = pids.filter((pid) => {
+      try { process.kill(pid, 0); return true } catch (error) { if (error.code === 'ESRCH') return false; throw error }
+    })
+    if (live.length === 0) return
+    if (Date.now() >= deadline) throw new Error(`packaged Host left owned processes running: ${live.join(', ')}`)
+    await new Promise((done) => setTimeout(done, 20))
+  }
+}
+
 function waitForJsonLine(child, timeoutMs = 10_000) {
   return new Promise((resolvePromise, reject) => {
     let stdout = ''
@@ -211,6 +240,7 @@ try {
   let ready
   let first
   let second
+  let descendants = []
   try {
     ready = await waitForJsonLine(service)
     const firstRun = await execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', firstOrderPath])
@@ -223,14 +253,17 @@ try {
     if (second.calls?.[0]?.result?.value !== 'packaged-host' || second.calls[0].session !== 'warm') {
       throw new Error(`second packaged host call did not reuse the provider session: ${JSON.stringify(second)}`)
     }
+    descendants = await windowsDescendants(service.pid)
+    if (process.platform === 'win32' && descendants.length < 2) throw new Error('packaged Host did not retain its Windows guardian and Provider')
   } finally {
     if (service.exitCode === null && service.signalCode === null) service.kill('SIGTERM')
     const exited = await serviceExit
     if (exited.error !== undefined) throw exited.error
-    if (exited.code !== 0) throw new Error(`packaged service did not stop cleanly: ${exited.code ?? exited.signal}`)
+    if (exited.code !== 0 && !(process.platform === 'win32' && exited.code === 1)) throw new Error(`packaged service exit was unexpected: ${exited.code ?? exited.signal}`)
+    await assertProcessesExited(descendants)
   }
   await assertEndpointAbsent(socketPath)
-  const socketAfterClose = process.platform === 'win32' ? null : await lstat(socketPath).catch((error) => {
+  const socketAfterClose = process.platform === 'win32' ? undefined : await lstat(socketPath).catch((error) => {
     if (error?.code === 'ENOENT') return undefined
     throw error
   })
@@ -246,7 +279,9 @@ try {
       ready: ready.status,
       firstSession: first.calls[0].session,
       secondSession: second.calls[0].session,
-      cleanShutdown: true,
+      cleanShutdown: process.platform !== 'win32',
+      shutdownMode: process.platform === 'win32' ? 'host-process-termination' : 'graceful-signal',
+      ownedProcessesRetired: true,
     },
     installedResolver: {
       status: resolved.status,
