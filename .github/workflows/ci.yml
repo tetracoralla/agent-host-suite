@@ -54,6 +54,8 @@ jobs:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
+      - name: Verify real private Windows access lists
+        run: node --test --test-timeout=60000 test/private-permissions.test.mjs
       - run: npm run check
       - run: npm run audit:production
       - name: Create a complete bound Windows packaging fixture

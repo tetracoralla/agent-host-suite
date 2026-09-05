@@ -10,6 +10,7 @@ const pendingReads = new Map()
 // Use SIDs rather than localized account names, and keep path data out of code.
 const windowsScript = String.raw`
 $ErrorActionPreference = 'Stop'
+try {
 $target = $env:OPENADAM_PRIVATE_PATH
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $userSid = $identity.User.Value
@@ -50,6 +51,9 @@ if (-not $private -and $env:OPENADAM_PRIVATE_ENSURE -eq '1') {
 } else {
   @{status='shared'} | ConvertTo-Json -Compress
 }
+} catch {
+  @{status='error'; reason=$_.FullyQualifiedErrorId; line=$_.InvocationInfo.ScriptLineNumber} | ConvertTo-Json -Compress
+}
 `
 
 async function windowsAccess(path, ensure) {
@@ -68,6 +72,11 @@ async function windowsAccess(path, ensure) {
       value = JSON.parse(result.stdout.trim())
     } catch {
       throw new AgentHostError('STATE_ROOT_PERMISSIONS_UNAVAILABLE', 'Windows could not verify the private Agent Host access list')
+    }
+    if (value.status === 'error') {
+      const reason = String(value.reason).replace(/[^A-Za-z0-9_.,-]/gu, '').slice(0, 160)
+      const line = Number.isSafeInteger(value.line) ? value.line : 0
+      throw new AgentHostError('STATE_ROOT_PERMISSIONS_UNAVAILABLE', `Windows access-list verification failed (${reason}, line ${line})`)
     }
     if (value.status === 'wrong-owner') {
       throw new AgentHostError('STATE_ROOT_WRONG_OWNER', 'Private Agent Host state is not owned by the current Windows identity')
