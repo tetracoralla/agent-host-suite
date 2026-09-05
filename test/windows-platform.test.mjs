@@ -1,7 +1,8 @@
+import { readProcessInventory } from '../src/process-inventory.mjs'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { toolSearchPath } from '../src/process.mjs'
+import { runFile, toolSearchPath } from '../src/process.mjs'
 import { currentReleasePlatform } from '../src/release-manifest.mjs'
 
 test('release platform mapping covers supported Windows architectures', () => {
@@ -30,4 +31,13 @@ test('Windows application install and restore verify state compatibility before 
   assert.equal(compatibilityFunction >= 0, true)
   assert.equal(restoreCheck > compatibilityFunction && restoreCheck < restoreSwap, true)
   assert.equal(installCheck > restoreSwap && installCheck < installSwap, true)
+})
+
+
+test('Windows process inventory observes the current real process under the calling shell environment', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const inventory = await readProcessInventory(runFile)
+  assert.ok(Array.isArray(inventory), 'Windows process inventory is unavailable')
+  assert.ok(inventory.some((item) => item.pid === process.pid && item.command.includes('node')))
 })

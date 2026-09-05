@@ -1,6 +1,7 @@
 import { platform } from 'node:os'
 
 const POWERSHELL_INVENTORY = [
+  "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules');",
   'Get-CimInstance Win32_Process',
   '| Select-Object ProcessId,CommandLine,WorkingSetSize',
   '| ConvertTo-Json -Compress',

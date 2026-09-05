@@ -358,6 +358,7 @@ function windowsTaskIdentity(taskName) {
 async function inspectWindowsTaskState(taskName, runner) {
   const identity = windowsTaskIdentity(taskName)
   const script = [
+    "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')",
     `$matches = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskPath -eq ${powershellLiteral(identity.taskPath)} -and $_.TaskName -eq ${powershellLiteral(identity.name)} })`,
     "if ($matches.Count -eq 0) { 'ABSENT' } elseif ($matches.Count -eq 1) { 'PRESENT:' + $matches[0].State.ToString() } else { 'AMBIGUOUS' }",
   ].join('; ')
@@ -382,6 +383,7 @@ async function inspectWindowsTaskState(taskName, runner) {
 async function confirmWindowsTaskAbsent(taskName, runner) {
   const identity = windowsTaskIdentity(taskName)
   const script = [
+    "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')",
     `$matches = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskPath -eq ${powershellLiteral(identity.taskPath)} -and $_.TaskName -eq ${powershellLiteral(identity.name)} })`,
     "if ($matches.Count -eq 0) { 'ABSENT' } elseif ($matches.Count -eq 1) { 'PRESENT' } else { 'AMBIGUOUS' }",
   ].join('; ')
