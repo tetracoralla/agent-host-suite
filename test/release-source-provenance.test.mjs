@@ -55,6 +55,7 @@ async function repository(t) {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-source-policy-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['init', '-q'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'core.autocrlf', 'false'], { cwd: root })
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.name', 'Agent Host Test'], { cwd: root })
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
   await writeFile(join(root, '.gitignore'), 'ignored-output\n')
@@ -70,6 +71,7 @@ async function armorialRepository(t, { failRelease = false, linkedRelease = fals
   const root = await mkdtemp(join(tmpdir(), 'agent-host-armorial-source-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['init', '-q'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'core.autocrlf', 'false'], { cwd: root })
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.name', 'Agent Host Test'], { cwd: root })
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
   await mkdir(join(root, 'scripts'))
@@ -127,6 +129,7 @@ async function fileVitalsRepository(t) {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-file-vitals-source-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['init', '-q'], { cwd: root })
+  await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'core.autocrlf', 'false'], { cwd: root })
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.name', 'Agent Host Test'], { cwd: root })
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
   const bundle = 'file-vitals-0.3.3-darwin-arm64'

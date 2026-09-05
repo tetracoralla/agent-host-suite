@@ -34,7 +34,7 @@ async function regularFiles(root, current = root, result = []) {
     const path = join(current, entry.name)
     if (entry.isSymbolicLink()) throw new AgentHostError('CODEX_PROJECTION_INVALID', `Codex projection refuses symbolic links: ${path}`)
     if (entry.isDirectory()) await regularFiles(root, path, result)
-    else if (entry.isFile()) result.push(relative(root, path))
+    else if (entry.isFile()) result.push(relative(root, path).split(sep).join('/'))
     else throw new AgentHostError('CODEX_PROJECTION_INVALID', `Codex projection refuses special files: ${path}`)
   }
   return result.sort()

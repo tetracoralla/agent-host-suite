@@ -45,7 +45,7 @@ function bytesIdentity(contents) {
   return `sha256:${createHash('sha256').update(contents).digest('hex')}`
 }
 
-test('service replacement rejects a stale lifecycle identity even when the state file disappeared', async (t) => {
+test('service replacement rejects a stale lifecycle identity even when the state file disappeared', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-missing-state-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launchAgentPath = join(directory, 'agent-host.plist')
@@ -145,7 +145,7 @@ test('retained LaunchAgent program parsing accepts one direct identity and rejec
   }
 })
 
-test('invalid retained LaunchAgent program structure fails before recovery mutation', async (t) => {
+test('invalid retained LaunchAgent program structure fails before recovery mutation', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-invalid-retained-program-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const recoveryRoot = join(directory, 'service-recovery')
@@ -193,7 +193,7 @@ test('invalid retained LaunchAgent program structure fails before recovery mutat
   assert.equal((await lstat(persisted.directory)).isDirectory(), true)
 })
 
-test('service preflight reports an existing LaunchAgent before setup mutates a host', async (t) => {
+test('service preflight reports an existing LaunchAgent before setup mutates a host', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const path = join(directory, 'agent-host.plist')
@@ -206,7 +206,7 @@ test('service preflight reports an existing LaunchAgent before setup mutates a h
   assert.equal(calls, 0)
 })
 
-test('service preflight admits a missing path only when the launchd label is absent', async (t) => {
+test('service preflight admits a missing path only when the launchd label is absent', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const path = join(directory, 'agent-host.plist')
@@ -218,7 +218,7 @@ test('service preflight admits a missing path only when the launchd label is abs
   assert.equal(ready.launchAgentPath, path)
 })
 
-test('service preflight and inspection do not convert host query failures into absence', async (t) => {
+test('service preflight and inspection do not convert host query failures into absence', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-query-failure-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launchAgentPath = join(directory, 'agent-host.plist')
@@ -253,7 +253,7 @@ test('service inspection does not adopt another installation when this state has
   assert.equal(calls, 0)
 })
 
-test('service inspection distinguishes a loaded crash loop from a ready socket service', async (t) => {
+test('service inspection distinguishes a loaded crash loop from a ready socket service', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-socket-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const socketPath = join(directory, 'missing.sock')
@@ -268,7 +268,7 @@ test('service inspection distinguishes a loaded crash loop from a ready socket s
   assert.equal(status.lastExitCode, 1)
 })
 
-test('fresh macOS service readiness failure removes its descriptor and Socket', async (t) => {
+test('fresh macOS service readiness failure removes its descriptor and Socket', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-fresh-failure-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launchAgentPath = join(directory, 'agent-host.plist')
@@ -294,7 +294,7 @@ test('fresh macOS service readiness failure removes its descriptor and Socket', 
   assert.equal(calls.some((call) => call[1] === 'bootout'), true)
 })
 
-test('macOS replacement failure restores exact prior descriptor and running service', async (t) => {
+test('macOS replacement failure restores exact prior descriptor and running service', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-replace-failure-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launchAgentPath = join(directory, 'agent-host.plist')
@@ -339,7 +339,7 @@ test('macOS replacement failure restores exact prior descriptor and running serv
   assert.equal(calls.filter((call) => call[1] === 'kickstart').length, 2)
 })
 
-test('macOS replacement retains recovery when rollback commands leave the replacement job active', async (t) => {
+test('macOS replacement retains recovery when rollback commands leave the replacement job active', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-restore-verification-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launchAgentPath = join(directory, 'agent-host.plist')
@@ -390,7 +390,7 @@ test('macOS replacement retains recovery when rollback commands leave the replac
   assert.deepEqual(await readdir(recoveryRoot), [failure.details.recovery.identity])
 })
 
-test('macOS failed rollback cleanup verifies absence and otherwise preserves recovery files', async (t) => {
+test('macOS failed rollback cleanup verifies absence and otherwise preserves recovery files', { skip: process.platform !== 'darwin' }, async (t) => {
   for (const replacement of [false, true]) {
     for (const outcome of ['absent', 'present', 'query-failure']) {
       const directory = await mkdtemp(join(tmpdir(), `agent-host-service-cleanup-${replacement}-${outcome}-`))
@@ -1086,7 +1086,7 @@ test('Windows replacement retains checksummed launcher and Task XML until exact 
   await assert.rejects(() => access(retained.directory), (error) => error.code === 'ENOENT')
 })
 
-test('macOS replacement refuses a loaded but stopped service before any mutation', async (t) => {
+test('macOS replacement refuses a loaded but stopped service before any mutation', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-stopped-replace-failure-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launchAgentPath = join(directory, 'agent-host.plist')
@@ -1113,7 +1113,7 @@ test('macOS replacement refuses a loaded but stopped service before any mutation
   assert.equal(calls[0][1], 'print')
 })
 
-test('macOS replacement refuses an unverified prior service state before any mutation', async (t) => {
+test('macOS replacement refuses an unverified prior service state before any mutation', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-unverified-replace-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launchAgentPath = join(directory, 'agent-host.plist')
@@ -1210,17 +1210,19 @@ test('service uninstall retains its descriptor or launcher unless removal succee
   await writeFile(macDescriptor, 'descriptor\n')
   await writeFile(windowsLauncher, 'launcher\n')
 
-  await assert.rejects(
-    uninstallService(
-      { created: true, launchAgentPath: macDescriptor },
-      async (_command, args) => args[0] === 'bootout'
-        ? { status: 5, stdout: '', stderr: 'failed' }
-        : { status: 0, stdout: 'state = running\n', stderr: '' },
-      { platformName: 'darwin' },
-    ),
-    (error) => error.code === 'SERVICE_ROLLBACK_CLEANUP_INCOMPLETE',
-  )
-  assert.equal(await readFile(macDescriptor, 'utf8'), 'descriptor\n')
+  if (process.platform === 'darwin') {
+    await assert.rejects(
+      uninstallService(
+        { created: true, launchAgentPath: macDescriptor },
+        async (_command, args) => args[0] === 'bootout'
+          ? { status: 5, stdout: '', stderr: 'failed' }
+          : { status: 0, stdout: 'state = running\n', stderr: '' },
+        { platformName: 'darwin' },
+      ),
+      (error) => error.code === 'SERVICE_ROLLBACK_CLEANUP_INCOMPLETE',
+    )
+    assert.equal(await readFile(macDescriptor, 'utf8'), 'descriptor\n')
+  }
 
   await assert.rejects(
     uninstallService(

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
 import test from 'node:test'
@@ -87,7 +87,7 @@ test('resolveExecutable finds hosts outside a GUI-clean PATH', async (t) => {
   await chmod(fake, 0o755)
   const discovered = await resolveExecutable('fake-host-cli', (command, args, options) =>
     runFile(command, args, { ...options, env: { ...options.env, PATH: `${options.env.PATH}${delimiter}${bin}` } }))
-  assert.equal(discovered, fake)
+  assert.equal(await realpath(discovered), await realpath(fake))
 })
 
 test('resolveExecutable probes which with an augmented environment', { skip: process.platform === 'win32' }, async () => {

@@ -1,6 +1,6 @@
 import { assertPrivateAccess } from './private-permissions.mjs'
 import { homedir, platform, tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, parse } from 'node:path'
+import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path'
 import { lstat, mkdtemp, rm } from 'node:fs/promises'
 import { buildDevelopmentManifest, buildDevelopmentObservabilityManifest, fingerprintIdentityFiles } from './development-manifest.mjs'
 import { AgentHostError } from './errors.mjs'
@@ -1291,9 +1291,11 @@ async function transitionComponentInventoryUnlocked(options, inventory, dependen
 }
 
 export function safePurgeRoot(root) {
-  const parsed = parse(root)
-  if (root === parsed.root || root === homedir() || dirname(root) === root) return false
-  return root.split(parsed.root).filter(Boolean).length >= 3
+  if (!isAbsolute(root)) return false
+  const normalized = resolve(root)
+  const parsed = parse(normalized)
+  if (normalized === parsed.root || normalized === resolve(homedir())) return false
+  return normalized.slice(parsed.root.length).split(sep).filter(Boolean).length >= 3
 }
 
 async function uninstallInstallationUnlocked(options, dependencies = {}, preparedPaths = null) {

@@ -401,7 +401,7 @@ test('current monitoring read bypasses stale Agent Host cache without collecting
   const calls = []
   const runner = async (command, args) => {
     calls.push([command, args])
-    if (command === '/bin/launchctl') return { status: 0, stdout: '', stderr: '' }
+    if ((command === '/bin/launchctl' || command === 'schtasks.exe')) return { status: 0, stdout: '', stderr: '' }
     if (args.includes('status')) return { status: 0, stdout: JSON.stringify(status), stderr: '' }
     if (args.includes('report')) return { status: 0, stdout: JSON.stringify(report), stderr: '' }
     throw new Error('unexpected command')

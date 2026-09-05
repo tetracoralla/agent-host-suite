@@ -3,7 +3,7 @@ import { createReadStream, createWriteStream } from 'node:fs'
 import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { platform, tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, posix, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -117,10 +117,10 @@ function archiveEntryName(raw) {
 function expectedArchiveDirectories(files) {
   const directories = new Set()
   for (const file of files) {
-    let directory = dirname(file)
+    let directory = posix.dirname(file)
     while (directory !== '.') {
       directories.add(directory)
-      directory = dirname(directory)
+      directory = posix.dirname(directory)
     }
   }
   return directories
@@ -130,11 +130,11 @@ async function inspectArchive(path, runner) {
   const archiveInfo = await stat(path)
   const timeoutMs = archiveCommandTimeoutMs(archiveInfo.size)
   const listing = await runner(tarCommand(), ['-tzf', path], { timeoutMs })
-  const entries = listing.stdout.split('\n').filter(Boolean)
+  const entries = listing.stdout.split(/\r?\n/u).filter(Boolean)
   if (entries.length === 0 || !entries.some((entry) => entry.replace(/^\.\//u, '') === 'component.json')) fail('RELEASE_ARCHIVE_INVALID', 'Release archive does not contain component.json')
   for (const entry of entries) if (!safeArchiveEntry(entry)) fail('RELEASE_ARCHIVE_UNSAFE', `Release archive contains an unsafe path: ${entry}`)
   const verbose = await runner(tarCommand(), ['-tvzf', path], { timeoutMs })
-  const verboseLines = verbose.stdout.split('\n').filter(Boolean)
+  const verboseLines = verbose.stdout.split(/\r?\n/u).filter(Boolean)
   for (const line of verboseLines) {
     if (!['-', 'd'].includes(line[0])) fail('RELEASE_ARCHIVE_UNSAFE', 'Release archives cannot contain links or special files')
   }

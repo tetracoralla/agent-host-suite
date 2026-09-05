@@ -53,7 +53,7 @@ test('Claude Developer Skill projection installs, probes the exact CLI version, 
   assert.equal(preview.present, false)
   const managed = await installDeveloperKitSkill('claude', manifest, paths, null, { homeRoot })
   assert.equal((await lstat(managed.exposurePath)).isSymbolicLink(), true)
-  assert.match(await readFile(managed.launcherPath, 'utf8'), /^#!\/bin\/sh\nexec /u)
+  assert.match(await readFile(managed.launcherPath, 'utf8'), process.platform === 'win32' ? /^@echo off\r\nsetlocal DisableDelayedExpansion\r\n/u : /^#!\/bin\/sh\nexec /u)
   assert.equal((await inspectDeveloperKitSkill(managed)).status, 'ok')
   const removed = await uninstallDeveloperKitSkill(managed)
   assert.equal(removed.removed, true)

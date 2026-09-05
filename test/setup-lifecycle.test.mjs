@@ -333,6 +333,8 @@ test('purge-data removes the private state root for a deep state root', async (t
 })
 
 test('purge-data refuses filesystem roots, home, and shallow state roots', async () => {
+  assert.equal(safePurgeRoot('relative/path/state'), false)
+  assert.equal(safePurgeRoot(join(homedir(), '..', '..', '..', '..', '..')), false)
   assert.equal(safePurgeRoot('/'), false)
   assert.equal(safePurgeRoot('/private/tmp'), false)
   assert.equal(safePurgeRoot('/tmp/one-level'), false)

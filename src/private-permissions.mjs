@@ -10,6 +10,9 @@ const pendingReads = new Map()
 // Use SIDs rather than localized account names, and keep path data out of code.
 const windowsScript = String.raw`
 $ErrorActionPreference = 'Stop'
+# Parent PowerShell 7 sessions can supply an incompatible module search path to
+# Windows PowerShell 5.1. Resolve only this engine's built-in modules.
+$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')
 try {
 $target = $env:OPENADAM_PRIVATE_PATH
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()

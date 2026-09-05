@@ -1,4 +1,7 @@
-import { isAbsolute, normalize, sep } from 'node:path'
+import { posix, win32 } from 'node:path'
+
+// Manifest inventories always use slash-separated paths, regardless of host OS.
+const { isAbsolute, normalize, sep } = posix
 import { AgentHostError } from './errors.mjs'
 
 export const TOOL_INTEGRATION_SCHEMA = 'openadam.agent-host-tool-integration.v0.1'
@@ -36,7 +39,7 @@ export function integrationRelativePath(value, label) {
   string(value, label)
   if (value.includes('\\')) fail(`${label} cannot contain backslashes`)
   const result = normalize(value)
-  if (isAbsolute(result) || result === '.' || result === '..' || result.startsWith(`..${sep}`)) fail(`${label} must be a contained relative path`)
+  if (isAbsolute(result) || win32.isAbsolute(result) || result === '.' || result === '..' || result.startsWith(`..${sep}`)) fail(`${label} must be a contained relative path`)
   return result
 }
 
