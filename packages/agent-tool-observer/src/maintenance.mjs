@@ -1,3 +1,4 @@
+import { archiveSemanticVersions } from "./version-history.mjs";
 import fs from "node:fs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -58,19 +59,6 @@ const TARGETS = Object.freeze([
       )`
   },
   {
-    name: "agentHostDeploymentObservations",
-    count: `SELECT count(*) AS value FROM agent_host_deployment_observation
-      WHERE observed_at_ms < ? AND deployment_id != COALESCE((
-        SELECT deployment_id FROM agent_host_deployment_observation
-        ORDER BY activated_at_ms DESC, observed_at_ms DESC, deployment_id DESC LIMIT 1
-      ), '')`,
-    remove: `DELETE FROM agent_host_deployment_observation
-      WHERE observed_at_ms < ? AND deployment_id != COALESCE((
-        SELECT deployment_id FROM agent_host_deployment_observation
-        ORDER BY activated_at_ms DESC, observed_at_ms DESC, deployment_id DESC LIMIT 1
-      ), '')`
-  },
-  {
     name: "collectionRuns",
     count: "SELECT count(*) AS value FROM collection_run WHERE COALESCE(completed_at_ms, started_at_ms) < ?",
     remove: "DELETE FROM collection_run WHERE COALESCE(completed_at_ms, started_at_ms) < ?"
@@ -122,6 +110,7 @@ export function maintainDatabase(database, config, options = {}, nowMs = Date.no
   }
   database.exec("BEGIN IMMEDIATE");
   try {
+    archiveSemanticVersions(database, cutoffMs);
     for (const target of TARGETS) database.prepare(target.remove).run(cutoffMs);
     database.exec("COMMIT");
   } catch (error) {

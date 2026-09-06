@@ -162,6 +162,13 @@ function compactTool(item) {
     provider: boundedText(item?.provider),
     toolName: boundedText(item?.toolName),
     historicalCalls: nonNegativeIntegerOrNull(item?.calls),
+    directCalls: item?.derivedCalls == null ? null : Math.max(0, (item.calls ?? 0) - item.derivedCalls),
+    referencedCalls: nonNegativeIntegerOrNull(item?.derivedCalls),
+    componentId: boundedText(item?.currentComponentBinding?.componentId ?? item?.currentAgentHostDeployment?.componentId),
+    componentVersion: boundedText(item?.currentComponentBinding?.componentVersion ?? item?.currentAgentHostDeployment?.componentVersion),
+    currentBindingCalls: nonNegativeIntegerOrNull(item?.currentComponentBinding?.calls),
+    currentBindingObservedSinceMs: nonNegativeIntegerOrNull(item?.currentComponentBinding?.observedSinceMs),
+    currentBindingAttribution: boundedText(item?.currentComponentBinding?.versionAttribution),
     measuredCalls: nonNegativeIntegerOrNull(item?.runtime?.measured),
     completed: nonNegativeIntegerOrNull(item?.runtime?.completed),
     errors: nonNegativeIntegerOrNull(item?.runtime?.errors),
@@ -194,11 +201,45 @@ function compactSemanticTarget(value) {
   }
 }
 
+function compactOutcome(value) {
+  if (!value) return null
+  const keys = ['reported', 'notReported', 'invalid', 'completed', 'partial', 'errors', 'cancelled', 'unknown']
+  return { ...Object.fromEntries(keys.map((key) => [key, nonNegativeIntegerOrNull(value[key])])),
+    items: Object.fromEntries(['total', 'completed', 'errors', 'cancelled', 'unknown']
+      .map((key) => [key, nonNegativeIntegerOrNull(value.items?.[key])])) }
+}
+
+function compactErrorCodes(rows = []) {
+  const entries = rows.slice(0, 20).map((item) => ({
+    providerId: boundedText(item.providerId), providerVersion: boundedText(item.providerVersion),
+    purpose: boundedText(item.purpose), source: boundedText(item.source),
+    code: boundedText(item.code), count: nonNegativeIntegerOrNull(item.count),
+  }))
+  return { returned: entries.length, available: rows.length, truncated: rows.length > entries.length, entries }
+}
+
+function compactVersionHistory(value) {
+  const rows = Array.isArray(value?.versions) ? value.versions : []
+  const entries = rows.slice(0, 32).map((item) => ({
+    providerId: boundedText(item.providerId), providerVersion: boundedText(item.providerVersion),
+    purpose: boundedText(item.purpose),
+    ...Object.fromEntries(['executions', 'completed', 'providerErrors', 'hostErrors', 'reportedOutcomes',
+      'partialResults', 'resultErrors', 'resultCancellations', 'batchItems', 'itemErrors', 'itemCancellations',
+      'firstObservedAtMs', 'lastObservedAtMs'].map((key) => [key, nonNegativeIntegerOrNull(item[key])])),
+  }))
+  return { basis: boundedText(value?.basis), earlierHistory: boundedText(value?.earlierHistory),
+    retention: boundedText(value?.retention), available: rows.length, returned: entries.length,
+    limit: 32, truncated: rows.length > entries.length,
+    totalExecutions: rows.reduce((sum, row) => sum + (nonNegativeIntegerOrNull(row.executions) ?? 0), 0), entries }
+}
+
 function compactSemanticExecution(item) {
   return {
     target: compactSemanticTarget(item?.target),
     providerId: boundedText(item?.providerId),
     providerVersion: boundedText(item?.providerVersion),
+    purpose: boundedText(item?.purpose) ?? 'unspecified',
+    providerOutcome: compactOutcome(item?.providerOutcome),
     transport: boundedText(item?.transport),
     executions: nonNegativeIntegerOrNull(item?.executions),
     completed: nonNegativeIntegerOrNull(item?.runtime?.completed),
@@ -230,11 +271,28 @@ function reliabilityTotals(tools, semanticExecutions) {
     semanticExecutions: semanticExecutions.reduce((sum, item) => sum + (item.executions ?? 0), 0),
     semanticCompleted: semanticExecutions.reduce((sum, item) => sum + (item.completed ?? 0), 0),
     semanticProviderErrors: semanticExecutions.reduce((sum, item) => sum + (item.providerErrors ?? 0), 0),
+    semanticPartialResults: semanticExecutions.reduce((sum, item) => sum + (item.providerOutcome?.partial ?? 0), 0),
+    semanticItemErrors: semanticExecutions.reduce((sum, item) => sum + (item.providerOutcome?.items?.errors ?? 0), 0),
+    diagnosticExecutions: semanticExecutions.filter((item) => item.purpose === 'diagnostic').reduce((sum, item) => sum + (item.executions ?? 0), 0),
+    taskExecutions: semanticExecutions.filter((item) => item.purpose === 'task').reduce((sum, item) => sum + (item.executions ?? 0), 0),
+    unspecifiedExecutions: semanticExecutions.filter((item) => item.purpose === 'unspecified').reduce((sum, item) => sum + (item.executions ?? 0), 0),
     semanticHostErrors: semanticExecutions.reduce((sum, item) => sum + (item.hostErrors ?? 0), 0),
   }
 }
 
 function enforceBudget(result) {
+  // Detail lists share one response budget; their omission must not change the
+  // complete observed totals or hide that additional rows exist.
+  const details = ['dailyActivity', 'semanticExecutions', 'tools', 'runtimeErrorCodes', 'versionHistory']
+  while (Buffer.byteLength(JSON.stringify(result), 'utf8') + 100 > USAGE_SUMMARY_MAX_BYTES) {
+    const key = details.find((name) => result[name]?.entries?.length > 0)
+    if (key === undefined) break
+    const detail = result[key]
+    if (key === 'dailyActivity') detail.entries.shift()
+    else detail.entries.pop()
+    detail.returned = detail.entries.length
+    detail.truncated = true
+  }
   let serializedBytes = 0
   let output
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -270,8 +328,10 @@ function emptyResult(configured, enabled) {
     providerUsage: [],
     providerActivity: [],
     dailyActivity: { returned: 0, available: 0, limit: DAILY_ACTIVITY_LIMIT, truncated: false, entries: [] },
-    tools: { returned: 0, available: 0, limit: TOOL_LIMIT, entries: [] },
-    semanticExecutions: { returned: 0, available: 0, limit: SEMANTIC_EXECUTION_LIMIT, entries: [] },
+    tools: { returned: 0, available: 0, limit: TOOL_LIMIT, truncated: false, entries: [] },
+    semanticExecutions: { returned: 0, available: 0, limit: SEMANTIC_EXECUTION_LIMIT, truncated: false, entries: [] },
+    versionHistory: compactVersionHistory(null),
+    runtimeErrorCodes: compactErrorCodes(),
     trace: compactTrace(null),
     reliability: reliabilityTotals([], []),
     coverage: compactCoverage(null),
@@ -296,16 +356,16 @@ export function projectUsageSummary(state, current, currentErrorCode = null) {
   const report = source?.report ?? null
   const rawTools = Array.isArray(report?.suiteTools) ? report.suiteTools : []
   const rawSemanticExecutions = Array.isArray(report?.suiteExecutions) ? report.suiteExecutions : []
-  const tools = rawTools
+  const allTools = rawTools
     .filter((item) => Number.isFinite(item?.calls) && item.calls > 0)
     .sort((left, right) => right.calls - left.calls || String(left.toolName).localeCompare(String(right.toolName)))
-    .slice(0, TOOL_LIMIT)
     .map(compactTool)
-  const semanticExecutions = rawSemanticExecutions
+  const tools = allTools.slice(0, TOOL_LIMIT)
+  const allSemanticExecutions = rawSemanticExecutions
     .filter((item) => Number.isFinite(item?.executions) && item.executions > 0)
     .sort((left, right) => right.executions - left.executions || String(left.providerId).localeCompare(String(right.providerId)))
-    .slice(0, SEMANTIC_EXECUTION_LIMIT)
     .map(compactSemanticExecution)
+  const semanticExecutions = allSemanticExecutions.slice(0, SEMANTIC_EXECUTION_LIMIT)
   const providerHealth = (report?.providers ?? []).slice(0, PROVIDER_LIMIT).map(compactProviderHealth)
   const providerUsage = (report?.usage ?? []).slice(0, PROVIDER_LIMIT).map(compactUsage)
   const providerActivity = (report?.activity?.providers ?? []).slice(0, PROVIDER_LIMIT).map(compactActivity)
@@ -318,6 +378,8 @@ export function projectUsageSummary(state, current, currentErrorCode = null) {
     configured: true,
     enabled: true,
     windowDays: nonNegativeIntegerOrNull(report?.windowDays),
+    versionHistory: compactVersionHistory(report?.versionHistory),
+    runtimeErrorCodes: compactErrorCodes(report?.runtimeErrorCodes),
     observationSource: currentAvailable ? 'current-observer-snapshots' : cached === null ? 'none' : 'cached-agent-host-refresh',
     currentReadErrorCode: currentAvailable ? null : boundedText(currentErrorCode),
     freshness: currentAvailable ? compactFreshness(current.freshness) : null,
@@ -338,15 +400,16 @@ export function projectUsageSummary(state, current, currentErrorCode = null) {
       truncated: report?.activity?.dailyRowsTruncated === true || rawDailyActivity.length > DAILY_ACTIVITY_LIMIT,
       entries: dailyActivity,
     },
-    tools: { returned: tools.length, available: rawTools.length, limit: TOOL_LIMIT, entries: tools },
+    tools: { returned: tools.length, available: allTools.length, limit: TOOL_LIMIT, truncated: tools.length < allTools.length, entries: tools },
     semanticExecutions: {
       returned: semanticExecutions.length,
-      available: rawSemanticExecutions.length,
+      available: allSemanticExecutions.length,
       limit: SEMANTIC_EXECUTION_LIMIT,
+      truncated: semanticExecutions.length < allSemanticExecutions.length,
       entries: semanticExecutions,
     },
     trace: compactTrace(report?.tracePlane),
-    reliability: reliabilityTotals(tools, semanticExecutions),
+    reliability: reliabilityTotals(allTools, allSemanticExecutions),
     coverage: compactCoverage(report?.observationCoverage),
     privacy: {
       rawPromptStored: false,

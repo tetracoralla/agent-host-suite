@@ -20,6 +20,7 @@ async function schema(name) {
 
 test('published host carrier schemas agree with runtime request and response checks', async () => {
   const ajv = new Ajv2020({ allErrors: true, strict: false })
+  ajv.addSchema(await schema('work-order.schema.v0.1.json'))
   ajv.addSchema(await schema('work-order.schema.json'))
   ajv.addSchema(await schema('contract-selection.schema.json'))
   const validateRequest = ajv.compile(await schema('host-request.schema.json'))
@@ -32,6 +33,13 @@ test('published host carrier schemas agree with runtime request and response che
   }
   assert.equal(validateRequest(request), true, JSON.stringify(validateRequest.errors))
   assert.equal(assertHostRequest(request, 1024 * 1024), request)
+  const modern = { ...request, schemaVersion: 'openadam.direct-host-request.v0.2',
+    workOrder: { ...request.workOrder, schemaVersion: 'openadam.direct-work-order.v0.2', purpose: 'diagnostic' } }
+  const validateModern = ajv.compile(await schema('host-request.schema.v0.2.json'))
+  assert.equal(validateModern(modern), true, JSON.stringify(validateModern.errors))
+  assert.equal(assertHostRequest(modern, 1024 * 1024), modern)
+  assert.equal(validateRequest(modern), false)
+  assert.throws(() => assertHostRequest({ ...modern, schemaVersion: HOST_REQUEST_VERSION }, 1024 * 1024))
   const project = {
     schemaVersion: HOST_REQUEST_VERSION,
     id: 'project-case',

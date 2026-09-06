@@ -20,3 +20,11 @@ through that product's data lifecycle.
 No observation is uploaded by default. A future remote destination requires a
 separate product decision, consent, authentication, retention policy, and
 security review.
+
+Version and caller-purpose summaries, stable failure-code counts and batch item
+counts are metadata only. Raw event retention remains configurable (45 days by
+default). Compact Direct Runtime version summaries, hash-only replay receipts
+and component deployment boundaries survive raw-event cleanup and upgrades;
+they remain until explicit Observer state removal. Previously deleted records
+cannot be reconstructed. Disabling monitoring stops new collection without
+removing these records. No model runs merely because a report is available.

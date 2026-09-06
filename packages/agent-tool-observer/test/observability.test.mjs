@@ -14,6 +14,54 @@ function digest(character) {
   return `sha256:${character.repeat(64)}`;
 }
 
+test("unrelated upgrades preserve component observations while replacement and rollback start a new binding window", () => {
+  const root = temporaryRoot();
+  try {
+    const { config } = fixtureConfig(root);
+    const database = openStateDatabase(config);
+    const file = path.join(root, "deployment.json");
+    const deployment = (time, mathVersion, otherVersion) => {
+      fs.writeFileSync(file, JSON.stringify({
+        schemaVersion: "openadam.agent-host-deployment-observation.v0.1",
+        observedAtMs: time, activatedAtMs: time, channel: "release",
+        releaseId: `release-${time}`, suiteVersion: "0.1.5", profile: "local-dogfood",
+        components: [
+          { id: "math-anchor", version: mathVersion, artifactSha256: digest(mathVersion === "0.6.0" ? "a" : "b"), toolNames: ["math.run"] },
+          { id: "laniakea", version: otherVersion, artifactSha256: digest("c"), toolNames: ["read_mind_map"] },
+        ],
+      }));
+      ingestAgentHostDeployment(database, file);
+    };
+    const call = (time) => putToolEvent(database, {
+      eventId: `call-${time}`, provider: "codex", sessionStartedAtMs: time,
+      occurredAtMs: time, toolName: "mcp__math_anchor__math_run", routeClass: "mcp",
+      isOpenAdam: true, status: "completed", sourceFormat: "test", recordedAtMs: time,
+    });
+    const math = () => buildReport(database, { days: 1 }, 10_000).tools
+      .find((item) => item.toolName === "mcp__math_anchor__math_run");
+    deployment(1_000, "0.6.0", "0.3.0");
+    call(1_500);
+    deployment(2_000, "0.6.0", "0.3.1");
+    assert.equal(math().currentAgentHostDeployment.callsSinceActivation, 0);
+    assert.equal(math().currentComponentBinding.calls, 1);
+    assert.equal(math().currentComponentBinding.observedSinceMs, 1_000);
+    assert.equal(math().currentComponentBinding.boundaryObserved, false);
+    deployment(3_000, "0.7.0", "0.3.1");
+    call(3_500);
+    assert.equal(math().calls, 2);
+    assert.equal(math().currentComponentBinding.calls, 1);
+    assert.equal(math().currentComponentBinding.observedSinceMs, 3_000);
+    assert.equal(math().currentComponentBinding.boundaryObserved, true);
+    deployment(4_000, "0.6.0", "0.3.1");
+    assert.equal(math().calls, 2);
+    assert.equal(math().currentComponentBinding.calls, 0);
+    assert.equal(math().currentComponentBinding.observedSinceMs, 4_000);
+    database.close();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function directObservation(overrides = {}) {
   return {
     schemaVersion: "openadam.direct-execution-observation.v0.1",
@@ -554,5 +602,59 @@ test("maintenance previews and removes only observations older than the retained
     database.close();
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("version history survives raw retention and replay without merging diagnostics into tasks", () => {
+  const root = temporaryRoot();
+  try {
+    const { config, paths } = fixtureConfig(root, { ATO_DISABLE_PROVIDERS: "codex,claude,zcode" });
+    const partial = { status: "partial", items: { total: 2, completed: 1, errors: 1, cancelled: 0, unknown: 0 }, errorCodes: [{ code: "E_TIMEOUT", count: 1 }] };
+    const modern = directObservation({ schemaVersion: "openadam.direct-execution-observation.v0.2", purpose: "diagnostic", outcome: { status: "reported", value: partial } });
+    writeJsonl(paths.directRuntime, [modern, directObservation({ eventId: digest("f") })]);
+    const database = openStateDatabase(config);
+    assert.equal(collect(database, config, modern.completedAtMs + 100).semanticSources[0].status, "ok");
+    let report = buildReport(database, { days: 1 }, modern.completedAtMs + 200);
+    const diagnostic = report.semanticExecutions.find((item) => item.purpose === "diagnostic");
+    assert.equal(diagnostic.runtime.completed, 1);
+    assert.equal(diagnostic.providerOutcome.partial, 1);
+    assert.equal(diagnostic.providerOutcome.items.errors, 1);
+    assert.equal(report.semanticExecutions.find((item) => item.purpose === "unspecified").providerOutcome.notReported, 1);
+    const before = report.versionHistory;
+    const later = modern.completedAtMs + 100 * 86_400_000;
+    maintainDatabase(database, config, {}, later);
+    assert.equal(database.prepare("SELECT count(*) AS n FROM semantic_execution_event").get().n, 0);
+    assert.equal(database.prepare("SELECT count(*) AS n FROM semantic_execution_detail").get().n, 0);
+    assert.deepEqual(buildReport(database, { days: 1 }, later).versionHistory, before);
+    maintainDatabase(database, config, {}, later);
+    // Rotate the log and replay both old event IDs plus a new task.
+    fs.unlinkSync(paths.directRuntime);
+    const task = { ...modern, eventId: digest("1"), purpose: "task", occurredAtMs: later, completedAtMs: later + 1 };
+    writeJsonl(paths.directRuntime, [modern, directObservation({ eventId: digest("f") }), task]);
+    assert.equal(collect(database, config, later + 100).semanticSources[0].status, "ok");
+    report = buildReport(database, { days: 1 }, later + 100);
+    assert.equal(report.versionHistory.versions.reduce((sum, item) => sum + item.executions, 0), 3);
+    assert.equal(report.versionHistory.versions.find((item) => item.purpose === "task").executions, 1);
+    database.close();
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("malformed v0.2 metadata is rejected atomically before cursor advancement", () => {
+  for (const outcome of [
+    { status: "reported", value: { status: "completed", items: null, errorCodes: [{ code: "E_TIMEOUT", count: 1 }] } },
+    { status: "not-reported", value: {} },
+    { status: "reported", value: { status: "partial", items: { total: 2, completed: 2, errors: 1, cancelled: 0, unknown: 0 }, errorCodes: [] } },
+  ]) {
+    const root = temporaryRoot();
+    try {
+      const { config, paths } = fixtureConfig(root, { ATO_DISABLE_PROVIDERS: "codex,claude,zcode" });
+      writeJsonl(paths.directRuntime, [directObservation(), directObservation({ eventId: digest("1"), schemaVersion: "openadam.direct-execution-observation.v0.2", purpose: "task", outcome })]);
+      const database = openStateDatabase(config);
+      assert.equal(collect(database, config, 1_777_000_000_100).semanticSources[0].status, "error");
+      for (const table of ["semantic_execution_event", "semantic_execution_detail", "direct_runtime_cursor"]) {
+        assert.equal(database.prepare(`SELECT count(*) AS n FROM ${table}`).get().n, 0);
+      }
+      database.close();
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   }
 });

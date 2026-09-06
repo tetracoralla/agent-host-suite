@@ -378,3 +378,25 @@ test("ZCode adapter reports zero writes when a partial scan rolls back", () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("Codex qualified wrappers preserve reference uncertainty and explicit output failures", () => {
+  const root = temporaryRoot();
+  try {
+    const { config } = fixtureConfig(root);
+    const database = openStateDatabase(config);
+    const parser = createCodexParser({ database, sourceId: "source-hash", recordedAtMs: 1000 });
+    parser.onRecord({ type: "session_meta", payload: { id: "fixture-session" } });
+    parser.onRecord({ type: "response_item", payload: {
+      type: "custom_tool_call", call_id: "wrapper", name: "functions.exec",
+      input: 'if (false) await tools.mcp__math_anchor__math_run({});',
+    } });
+    parser.onRecord({ type: "response_item", payload: {
+      type: "custom_tool_call_output", call_id: "wrapper", status: "completed", output: '{"isError":true,"content":"private-error"}',
+    } });
+    const rows = database.prepare("SELECT derived, status FROM tool_event ORDER BY derived").all();
+    assert.equal(rows[0].status, "error");
+    assert.equal(rows[1].status, "observed");
+    assert.equal(JSON.stringify(database.prepare("SELECT * FROM tool_event").all()).includes("private-error"), false);
+    database.close();
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

@@ -77,7 +77,7 @@ try {
   assert.deepEqual(report.portfolio.highObservedErrorRates, []);
   assert.deepEqual(report.portfolio.repeatedUnmappedMcpUse, []);
   assert.deepEqual(report.portfolio.repeatedToolSequences, []);
-  assert.equal(report.schemaVersion, "openadam.agent-tool-observer.report.v0.8");
+  assert.equal(report.schemaVersion, "openadam.agent-tool-observer.report.v0.9");
   assert.equal("procedures" in report, false);
   assert.equal("capabilities" in report, false);
   assert.equal(report.privacy.rawContentStored, false);

@@ -91,7 +91,7 @@ test('usage summary is bounded, path-free, ranked, and preserves authority limit
   assert.equal(result.tools.entries.length, 20)
   assert.equal(result.tools.available, 40)
   assert.equal(result.tools.entries[0].historicalCalls, 100)
-  assert.equal(result.reliability.measuredToolCalls, 200)
+  assert.equal(result.reliability.measuredToolCalls, 400)
   assert.equal(result.coverage.skillUse.status, 'unavailable')
   assert.equal(result.coverage.resultAdoption.status, 'not-observed')
   assert.deepEqual(result.freshness, { status: 'current', latestCollectionCompletedAtMs: 3, ageMs: 1, overdueAfterMs: 2 })
@@ -106,6 +106,46 @@ test('usage summary is bounded, path-free, ranked, and preserves authority limit
   assert.equal(serialized.includes(root), false)
   assert.equal(Buffer.byteLength(serialized, 'utf8') <= USAGE_SUMMARY_MAX_BYTES, true)
   assert.equal(result.response.serializedBytes, Buffer.byteLength(serialized, 'utf8'))
+})
+
+test('usage totals include groups omitted from the bounded detail lists', () => {
+  const value = report()
+  value.suiteExecutions = Array.from({ length: 25 }, (_, index) => ({
+    ...value.suiteExecutions[0],
+    providerVersion: `1.0.${index}`,
+    executions: index + 1,
+    runtime: { completed: index, providerErrors: 1, hostErrors: 0 },
+  }))
+  const result = projectUsageSummary(state({ enabled: true }), { report: value })
+  assert.equal(result.tools.entries.length, 20)
+  assert.equal(result.semanticExecutions.entries.length, 20)
+  assert.equal(result.tools.truncated, true)
+  assert.equal(result.semanticExecutions.truncated, true)
+  assert.equal(result.reliability.measuredToolCalls, 400)
+  assert.equal(result.reliability.toolErrors, 40)
+  assert.equal(result.reliability.semanticExecutions, 325)
+  assert.equal(result.reliability.semanticCompleted, 300)
+  assert.equal(result.reliability.semanticProviderErrors, 25)
+})
+
+test('a dense usage report reduces detail without failing or changing totals', () => {
+  const value = report()
+  value.activity.daily = Array.from({ length: 120 }, (_, index) => ({
+    ...value.activity.daily[0], utcDate: `2026-09-${String(index % 30 + 1).padStart(2, '0')}`,
+  }))
+  value.activity.dailyRowsAvailable = 120
+  value.suiteExecutions = Array.from({ length: 25 }, (_, index) => ({
+    ...value.suiteExecutions[0], providerVersion: `1.0.${index}`,
+  }))
+  const result = projectUsageSummary(state({ enabled: true }), { report: value })
+  assert.equal(result.status, 'ok')
+  assert.equal(result.reliability.measuredToolCalls, 400)
+  assert.equal(result.reliability.semanticExecutions, 50)
+  assert.equal(result.dailyActivity.truncated, true)
+  assert.equal(result.dailyActivity.available, 120)
+  assert.equal(result.dailyActivity.returned, result.dailyActivity.entries.length)
+  assert.equal(result.response.serializedBytes, Buffer.byteLength(JSON.stringify(result)))
+  assert.ok(result.response.serializedBytes <= USAGE_SUMMARY_MAX_BYTES)
 })
 
 test('usage summary falls back to a cached Host refresh without claiming current freshness', async (t) => {

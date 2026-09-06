@@ -1,3 +1,5 @@
+import { semanticErrorCodes } from "./db-read.mjs";
+import { semanticVersionHistory } from "./version-history.mjs";
 import {
   activitySummaryRows,
   dailyActivityRows,
@@ -21,8 +23,9 @@ import {
   usageReportRows
 } from "./db-read.mjs";
 import { negotiatedTraceAdapters } from "./trace-adapters.mjs";
+import { currentComponentObservations } from "./component-history.mjs";
 
-export const REPORT_SCHEMA_VERSION = "openadam.agent-tool-observer.report.v0.8";
+export const REPORT_SCHEMA_VERSION = "openadam.agent-tool-observer.report.v0.9";
 const ROUTING_EVENT_LIMIT = 50_000;
 const ROUTING_OBSERVATION_LIMIT = 100;
 const DAILY_ACTIVITY_LIMIT = 400;
@@ -307,6 +310,7 @@ export function buildReport(database, options = {}, nowMs = Date.now()) {
   const days = options.days ?? 30;
   const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
   const currentDeployment = deploymentFromRow(latestAgentHostDeployment(database));
+  const componentObservations = currentComponentObservations(database, currentDeployment, cutoffMs);
   const deploymentRows = currentDeployment ? deploymentToolRows(database, currentDeployment.activatedAtMs) : [];
   const deploymentCalls = new Map(
     deploymentRows
@@ -321,6 +325,8 @@ export function buildReport(database, options = {}, nowMs = Date.now()) {
     const errors = Number(row.errors);
     const associated = usageAssociations.get(`${row.provider}\0${row.tool_name}`);
     const binding = deploymentBinding(row.tool_name, currentDeployment);
+    const componentObservation = binding ? componentObservations.get(binding.component.id) : null;
+    const componentCalls = componentObservation?.rows.get(`${row.provider}\0${row.tool_name}`);
     const deploymentCall = deploymentCalls.get(`${row.provider}\0${row.tool_name}`);
     const freshSessionCalls = Number(deploymentCall?.fresh_session_calls ?? 0);
     const preActivationSessionCalls = Number(deploymentCall?.pre_activation_session_calls ?? 0);
@@ -377,6 +383,17 @@ export function buildReport(database, options = {}, nowMs = Date.now()) {
       correctnessStatus: "unknown",
       opportunityStatus: "unknown",
       routingMode: "unknown",
+      currentComponentBinding: componentObservation ? {
+        componentId: componentObservation.componentId,
+        componentVersion: componentObservation.componentVersion,
+        observedSinceMs: componentObservation.observedSinceMs,
+        windowStartMs: componentObservation.windowStartMs,
+        boundaryObserved: componentObservation.boundaryObserved,
+        historyTruncated: componentObservation.historyTruncated,
+        calls: Number(componentCalls?.calls ?? 0),
+        basis: componentObservation.basis,
+        versionAttribution: "declared-binding-only",
+      } : null,
       currentAgentHostDeployment: binding ? {
         status: freshSessionCalls > 0
           ? "fresh-session-observed"
@@ -511,6 +528,17 @@ export function buildReport(database, options = {}, nowMs = Date.now()) {
     },
     providerId: row.provider_id,
     providerVersion: row.provider_version,
+    purpose: row.purpose,
+    providerOutcome: {
+      reported: Number(row.outcome_reported),
+      notReported: Number(row.executions) - Number(row.outcome_reported) - Number(row.outcome_invalid),
+      invalid: Number(row.outcome_invalid),
+      completed: Number(row.outcome_completed), partial: Number(row.outcome_partial),
+      errors: Number(row.outcome_errors), cancelled: Number(row.outcome_cancelled), unknown: Number(row.outcome_unknown),
+      items: { total: Number(row.items_total), completed: Number(row.items_completed),
+        errors: Number(row.items_errors), cancelled: Number(row.items_cancelled), unknown: Number(row.items_unknown) },
+      basis: "provider-declared-execution-outcome-metadata",
+    },
     transport: row.transport,
     lifecycle: row.lifecycle,
     executions: Number(row.executions),
@@ -591,6 +619,17 @@ export function buildReport(database, options = {}, nowMs = Date.now()) {
       adapterId: row.adapter_id,
       adapterVersion: row.adapter_version,
       providerVersion: row.provider_version,
+    purpose: row.purpose,
+    providerOutcome: {
+      reported: Number(row.outcome_reported),
+      notReported: Number(row.executions) - Number(row.outcome_reported) - Number(row.outcome_invalid),
+      invalid: Number(row.outcome_invalid),
+      completed: Number(row.outcome_completed), partial: Number(row.outcome_partial),
+      errors: Number(row.outcome_errors), cancelled: Number(row.outcome_cancelled), unknown: Number(row.outcome_unknown),
+      items: { total: Number(row.items_total), completed: Number(row.items_completed),
+        errors: Number(row.items_errors), cancelled: Number(row.items_cancelled), unknown: Number(row.items_unknown) },
+      basis: "provider-declared-execution-outcome-metadata",
+    },
       sourceFormat: row.source_format,
       modelSteps: Number(model?.model_steps ?? 0),
       observedSessions: Number(row.observed_sessions),
@@ -739,6 +778,8 @@ export function buildReport(database, options = {}, nowMs = Date.now()) {
         reason: "model-and-pricing-identity-not-observed-at-tool-call-granularity"
       }
     },
+    versionHistory: semanticVersionHistory(database),
+    runtimeErrorCodes: semanticErrorCodes(database, cutoffMs),
     semanticExecutions,
     directRuntime: directHealth ? {
       status: directHealth.status,

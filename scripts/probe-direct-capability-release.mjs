@@ -7,7 +7,7 @@ import { prepareRuntimeConfig } from '../packages/direct-execution-runtime/src/c
 import { DirectExecutionRuntime } from '../packages/direct-execution-runtime/src/runtime.mjs'
 import { hostFacingManifest, loadProfile } from '../src/profile.mjs'
 import { cleanupMaterializedRelease, materializeRelease } from '../src/release-artifacts.mjs'
-import { loadReleaseManifest } from '../src/release-manifest.mjs'
+import { compareSuiteVersions, loadReleaseManifest } from '../src/release-manifest.mjs'
 import { createRuntimeConfig } from '../src/runtime-config.mjs'
 import { prepareStatePaths } from '../src/state.mjs'
 
@@ -86,12 +86,18 @@ try {
   const manifest = preparation.manifest
   const dataTransformer = manifest.components['data-transformer']
   const fileVitals = manifest.components['file-vitals']
-  assert.equal(dataTransformer.version, '0.2.0')
-  assert.equal(fileVitals.version, '0.3.3')
+  assert.equal(dataTransformer.version, release.manifest.components.find((item) => item.id === 'data-transformer').version)
+  assert.equal(fileVitals.version, release.manifest.components.find((item) => item.id === 'file-vitals').version)
   assert.equal(dataTransformer.capabilityProvider.lifecycle, 'persistent')
   assert.equal(dataTransformer.capabilityProvider.workspaceRootRequired, true)
-  assert.equal(fileVitals.capabilityProvider.lifecycle, 'persistent')
-  assert.equal(fileVitals.capabilityProvider.workspaceRootRequired, true)
+  const fileCapabilityDeclared = fileVitals.capabilityProvider !== undefined
+  // File Vitals introduced the Direct Capability carrier in 0.3.3. A release
+  // preserving the older MCP carrier must not be described as covering it.
+  if (compareSuiteVersions(fileVitals.version, '0.3.3') >= 0) assert.equal(fileCapabilityDeclared, true)
+  if (fileCapabilityDeclared) {
+    assert.equal(fileVitals.capabilityProvider.lifecycle, 'persistent')
+    assert.equal(fileVitals.capabilityProvider.workspaceRootRequired, true)
+  }
   const inactiveAgentManifest = hostFacingManifest(
     manifest,
     profile.agentComponents.filter((id) => !['data-transformer', 'file-vitals'].includes(id)),
@@ -105,10 +111,10 @@ try {
       binding: prepared.providers.get('io.github.tetracoralla.batchticket'),
       component: dataTransformer,
     }],
-    ['io.github.tetracoralla.file-vitals', {
+    ...(fileCapabilityDeclared ? [['io.github.tetracoralla.file-vitals', {
       binding: prepared.providers.get('io.github.tetracoralla.file-vitals'),
       component: fileVitals,
-    }],
+    }]] : []),
   ])
   for (const [providerId, { binding, component }] of bindings) {
     assert.notEqual(binding, undefined, `${providerId} binding is absent`)
@@ -119,8 +125,9 @@ try {
       assert.equal(isInside(materializedComponentRoot, path), true)
     }
   }
-  assert.equal(bindings.get('io.github.tetracoralla.batchticket').binding.providerVersion, '0.2.0')
-  assert.equal(bindings.get('io.github.tetracoralla.file-vitals').binding.providerVersion, '0.3.3')
+  assert.equal(bindings.get('io.github.tetracoralla.batchticket').binding.providerVersion, dataTransformer.version)
+  if (fileCapabilityDeclared) assert.equal(bindings.get('io.github.tetracoralla.file-vitals').binding.providerVersion, fileVitals.version)
+  else assert.equal(prepared.providers.has('io.github.tetracoralla.file-vitals'), false)
 
   runtime = new DirectExecutionRuntime(prepared)
   const dataCold = await timed(dataCall('data-cold', { path: 'users.json' }))
@@ -139,6 +146,8 @@ try {
   const dataRecovered = await timed(dataCall('data-recovered', { path: 'users.json' }))
   assert.equal(dataRecovered.result.calls[0].status, 'ok')
 
+  let fileProbe = null
+  if (fileCapabilityDeclared) {
   const fileCold = await timed(fileCall('file-cold', { path: 'users.json' }))
   assert.equal(fileCold.result.calls[0].status, 'ok')
   assert.equal(fileCold.result.calls[0].result.identity.media_type, 'application/json')
@@ -153,6 +162,16 @@ try {
   const fileRecovered = await timed(fileCall('file-recovered', { path: 'users.json' }))
   assert.equal(fileRecovered.result.calls[0].status, 'ok')
 
+    fileProbe = {
+      providerId: 'io.github.tetracoralla.file-vitals', version: fileVitals.version,
+      coldMs: Math.round(fileCold.elapsedMs * 100) / 100, warmCalls: fileWarm.length,
+      warmP50Ms: Math.round(percentile(fileWarm, 0.5) * 100) / 100,
+      warmP95Ms: Math.round(percentile(fileWarm, 0.95) * 100) / 100,
+      forbiddenPathCode: fileForbidden.result.calls[0].error.code,
+      recoveryMs: Math.round(fileRecovered.elapsedMs * 100) / 100,
+    }
+  }
+
   process.stdout.write(`${JSON.stringify({
     status: 'ok',
     releaseId: manifest.releaseId,
@@ -160,6 +179,7 @@ try {
     mcpActive: false,
     sourceCheckoutUsed: false,
     workspaceAuthority: 'host-explicit-root',
+    unavailableCarriers: fileCapabilityDeclared ? [] : [{ componentId: 'file-vitals', version: fileVitals.version, carrier: 'direct-capability-jsonl', reason: 'older-release-does-not-declare-this-carrier' }],
     providers: [
       {
         providerId: 'io.github.tetracoralla.batchticket',
@@ -171,16 +191,7 @@ try {
         forbiddenPathCode: dataForbidden.result.calls[0].error.code,
         recoveryMs: Math.round(dataRecovered.elapsedMs * 100) / 100,
       },
-      {
-        providerId: 'io.github.tetracoralla.file-vitals',
-        version: bindings.get('io.github.tetracoralla.file-vitals').binding.providerVersion,
-        coldMs: Math.round(fileCold.elapsedMs * 100) / 100,
-        warmCalls: fileWarm.length,
-        warmP50Ms: Math.round(percentile(fileWarm, 0.5) * 100) / 100,
-        warmP95Ms: Math.round(percentile(fileWarm, 0.95) * 100) / 100,
-        forbiddenPathCode: fileForbidden.result.calls[0].error.code,
-        recoveryMs: Math.round(fileRecovered.elapsedMs * 100) / 100,
-      },
+      ...(fileProbe === null ? [] : [fileProbe]),
     ],
   }, null, 2)}\n`)
 } finally {

@@ -9,6 +9,7 @@ import {
   putSemanticExecutionEvent
 } from "../db.mjs";
 import { ObserverError, stableErrorCode } from "../errors.mjs";
+import { validExecutionOutcome } from "../core/execution-outcome.mjs";
 
 const EVENT_KEYS = new Set([
   "schemaVersion", "eventId", "workOrderHash", "callHash", "occurredAtMs",
@@ -112,9 +113,20 @@ function normalizeTarget(target) {
 }
 
 function normalizeObservation(value, sourceId, recordedAtMs) {
-  exactKeys(value, EVENT_KEYS, "observation");
-  if (value.schemaVersion !== "openadam.direct-execution-observation.v0.1") {
+  const modern = value?.schemaVersion === "openadam.direct-execution-observation.v0.2";
+  if (!modern && value?.schemaVersion !== "openadam.direct-execution-observation.v0.1") {
     throw new ObserverError("DIRECT_OBSERVATION_UNSUPPORTED", "Direct Runtime observation version is unsupported");
+  }
+  exactKeys(value, modern ? new Set([...EVENT_KEYS, "purpose", "outcome"]) : EVENT_KEYS, "observation");
+  if (modern) {
+    if (!["task", "diagnostic", "validation", "unspecified"].includes(value.purpose)) {
+      throw new ObserverError("DIRECT_OBSERVATION_INVALID", "purpose is invalid");
+    }
+    exactKeys(value.outcome, new Set(["status", "value"]), "outcome");
+    if (value.outcome.status === "reported" ? !validExecutionOutcome(value.outcome.value)
+      : !["not-reported", "invalid"].includes(value.outcome.status) || value.outcome.value !== null) {
+      throw new ObserverError("DIRECT_OBSERVATION_INVALID", "outcome is invalid");
+    }
   }
   const eventDigest = digest(value.eventId, "eventId");
   const occurredAtMs = nonNegativeInteger(value.occurredAtMs, "occurredAtMs");
@@ -164,6 +176,8 @@ function normalizeObservation(value, sourceId, recordedAtMs) {
     bindingDigest: digest(value.bindingDigest, "bindingDigest", true),
     contractDigest: digest(value.contractDigest, "contractDigest", true),
     sourceFormat: value.schemaVersion,
+    purpose: modern ? value.purpose : "unspecified",
+    outcome: modern ? value.outcome : { status: "not-reported", value: null },
     recordedAtMs
   };
 }

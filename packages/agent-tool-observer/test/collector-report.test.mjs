@@ -529,6 +529,7 @@ test("schema v10 migration preserves semantic observations and admits projected 
       toolName: "math.batch"
     });
     database.exec(`
+      DROP TABLE semantic_execution_detail;
       DROP INDEX IF EXISTS semantic_execution_time_idx;
       DROP INDEX IF EXISTS semantic_execution_target_idx;
       DROP INDEX IF EXISTS semantic_execution_provider_idx;

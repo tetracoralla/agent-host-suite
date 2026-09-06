@@ -314,6 +314,19 @@ export function semanticExecutionReportRows(database, cutoffMs) {
     SELECT
       target_kind, semantic_id, semantic_version, operation_id, tool_name,
       provider_id, provider_version, transport, lifecycle,
+      coalesce(d.purpose, 'unspecified') AS purpose,
+      sum(CASE WHEN d.outcome_status = 'reported' THEN 1 ELSE 0 END) AS outcome_reported,
+      sum(CASE WHEN d.outcome_status = 'invalid' THEN 1 ELSE 0 END) AS outcome_invalid,
+      sum(CASE WHEN json_extract(d.outcome_json, '$.status') = 'completed' THEN 1 ELSE 0 END) AS outcome_completed,
+      sum(CASE WHEN json_extract(d.outcome_json, '$.status') = 'partial' THEN 1 ELSE 0 END) AS outcome_partial,
+      sum(CASE WHEN json_extract(d.outcome_json, '$.status') = 'error' THEN 1 ELSE 0 END) AS outcome_errors,
+      sum(CASE WHEN json_extract(d.outcome_json, '$.status') = 'cancelled' THEN 1 ELSE 0 END) AS outcome_cancelled,
+      sum(CASE WHEN json_extract(d.outcome_json, '$.status') = 'unknown' THEN 1 ELSE 0 END) AS outcome_unknown,
+      sum(coalesce(json_extract(d.outcome_json, '$.items.total'), 0)) AS items_total,
+      sum(coalesce(json_extract(d.outcome_json, '$.items.completed'), 0)) AS items_completed,
+      sum(coalesce(json_extract(d.outcome_json, '$.items.errors'), 0)) AS items_errors,
+      sum(coalesce(json_extract(d.outcome_json, '$.items.cancelled'), 0)) AS items_cancelled,
+      sum(coalesce(json_extract(d.outcome_json, '$.items.unknown'), 0)) AS items_unknown,
       count(*) AS executions,
       sum(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS completed,
       sum(CASE WHEN status = 'provider_error' THEN 1 ELSE 0 END) AS provider_errors,
@@ -325,10 +338,10 @@ export function semanticExecutionReportRows(database, cutoffMs) {
       sum(response_bytes) AS response_bytes,
       min(completed_at_ms) AS first_observed_at_ms,
       max(completed_at_ms) AS last_observed_at_ms
-    FROM semantic_execution_event
+    FROM semantic_execution_event e LEFT JOIN semantic_execution_detail d USING(event_id)
     WHERE completed_at_ms >= ?
     GROUP BY target_kind, semantic_id, semantic_version, operation_id, tool_name,
-      provider_id, provider_version, transport, lifecycle
+      provider_id, provider_version, transport, lifecycle, coalesce(d.purpose, 'unspecified')
     ORDER BY executions DESC, provider_id, semantic_id, operation_id, tool_name
   `).all(cutoffMs);
 }
@@ -351,6 +364,14 @@ export function latestAgentHostDeployment(database) {
     ORDER BY activated_at_ms DESC, observed_at_ms DESC, deployment_id DESC
     LIMIT 1
   `).get() ?? null;
+}
+
+export function agentHostDeploymentHistory(database, limit = 512) {
+  return database.prepare(`
+    SELECT activated_at_ms, components_json FROM agent_host_deployment_observation
+    ORDER BY activated_at_ms DESC, observed_at_ms DESC, deployment_id DESC
+    LIMIT ?
+  `).all(limit + 1);
 }
 
 export function deploymentToolRows(database, activatedAtMs) {
@@ -424,4 +445,23 @@ export function schemaColumns(database) {
     table,
     name: row.name
   })));
+}
+
+export function semanticErrorCodes(database, cutoffMs) {
+  return database.prepare(`SELECT provider_id, provider_version, purpose, source, code, sum(occurrences) AS occurrences FROM (
+    SELECT e.provider_id, e.provider_version, coalesce(d.purpose, 'unspecified') AS purpose,
+      'runtime' AS source, e.error_code AS code, 1 AS occurrences
+    FROM semantic_execution_event e LEFT JOIN semantic_execution_detail d USING(event_id)
+    WHERE e.completed_at_ms >= ? AND e.error_code IS NOT NULL
+    UNION ALL
+    SELECT e.provider_id, e.provider_version, coalesce(d.purpose, 'unspecified'),
+      'provider-outcome', json_extract(j.value, '$.code'), json_extract(j.value, '$.count')
+    FROM semantic_execution_event e JOIN semantic_execution_detail d USING(event_id),
+      json_each(d.outcome_json, '$.errorCodes') j
+    WHERE e.completed_at_ms >= ?
+  ) GROUP BY provider_id, provider_version, purpose, source, code
+    ORDER BY occurrences DESC, provider_id, provider_version, code`).all(cutoffMs, cutoffMs).map((row) => ({
+      providerId: row.provider_id, providerVersion: row.provider_version, purpose: row.purpose,
+      source: row.source, code: row.code, count: row.occurrences,
+    }));
 }

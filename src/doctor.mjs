@@ -254,7 +254,7 @@ export async function doctor(state, {
     ))
     const result = await runner(runtime.command, [
       ...runtime.args, 'run', '--socket', state.runtime.socketPath, '--work-order', '-',
-    ], { input: `${JSON.stringify(semanticProbeOrder())}\n`, allowFailure: true, timeoutMs: 45_000 })
+    ], { input: `${JSON.stringify(semanticProbeOrder(runtime.version))}\n`, allowFailure: true, timeoutMs: 45_000 })
     let parsed = null
     try { parsed = JSON.parse(result.stdout) } catch {}
     const math = parsed?.calls?.find((item) => item.id === 'math')

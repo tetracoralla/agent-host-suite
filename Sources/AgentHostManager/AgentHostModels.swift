@@ -539,6 +539,13 @@ struct UsageToolEntry: Decodable, Equatable, Identifiable, Sendable {
     let provider: String?
     let toolName: String?
     let historicalCalls: Int?
+    let directCalls: Int?
+    let referencedCalls: Int?
+    let componentId: String?
+    let componentVersion: String?
+    let currentBindingCalls: Int?
+    let currentBindingObservedSinceMs: Int64?
+    let currentBindingAttribution: String?
     let measuredCalls: Int?
     let completed: Int?
     let errors: Int?
@@ -612,6 +619,30 @@ struct UsageCoverage: Decodable, Equatable, Sendable {
     let nonUseReason: UsageCoverageItem
 }
 
+struct UsageVersionEntry: Decodable, Equatable, Identifiable, Sendable {
+    let providerId: String?
+    let providerVersion: String?
+    let purpose: String?
+    let executions: Int?
+    let completed: Int?
+    let providerErrors: Int?
+    let hostErrors: Int?
+    let reportedOutcomes: Int?
+    let partialResults: Int?
+    let itemErrors: Int?
+    let firstObservedAtMs: Int64?
+    let lastObservedAtMs: Int64?
+    var id: String { "\(providerId ?? "unknown"):\(providerVersion ?? "unknown"):\(purpose ?? "unknown")" }
+}
+
+struct UsageVersionHistory: Decodable, Equatable, Sendable {
+    let available: Int
+    let returned: Int
+    let truncated: Bool
+    let totalExecutions: Int
+    let entries: [UsageVersionEntry]
+}
+
 struct UsageSummary: Decodable, Equatable, Sendable {
     let configured: Bool
     let enabled: Bool
@@ -625,6 +656,7 @@ struct UsageSummary: Decodable, Equatable, Sendable {
     let providerActivity: [UsageProviderActivity]
     let dailyActivity: UsageDailyList?
     let tools: UsageToolList
+    let versionHistory: UsageVersionHistory?
     let trace: UsageTraceSummary
     let reliability: UsageReliability
     let coverage: UsageCoverage

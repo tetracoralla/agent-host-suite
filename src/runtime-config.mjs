@@ -158,9 +158,12 @@ export async function cleanupRuntimeSocket(paths, runtime, options = {}) {
   return { removed: true }
 }
 
-export function semanticProbeOrder() {
+export function semanticProbeOrder(runtimeVersion = '0.2.2') {
+  const version = runtimeVersion.match(/^(\d+)\.(\d+)\.(\d+)/u)?.slice(1).map(Number)
+  const modern = version !== undefined && (version[0] > 0 || version[1] > 2 || (version[1] === 2 && version[2] >= 2))
   return {
-    schemaVersion: 'openadam.direct-work-order.v0.1',
+    schemaVersion: modern ? 'openadam.direct-work-order.v0.2' : 'openadam.direct-work-order.v0.1',
+    ...(modern ? { purpose: 'diagnostic' } : {}),
     id: 'agent-host-doctor',
     calls: [
       {

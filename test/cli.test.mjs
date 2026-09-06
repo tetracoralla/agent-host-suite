@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,27 @@ import test from 'node:test'
 import { human } from '../src/cli.mjs'
 
 const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
+
+test('manager --no-open prints a usable local entry before the server closes', { timeout: 15_000 }, async (t) => {
+  const child = spawn(process.execPath, [cliPath, 'manager', '--no-open'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const closed = new Promise((resolve) => child.once('exit', resolve))
+  t.after(async () => { child.kill(); await closed })
+  const url = await new Promise((resolve, reject) => {
+    let output = ''
+    child.once('error', reject)
+    child.once('exit', () => reject(new Error('Manager closed before publishing its entry')))
+    child.stdout.on('data', (chunk) => {
+      output += chunk
+      if (output.includes('\n')) resolve(output.split('\n')[0])
+    })
+  })
+  assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/auth\/[A-Za-z0-9_-]+$/u)
+  const entry = await fetch(url, { redirect: 'manual' })
+  assert.equal(entry.status, 303)
+  const page = await fetch(new URL('/', url), { headers: { cookie: entry.headers.get('set-cookie').split(';')[0] } })
+  assert.equal(page.status, 200)
+  assert.match(await page.text(), /Agent Host/u)
+})
 
 test('CLI rejects known options that do not belong to the selected operation', () => {
   const cases = [

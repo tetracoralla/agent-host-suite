@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.1.6 — 2026-09-06
+
+- Preserve compact execution history across component updates and raw-event
+  cleanup; unrelated updates no longer reset a tool's binding window.
+- Separate transport completion, provider-declared partial batches and caller
+  purpose. Preserve old records as unreported instead of assuming success.
+- Show version history and tool activity in both Managers, with an explicit
+  handoff to the user's Agent for analysis. Full totals precede display limits.
+- Preserve Codex script-reference uncertainty and explicit result error flags.
+- Ship Runtime 0.2.2 and Observer 0.6.0 with closed, backward-readable metadata
+  extensions; retain platform fixes already merged into the source repository.
+
+
 - Wait briefly for Windows readers to release an already retired lifecycle lock
   before removing it; persistent file sharing still prevents the mutation.
 - Preserve a completed browser Manager action when its status refresh fails,

@@ -21,6 +21,7 @@ const SUPPORTED_OBSERVER_REPORTS = new Set([
   'openadam.agent-tool-observer.report.v0.6',
   'openadam.agent-tool-observer.report.v0.7',
   'openadam.agent-tool-observer.report.v0.8',
+  'openadam.agent-tool-observer.report.v0.9',
 ])
 const SEMANTIC_TARGET_KINDS = new Set(['procedure', 'capability', 'mcp-tool', 'mcp-operation'])
 const TRACE_ADAPTER_LIMIT = 32
@@ -236,17 +237,18 @@ function hostReport(report, providerIds) {
   const suiteTools = report.tools
     .filter((item) => item.currentAgentHostDeployment?.componentId !== undefined)
     .sort((left, right) => right.calls - left.calls || left.toolName.localeCompare(right.toolName))
-    .slice(0, 25)
     .map((item) => ({
       provider: item.provider,
       toolName: item.toolName,
       calls: item.calls,
+      derivedCalls: item.derivedCalls,
       runtime: item.runtime,
       payload: item.payload,
       turnAssociatedUsage: item.turnAssociatedUsage,
       firstObservedAtMs: item.firstObservedAtMs,
       lastObservedAtMs: item.lastObservedAtMs,
       currentAgentHostDeployment: item.currentAgentHostDeployment,
+      currentComponentBinding: item.currentComponentBinding ?? null,
     }))
   const routingObservations = report.routingObservations ?? []
   return {
@@ -261,6 +263,8 @@ function hostReport(report, providerIds) {
     cost: report.cost,
     directRuntime: report.directRuntime,
     freshSessionCorrelation: report.freshSessionCorrelation ?? null,
+    versionHistory: report.versionHistory ?? null,
+    runtimeErrorCodes: report.runtimeErrorCodes ?? [],
     suiteExecutions,
     suiteTools,
     routingObservations,

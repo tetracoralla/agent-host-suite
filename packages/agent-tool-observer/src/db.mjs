@@ -1,4 +1,5 @@
 import { assertPrivateFiles } from "./private-files.mjs";
+import { VERSION_HISTORY_SCHEMA } from "./version-history.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -7,6 +8,16 @@ import { classifyTool } from "./core/classify.mjs";
 import { ObserverError } from "./errors.mjs";
 
 const SCHEMA_VERSION = "11";
+
+const DETAIL_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS semantic_execution_detail (
+  event_id TEXT PRIMARY KEY REFERENCES semantic_execution_event(event_id) ON DELETE CASCADE,
+  source_format TEXT NOT NULL,
+  purpose TEXT NOT NULL CHECK(purpose IN ('task', 'diagnostic', 'validation', 'unspecified')),
+  outcome_status TEXT NOT NULL CHECK(outcome_status IN ('reported', 'not-reported', 'invalid')),
+  outcome_json TEXT CHECK(outcome_json IS NULL OR (json_valid(outcome_json) AND length(outcome_json) <= 16384))
+) STRICT;
+`;
 
 const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -291,6 +302,8 @@ CREATE TABLE IF NOT EXISTS direct_runtime_health (
   scanned_at_ms INTEGER NOT NULL CHECK (scanned_at_ms >= 0)
 ) STRICT;
 
+${VERSION_HISTORY_SCHEMA}
+
 CREATE TABLE IF NOT EXISTS semantic_execution_event (
   event_id TEXT PRIMARY KEY CHECK (length(event_id) = 64),
   source_id TEXT NOT NULL CHECK (length(source_id) = 64),
@@ -320,6 +333,9 @@ CREATE TABLE IF NOT EXISTS semantic_execution_event (
   source_format TEXT NOT NULL CHECK (source_format = 'openadam.direct-execution-observation.v0.1'),
   recorded_at_ms INTEGER NOT NULL CHECK (recorded_at_ms >= 0)
 ) STRICT;
+
+
+
 
 CREATE INDEX IF NOT EXISTS semantic_execution_time_idx ON semantic_execution_event(completed_at_ms);
 CREATE INDEX IF NOT EXISTS semantic_execution_target_idx ON semantic_execution_event(target_kind, semantic_id, operation_id, completed_at_ms);
@@ -553,10 +569,12 @@ export function openStateDatabase(config) {
     throw new ObserverError("SCHEMA_VERSION_UNSUPPORTED", "Observer database schema version is not supported");
   }
   ensureAdditiveToolColumns(database);
+  database.exec(DETAIL_SCHEMA_SQL);
   try {
     assertPrivateFiles([config.databasePath, `${config.databasePath}-wal`, `${config.databasePath}-shm`]
       .filter((path) => fs.existsSync(path)).map((path) => ({ path, ensure: !databaseExisted })));
   } catch (error) { database.close(); throw error; }
+
 
   return database;
 }
@@ -1006,46 +1024,66 @@ export function putDirectRuntimeHealth(database, health) {
 }
 
 export function putSemanticExecutionEvent(database, event) {
-  const result = database.prepare(`
-    INSERT INTO semantic_execution_event(
-      event_id, source_id, work_order_hash, call_hash, occurred_at_ms,
-      completed_at_ms, target_kind, semantic_id, semantic_version,
-      operation_id, tool_name, provider_id, provider_version, transport,
-      lifecycle, status, error_code, duration_ms, queue_ms,
-      provider_round_trip_ms, request_bytes, response_bytes, session_state,
-      binding_digest, contract_digest, source_format, recorded_at_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(event_id) DO NOTHING
-  `).run(
-    event.eventId,
-    event.sourceId,
-    event.workOrderHash,
-    event.callHash,
-    event.occurredAtMs,
-    event.completedAtMs,
-    event.targetKind,
-    event.semanticId ?? null,
-    event.semanticVersion ?? null,
-    event.operationId ?? null,
-    event.toolName ?? null,
-    event.providerId,
-    event.providerVersion ?? null,
-    event.transport,
-    event.lifecycle,
-    event.status,
-    event.errorCode ?? null,
-    event.durationMs,
-    event.queueMs ?? null,
-    event.providerRoundTripMs ?? null,
-    event.requestBytes,
-    event.responseBytes ?? null,
-    event.sessionState ?? null,
-    event.bindingDigest ?? null,
-    event.contractDigest ?? null,
-    event.sourceFormat,
-    event.recordedAtMs
-  );
-  return result.changes > 0 ? 1 : 0;
+  const ownTransaction = !database.isTransaction;
+  if (ownTransaction) database.exec("BEGIN IMMEDIATE");
+  try {
+    if (database.prepare("SELECT 1 FROM semantic_execution_receipt WHERE event_id = ?").get(event.eventId)) {
+      if (ownTransaction) database.exec("COMMIT");
+      return 0;
+    }
+    const result = database.prepare(`
+      INSERT INTO semantic_execution_event(
+        event_id, source_id, work_order_hash, call_hash, occurred_at_ms,
+        completed_at_ms, target_kind, semantic_id, semantic_version,
+        operation_id, tool_name, provider_id, provider_version, transport,
+        lifecycle, status, error_code, duration_ms, queue_ms,
+        provider_round_trip_ms, request_bytes, response_bytes, session_state,
+        binding_digest, contract_digest, source_format, recorded_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(event_id) DO NOTHING
+    `).run(
+      event.eventId,
+      event.sourceId,
+      event.workOrderHash,
+      event.callHash,
+      event.occurredAtMs,
+      event.completedAtMs,
+      event.targetKind,
+      event.semanticId ?? null,
+      event.semanticVersion ?? null,
+      event.operationId ?? null,
+      event.toolName ?? null,
+      event.providerId,
+      event.providerVersion ?? null,
+      event.transport,
+      event.lifecycle,
+      event.status,
+      event.errorCode ?? null,
+      event.durationMs,
+      event.queueMs ?? null,
+      event.providerRoundTripMs ?? null,
+      event.requestBytes,
+      event.responseBytes ?? null,
+      event.sessionState ?? null,
+      event.bindingDigest ?? null,
+      event.contractDigest ?? null,
+      // The legacy table stores the v0.1 projection so older installed readers
+      // can still open the database; the additive detail records wire provenance.
+      "openadam.direct-execution-observation.v0.1",
+      event.recordedAtMs
+    );
+    if (result.changes > 0) {
+      database.prepare(`INSERT INTO semantic_execution_detail(event_id, source_format, purpose, outcome_status, outcome_json)
+        VALUES (?, ?, ?, ?, ?)`).run(event.eventId, event.sourceFormat, event.purpose ?? "unspecified",
+          event.outcome?.status ?? "not-reported",
+          event.outcome?.value == null ? null : JSON.stringify(event.outcome.value));
+    }
+    if (ownTransaction) database.exec("COMMIT");
+    return result.changes > 0 ? 1 : 0;
+  } catch (error) {
+    if (ownTransaction && database.isTransaction) database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function putContextSurfaceMeasurement(database, measurement) {

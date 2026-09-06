@@ -7,17 +7,18 @@ import { assertSchema, createValidator, loadBundledSchema } from './schema.mjs'
 import { JsonlSession } from './sessions/jsonl-session.mjs'
 import { McpSession } from './sessions/mcp-session.mjs'
 
-let validateWorkOrderSchema
+const validateWorkOrderSchemas = new Map()
 let validateContractSelectionSchema
 let validateResolutionRequestSchema
 let providerRequestCounter = 0
 let workOrderRunCounter = 0
 
-async function workOrderValidator() {
-  if (validateWorkOrderSchema === undefined) {
-    validateWorkOrderSchema = createValidator().compile(await loadBundledSchema('work-order.schema.json'))
+async function workOrderValidator(version) {
+  const name = version === 'openadam.direct-work-order.v0.1' ? 'work-order.schema.v0.1.json' : 'work-order.schema.json'
+  if (!validateWorkOrderSchemas.has(name)) {
+    validateWorkOrderSchemas.set(name, createValidator().compile(await loadBundledSchema(name)))
   }
-  return validateWorkOrderSchema
+  return validateWorkOrderSchemas.get(name)
 }
 
 async function contractSelectionValidator() {
@@ -175,6 +176,7 @@ export class DirectExecutionRuntime {
     this.circuits = new CircuitBreaker(config.limits)
     this.providers = new ProviderManager(config)
     this.observationSink = options.observationSink ?? null
+    this.callOutcomes = new WeakMap()
     this.observationState = {
       enabled: this.observationSink !== null,
       attempted: 0,
@@ -216,7 +218,7 @@ export class DirectExecutionRuntime {
       code: 'HOST_INVALID_JSON_VALUE',
       label: 'work order',
     })
-    assertSchema(await workOrderValidator(), snapshot, 'HOST_WORK_ORDER_INVALID', 'work order')
+    assertSchema(await workOrderValidator(snapshot.schemaVersion), snapshot, 'HOST_WORK_ORDER_INVALID', 'work order')
     if (jsonBytes(snapshot) > this.config.limits.maxWorkOrderBytes) {
       throw new HostError('HOST_INPUT_TOO_LARGE', 'Complete work order exceeds the configured byte limit')
     }
@@ -558,7 +560,7 @@ export class DirectExecutionRuntime {
         ?? binding?.expectedServer?.version
         ?? null
       const observation = {
-        schemaVersion: 'openadam.direct-execution-observation.v0.1',
+        schemaVersion: 'openadam.direct-execution-observation.v0.2',
         eventId: digestJson({ workOrderHash, callId: sourceCall.id, completedAtMs, runSequence, status: resultCall.status }),
         workOrderHash,
         callHash: digestJson({ workOrderHash, callId: sourceCall.id }),
@@ -585,6 +587,8 @@ export class DirectExecutionRuntime {
         sessionState: resultCall.session ?? null,
         bindingDigest: resultCall.binding?.digest ?? binding?.bindingDigest ?? null,
         contractDigest: resultCall.binding?.contractDigest ?? null,
+        purpose: workOrder.purpose ?? 'unspecified',
+        outcome: this.callOutcomes.get(resultCall) ?? { status: 'not-reported', value: null },
         execution: {
           modelCalls: 0,
           tokenUsage: null,
@@ -666,8 +670,11 @@ export class DirectExecutionRuntime {
           total: performance.now() - started,
         },
       }
-      if (invocation.ok) return { ...common, status: 'ok', result: invocation.result }
-      return { ...common, status: 'provider_error', error: invocation.error }
+      const result = invocation.ok
+        ? { ...common, status: 'ok', result: invocation.result }
+        : { ...common, status: 'provider_error', error: invocation.error }
+      if (invocation.executionOutcome !== undefined) this.callOutcomes.set(result, invocation.executionOutcome)
+      return result
     } catch (error) {
       const normalized = asHostError(error)
       this.circuits.recordFailure(call.providerId, normalized)
