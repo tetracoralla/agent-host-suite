@@ -7,6 +7,7 @@ import { createLaunchSnapshot } from '../launch-snapshot.mjs'
 import { prepareMcpOperationProjection, projectMcpOperation } from '../operation-projection.mjs'
 import { assertSchema, createValidator } from '../schema.mjs'
 import { StrictMcpStdioTransport } from '../strict-mcp-stdio-transport.mjs'
+import { readExecutionOutcome } from '../execution-outcome.mjs'
 
 function safeAnnotations(tool) {
   const annotations = tool.annotations ?? {}
@@ -607,6 +608,7 @@ export class McpSession {
       return {
         ok: false,
         error,
+        executionOutcome: readExecutionOutcome(response),
         sessionState,
         providerRoundTripMs: performance.now() - started,
         contractDigest: selected.contractDigest,
@@ -615,6 +617,7 @@ export class McpSession {
     return {
       ok: true,
       result: structured,
+      executionOutcome: readExecutionOutcome(response),
       sessionState,
       providerRoundTripMs: performance.now() - started,
       contractDigest: selected.contractDigest,

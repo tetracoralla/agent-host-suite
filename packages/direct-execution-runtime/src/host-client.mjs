@@ -3,7 +3,7 @@ import { createConnection } from 'node:net'
 import { isAbsolute } from 'node:path'
 import { platform } from 'node:os'
 import { HostError } from './errors.mjs'
-import { assertHostRequest, assertHostResponse, HOST_REQUEST_VERSION } from './host-protocol.mjs'
+import { assertHostRequest, assertHostResponse, HOST_REQUEST_VERSION, HOST_REQUEST_V2 } from './host-protocol.mjs'
 import { decodeUtf8Strict, parseStrictJson, snapshotJsonValue } from './json.mjs'
 
 export const MAX_HOST_CLIENT_REQUEST_BYTES = 16 * 1024 * 1024 + 64 * 1024
@@ -45,6 +45,7 @@ export async function requestDirectHost({
     label: 'host request',
     maxBytes: MAX_HOST_CLIENT_REQUEST_BYTES,
   })
+  if (capturedRequest.workOrder?.schemaVersion === 'openadam.direct-work-order.v0.2') capturedRequest.schemaVersion = HOST_REQUEST_V2
   assertHostRequest(capturedRequest, MAX_HOST_CLIENT_REQUEST_BYTES)
   const requestLine = Buffer.from(`${JSON.stringify(capturedRequest)}\n`)
 

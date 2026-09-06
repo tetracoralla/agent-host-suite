@@ -268,6 +268,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   return {
     content: [{ type: 'text', text: value }],
     structuredContent,
+    ...(process.argv.includes('--partial-outcome') ? {
+      _meta: { 'io.openadam.executionOutcome.v1': {
+        status: 'partial', items: { total: 2, completed: 1, errors: 1, cancelled: 0, unknown: 0 },
+        errorCodes: [{ code: 'E_TIMEOUT', count: 1 }],
+      } },
+    } : {}),
   }
 })
 

@@ -99,7 +99,8 @@ if (productText.includes(developmentCoordinate)) {
 const ajv = new Ajv2020({ allErrors: true, strict: false })
 addFormats(ajv)
 const providerSchema = parseStrictJson(await readFile(resolve(root, 'schemas/provider-config.schema.json'), 'utf8'))
-const workOrderSchema = parseStrictJson(await readFile(resolve(root, 'schemas/work-order.schema.json'), 'utf8'))
+const workOrderSchema = parseStrictJson(await readFile(resolve(root, 'schemas/work-order.schema.v0.1.json'), 'utf8'))
+const workOrderV2Schema = parseStrictJson(await readFile(resolve(root, 'schemas/work-order.schema.json'), 'utf8'))
 const contractSelectionSchema = parseStrictJson(await readFile(resolve(root, 'schemas/contract-selection.schema.json'), 'utf8'))
 const resolutionRequestSchema = parseStrictJson(await readFile(resolve(root, 'schemas/resolution-request.schema.json'), 'utf8'))
 const resolutionResultSchema = parseStrictJson(await readFile(resolve(root, 'schemas/resolution-result.schema.json'), 'utf8'))
@@ -113,6 +114,7 @@ const exampleResolutionRequest = parseStrictJson(
   await readFile(resolve(root, 'examples/resolution-request.example.json'), 'utf8'),
 )
 if (!ajv.compile(providerSchema)(exampleConfig)) throw new Error('provider config example does not satisfy its schema')
+if (!ajv.compile(workOrderV2Schema)({ ...exampleOrder, schemaVersion: 'openadam.direct-work-order.v0.2', purpose: 'validation' })) throw new Error('v0.2 work-order example does not satisfy its schema')
 if (!ajv.compile(workOrderSchema)(exampleOrder)) throw new Error('work-order example does not satisfy its schema')
 if (!ajv.compile(workOrderSchema)(structuredDataProcedureOrder)) {
   throw new Error('Structured Data Preflight work-order example does not satisfy its schema')

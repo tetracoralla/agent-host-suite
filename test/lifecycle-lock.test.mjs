@@ -177,6 +177,51 @@ test('stale retirement retries sharing failures and rechecks owner identity befo
   }
 })
 
+test('retirement gets one guarded retry when the final scan observes no contenders', { timeout: 15_000 }, async (t) => {
+  for (const replaceOwner of [false, true]) {
+    const root = await temporaryStateRoot(t)
+    const lock = join(root, '.lifecycle-lock')
+    const owner = {
+      schemaVersion: 'openadam.agent-host-lifecycle-lock.v0.1',
+      token: 'dead-owner-final-scan', pid: 2_147_483_647,
+      processStartedAt: '2020-01-01T00:00:00.000Z',
+      operation: 'test.final-scan', acquiredAt: '2020-01-01T00:00:00.000Z',
+    }
+    await mkdir(lock)
+    await writeFile(join(lock, 'owner.json'), JSON.stringify(owner))
+    let attempts = 0
+    let entered = false
+    const recovering = withLifecycleMutation({ root }, 'test.quiescent-retirement', {
+      renameLifecycleLock: async (source, destination) => {
+        attempts += 1
+        if (attempts === 1) {
+          // A sharing failure can return after the ordinary retry window. The
+          // subsequent scan sees a quiet directory, which is safe to retry only
+          // if it still belongs to the dead owner.
+          await new Promise((resolve) => setTimeout(resolve, 2100))
+          if (replaceOwner) await writeFile(join(lock, 'owner.json'), JSON.stringify({
+            ...owner, token: 'replacement-owner', pid: process.pid,
+            processStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+          }))
+          throw Object.assign(new Error('transient sharing violation'), { code: 'EPERM' })
+        }
+        await rename(source, destination)
+      },
+    }, async () => { entered = true })
+    if (replaceOwner) {
+      await assert.rejects(recovering, { code: 'LIFECYCLE_BUSY' })
+      assert.equal(attempts, 1)
+      assert.equal(entered, false)
+      assert.equal(JSON.parse(await readFile(join(lock, 'owner.json'))).token, 'replacement-owner')
+    } else {
+      await recovering
+      assert.equal(attempts, 2)
+      assert.equal(entered, true)
+      await assert.rejects(access(lock), { code: 'ENOENT' })
+    }
+  }
+})
+
 test('Windows retired lifecycle cleanup waits for transient readers and fails closed for a held file', {
   skip: process.platform !== 'win32', timeout: 45000,
 }, async (t) => {

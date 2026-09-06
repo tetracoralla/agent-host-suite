@@ -297,3 +297,11 @@ then checkpoints and compacts SQLite. Provider cursors and health state remain.
 - public Dashboard, MCP server, plugin, or Skill;
 - historical truth before the configured initial lookback window;
 - cross-provider causal comparison or universal Tool Scores.
+
+
+Report v0.9 adds longitudinal version/purpose aggregates and exact component
+binding continuity. Raw retention does not erase these compact summaries or
+component boundaries. Hash-only receipts prevent a rotated source from counting
+an archived execution twice. Partial provider results stay separate from transport
+completion; old unreported outcomes remain unknown. See
+[migration notes](migrations/report-v0.9.md) for storage and rollback semantics.

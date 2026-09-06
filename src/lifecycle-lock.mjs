@@ -390,6 +390,7 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
     // blindly could retire a replacement lease published between attempts.
     const stalePath = join(existingRoot, `.lifecycle-lock-stale-${randomUUID()}`)
     const retirementDeadline = Date.now() + 2000
+    let quiescentRetry = false
     while (true) {
       const current = await readJson(join(lockPath, OWNER_FILE)).catch((error) => {
         if (error?.code === 'ENOENT') return null
@@ -412,7 +413,7 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
         break
       } catch (error) {
         if (error?.code === 'ENOENT') return false
-        if (['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) {
+        if (!quiescentRetry && ['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) {
           if (Date.now() < retirementDeadline) {
             await new Promise((resolvePromise) => setTimeout(resolvePromise, 25))
             continue
@@ -433,6 +434,11 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
           if (active.some((item) => item.value.token !== claim.token)) {
             throw new AgentHostError('LIFECYCLE_RECOVERY_BUSY', 'Other live recovery claimants still hold the stale lock directory', { causeCode: error.code })
           }
+          // The final process/claim scan can outlast the remaining contenders.
+          // Its quiescent result is newer than the failed rename. Try once more
+          // through the owner checks above; never retry a replacement blindly.
+          quiescentRetry = true
+          continue
         }
         throw new AgentHostError('LIFECYCLE_RECOVERY_FAILED', 'The elected stale Agent Host lifecycle lock could not be retired', { causeCode: error?.code ?? null })
       }

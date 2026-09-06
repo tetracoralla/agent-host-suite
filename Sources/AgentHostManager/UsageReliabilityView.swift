@@ -1,7 +1,11 @@
+import AppKit
 import SwiftUI
 
 struct UsageReliabilityView: View {
     @ObservedObject var store: AgentHostStore
+    @State private var selectedProvider = "all"
+    @State private var copiedAnalysis = false
+    @State private var showAllTools = false
 
     var body: some View {
         ScrollView {
@@ -14,7 +18,10 @@ struct UsageReliabilityView: View {
                     }
                 }
 
-                if store.usage?.enabled != true {
+                if store.usage == nil {
+                    ProgressView(L10n.text("Loading monitoring data…"))
+                        .frame(maxWidth: .infinity, minHeight: 300)
+                } else if store.usage?.enabled != true {
                     ContentUnavailableView(
                         L10n.text("Local monitoring is off"),
                         systemImage: "chart.bar.xaxis",
@@ -33,12 +40,18 @@ struct UsageReliabilityView: View {
                         }
                     }
 
-                    providerActivity(usage)
-                    reliability(usage)
-                    traceCoverage(usage)
-                    RetainedTraceSessionsView(store: store, usage: usage)
                     tools(usage)
-                    coverage(usage)
+                    versionHistory(usage)
+                    reliability(usage)
+                    providerActivity(usage)
+                    DisclosureGroup(L10n.text("Collection details")) {
+                        VStack(alignment: .leading, spacing: 20) {
+                            traceCoverage(usage)
+                            coverage(usage)
+                            RetainedTraceSessionsView(store: store, usage: usage)
+                        }
+                        .padding(.top, 12)
+                    }
                 }
             }
             .frame(maxWidth: 860, alignment: .leading)
@@ -143,10 +156,10 @@ struct UsageReliabilityView: View {
     }
 
     @ViewBuilder private func tools(_ usage: UsageSummary) -> some View {
-        let displayed = Array(usage.tools.entries.prefix(12))
+        let displayed = Array(usage.tools.entries.prefix(showAllTools ? usage.tools.entries.count : 8))
         Panel {
             HStack {
-                Text(L10n.text("Most used Agent Host tools")).font(.headline)
+                Text(L10n.text("Tool activity")).font(.headline)
                 Spacer()
                 if usage.tools.available > displayed.count {
                     Text(L10n.format("Top {shown} of {available}", ["shown": displayed.count.formatted(), "available": usage.tools.available.formatted()]))
@@ -162,20 +175,119 @@ struct UsageReliabilityView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(toolName(tool.toolName)).lineLimit(1)
-                            Text(agentName(tool.provider ?? "unknown"))
+                            Text([agentName(tool.provider ?? "unknown"), tool.componentVersion.map { L10n.format("Installed {version}", ["version": $0]) }].compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text((tool.historicalCalls ?? 0).formatted()).monospacedDigit()
-                        Text(L10n.text("calls")).font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(L10n.format("{count} observations", ["count": (tool.historicalCalls ?? 0).formatted()])).monospacedDigit()
+                            if let count = tool.currentBindingCalls {
+                                Text(L10n.format("{count} since this binding", ["count": count.formatted()]))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let count = tool.referencedCalls, count > 0 {
+                                Text(L10n.format("{count} from script references", ["count": count.formatted()]))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     if index < displayed.count - 1 { Divider() }
                 }
-                Text(L10n.text("Historical calls are observations, not proof of adoption, correctness, task quality, or value."))
+                if usage.tools.entries.count > 8 {
+                    Button(L10n.text(showAllTools ? "Show less" : "Show more tools")) { showAllTools.toggle() }
+                        .buttonStyle(.link)
+                }
+                Text(L10n.text("Script references do not prove execution. Binding counts may include older open sessions; unrelated tool updates do not restart this window."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    @ViewBuilder private func versionHistory(_ usage: UsageSummary) -> some View {
+        Panel {
+            HStack {
+                Text(L10n.text("Version history")).font(.headline)
+                Spacer()
+                Button(L10n.text(copiedAnalysis ? "Analysis request copied" : "Copy analysis request")) {
+                    let prompt = L10n.text("Use the installed Agent Host operations skill to read the current usage report. Analyze tool activity, version history, runtime errors, collection coverage, and unknowns. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; do not infer adoption or correctness from counts alone.")
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(prompt, forType: .string)
+                    copiedAnalysis = true
+                }
+                .buttonStyle(.bordered)
+            }
+            if let history = usage.versionHistory, !history.entries.isEmpty {
+                let providers = Array(Set(history.entries.compactMap(\.providerId))).sorted()
+                Picker(L10n.text("Tool"), selection: $selectedProvider) {
+                    Text(L10n.text("All tools")).tag("all")
+                    ForEach(providers, id: \.self) { provider in
+                        Text(providerName(provider)).tag(provider)
+                    }
+                }
+                .frame(maxWidth: 320)
+                ForEach(history.entries.filter { selectedProvider == "all" || $0.providerId == selectedProvider }) { entry in
+                    Divider()
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(providerName(entry.providerId)) · \(entry.providerVersion ?? "—")").fontWeight(.medium)
+                            Text(purposeName(entry.purpose)).font(.caption).foregroundStyle(.secondary)
+                            if let time = entry.lastObservedAtMs {
+                                Text(Date(timeIntervalSince1970: Double(time) / 1000), format: .dateTime.year().month().day().hour().minute())
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(L10n.format("{count} executions", ["count": (entry.executions ?? 0).formatted()])).monospacedDigit()
+                            let errors = (entry.providerErrors ?? 0) + (entry.hostErrors ?? 0)
+                            if errors > 0 {
+                                Text(L10n.format("{count} runtime errors", ["count": errors.formatted()])).foregroundStyle(.orange)
+                            }
+                            if let partial = entry.partialResults, partial > 0 {
+                                Text(L10n.format("{count} partial results · {items} failed items", ["count": partial.formatted(), "items": (entry.itemErrors ?? 0).formatted()])).foregroundStyle(.orange)
+                            }
+                            if entry.reportedOutcomes == 0 {
+                                Text(L10n.text("Result details unavailable")).foregroundStyle(.secondary)
+                            }
+                        }
+                        .font(.caption)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                if history.truncated {
+                    Text(L10n.format("Showing {shown} of {available} version groups", ["shown": history.returned.formatted(), "available": history.available.formatted()]))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Text(L10n.text("No version-attributed execution history is available yet.")).foregroundStyle(.secondary)
+            }
+            Text(L10n.text("Version totals survive updates and raw-event cleanup. Earlier deleted records cannot be recovered. Paste the analysis request into your Agent to interpret the current data."))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func providerName(_ id: String?) -> String {
+        switch id?.split(separator: ".").last.map(String.init) {
+        case "math-anchor": "Math Anchor"
+        case "migratory-time": "Migratory Time"
+        case "icon-svg-select", "armorial": "Armorial"
+        case "laniakea": "Laniakea"
+        case "batchticket": "Data Transformer"
+        case "file-vitals": "File Vitals"
+        case "text-integrity": "Text Integrity"
+        case .some(let name): name.replacingOccurrences(of: "-", with: " ").localizedCapitalized
+        case nil: L10n.text("Unknown")
+        }
+    }
+
+    private func purposeName(_ purpose: String?) -> String {
+        switch purpose {
+        case "task": L10n.text("Agent task")
+        case "diagnostic": L10n.text("Health check")
+        case "validation": L10n.text("Validation")
+        default: L10n.text("Purpose not recorded")
         }
     }
 
@@ -281,7 +393,7 @@ private struct DailyHeatStrip: View {
                         .frame(maxWidth: .infinity, minHeight: 11, maxHeight: 11)
                         .help(L10n.format("{date} · {tokens} tokens · {calls} tool calls", [
                             "date": entry.utcDate ?? L10n.text("Unknown"),
-                            "tokens": (entry.totalTokens ?? 0).formatted(),
+                            "tokens": entry.totalTokens?.formatted() ?? L10n.text("Unavailable"),
                             "calls": (entry.toolCalls ?? 0).formatted(),
                         ]))
                 }

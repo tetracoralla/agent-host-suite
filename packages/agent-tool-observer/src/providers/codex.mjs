@@ -16,6 +16,19 @@ function runtimeStatus(value) {
   return "observed";
 }
 
+function outputStatus(payload) {
+  const declared = runtimeStatus(payload.status);
+  if (["error", "cancelled"].includes(declared)) return declared;
+  let output = payload.output;
+  if (typeof output === "string" && Buffer.byteLength(output) <= 65536) {
+    try { output = JSON.parse(output); } catch { output = null; }
+  }
+  // Only an explicit transport error flag qualifies; free-form result text and
+  // nested tool results cannot establish another call's terminal outcome.
+  if (payload.isError === true || output?.isError === true) return "error";
+  return "completed";
+}
+
 function createCodexParser({ database, sourceId, recordedAtMs }) {
   let sessionId = sourceId;
   let hasSessionContext = false;
@@ -88,7 +101,7 @@ function createCodexParser({ database, sourceId, recordedAtMs }) {
           const status = runtimeStatus(payload.status);
           const requestPayload = payload.input ?? payload.arguments;
           addTool(name, callId, occurredAtMs, status, false, 0, jsonPayloadBytes(requestPayload));
-          if (name === "exec" && typeof payload.input === "string") {
+          if (["exec", "functions.exec"].includes(name) && typeof payload.input === "string") {
             const nested = extractNestedToolNames(payload.input);
             nested.forEach((nestedName, index) => addTool(nestedName, callId, occurredAtMs, "observed", true, index + 1));
           }
@@ -115,7 +128,7 @@ function createCodexParser({ database, sourceId, recordedAtMs }) {
           writes += completeToolEvent(
             database,
             eventIdentifier("codex", "tool", sessionId, key, 0, name),
-            "completed",
+            outputStatus(payload),
             occurredAtMs ?? recordedAtMs,
             jsonPayloadBytes(payload.output)
           );

@@ -371,7 +371,11 @@ async function run(options, dependencies = {}) {
     return { status: 'ok', entries: await listActivity(paths) }
   }
   if (options.command === 'usage') return usageSummary(options)
-  if (options.command === 'manager') return startWebManager({ stateRoot: options.stateRoot, open: !options.noOpen })
+  if (options.command === 'manager') return startWebManager({
+    stateRoot: options.stateRoot,
+    open: !options.noOpen,
+    ...(options.noOpen ? { onReady: ({ url }) => process.stdout.write(`${url}\n`) } : {}),
+  })
   if (options.command === 'storage') return storageStatus(options)
   if (options.command === 'cleanup') return cleanupStorage(options)
   if (options.command === 'component') {

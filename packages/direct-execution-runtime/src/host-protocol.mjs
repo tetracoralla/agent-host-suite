@@ -2,6 +2,7 @@ import { HostError, hostErrorPayload } from './errors.mjs'
 import { jsonBytes } from './json.mjs'
 
 export const HOST_REQUEST_VERSION = 'openadam.direct-host-request.v0.1'
+export const HOST_REQUEST_V2 = 'openadam.direct-host-request.v0.2'
 export const HOST_RESPONSE_VERSION = 'openadam.direct-host-response.v0.1'
 export const HOST_SERVICE_VERSION = 'openadam.direct-host-service-observation.v0.2'
 
@@ -24,7 +25,7 @@ function unicodeCodePoints(value) {
 export function assertHostRequest(request, maxBytes) {
   if (!ordinaryObject(request)) throw new HostError('HOST_PROTOCOL_ERROR', 'Host request must be an object')
   if (jsonBytes(request) > maxBytes) throw new HostError('HOST_INPUT_TOO_LARGE', 'Host request exceeds the service byte limit')
-  if (request.schemaVersion !== HOST_REQUEST_VERSION) {
+  if (![HOST_REQUEST_VERSION, HOST_REQUEST_V2].includes(request.schemaVersion)) {
     throw new HostError('HOST_PROTOCOL_ERROR', 'Unsupported host request schemaVersion')
   }
   if (typeof request.id !== 'string' || request.id.length > 200 || !ID_PATTERN.test(request.id)) {
@@ -44,6 +45,13 @@ export function assertHostRequest(request, maxBytes) {
   }
   if (!['inspect', 'project'].includes(request.action) && !ordinaryObject(request.workOrder)) {
     throw new HostError('HOST_PROTOCOL_ERROR', 'Host request workOrder must be an object')
+  }
+  if (request.workOrder?.schemaVersion === 'openadam.direct-work-order.v0.2' && request.schemaVersion !== HOST_REQUEST_V2) {
+    throw new HostError('HOST_PROTOCOL_ERROR', 'Work order v0.2 requires host request v0.2')
+  }
+  if (request.workOrder !== undefined && request.schemaVersion === HOST_REQUEST_V2
+    && request.workOrder.schemaVersion !== 'openadam.direct-work-order.v0.2') {
+    throw new HostError('HOST_PROTOCOL_ERROR', 'Host request v0.2 requires work order v0.2')
   }
   return request
 }
