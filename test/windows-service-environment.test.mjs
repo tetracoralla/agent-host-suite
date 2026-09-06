@@ -13,6 +13,19 @@ import { fixtureConfiguration, seedFixture } from './fixtures/windows-service-in
 
 const script = fileURLToPath(new URL('./fixtures/windows-service-interruption.mjs', import.meta.url))
 const read = (path) => readFile(path, 'utf8').then(JSON.parse)
+
+test('native Windows task validation accepts omitted empty action arguments', { skip: process.platform !== 'win32' }, async () => {
+  // prepare and validate do not register a task. Exercise the actual COM XML
+  // round trip, whose omitted Arguments property is null in Windows PowerShell.
+  const taskName = WINDOWS_SERVICE_TASK + '.empty-arguments-' + process.pid
+  const launcherPath = join(tmpdir(), 'agent-host-empty-arguments.cmd')
+  const task = await windowsTask('prepare', taskName, { launcherPath })
+  assert.deepEqual(await windowsTask('validate', taskName, { task, launcherPath }), task)
+  const nonempty = { ...task, xml: task.xml.replace('</Exec>', '<Arguments>unexpected</Arguments></Exec>') }
+  assert.notEqual(nonempty.xml, task.xml)
+  await assert.rejects(windowsTask('validate', taskName, { task: nonempty, launcherPath }), { code: 'SERVICE_PRIOR_STATE_UNRESTORABLE' })
+})
+
 async function fixture(t, installed) {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-windows-journal-'))
   t.after(() => rm(root, { recursive: true, force: true }))

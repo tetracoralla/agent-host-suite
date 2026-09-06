@@ -89,7 +89,9 @@ try {
         'observe' { $result = Describe (Task) }
         'validate' {
             $definition = Definition $request.task.xml
-            if (-not [string]::Equals($definition.Actions.Item(1).Path, $request.launcherPath, [StringComparison]::OrdinalIgnoreCase) -or $definition.Actions.Item(1).Arguments -cne '') { Fail 'SERVICE_PRIOR_STATE_UNRESTORABLE' }
+            # COM returns null for an omitted Arguments element. Both null and
+            # the empty string mean the recorded launcher has no extra arguments.
+            if (-not [string]::Equals($definition.Actions.Item(1).Path, $request.launcherPath, [StringComparison]::OrdinalIgnoreCase) -or [string]$definition.Actions.Item(1).Arguments -cne '') { Fail 'SERVICE_PRIOR_STATE_UNRESTORABLE' }
             if (($request.task.state -eq 1) -ne (-not $definition.Settings.Enabled)) { Fail 'SERVICE_DEFINITION_INVALID' }
             $result = @{ xml = [string]$definition.XmlText; sddl = (Sddl $request.task.sddl); state = [int]$request.task.state }
         }
