@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { addHost, hostStateOutsideManifest, hostStatus, removeHost, safePurgeRoot, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation, rollbackInstallation } from '../src/lifecycle.mjs'
+import { addHost, hostStatus, removeHost, safePurgeRoot, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation, rollbackInstallation } from '../src/lifecycle.mjs'
 import { setup } from '../src/setup.mjs'
 import { loadState, prepareStatePaths, saveState } from '../src/state.mjs'
 import { listActivity } from '../src/activity.mjs'
@@ -15,7 +15,7 @@ const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
 
 function lifecycleDependencies(fake, stateRoot, values = {}) {
   return {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     hostSkillHome: join(stateRoot, 'host-home'),
     catalogPreflight: healthyCatalogPreflight,
     applicationStatePreflight: compatibleApplicationState,
@@ -48,7 +48,7 @@ test('setup, no-op update, and uninstall preserve host ownership without manufac
     'environment.updated',
     'environment.installed',
   ])
-  const removed = await uninstallInstallation({ stateRoot, purgeData: false }, { runner: fake.runner })
+  const removed = await uninstallInstallation({ stateRoot, purgeData: false }, { runner: fake.runner, codexConfiguration: fake.configuration })
   assert.equal(removed.status, 'uninstalled')
   assert.equal(await loadState(paths), null)
   assert.equal(fake.plugins.size, 0)
@@ -74,7 +74,7 @@ test('a failed post-commit setup activity append returns a warning without rolli
   }])
   const paths = await prepareStatePaths(stateRoot)
   assert.equal((await loadState(paths)).profile, 'standard')
-  assert.equal(fake.plugins.has('math-anchor@math-anchor'), true)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, true)
 })
 
 test('a failed uninstall activity append returns a warning without leaving installed state behind', async (t) => {
@@ -88,7 +88,7 @@ test('a failed uninstall activity append returns a warning without leaving insta
     lifecycleDependencies(fake, stateRoot),
   )
   const result = await uninstallInstallation({ stateRoot, purgeData: false }, {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     recordActivity: async () => { throw new Error('injected activity append failure') },
   })
   assert.equal(result.status, 'uninstalled')
@@ -279,7 +279,7 @@ test('successful read-only lifecycle no-ops do not leave a newly published priva
   await assert.rejects(() => access(setupStateRoot), (error) => error.code === 'ENOENT')
 
   const uninstallStateRoot = join(stateParent, 'uninstall', 'private', 'state')
-  const absent = await uninstallInstallation({ stateRoot: uninstallStateRoot, purgeData: false }, { runner: fake.runner })
+  const absent = await uninstallInstallation({ stateRoot: uninstallStateRoot, purgeData: false }, { runner: fake.runner, codexConfiguration: fake.configuration })
   assert.equal(absent.status, 'not-installed')
   await assert.rejects(() => access(uninstallStateRoot), (error) => error.code === 'ENOENT')
 })
@@ -310,7 +310,7 @@ test('quick host status detects the executable without starting the Agent app CL
   const fake = createCodexRunner({ mathPresent: false, timePresent: false })
   await setup({ profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false }, lifecycleDependencies(fake, stateRoot))
   const before = fake.calls.length
-  const result = await hostStatus({ stateRoot, target: 'codex', quick: true }, { runner: fake.runner })
+  const result = await hostStatus({ stateRoot, target: 'codex', quick: true }, { runner: fake.runner, codexConfiguration: fake.configuration })
   const quickCalls = fake.calls.slice(before)
   assert.equal(result.status, 'ok')
   assert.equal(result.managed, true)
@@ -325,7 +325,7 @@ test('purge-data removes the private state root for a deep state root', async (t
   await createDevelopmentWorkspace(root)
   const fake = createCodexRunner({ mathPresent: false, timePresent: false })
   await setup({ profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false }, lifecycleDependencies(fake, stateRoot))
-  const purged = await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner })
+  const purged = await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner, codexConfiguration: fake.configuration })
   assert.equal(purged.status, 'uninstalled')
   assert.equal(purged.purgeData, true)
   assert.equal(purged.archive, null)
@@ -342,36 +342,6 @@ test('purge-data refuses filesystem roots, home, and shallow state roots', async
   assert.equal(safePurgeRoot(join(homedir(), 'Library/Application Support/OpenAdam/Agent Host Suite')), true)
 })
 
-test('profile transitions identify host bindings outside the target manifest', () => {
-  const current = {
-    kind: 'codex',
-    entries: [
-      { selector: 'math-anchor@openadam' },
-      { selector: 'migratory-time@migratory-time' },
-      { selector: 'file-vitals@file-vitals-local', pluginCreated: true },
-    ],
-  }
-  const manifest = {
-    components: {
-      math: { plugin: 'math-anchor', marketplace: 'openadam' },
-      time: { plugin: 'migratory-time', marketplace: 'migratory-time' },
-    },
-  }
-  assert.deepEqual(hostStateOutsideManifest('codex', current, manifest)?.entries, [
-    { selector: 'file-vitals@file-vitals-local', pluginCreated: true },
-  ])
-  const claude = {
-    kind: 'claude',
-    entries: [
-      { component: 'math-anchor' },
-      { component: 'migratory-time', created: true },
-    ],
-  }
-  assert.deepEqual(hostStateOutsideManifest('claude', claude, { components: { 'math-anchor': {} } })?.entries, [
-    { component: 'migratory-time', created: true },
-  ])
-})
-
 test('the installed tool working set changes Codex exposure without removing package inventory or release rollback', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-tool-set-workspace-'))
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-tool-set-state-'))
@@ -383,13 +353,13 @@ test('the installed tool working set changes Codex exposure without removing pac
   const preview = await setActiveTools({ stateRoot, tools: ['math-anchor'], dryRun: true }, lifecycleDependencies(fake, stateRoot))
   assert.equal(preview.status, 'ready')
   assert.deepEqual(preview.activeAgentComponents, ['math-anchor'])
-  assert.equal(fake.plugins.has('migratory-time@migratory-time'), true)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, true)
 
   const changed = await setActiveTools({ stateRoot, tools: ['math-anchor'], dryRun: false }, lifecycleDependencies(fake, stateRoot))
   assert.equal(changed.status, 'tool-set-updated')
   assert.equal(changed.restartRequired, true)
-  assert.equal(fake.plugins.has('math-anchor@math-anchor'), true)
-  assert.equal(fake.plugins.has('migratory-time@migratory-time'), false)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, true)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, false)
   const paths = await prepareStatePaths(stateRoot)
   const state = await loadState(paths)
   assert.deepEqual(state.availableAgentComponents, ['math-anchor', 'migratory-time'])
@@ -400,7 +370,7 @@ test('the installed tool working set changes Codex exposure without removing pac
 
   const reset = await setActiveTools({ stateRoot, resetTools: true, dryRun: false }, lifecycleDependencies(fake, stateRoot))
   assert.deepEqual(reset.activeAgentComponents, ['math-anchor', 'migratory-time'])
-  assert.equal(fake.plugins.has('migratory-time@migratory-time'), true)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, true)
   assert.equal((await listActivity(paths))[0].type, 'tool-set.changed')
 })
 
@@ -420,8 +390,8 @@ test('the local profile reset restores its small default instead of activating t
   assert.deepEqual(reset.defaultAgentComponents, ['math-anchor'])
   assert.deepEqual(reset.activeAgentComponents, ['math-anchor'])
   assert.deepEqual(reset.inactiveAgentComponents, ['migratory-time'])
-  assert.equal(fake.plugins.has('math-anchor@math-anchor'), true)
-  assert.equal(fake.plugins.has('migratory-time@migratory-time'), false)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, true)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, false)
 })
 
 test('an over-budget tool set is rejected before host bindings or saved state change', async (t) => {
@@ -444,10 +414,10 @@ test('an over-budget tool set is rejected before host bindings or saved state ch
   )
   assert.equal(fake.calls.length, callsBefore)
   assert.deepEqual(await loadState(paths), stateBefore)
-  assert.equal(fake.plugins.has('migratory-time@migratory-time'), false)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, false)
 })
 
-test('an inactive tool stays absent instead of restoring a displaced source-checkout plugin', async (t) => {
+test('an inactive tool keeps its displaced user plugin disabled until Host uninstall', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-tool-set-source-workspace-'))
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-tool-set-source-state-'))
   t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
@@ -464,27 +434,28 @@ test('an inactive tool stays absent instead of restoring a displaced source-chec
   }, lifecycleDependencies(fake, stateRoot))
 
   await setActiveTools({ stateRoot, tools: ['migratory-time'], dryRun: false }, lifecycleDependencies(fake, stateRoot))
-  assert.equal(fake.plugins.has('math-anchor@math-anchor'), false)
-  assert.equal(fake.marketplaces.has('math-anchor'), false)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, false)
+  assert.equal(fake.marketplaces.get('math-anchor'), workspace.math)
   const inactive = await loadState(await prepareStatePaths(stateRoot))
-  assert.equal(inactive.hosts.codex.inactiveEntries.some((entry) => entry.selector === 'math-anchor@math-anchor' && entry.displacedMarketplace === workspace.math), true)
+  assert.equal(inactive.hosts.codex.inactiveEntries.some((entry) => entry.component === 'math-anchor' && entry.displacedPlugins.some((item) => item.selector === 'math-anchor@math-anchor' && item.before.value === true)), true)
 
   const updated = await updateInstallation(
     { stateRoot, dryRun: false, replaceHostConflicts: true },
     lifecycleDependencies(fake, stateRoot),
   )
   assert.equal(updated.status, 'updated')
-  assert.equal(fake.plugins.has('math-anchor@math-anchor'), false)
-  assert.equal(fake.marketplaces.has('math-anchor'), false)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, false)
+  assert.equal(fake.marketplaces.get('math-anchor'), workspace.math)
   const updatedInactive = await loadState(await prepareStatePaths(stateRoot))
-  assert.equal(updatedInactive.hosts.codex.inactiveEntries.some((entry) => entry.selector === 'math-anchor@math-anchor' && entry.displacedMarketplace === workspace.math), true)
+  assert.equal(updatedInactive.hosts.codex.inactiveEntries.some((entry) => entry.component === 'math-anchor' && entry.displacedPlugins.some((item) => item.selector === 'math-anchor@math-anchor' && item.before.value === true)), true)
 
   await setActiveTools({ stateRoot, resetTools: true, dryRun: false }, lifecycleDependencies(fake, stateRoot))
-  assert.equal(fake.plugins.has('math-anchor@math-anchor'), true)
-  assert.notEqual(fake.marketplaces.get('math-anchor'), workspace.math)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, true)
+  assert.equal(fake.plugins.get('math-anchor@math-anchor').enabled, false)
+  assert.equal(fake.marketplaces.get('math-anchor'), workspace.math)
 
-  await uninstallInstallation({ stateRoot, purgeData: false }, { runner: fake.runner })
-  assert.equal(fake.plugins.has('math-anchor@math-anchor'), true)
+  await uninstallInstallation({ stateRoot, purgeData: false }, { runner: fake.runner, codexConfiguration: fake.configuration })
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, true)
   assert.equal(fake.marketplaces.get('math-anchor'), workspace.math)
 })
 
@@ -497,7 +468,7 @@ test('unsafe purge-data is rejected before any installed state or host binding c
   await setup({ profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false }, lifecycleDependencies(fake, stateRoot))
   const paths = await prepareStatePaths(stateRoot)
   await assert.rejects(
-    uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner }),
+    uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner, codexConfiguration: fake.configuration }),
     (error) => error.code === 'PURGE_ROOT_UNSAFE',
   )
   assert.notEqual(await loadState(paths), null)
@@ -505,31 +476,37 @@ test('unsafe purge-data is rejected before any installed state or host binding c
   assert.equal(fake.marketplaces.size, 3)
 })
 
-test('a tool-set change whose activation and rollback both fail surfaces a dedicated rollback error and saves no state', async (t) => {
+test('failed native configuration activation and compensation retain recovery ownership for a later retry', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-tool-set-rollback-workspace-'))
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-tool-set-rollback-state-'))
   t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
   await createDevelopmentWorkspace(root)
   const fake = createCodexRunner({ mathPresent: false, timePresent: false })
-  await setup({ profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false }, lifecycleDependencies(fake, stateRoot))
-  // Suspend migratory-time so the next change must re-add it through `plugin add`.
-  await setActiveTools({ stateRoot, tools: ['math-anchor'], dryRun: false }, lifecycleDependencies(fake, stateRoot))
-
-  const base = fake.runner
-  const failing = async (command, args, options = {}) => {
-    if (command === '/fake/codex' && args[0] === 'plugin' && args[1] === 'add') {
-      throw new Error('plugin admission unavailable')
-    }
-    return base(command, args, options)
-  }
+  const dependencies = lifecycleDependencies(fake, stateRoot)
+  await setup({ profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false }, dependencies)
+  await setActiveTools({ stateRoot, tools: ['math-anchor'], dryRun: false }, dependencies)
   const paths = await prepareStatePaths(stateRoot)
   const before = await loadState(paths)
-
+  const failingConfiguration = (executable, options, callback) => fake.configuration(executable, options, (client) => callback({
+    read: client.read,
+    write: async (snapshot, changes) => {
+      if (changes.some((change) => change.keys[2] === 'enabled' && change.value === true)) {
+        throw Object.assign(new Error('native configuration unavailable'), { code: 'FIXTURE_CONFIG_UNAVAILABLE' })
+      }
+      return client.write(snapshot, changes)
+    },
+  }))
   await assert.rejects(
-    setActiveTools({ stateRoot, tools: ['migratory-time'], dryRun: false }, lifecycleDependencies(fake, stateRoot, { runner: failing })),
-    (error) => error.code === 'TOOL_SET_CHANGE_ROLLBACK_FAILED'
-      && error.details.change.includes('plugin admission unavailable')
-      && error.details.rollback.includes('plugin admission unavailable'),
+    setActiveTools({ stateRoot, tools: ['migratory-time'], dryRun: false }, { ...dependencies, codexConfiguration: failingConfiguration }),
+    (error) => error.code === 'ENVIRONMENT_RECOVERY_REQUIRED'
+      && error.details.causeCode === 'TOOL_SET_CHANGE_ROLLBACK_FAILED'
+      && error.details.recoveryCode === 'FIXTURE_CONFIG_UNAVAILABLE',
   )
-  assert.deepEqual(await loadState(paths), before)
+  await assert.rejects(loadState(paths), { code: 'ENVIRONMENT_RECOVERY_REQUIRED' })
+  const pointer = JSON.parse(await readFile(paths.state, 'utf8'))
+  assert.equal(pointer.schemaVersion, 'openadam.agent-host-changing.v0.1')
+  await setActiveTools({ stateRoot, tools: ['math-anchor'], dryRun: false }, dependencies)
+  const recovered = await loadState(paths)
+  assert.deepEqual(recovered.agentComponents, before.agentComponents)
+  assert.deepEqual(recovered.hosts, before.hosts)
 })

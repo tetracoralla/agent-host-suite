@@ -24,11 +24,15 @@ owned by those public mechanisms. An Agent-app update may require a fresh
 compatibility check, but it cannot overwrite a patched runtime because Agent
 Host never patches the Agent app.
 
-Claude Code integrations are owned at user scope. Agent Host invokes its
-documented management command with `setting-sources=user` and disables Skills
-and Chrome integration for that subprocess. It does not ask the host command to
-load project or local settings merely to inspect or change a Suite-owned user
-binding.
+Claude Code integrations are owned at user scope. Agent Host reads and changes
+selected `mcpServers` fields in the public user `.claude.json` file, preserving
+exact argument arrays, complete displaced entries, and unrelated settings.
+It retains the resolved config path in Host state; project-scoped entries are
+untouched. The installed-version query uses `setting-sources=user` with Skills
+and Chrome integration disabled. Binding inspection does not invoke a Provider
+health query or reconstruct arguments from human CLI output. Legacy displacement
+that was recorded only as a lossy argument rendering cannot be automatically
+restored as though it were exact.
 
 ZCode integrations use its documented user configuration and Skill locations:
 `~/.zcode/cli/config.json` under `mcp.servers`, and `~/.zcode/skills`.
@@ -164,26 +168,28 @@ inside that compensation boundary. Monitoring refresh and retention maintenance
 cannot reverse already-collected Observer rows, so typed failures disclose the
 committed and possible partial effects instead of claiming atomicity.
 
-Service replacement records configured, running, and endpoint-ready state as
-separate facts. Windows reads the scheduled task's actual state instead of
-inferring it from named-pipe reachability. A loaded but stopped macOS LaunchAgent
-that exited cleanly cannot be recreated exactly after a replacement failure, so
-replacement refuses that case before mutation. Generated descriptors keep
-`RunAtLoad` enabled: after a reboot or login nothing else in the Suite starts
-the service, direct tool calls fail while its Socket is absent, and a
-never-started service would also block the next replacement. Replacement itself
-still uses explicit bootout, bootstrap, and kickstart so a running prior
-service is restored exactly. If a rollback `bootout`, scheduled-task end, or
-scheduled-task delete reports failure, rollback immediately queries the exact
-job/task identity. It removes or restores descriptor and launcher files only
-after absence is confirmed. Before either carrier is overwritten, the previous
-macOS descriptor or Windows launcher plus Task XML is copied into a unique
-owner-only recovery bundle and verified by byte count and SHA-256. The bundle
-is retired only after the new service succeeds or the prior configured,
-running, and ready state is restored exactly. A still-present or unqueryable
-service keeps that process-independent bundle and returns one bounded compound
-installation/rollback failure with an opaque, path-free recovery identity and
-a structured `agent-host service recover` action. The command accepts only that
+Service installation, replacement and removal require the owning environment
+transaction. The before-effect journal records carrier bytes, native identity
+and configured/running/endpoint-ready state as separate facts. Windows also
+records the launcher owner/group/access ACL and the scheduled task definition
+and ACL. Windows stopped and disabled tasks remain stopped or disabled after
+recovery; queued/unknown prior tasks and read-only launchers are unsupported
+before mutation. A loaded-but-stopped macOS LaunchAgent is likewise refused.
+Generated macOS descriptors retain `RunAtLoad`; bootstrap starts them without
+an immediate force-kickstart. Removal waits for native absence before changing
+carrier files. Unchanged ready services retain their process only when their
+recorded identity and declared Runtime fingerprint also match.
+
+Whole-journal recovery preflights all remaining resources and reverses them
+before restoring stable lifecycle state. Another application's changed resource
+blocks restoration and keeps its bytes and ownership record. Successful service
+startup does not retire the journal: only whole-environment commit does. The
+normal service writer has no standalone fallback and produces no new v0.2
+service-recovery bundles. Current environment operations recover an interrupted
+journal before retrying the requested change; read-only status never repairs it.
+
+Historical service-recovery bundles retain the dedicated
+`agent-host service recover` compatibility route. The command accepts only that
 identity and its manifest digest; it resolves the bundle beneath the selected
 Host private-state root and never accepts a bundle path. Before creating a lock
 or state scaffold, the CLI read-only preflight requires an existing canonical,
@@ -251,9 +257,30 @@ distribution verification for a public binary.
 Package inventory and Agent-visible working set are separate. Every transition
 that can change the working set measures the proposed live catalogs and blocks
 activation when their canonical bytes, largest tool, or tool count exceed the
-declared budgets. This makes the 64 KiB catalog limit an enforced boundary
-rather than a later monitoring warning; it does not require uninstalling tools
-that are inactive for the current task.
+declared resource limits. The 64 KiB aggregate limit protects admission of the
+selected managed catalog; it does not require uninstalling inactive tools.
+This is a Host resource policy, not an observed Codex/Claude context-window
+limit or a measurement of a model's input. Provider `tools/list`, a host's native
+inventory, enabled Skill metadata, loaded Skill contents and the final model
+request are distinct surfaces. A host may filter, defer, add to or transform
+the catalog. Catalog bytes must not be converted into claimed token savings
+without an explicit tokenizer/input observation and a comparable run.
+
+Current Codex 0.152.0 public read-only inventories can verify effective native
+configuration, active Skill identities and MCP tool metadata in isolated homes.
+They do not establish the assembled model request. The natural four-route
+Controller and native driver live in `agent-tool-labs/packages/agent-tool-evals`;
+their preparation digest separates common configuration from declared exposure.
+The normal Host does not gain an evaluator or another routing service. Future
+host-specific exposure changes should use a verified public mechanism and
+preserve the same task/native tools; a feature's name or a catalog byte count
+alone is insufficient evidence to select that change.
+
+The former `measure:local-dogfood` script has been removed. It forced tool use,
+defaulted to a different model and wrote overlays into the live Codex home.
+Its reports retain their historical meaning; they are not migrated into natural
+four-route reports. Run construction, explicit model/budget admission and
+descriptive task comparison now belong to the separate evaluation package.
 
 The Local profile declares a small initial working set separately from its
 complete activatable inventory. Setup and profile changes warm and bind only
@@ -340,6 +367,18 @@ of scope.
 
 ## Private state
 
+The current writer uses `openadam.agent-host-state.v0.2`. It still reads v0.1
+without changing it. New ownership records retain complete displaced Claude
+JSON bindings; older writers cannot interpret them safely and must reject v0.2.
+Initial setup and legacy-state migration check the installed application through
+an isolated `status` invocation before mutating host bindings or services. A
+preview runs that read-only compatibility check too. Migration retains the
+original v0.1 record in history and publishes v0.2 only on commit. Existing
+interruption recovery restores the recorded previous version before migration
+preflight; dedicated service-bundle recovery preserves its bound old state.
+An incompatible application must be updated through the separate authorized
+installation workflow before a migration can proceed.
+
 Installed paths, local development roots, service sockets, process state, and
 observations live in a user-private state directory. Tracked examples contain
 placeholders only. The manager writes state atomically and records which host
@@ -356,7 +395,7 @@ active execution entries. No path denylist or extra workspace sandbox is part
 of this architecture.
 
 The installed profile and active Agent tool set are separate. A temporary
-active-set reduction removes only Agent Host's managed host binding and keeps
+active-set reduction deactivates Agent Host's managed exposure and keeps
 the displaced user entry suspended, so a source-checkout plugin cannot silently
 reappear. Removing a component from the installed profile, disconnecting the
 Agent app, or uninstalling the environment restores the preserved user entry.
@@ -367,6 +406,60 @@ declares workspace environment variables. It creates a content-addressed thin
 Codex projection containing plugin identity and Skill resources, while every
 MCP command and working directory points to the immutable package. Codex may
 cache that small projection; it does not cache a second provider runtime.
+
+Native Codex bindings use a fresh Host-specific marketplace identity for each
+new projection installation. User plugins are disabled and their prior enabled
+cell is retained; their marketplaces and cached bytes remain untouched. The
+native install receipt identifies the cached path, whose complete file inventory
+and contents must match the verified projection. An upstream source path does
+not establish installed identity. Working-set suspension preserves the cache
+and registration, and inactive projections remain retained until removal.
+
+The public config API provides version-checked field writes. The native plugin
+installer's enablement side effect is journaled before invocation; its cache
+copy has no public version-check option. Recovery removes fresh registrations
+without rewriting an existing native cache. User-edited or newly shared Host
+registrations must be resolved while their ownership and supporting files remain
+recorded. Legacy migration only retires exact, exclusively Host-owned records;
+lossy old displacement records are not silently reconstructed.
+
+### Native service carriers
+
+Normal macOS lifecycle changes journal the LaunchAgent descriptor, its observed
+job identity and readiness before stopping, replacing or removing it. They share
+whole-resource recovery with Agent-app configuration and Skill projections.
+A user-modified descriptor or job blocks recovery instead of being overwritten;
+committed state ends the old journal's authority. Unchanged ready services retain
+their process only when both descriptor and Runtime fingerprint match.
+
+The service's default label remains stable. Native job inspection uses the
+retained label and exact arguments/environment, with bounded parsing of the
+current public diagnostic output. Removal waits for confirmed native absence;
+command return alone does not establish that the old job has gone.
+
+Windows uses the public Task Scheduler 2.0 COM API through a bounded, private
+JSON/stdin adapter. Preparation fills an unregistered task definition; observation
+and recovery compare its complete native XML serialization and owner/group/access
+security descriptor. Registration uses create-only semantics, preserves the
+recorded ACL, and ignores registration triggers. The native helper rechecks the
+expected definition/ACL before stop, delete or run; create refuses a concurrent
+same-name registration. There is no forced overwrite or credential prompt.
+Only the current user's limited interactive-token/logon-trigger task can be
+restored without collecting a password or replaying a time/registration event.
+Unknown serialization changes fail closed; the implementation does not strip
+fields to make an unexpected native response match.
+
+Launcher bytes and owner/group/access ACL are restored together by preparing a
+private file before atomic rename. Task and launcher ACL edits block recovery;
+NTFS permissions are not inferred from synthetic POSIX mode bits. SACL auditing
+is outside the unprivileged Host's access-list contract. A newly needed shared
+`\openAdam` task folder may remain empty after removal; it is never recursively
+deleted as though it belonged only to this service. Native Windows verification
+is explicit through `node scripts/probe-windows-service-journal.mjs`, which uses
+unique suffixed task names, a temporary private root, a named-pipe fixture and
+actual process termination. It retains a failed probe's own state for diagnosis.
+The current macOS source/protocol and PowerShell-parser checks do not establish
+Windows Task Scheduler execution, XML/ACL round-trip behavior, or login recovery.
 
 ### Bounded Direct Runtime residency
 

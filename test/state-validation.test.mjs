@@ -35,7 +35,7 @@ const valid = {
 
 test('saved state validation accepts the current lifecycle shape and its public schema names every field', async () => {
   assert.equal(validateState(structuredClone(valid)).suiteVersion, '0.1.1')
-  const schema = JSON.parse(await readFile(new URL('../schemas/agent-host-state.schema.v0.1.json', import.meta.url), 'utf8'))
+  const schema = JSON.parse(await readFile(new URL('../schemas/agent-host-state.schema.v0.2.json', import.meta.url), 'utf8'))
   for (const key of Object.keys(valid)) assert.equal(Object.hasOwn(schema.properties, key), true, key)
 })
 

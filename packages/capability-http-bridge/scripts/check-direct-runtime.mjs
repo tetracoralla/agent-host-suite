@@ -82,7 +82,10 @@ try {
       maxResultBytes: 262144,
       maxProtocolLineBytes: 1048576,
       maxStderrBytes: 4096,
-      defaultTimeoutMs: 10000,
+      // Match the Direct Runtime's Windows integration-fixture budget: its
+      // native ACL snapshot and Job guardian are part of this cold call. The
+      // loopback HTTP deadline remains one second in the instance above.
+      defaultTimeoutMs: process.platform === 'win32' ? 30000 : 10000,
       circuitBreakerFailureThreshold: 3,
       circuitBreakerCooldownMs: 50,
     },

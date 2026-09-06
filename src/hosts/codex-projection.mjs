@@ -233,6 +233,7 @@ async function materializeComponent(componentId, component, projectionRoot, work
   }
   return {
     ...component,
+    hostProjectionRoot: componentProjectionRoot,
     marketplaceRoot,
     pluginRoot,
     pluginIdentityRelativeFiles,

@@ -41,7 +41,7 @@ async function environment(root) {
     profile: 'standard', hosts: ['codex'], releaseManifest: manifest, stateRoot,
     noService: true, dryRun: false, enableObservability: false,
   }, {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     hostSkillHome,
     componentWarmup: healthyComponentWarmup,
     catalogPreflight: healthyCatalogPreflight,
@@ -102,7 +102,7 @@ test('private component import locks preview facts, activates through Codex proj
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const fixture = await createToolComponentFixture(join(root, 'tool'))
   const dependencies = {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     hostSkillHome,
     mcpProbe: healthyProbe,
     componentWarmup: healthyComponentWarmup,
@@ -121,15 +121,15 @@ test('private component import locks preview facts, activates through Codex proj
   }, dependencies)
   assert.equal(imported.status, 'imported')
   assert.equal(imported.component.active, true)
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), true)
-  assert.equal(fake.marketplaces.get('private-fixture-local').includes(join(stateRoot, 'host-projections', 'codex')), true)
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, true)
+  assert.equal(fake.enabledPlugins('private-fixture')[0].sourcePath.includes(join(await realpath(stateRoot), 'host-projections', 'codex')), true)
   const listed = await localComponentStatus({ stateRoot })
   assert.deepEqual(listed.components.map((item) => [item.id, item.active]), [['private-fixture', true]])
 
   const removed = await removeLocalComponent({ stateRoot, target: 'private-fixture', dryRun: false }, dependencies)
   assert.equal(removed.status, 'removed')
   assert.equal(removed.component.installed, false)
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), false)
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, false)
   const removedState = await loadState(await prepareStatePaths(stateRoot))
   assert.equal(removedState.components['private-fixture'], undefined)
   assert.equal(removedState.privateComponents['private-fixture'].rollback.component.root.includes(join(await realpath(stateRoot), 'packages')), true)
@@ -138,7 +138,7 @@ test('private component import locks preview facts, activates through Codex proj
   assert.equal(restored.status, 'rolled-back')
   assert.equal(restored.component.version, '0.1.0')
   assert.equal(restored.component.active, true)
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), true)
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, true)
 })
 
 test('component inventory transitions publish installed Direct Capability providers into the active runtime config', async (t) => {
@@ -177,7 +177,7 @@ test('component inventory transitions publish installed Direct Capability provid
     agentComponents: previous.agentComponents,
     privateComponents: {},
   }, {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     hostSkillHome,
     catalogPreflight: healthyCatalogPreflight,
   })
@@ -196,7 +196,7 @@ test('private component rollback preserves removal as the immediate previous sta
   const first = await createToolComponentFixture(join(root, 'first'), { version: '0.1.0', marker: 'first' })
   const second = await createToolComponentFixture(join(root, 'second'), { version: '0.2.0', marker: 'second' })
   const dependencies = {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     hostSkillHome,
     mcpProbe: healthyProbe,
     componentWarmup: healthyComponentWarmup,
@@ -211,7 +211,7 @@ test('private component rollback preserves removal as the immediate previous sta
   const removed = await rollbackLocalComponent({ stateRoot, target: 'private-fixture', dryRun: false }, dependencies)
   assert.equal(removed.component.installed, false)
   assert.equal(removed.component.rollback.version, '0.2.0')
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), false)
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, false)
 
   const restored = await rollbackLocalComponent({ stateRoot, target: 'private-fixture', dryRun: false }, dependencies)
   assert.equal(restored.component.version, '0.2.0')
@@ -223,13 +223,13 @@ test('private component import is inactive by default and refuses component ids 
   t.after(() => rm(root, { recursive: true, force: true }))
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const privateFixture = await createToolComponentFixture(join(root, 'private'))
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   const imported = await importLocalComponent({
     stateRoot, artifact: privateFixture.artifactPath, binding: privateFixture.binding,
     activate: false, replace: false, dryRun: false,
   }, dependencies)
   assert.equal(imported.component.active, false)
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), false)
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, false)
   await removeLocalComponent({ stateRoot, target: 'private-fixture', dryRun: false }, dependencies)
 
   const paths = await prepareStatePaths(stateRoot)
@@ -253,7 +253,7 @@ test('private component import supports multiple sealed records and binds only d
   const first = await createToolComponentFixture(join(root, 'first'), {
     optionalPathEnvironment: ['PLUGIN_CACHE_ROOTS', 'APPLICATION_ROOTS'],
   })
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
 
   await assert.rejects(
     importLocalComponent({ stateRoot, artifact: first.artifactPath, binding: first.binding, pathGrants: [`UNDECLARED=${pluginCache}`] }, dependencies),
@@ -288,7 +288,7 @@ test('private component rollback restores one record while another remains curre
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const first = await createToolComponentFixture(join(root, 'first'), { id: 'first-fixture' })
   const second = await createToolComponentFixture(join(root, 'second'), { id: 'second-fixture' })
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   await importLocalComponent({ stateRoot, artifact: first.artifactPath, binding: first.binding, activate: false }, dependencies)
   await removeLocalComponent({ stateRoot, target: 'first-fixture' }, dependencies)
   await importLocalComponent({ stateRoot, artifact: second.artifactPath, binding: second.binding, activate: true }, dependencies)
@@ -307,8 +307,8 @@ test('private component rollback restores one record while another remains curre
   const state = await loadState(await prepareStatePaths(stateRoot))
   assert.equal(state.privateComponents['first-fixture'].current.component.version, '0.1.0')
   assert.equal(state.privateComponents['second-fixture'].current.component.version, '0.1.0')
-  assert.equal(fake.plugins.has('second-fixture@second-fixture-local'), true)
-  assert.equal(fake.plugins.has('first-fixture@first-fixture-local'), false)
+  assert.equal(fake.enabledPlugins('second-fixture').length > 0, true)
+  assert.equal(fake.enabledPlugins('first-fixture').length > 0, false)
 })
 
 test('activating a second private component fails before state change when the complete catalog conflicts', async (t) => {
@@ -323,7 +323,7 @@ test('activating a second private component fails before state change when the c
     }
     return healthyCatalogPreflight(components)
   }
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight }
   await importLocalComponent({ stateRoot, artifact: first.artifactPath, binding: first.binding, activate: true }, dependencies)
   const before = await loadState(await prepareStatePaths(stateRoot))
   await assert.rejects(
@@ -331,8 +331,8 @@ test('activating a second private component fails before state change when the c
     (error) => error.code === 'AGENT_TOOL_BINDING_CONFLICT',
   )
   assert.deepEqual(await loadState(await prepareStatePaths(stateRoot)), before)
-  assert.equal(fake.plugins.has('first-fixture@first-fixture-local'), true)
-  assert.equal(fake.plugins.has('second-fixture@second-fixture-local'), false)
+  assert.equal(fake.enabledPlugins('first-fixture').length > 0, true)
+  assert.equal(fake.enabledPlugins('second-fixture').length > 0, false)
 })
 
 test('private component rollback preserves optional path validation errors', async (t) => {
@@ -342,7 +342,7 @@ test('private component rollback preserves optional path validation errors', asy
   const pluginCache = join(root, 'plugin-cache')
   await import('node:fs/promises').then(({ mkdir }) => mkdir(pluginCache))
   const fixture = await createToolComponentFixture(join(root, 'private'), { optionalPathEnvironment: ['PLUGIN_CACHE_ROOTS'] })
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   await importLocalComponent({
     stateRoot, artifact: fixture.artifactPath, binding: fixture.binding,
     pathGrants: [`PLUGIN_CACHE_ROOTS=${pluginCache}`], activate: false,
@@ -372,7 +372,7 @@ test('activating a component fails closed when a retained optional path grant is
   const pluginCache = join(root, 'plugin-cache')
   await import('node:fs/promises').then(({ mkdir }) => mkdir(pluginCache))
   const fixture = await createToolComponentFixture(join(root, 'private'), { optionalPathEnvironment: ['PLUGIN_CACHE_ROOTS'] })
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   await importLocalComponent({
     stateRoot, artifact: fixture.artifactPath, binding: fixture.binding,
     pathGrants: [`PLUGIN_CACHE_ROOTS=${pluginCache}`], activate: false,
@@ -385,7 +385,7 @@ test('activating a component fails closed when a retained optional path grant is
     (error) => error.code === 'PATH_GRANT_INVALID' && error.message.includes('PLUGIN_CACHE_ROOTS'),
   )
   assert.deepEqual(await loadState(await prepareStatePaths(stateRoot)), before)
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), false)
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, false)
 })
 
 test('an inactive v0.3 private Provider remains discoverable as a Skill-only Codex plugin', async (t) => {
@@ -393,15 +393,14 @@ test('an inactive v0.3 private Provider remains discoverable as a Skill-only Cod
   t.after(() => rm(root, { recursive: true, force: true }))
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const fixture = await createToolComponentFixture(join(root, 'private'), { discovery: true })
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   const imported = await importLocalComponent({
     stateRoot, artifact: fixture.artifactPath, binding: fixture.binding,
     activate: false, replace: false, dryRun: false,
   }, dependencies)
   assert.equal(imported.component.active, false)
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), true)
-  const marketplaceRoot = fake.marketplaces.get('private-fixture-local')
-  const pluginRoot = join(marketplaceRoot, 'plugins', 'private-fixture')
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, true)
+  const pluginRoot = fake.enabledPlugins('private-fixture')[0].installedPath
   const plugin = JSON.parse(await readFile(join(pluginRoot, '.codex-plugin/plugin.json'), 'utf8'))
   assert.equal('mcpServers' in plugin, false)
   await assert.rejects(readFile(join(pluginRoot, '.mcp.json')), (error) => error.code === 'ENOENT')
@@ -417,7 +416,7 @@ test('a compatibility update preserves the private component overlay without add
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const fixture = await createToolComponentFixture(join(root, 'private'))
   const dependencies = {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     hostSkillHome,
     mcpProbe: healthyProbe,
     componentWarmup: healthyComponentWarmup,
@@ -450,7 +449,7 @@ test('private component replacement retains exactly one prior sealed version for
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const first = await createToolComponentFixture(join(root, 'first'), { version: '0.1.0', marker: 'first' })
   const second = await createToolComponentFixture(join(root, 'second'), { version: '0.2.0', marker: 'second' })
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   await importLocalComponent({ stateRoot, artifact: first.artifactPath, binding: first.binding, activate: true, dryRun: false }, dependencies)
 
   const replaced = await importLocalComponent({
@@ -466,7 +465,7 @@ test('private component replacement retains exactly one prior sealed version for
   assert.equal(restored.component.rollback.version, '0.2.0')
   const state = await loadState(await prepareStatePaths(stateRoot))
   assert.equal(state.components['private-fixture'].version, '0.1.0')
-  assert.equal(fake.plugins.get('private-fixture@private-fixture-local').version, '0.1.0')
+  assert.equal(fake.enabledPlugins('private-fixture')[0].version, '0.1.0')
 })
 
 test('private component transitions never enter compatibility-release rollback history', async (t) => {
@@ -474,7 +473,7 @@ test('private component transitions never enter compatibility-release rollback h
   t.after(() => rm(root, { recursive: true, force: true }))
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const fixture = await createToolComponentFixture(join(root, 'private'))
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   const paths = await prepareStatePaths(stateRoot)
   const before = await listHistory(paths)
 
@@ -500,7 +499,7 @@ test('private component import dry-run removes every package path it created', a
   t.after(() => rm(root, { recursive: true, force: true }))
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const fixture = await createToolComponentFixture(join(root, 'private'))
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   const paths = await prepareStatePaths(stateRoot)
   const before = await loadState(paths)
 
@@ -523,7 +522,7 @@ test('a failed post-commit activity append returns stable warnings and preserves
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const fixture = await createToolComponentFixture(join(root, 'private'))
   const dependencies = {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     hostSkillHome,
     mcpProbe: healthyProbe,
     catalogPreflight: healthyCatalogPreflight,
@@ -569,7 +568,7 @@ test('private component rollback rejects tampered retained bytes before health o
   t.after(() => rm(root, { recursive: true, force: true }))
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const fixture = await createToolComponentFixture(join(root, 'private'))
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   await importLocalComponent({
     stateRoot, artifact: fixture.artifactPath, binding: fixture.binding,
     activate: true, dryRun: false,
@@ -592,7 +591,7 @@ test('private component rollback rejects tampered retained bytes before health o
   )
   assert.equal(probes, 0)
   assert.deepEqual(await loadState(paths), before)
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), false)
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, false)
 })
 
 test('private component rollback requires a current healthy MCP catalog before host transition', async (t) => {
@@ -600,7 +599,7 @@ test('private component rollback requires a current healthy MCP catalog before h
   t.after(() => rm(root, { recursive: true, force: true }))
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const fixture = await createToolComponentFixture(join(root, 'private'))
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   await importLocalComponent({
     stateRoot, artifact: fixture.artifactPath, binding: fixture.binding,
     activate: true, dryRun: false,
@@ -617,7 +616,7 @@ test('private component rollback requires a current healthy MCP catalog before h
     (error) => error.code === 'TOOL_HEALTH_TOOLS_MISSING',
   )
   assert.deepEqual(await loadState(paths), before)
-  assert.equal(fake.plugins.has('private-fixture@private-fixture-local'), false)
+  assert.equal(fake.enabledPlugins('private-fixture').length > 0, false)
 })
 
 test('verified storage cleanup retains private component bytes referenced by current and rollback state', async (t) => {
@@ -626,7 +625,7 @@ test('verified storage cleanup retains private component bytes referenced by cur
   const { stateRoot, fake, hostSkillHome } = await environment(root)
   const first = await createToolComponentFixture(join(root, 'first'), { version: '0.1.0', marker: 'first' })
   const second = await createToolComponentFixture(join(root, 'second'), { version: '0.2.0', marker: 'second' })
-  const dependencies = { runner: fake.runner, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
+  const dependencies = { runner: fake.runner, codexConfiguration: fake.configuration, hostSkillHome, mcpProbe: healthyProbe, componentWarmup: healthyComponentWarmup, catalogPreflight: healthyCatalogPreflight }
   await importLocalComponent({ stateRoot, artifact: first.artifactPath, binding: first.binding, activate: false, dryRun: false }, dependencies)
   await importLocalComponent({ stateRoot, artifact: second.artifactPath, binding: second.binding, replace: true, dryRun: false }, dependencies)
   await removeLocalComponent({ stateRoot, target: 'private-fixture', dryRun: false }, dependencies)

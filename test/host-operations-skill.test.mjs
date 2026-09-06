@@ -60,23 +60,23 @@ test('Codex receives Agent Host operations as a Skill-only managed plugin', asyn
   const paths = await prepareStatePaths(join(root, 'private', 'state'))
   const fake = createCodexRunner({ mathPresent: false, timePresent: false })
 
-  const preflight = await preflightOperationsSkill('codex', paths, fake.runner)
+  const preflight = await preflightOperationsSkill('codex', paths, fake.runner, { codexConfiguration: fake.configuration })
   assert.equal(preflight.carrier, 'codex-plugin')
   assert.equal(preflight.present, false)
 
-  const managed = await installOperationsSkill('codex', paths, fake.runner)
+  const managed = await installOperationsSkill('codex', paths, fake.runner, null, { codexConfiguration: fake.configuration })
   assert.equal(managed.kind, 'codex-plugin')
-  assert.equal(fake.plugins.has('agent-host-operations@agent-host-local'), true)
-  assert.equal((await inspectOperationsSkill(managed, fake.runner)).status, 'ok')
+  assert.equal(fake.enabledPlugins('agent-host-operations').length > 0, true)
+  assert.equal((await inspectOperationsSkill(managed, fake.runner, { codexConfiguration: fake.configuration })).status, 'ok')
   const pluginRoot = managed.binding.entries[0].pluginRoot
   if (process.platform !== 'win32') assert.equal((await stat(join(pluginRoot, 'skills', 'agent-host-operations', 'scripts', 'agent-host'))).mode & 0o111, 0o111)
   const plugin = JSON.parse(await readFile(join(pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'))
   assert.equal(plugin.mcpServers, undefined)
   assert.equal(plugin.skills, './skills/')
 
-  await uninstallOperationsSkill(managed, fake.runner)
-  assert.equal(fake.plugins.has('agent-host-operations@agent-host-local'), false)
-  assert.equal(fake.marketplaces.has('agent-host-local'), false)
+  await uninstallOperationsSkill(managed, fake.runner, { codexConfiguration: fake.configuration })
+  assert.equal(fake.enabledPlugins('agent-host-operations').length > 0, false)
+  assert.equal(fake.marketplaces.has(managed.binding.entries[0].marketplace), false)
 })
 
 test('Claude Skill projection fails closed, restores a displaced Skill, and preserves later user changes', async (t) => {

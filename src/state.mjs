@@ -1,12 +1,14 @@
 import { assertPrivateAccess } from './private-permissions.mjs'
-import { copyFile, lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises'
+import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
 import { AgentHostError } from './errors.mjs'
 import { readJson, writePrivateJson } from './json.mjs'
 import { ensurePrivateDirectory } from './paths.mjs'
+import { environmentStateCommitted, readableEnvironmentState } from './environment-change.mjs'
 
-export const STATE_SCHEMA = 'openadam.agent-host-state.v0.1'
+export const STATE_SCHEMA = 'openadam.agent-host-state.v0.2'
+export const LEGACY_STATE_SCHEMA = 'openadam.agent-host-state.v0.1'
 
 const STATE_REQUIRED_KEYS = [
   'schemaVersion', 'suiteVersion', 'channel', 'profile', 'installedAt', 'updatedAt',
@@ -32,7 +34,7 @@ export function validateState(state) {
   if (!plainObject(state)) throw new AgentHostError('STATE_SCHEMA_INVALID', 'The saved Agent Host state is not an object', { fields: ['$'] })
   for (const key of Object.keys(state)) if (!STATE_ALLOWED_KEYS.has(key)) invalid.push(key)
   for (const key of STATE_REQUIRED_KEYS) if (state[key] === undefined) invalid.push(key)
-  if (state.schemaVersion !== STATE_SCHEMA) {
+  if (![STATE_SCHEMA, LEGACY_STATE_SCHEMA].includes(state.schemaVersion)) {
     throw new AgentHostError('STATE_SCHEMA_UNSUPPORTED', `Unsupported state schema: ${state.schemaVersion ?? 'missing'}`)
   }
   if (typeof state.suiteVersion !== 'string' || state.suiteVersion.length === 0) invalid.push('suiteVersion')
@@ -70,6 +72,14 @@ export function validateState(state) {
     throw new AgentHostError('STATE_SCHEMA_INVALID', 'The saved Agent Host state does not match the supported shape', { fields: [...new Set(invalid)].sort() })
   }
   return state
+}
+
+// Reading an old state must preserve its exact version and content: retained
+// service recovery records identify those bytes. Only a committed successor
+// adopts the new writer format, whose ownership records older readers reject.
+export function stateForWrite(state) {
+  validateState(state)
+  return { ...state, schemaVersion: STATE_SCHEMA }
 }
 
 export function statePaths(root) {
@@ -118,20 +128,23 @@ export async function prepareStatePaths(root) {
 }
 
 export async function loadState(paths) {
-  const state = await readJson(paths.state)
+  const state = readableEnvironmentState(paths, await readJson(paths.state))
   if (state === null) return null
   return validateState(state)
 }
 
 export async function saveState(paths, state, { retainCurrent = false } = {}) {
-  if (retainCurrent) {
-    const current = await readJson(paths.state)
-    if (current !== null) {
-      const timestamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
-      await copyFile(paths.state, join(paths.history, `${timestamp}-${current.suiteVersion ?? 'unknown'}-${randomUUID().slice(0, 8)}.json`))
-    }
+  const next = stateForWrite(state)
+  const current = readableEnvironmentState(paths, await readJson(paths.state))
+  // Preserve the original ownership record for every schema migration, even
+  // when this operation normally does not create compatibility-set history.
+  if (current !== null && (retainCurrent || current.schemaVersion !== STATE_SCHEMA)) {
+    validateState(current)
+    const timestamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
+    await writePrivateJson(join(paths.history, `${timestamp}-${current.suiteVersion ?? 'unknown'}-${randomUUID().slice(0, 8)}.json`), current)
   }
-  await writePrivateJson(paths.state, state)
+  await writePrivateJson(paths.state, next)
+  await environmentStateCommitted(paths)
 }
 
 export async function listHistory(paths) {
@@ -172,10 +185,12 @@ export async function loadRollbackState(paths, current) {
 }
 
 export async function archiveAndRemoveState(paths, state) {
+  readableEnvironmentState(paths, await readJson(paths.state))
   await mkdir(paths.history, { recursive: true, mode: 0o700 })
   const timestamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
   const archived = join(paths.history, `${timestamp}-uninstalled-${state.suiteVersion}-${randomUUID().slice(0, 8)}.json`)
   await writePrivateJson(archived, { ...state, uninstalledAt: new Date().toISOString() })
   await rm(paths.state, { force: true })
+  await environmentStateCommitted(paths)
   return basename(archived)
 }

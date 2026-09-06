@@ -6,11 +6,13 @@ import { connect } from 'node:net'
 import { AgentHostError } from './errors.mjs'
 import { canonicalJson } from './json.mjs'
 import { runFile } from './process.mjs'
+import { environmentDependencies } from './environment-change.mjs'
+import { installLaunchdEnvironment, uninstallLaunchdEnvironment } from './launchd-environment.mjs'
+import { installWindowsServiceEnvironment, uninstallWindowsServiceEnvironment } from './windows-service-environment.mjs'
+import { windowsTask } from './windows-task.mjs'
 import {
-  bindServiceRecoveryFailure,
   defaultServiceRecoveryRoot,
   loadServiceRecoveryBundle,
-  persistServiceRecoveryBundle,
   rebindServiceRecoveryPartialRestore,
   retireServiceRecoveryBundle,
 } from './service-recovery.mjs'
@@ -157,7 +159,7 @@ export function retainedLaunchAgentProgram(contents) {
   return programSeen ? program : programArguments
 }
 
-export function launchAgentContents(runtime, files) {
+export function launchAgentContents(runtime, files, label = SERVICE_LABEL) {
   const executableDirectory = dirname(runtime.command)
   const servicePath = [executableDirectory, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
     .filter((value, index, values) => values.indexOf(value) === index)
@@ -176,7 +178,7 @@ export function launchAgentContents(runtime, files) {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${SERVICE_LABEL}</string>
+  <string>${xml(label)}</string>
   <key>ProgramArguments</key>
   <array>
 ${argumentsList.map((item) => `    <string>${xml(item)}</string>`).join('\n')}
@@ -246,7 +248,7 @@ async function endpointReachable(path, timeoutMs = 250) {
   })
 }
 
-async function waitForEndpoint(path, attempts = 640) {
+export async function waitForEndpoint(path, attempts = 640) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (await endpointReachable(path)) return true
     if (attempt + 1 < attempts) await new Promise((resolvePromise) => setTimeout(resolvePromise, 125))
@@ -317,17 +319,6 @@ function publicRecovery(bundle, { includeAction = false, retained = true } = {})
     retryable: retained && includeAction,
     ...(includeAction ? { action: recoveryAction(bundle) } : {}),
   }
-}
-
-function serviceRollbackFailure(message, installationError, rollbackError, privatePaths, recovery = null, recoveryBindingError = null) {
-  return new AgentHostError('SERVICE_INSTALL_ROLLBACK_FAILED', message, {
-    installation: boundedServiceFailure(installationError, 'SERVICE_INSTALL_FAILED', privatePaths),
-    rollback: boundedServiceFailure(rollbackError, 'SERVICE_ROLLBACK_FAILED', privatePaths),
-    ...(recoveryBindingError === null ? {} : {
-      recoveryBinding: boundedServiceFailure(recoveryBindingError, 'SERVICE_RECOVERY_BIND_FAILED', privatePaths),
-    }),
-    ...(recovery === null ? {} : { recovery: publicRecovery(recovery, { includeAction: true }) }),
-  })
 }
 
 function publicRestoredService(bundle, service) {
@@ -413,10 +404,10 @@ async function removeWindowsTaskForRollback(taskName, runner) {
   }
 }
 
-function launchctlConfirmsServiceAbsent(result) {
+function launchctlConfirmsServiceAbsent(result, label = SERVICE_LABEL) {
   return !commandSucceeded(result)
     && result?.status === 113
-    && `${result.stdout ?? ''}\n${result.stderr ?? ''}`.includes(`Could not find service "${SERVICE_LABEL}"`)
+    && `${result.stdout ?? ''}\n${result.stderr ?? ''}`.includes(`Could not find service "${label}"`)
 }
 
 async function removeLaunchAgentForRollback(domain, launchAgentPath, runner) {
@@ -438,28 +429,6 @@ async function regularFileSnapshot(path) {
     throw new AgentHostError('SERVICE_PATH_UNSAFE', 'The local execution service descriptor is not a regular file')
   }
   return { contents: await readFile(path), mode: info.mode & 0o777 }
-}
-
-async function recoveryLifecycle(options) {
-  const value = options.recoveryLifecycle
-  if (value === null || typeof value !== 'object' || Array.isArray(value)
-    || typeof value.statePath !== 'string' || value.statePath.length === 0
-    || !/^sha256:[0-9a-f]{64}$/u.test(value.currentStateIdentity ?? '')) {
-    throw new AgentHostError(
-      'SERVICE_RECOVERY_CONTEXT_REQUIRED',
-      'Replacing an owned service requires an exact lifecycle-state recovery binding',
-    )
-  }
-  const state = await regularFileSnapshot(value.statePath)
-  const currentStateIdentity = stateContentsIdentity(state?.contents ?? null)
-  if (currentStateIdentity !== value.currentStateIdentity) {
-    throw new AgentHostError('SERVICE_RECOVERY_CONTEXT_INVALID', 'The lifecycle state identity changed before service replacement')
-  }
-  return {
-    statePath: value.statePath,
-    currentStateIdentity,
-    stateContents: state?.contents ?? null,
-  }
 }
 
 function byteRecordMatches(record, contents) {
@@ -496,24 +465,6 @@ async function currentTaskFailureBinding(platformName, target, runner) {
     // The recovery bundle records unknown task identity and later restoration fails closed.
   }
   return { configured: null, xmlSha256: null }
-}
-
-async function bindRecoveryFailure(recoveryRoot, recovery, platformName, target, carrierPath, runner) {
-  let carrier = null
-  try {
-    carrier = await regularFileSnapshot(carrierPath)
-  } catch {
-    // A non-regular residual cannot be safely restored over; bind as non-recoverable absence.
-  }
-  const task = await currentTaskFailureBinding(platformName, target, runner)
-  if (platformName === 'darwin' && task.configured === true
-    && (task.path !== target.launchAgentPath || task.program !== target.program)) {
-    throw new AgentHostError('SERVICE_RECOVERY_TARGET_MISMATCH', 'The failed LaunchAgent job does not match the replacement being retained')
-  }
-  return bindServiceRecoveryFailure(recoveryRoot, recovery.identity, recovery.manifestSha256, {
-    carrierContents: carrier?.contents ?? null,
-    task,
-  })
 }
 
 async function verifyRecoveryTarget(bundle, runner) {
@@ -695,14 +646,6 @@ function requireRecoveryShape(bundle) {
   }
 }
 
-async function loadExpectedRecovery(recoveryRoot, recovery) {
-  const bundle = await loadServiceRecoveryBundle(recoveryRoot, recovery.identity)
-  if (bundle.manifestSha256 !== recovery.manifestSha256) {
-    throw new AgentHostError('SERVICE_RECOVERY_BUNDLE_INVALID', 'The retained service recovery bundle failed identity or content verification')
-  }
-  return bundle
-}
-
 export async function restoreServiceRecoveryBundle(recoveryReference, runner = runFile, options = {}) {
   const recoveryRoot = options.recoveryRoot
   const waitUntilReady = options.waitForEndpoint ?? waitForEndpoint
@@ -802,8 +745,16 @@ export async function restoreServiceRecoveryBundle(recoveryReference, runner = r
   }
 }
 
-export async function preflightServiceInstallation(runner = runFile, launchAgentPath = defaultLaunchAgentPath(), platformName = platform()) {
+export async function preflightServiceInstallation(runner = runFile, launchAgentPath, platformName = platform()) {
+  const dependencies = environmentDependencies() ?? {}
+  launchAgentPath ??= dependencies.serviceLaunchAgentPath ?? defaultLaunchAgentPath()
+  const label = dependencies.serviceLabel ?? SERVICE_LABEL
   if (platformName === 'win32') {
+    if (environmentDependencies() !== null) {
+      const taskName = dependencies.serviceTaskName ?? WINDOWS_SERVICE_TASK
+      if (await windowsTask('observe', taskName, {}, runner) !== null) throw new AgentHostError('SERVICE_CONFLICT', 'Another local execution service is already configured')
+      return { supported: true, kind: 'windows-scheduled-task', label: taskName }
+    }
     const task = await inspectWindowsTaskState(WINDOWS_SERVICE_TASK, runner)
     if (task.configured) throw new AgentHostError('SERVICE_CONFLICT', 'Another local execution service is already configured', { taskName: WINDOWS_SERVICE_TASK })
     return { supported: true, kind: 'windows-scheduled-task', label: WINDOWS_SERVICE_TASK }
@@ -821,14 +772,14 @@ export async function preflightServiceInstallation(runner = runFile, launchAgent
     if (error.code !== 'ENOENT') throw error
   }
   const domain = `gui/${process.getuid()}`
-  const loaded = await runner('/bin/launchctl', ['print', `${domain}/${SERVICE_LABEL}`], { allowFailure: true })
+  const loaded = await runner('/bin/launchctl', ['print', `${domain}/${label}`], { allowFailure: true })
   if (loaded.status === 0) {
     throw new AgentHostError('SERVICE_CONFLICT', 'Another local execution service is already running')
   }
-  if (!launchctlConfirmsServiceAbsent(loaded)) {
+  if (!launchctlConfirmsServiceAbsent(loaded, label)) {
     throw new AgentHostError('SERVICE_STATE_UNAVAILABLE', 'macOS could not inspect the local execution service state')
   }
-  return { supported: true, label: SERVICE_LABEL, launchAgentPath }
+  return { supported: true, label, launchAgentPath }
 }
 
 export async function inspectService(serviceState = null, runner = runFile, options = {}) {
@@ -858,8 +809,9 @@ export async function inspectService(serviceState = null, runner = runFile, opti
     return { supported: true, configured: false, loaded: false, launchAgentPath: null }
   }
   const domain = `gui/${process.getuid()}`
-  const result = await runner('/bin/launchctl', ['print', `${domain}/${SERVICE_LABEL}`], { allowFailure: true })
-  if (!commandSucceeded(result) && !launchctlConfirmsServiceAbsent(result)) {
+  const label = serviceState.label ?? SERVICE_LABEL
+  const result = await runner('/bin/launchctl', ['print', `${domain}/${label}`], { allowFailure: true })
+  if (!commandSucceeded(result) && !launchctlConfirmsServiceAbsent(result, label)) {
     throw new AgentHostError('SERVICE_STATE_UNAVAILABLE', 'macOS could not inspect the local execution service state')
   }
   const loaded = result.status === 0
@@ -891,275 +843,33 @@ export async function inspectService(serviceState = null, runner = runFile, opti
 
 export async function installService(runtime, files, runner = runFile, existingState = null, options = {}) {
   const platformName = options.platformName ?? platform()
-  const waitUntilReady = options.waitForEndpoint ?? waitForEndpoint
-  if (platformName === 'win32') {
-    const launcherPath = existingState?.launcherPath ?? defaultWindowsRuntimeLauncherPath(files)
-    await mkdir(dirname(launcherPath), { recursive: true, mode: 0o700 })
-    const taskName = existingState?.taskName ?? WINDOWS_SERVICE_TASK
-    const priorLauncher = await regularFileSnapshot(launcherPath)
-    const missingOwnedStateAllowed = options.allowMissingOwnedState === true && existingState?.created === true
-    if (existingState !== null && priorLauncher === null && !missingOwnedStateAllowed) {
-      throw new AgentHostError('SERVICE_ROLLBACK_STATE_INVALID', 'The retained Windows service launcher is missing')
-    }
-    const priorTask = existingState === null || priorLauncher === null
-      ? null
-      : await runner('schtasks.exe', ['/Query', '/TN', taskName, '/XML'], { allowFailure: true, timeoutMs: 5_000 })
-    if (priorTask !== null && priorTask.status !== 0) {
-      throw new AgentHostError('SERVICE_ROLLBACK_STATE_INVALID', 'The retained Windows scheduled task is missing')
-    }
-    const priorTaskState = priorTask === null ? null : await inspectWindowsTaskState(taskName, runner)
-    if (priorTask !== null && !priorTaskState.configured) {
-      throw new AgentHostError('SERVICE_ROLLBACK_STATE_INVALID', 'The retained Windows scheduled task state is unavailable')
-    }
-    const priorRunning = priorTaskState?.running === true
-    const priorReady = priorRunning && (
-      options.existingEndpointReady ?? await endpointReachable(existingState.socketPath)
-    )
-    const recoveryRoot = options.recoveryRoot ?? defaultServiceRecoveryRoot(files)
-    const replacementContents = Buffer.from(windowsRuntimeLauncherContents(runtime, files))
-    const lifecycle = priorLauncher === null ? null : await recoveryLifecycle(options)
-    let recovery = priorLauncher === null ? null : await persistServiceRecoveryBundle({
-      recoveryRoot,
-      platform: 'win32',
-      target: {
-        launcherPath,
-        taskName,
-        replacementSocketPath: files.socketPath,
-        priorSocketPath: existingState?.socketPath ?? null,
-      },
-      prior: { running: priorRunning, ready: priorReady },
-      launcher: priorLauncher,
-      taskXml: priorTask.stdout,
-      replacement: {
-        identity: bytesDigest(replacementContents),
-        fileContents: replacementContents,
-        task: { taskName, launcherPath },
-      },
-      lifecycle,
+  if (!['darwin', 'win32'].includes(platformName)) throw new AgentHostError('SERVICE_PLATFORM_UNSUPPORTED', `Automatic service installation is not implemented on ${platformName}`)
+  const dependencies = environmentDependencies()
+  if (dependencies === null) throw new AgentHostError('SERVICE_LIFECYCLE_REQUIRED', 'Service changes require the owning environment lifecycle transaction')
+  const common = {
+    ...options,
+    endpointCheck: options.endpointReachable ?? dependencies.serviceEndpointReachable ?? endpointReachable,
+    waitForEndpoint: options.waitForEndpoint ?? dependencies.serviceWaitForEndpoint ?? waitForEndpoint,
+  }
+  return platformName === 'win32'
+    ? installWindowsServiceEnvironment(runtime, files, runner, existingState, {
+      ...common, launcherPath: options.launcherPath ?? dependencies.serviceLauncherPath,
+      serviceTaskName: options.serviceTaskName ?? dependencies.serviceTaskName,
     })
-    let mutationStarted = false
-    try {
-      await replacePrivateFile(launcherPath, replacementContents)
-      mutationStarted = true
-      await runner('schtasks.exe', [
-        '/Create', '/TN', taskName, '/SC', 'ONLOGON', '/RL', 'LIMITED',
-        '/TR', `"${launcherPath}"`, '/F',
-      ], { timeoutMs: 15_000 })
-      await runner('schtasks.exe', ['/Run', '/TN', taskName], { timeoutMs: 15_000 })
-      if (!await waitUntilReady(files.socketPath)) {
-        throw new AgentHostError('SERVICE_START_FAILED', 'The Windows local execution service did not make its named pipe ready')
-      }
-      if (recovery !== null) await retireServiceRecoveryBundle(recoveryRoot, recovery.identity)
-    } catch (error) {
-      let rollbackError = null
-      try {
-        if (!mutationStarted && recovery !== null) {
-          await retireServiceRecoveryBundle(recoveryRoot, recovery.identity)
-        } else if (mutationStarted) {
-          await removeWindowsTaskForRollback(taskName, runner)
-          if (recovery === null) {
-            await rm(launcherPath, { force: true })
-          } else {
-            const retained = await loadExpectedRecovery(recoveryRoot, recovery)
-            requireRecoveryShape(retained)
-            await replacePrivateFile(launcherPath, retained.launcher.contents, retained.launcher.mode)
-            const taskXmlPath = `${launcherPath}.restore-task-${process.pid}.xml`
-            try {
-              await replacePrivateFile(taskXmlPath, retained.taskXml)
-              await runner('schtasks.exe', ['/Create', '/TN', taskName, '/XML', taskXmlPath, '/F'], { timeoutMs: 15_000 })
-            } finally {
-              await rm(taskXmlPath, { force: true })
-            }
-            if (priorRunning) {
-              await runner('schtasks.exe', ['/Run', '/TN', taskName], { timeoutMs: 15_000 })
-              if (priorReady && !await waitUntilReady(existingState.socketPath)) {
-                throw new AgentHostError('SERVICE_RESTORE_FAILED', 'The retained Windows service did not become ready after restoration')
-              }
-            }
-            await verifyRestoredTarget(retained, runner, async () => priorReady, null)
-            await retireServiceRecoveryBundle(recoveryRoot, recovery.identity)
-          }
-        }
-      } catch (failure) {
-        rollbackError = failure
-      }
-      if (rollbackError !== null) {
-        let recoveryBindingError = null
-        if (recovery !== null) {
-          try {
-            recovery = await bindRecoveryFailure(
-              recoveryRoot,
-              recovery,
-              'win32',
-              { taskName },
-              launcherPath,
-              runner,
-            )
-          } catch (bindingError) {
-            recoveryBindingError = bindingError
-          }
-        }
-        throw serviceRollbackFailure(
-          'The Windows local execution service failed and its previous state could not be restored',
-          error,
-          rollbackError,
-          [launcherPath, files.configPath, files.socketPath, files.observationLog, existingState?.socketPath],
-          recovery,
-          recoveryBindingError,
-        )
-      }
-      throw error
-    }
-    return { kind: 'windows-scheduled-task', label: taskName, taskName, launcherPath, socketPath: files.socketPath, created: existingState?.created ?? true }
-  }
-  if (platformName !== 'darwin') {
-    throw new AgentHostError('SERVICE_PLATFORM_UNSUPPORTED', `Automatic service installation is not implemented on ${platformName}`)
-  }
-  const launchAgentPath = existingState?.launchAgentPath ?? options.launchAgentPath ?? defaultLaunchAgentPath()
-  await mkdir(dirname(launchAgentPath), { recursive: true, mode: 0o700 })
-  const priorDescriptor = await regularFileSnapshot(launchAgentPath)
-  if (priorDescriptor !== null && existingState === null) {
-    const current = priorDescriptor.contents.toString('utf8')
-    if (!current.includes(`<string>${SERVICE_LABEL}</string>`)) {
-      throw new AgentHostError('SERVICE_CONFLICT', 'The local execution service path belongs to another service', { launchAgentPath })
-    }
-    throw new AgentHostError('SERVICE_CONFLICT', 'Another local execution service is already configured', { launchAgentPath })
-  }
-  const missingOwnedStateAllowed = options.allowMissingOwnedState === true && existingState?.created === true
-  if (existingState !== null && priorDescriptor === null && !missingOwnedStateAllowed) {
-    throw new AgentHostError('SERVICE_ROLLBACK_STATE_INVALID', 'The retained LaunchAgent descriptor is missing')
-  }
-  const domain = `gui/${process.getuid()}`
-  const priorInspection = existingState === null
-    ? null
-    : await runner('/bin/launchctl', ['print', `${domain}/${SERVICE_LABEL}`], { allowFailure: true, timeoutMs: 5_000 })
-  if (priorInspection !== null
-    && !commandSucceeded(priorInspection)
-    && !launchctlConfirmsServiceAbsent(priorInspection)) {
-    throw new AgentHostError(
-      'SERVICE_STATE_UNAVAILABLE',
-      'macOS could not inspect the retained local execution service before replacement',
-    )
-  }
-  const priorLoaded = priorInspection !== null && commandSucceeded(priorInspection)
-  const priorRunning = priorLoaded && /^\s*state = running\s*$/mu.test(priorInspection.stdout)
-  if (priorLoaded && !priorRunning) {
-    throw new AgentHostError(
-      'SERVICE_PRIOR_STATE_UNRESTORABLE',
-      'The retained LaunchAgent is loaded but stopped; refusing an update that cannot preserve that state exactly',
-    )
-  }
-  const priorReady = priorRunning && (
-    options.existingEndpointReady ?? await endpointReachable(existingState.socketPath)
-  )
-  const recoveryRoot = options.recoveryRoot ?? defaultServiceRecoveryRoot(files)
-  const replacementContents = Buffer.from(launchAgentContents(runtime, files))
-  const lifecycle = priorDescriptor === null ? null : await recoveryLifecycle(options)
-  let recovery = priorDescriptor === null ? null : await persistServiceRecoveryBundle({
-    recoveryRoot,
-    platform: 'darwin',
-    target: {
-      launchAgentPath,
-      replacementSocketPath: files.socketPath,
-      priorSocketPath: existingState?.socketPath ?? null,
-    },
-    prior: { loaded: priorLoaded, running: priorRunning, ready: priorReady },
-    descriptor: priorDescriptor,
-    replacement: {
-      identity: bytesDigest(replacementContents),
-      fileContents: replacementContents,
-      task: { label: SERVICE_LABEL },
-    },
-    lifecycle,
-  })
-  let mutationStarted = false
-  try {
-    await replacePrivateFile(launchAgentPath, replacementContents)
-    mutationStarted = true
-    if (priorDescriptor !== null) {
-      await removeLaunchAgentForRollback(domain, launchAgentPath, runner)
-    }
-    await runner('/bin/launchctl', ['bootstrap', domain, launchAgentPath])
-    await runner('/bin/launchctl', ['kickstart', '-k', `${domain}/${SERVICE_LABEL}`])
-    if (!await waitUntilReady(files.socketPath)) {
-      throw new AgentHostError('SERVICE_START_FAILED', 'The local execution service did not finish provider preparation and make its Socket ready')
-    }
-    if (recovery !== null) await retireServiceRecoveryBundle(recoveryRoot, recovery.identity)
-  } catch (error) {
-    let rollbackError = null
-    try {
-      if (!mutationStarted && recovery !== null) {
-        await retireServiceRecoveryBundle(recoveryRoot, recovery.identity)
-      } else if (mutationStarted) {
-        await removeLaunchAgentForRollback(domain, launchAgentPath, runner)
-        await rm(files.socketPath, { force: true }).catch((failure) => {
-          if (failure.code !== 'ENOENT') throw failure
-        })
-        if (recovery === null) {
-          await rm(launchAgentPath, { force: true })
-        } else {
-          const retained = await loadExpectedRecovery(recoveryRoot, recovery)
-          requireRecoveryShape(retained)
-          await replacePrivateFile(launchAgentPath, retained.descriptor.contents, retained.descriptor.mode)
-          if (priorLoaded) {
-            await runner('/bin/launchctl', ['bootstrap', domain, launchAgentPath])
-            if (priorRunning) {
-              await runner('/bin/launchctl', ['kickstart', '-k', `${domain}/${SERVICE_LABEL}`])
-              if (priorReady && !await waitUntilReady(existingState.socketPath)) {
-                throw new AgentHostError('SERVICE_RESTORE_FAILED', 'The retained LaunchAgent did not become ready after restoration')
-              }
-            }
-          }
-          const expectedProgram = retainedLaunchAgentProgram(retained.descriptor.contents)
-          await verifyRestoredTarget(retained, runner, async () => priorReady, expectedProgram)
-          await retireServiceRecoveryBundle(recoveryRoot, recovery.identity)
-        }
-      }
-    } catch (failure) {
-      rollbackError = failure
-    }
-    if (rollbackError !== null) {
-      let recoveryBindingError = null
-      if (recovery !== null) {
-        try {
-          recovery = await bindRecoveryFailure(
-            recoveryRoot,
-            recovery,
-            'darwin',
-            { launchAgentPath, program: runtime.command },
-            launchAgentPath,
-            runner,
-          )
-        } catch (bindingError) {
-          recoveryBindingError = bindingError
-        }
-      }
-      throw serviceRollbackFailure(
-        'The local execution service failed and its previous state could not be restored',
-        error,
-        rollbackError,
-        [launchAgentPath, files.configPath, files.socketPath, files.observationLog, existingState?.socketPath],
-        recovery,
-        recoveryBindingError,
-      )
-    }
-    throw error
-  }
-  return { kind: 'launchd', label: SERVICE_LABEL, launchAgentPath, socketPath: files.socketPath, created: existingState?.created ?? true }
+    : installLaunchdEnvironment(runtime, files, runner, existingState, {
+      ...common, launchAgentPath: options.launchAgentPath ?? dependencies.serviceLaunchAgentPath ?? defaultLaunchAgentPath(),
+      serviceLabel: options.serviceLabel ?? dependencies.serviceLabel,
+    })
 }
 
 export async function uninstallService(serviceState, runner = runFile, options = {}) {
   if (serviceState === null || serviceState === undefined) return { removed: false }
   const platformName = options.platformName ?? platform()
-  if (platformName === 'win32') {
-    const taskName = serviceState.taskName ?? WINDOWS_SERVICE_TASK
-    await removeWindowsTaskForRollback(taskName, runner)
-    if (serviceState.created && typeof serviceState.launcherPath === 'string') await rm(serviceState.launcherPath, { force: true })
-    return { removed: serviceState.created === true }
-  }
-  if (platformName !== 'darwin') return { removed: false, unsupported: true }
-  const domain = `gui/${process.getuid()}`
-  await removeLaunchAgentForRollback(domain, serviceState.launchAgentPath, runner)
-  if (serviceState.created) await rm(serviceState.launchAgentPath, { force: true })
-  return { removed: serviceState.created }
+  if (!['darwin', 'win32'].includes(platformName)) return { removed: false, unsupported: true }
+  const dependencies = environmentDependencies()
+  if (dependencies === null) throw new AgentHostError('SERVICE_LIFECYCLE_REQUIRED', 'Service changes require the owning environment lifecycle transaction')
+  const common = { endpointCheck: options.endpointReachable ?? dependencies.serviceEndpointReachable ?? endpointReachable }
+  return platformName === 'win32'
+    ? uninstallWindowsServiceEnvironment(serviceState, runner, common)
+    : uninstallLaunchdEnvironment(serviceState, runner, common)
 }

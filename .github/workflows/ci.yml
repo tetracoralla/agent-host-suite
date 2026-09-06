@@ -46,7 +46,9 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    # Native recovery plus the complete ACL-backed source/package suite can
+    # exceed thirty minutes. Individual operation and test-file bounds remain.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -58,6 +60,9 @@ jobs:
         run: node --test --test-timeout=60000 test/private-permissions.test.mjs
       - name: Verify retired lifecycle cleanup with a real open file
         run: node --test --test-name-pattern='Windows retired lifecycle cleanup' test/lifecycle-lock.test.mjs
+      - name: Verify native Task Scheduler interruption and recovery
+        timeout-minutes: 10
+        run: node scripts/probe-windows-service-journal.mjs
       - name: Verify interrupted lifecycle recovery under contention
         run: |
           foreach ($attempt in 1..10) {

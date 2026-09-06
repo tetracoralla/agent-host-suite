@@ -4,7 +4,7 @@ import { inspectClaude } from './hosts/claude.mjs'
 import { inspectZcode } from './hosts/zcode.mjs'
 import { runFile } from './process.mjs'
 import { inspectService } from './service.mjs'
-import { mathProjectionSelection, semanticProbeOrder } from './runtime-config.mjs'
+import { inspectDirectProviders } from './provider-diagnostics.mjs'
 import { verifyReleaseComponent } from './release-artifacts.mjs'
 import { probeMcpTools } from './mcp-health.mjs'
 import { hostFacingManifest } from './profile.mjs'
@@ -32,6 +32,7 @@ export async function doctor(state, {
   contextAnalysis = null,
   stateRoot = null,
   maintenanceInspect = inspectMaintenance,
+  codexConfiguration,
 } = {}) {
   const checks = []
   const agentManifest = hostFacingManifest({ components: state.components }, state.agentComponents ?? Object.keys(state.components))
@@ -59,9 +60,9 @@ export async function doctor(state, {
   }
   if (inspectAgentApps && state.hosts.codex !== undefined) {
     try {
-      const current = await inspectCodex(agentManifest, runner, { managedState: state.hosts.codex, useManagedBindings: true })
+      const current = await inspectCodex(agentManifest, runner, { managedState: state.hosts.codex, useManagedBindings: true, codexConfiguration })
       const missing = current.entries.filter((entry) => !entry.pluginPresent || !entry.pluginEnabled || entry.installedVersion !== entry.requestedVersion || !entry.installedIdentityMatched)
-      const operationsSkill = await inspectOperationsSkill(state.hosts.codex.operationsSkill, runner)
+      const operationsSkill = await inspectOperationsSkill(state.hosts.codex.operationsSkill, runner, { codexConfiguration })
       const ready = missing.length === 0 && operationsSkill.status === 'ok'
       checks.push(check('host.codex', ready ? 'ok' : 'error', ready ? 'Codex plugins and Agent Host operations Skill are installed' : 'One or more Codex integrations need attention', {
         plugins: missing,
@@ -233,47 +234,7 @@ export async function doctor(state, {
       }))
     }
   }
-  if (deep && service.ready) {
-    const runtime = state.components['direct-execution-runtime']
-    const projectionResult = await runner(runtime.command, [
-      ...runtime.args, 'project', '--socket', state.runtime.socketPath, '--selection', '-',
-    ], { input: `${JSON.stringify(mathProjectionSelection())}\n`, allowFailure: true, timeoutMs: 45_000 })
-    let projection = null
-    try { projection = JSON.parse(projectionResult.stdout) } catch {}
-    const projectedOperation = projection?.contract?.inputSchema?.properties?.operation?.const ??
-      projection?.contract?.inputSchema?.oneOf?.[0]?.properties?.operation?.const
-    const projected = projectionResult.status === 0 &&
-      projection?.target?.operationId === 'expression.evaluate' &&
-      projectedOperation === 'expression.evaluate' &&
-      typeof projection?.contract?.contractDigest === 'string'
-    checks.push(check(
-      'runtime.contract-projection',
-      projected ? 'ok' : 'error',
-      projected ? 'The selected Math operation contract is current' : 'The selected Math operation contract could not be projected',
-      projected ? { schemaBytes: projection.contract.schemaBytes } : projection ?? projectionResult.stderr.trim(),
-    ))
-    const result = await runner(runtime.command, [
-      ...runtime.args, 'run', '--socket', state.runtime.socketPath, '--work-order', '-',
-    ], { input: `${JSON.stringify(semanticProbeOrder(runtime.version))}\n`, allowFailure: true, timeoutMs: 45_000 })
-    let parsed = null
-    try { parsed = JSON.parse(result.stdout) } catch {}
-    const math = parsed?.calls?.find((item) => item.id === 'math')
-    const mathBatch = parsed?.calls?.find((item) => item.id === 'math-batch')
-    const time = parsed?.calls?.find((item) => item.id === 'time')
-    const mathHealthy = math?.status === 'ok' && math?.result?.exact === '42' &&
-      mathBatch?.status === 'ok' && mathBatch?.result?.status === 'ok' &&
-      mathBatch?.result?.results?.[0]?.exact === '42' && mathBatch?.result?.results?.[1]?.exact === '3*x**2'
-    const timeHealthy = time?.status === 'ok' && time?.result?.results?.[0]?.localDateTime === '2026-08-24T21:00'
-    checks.push(check('tool.math-anchor.direct', mathHealthy ? 'ok' : 'error', mathHealthy ? 'Math Anchor direct execution is ready' : 'Math Anchor direct execution needs attention', { single: math, batch: mathBatch }))
-    checks.push(check('tool.migratory-time.direct', timeHealthy ? 'ok' : 'error', timeHealthy ? 'Migratory Time direct execution is ready' : 'Migratory Time direct execution needs attention', time))
-    const healthy = result.status === 0 && mathHealthy && timeHealthy
-    checks.push(check('runtime.semantic-probe', healthy ? 'ok' : 'error', healthy ? 'Math, native batch, and time-zone direct probes returned the expected typed results' : 'A direct semantic probe failed', parsed ?? result.stderr.trim()))
-  } else if (deep) {
-    for (const id of ['math-anchor', 'migratory-time']) {
-      if (state.components[id] === undefined) continue
-      checks.push(check(`tool.${id}.direct`, 'error', `${id} direct readiness is unknown while the local execution service is not running`))
-    }
-  }
+  if (deep) checks.push(...await inspectDirectProviders(state, service, runner))
   if (state.observability?.enabled === true && Array.isArray(contextAnalysis?.budgetChecks) && contextAnalysis.budgetChecks.length > 0) {
     const exceeded = contextAnalysis.budgetChecks.filter((item) => item?.status === 'exceeded')
     const catalogBytes = contextAnalysis.budgetChecks.find((item) => item?.metric === 'catalog.canonicalUtf8Bytes')
@@ -284,8 +245,8 @@ export async function doctor(state, {
       'context.catalog',
       exceeded.length === 0 ? 'ok' : 'warning',
       exceeded.length === 0
-        ? `The active tool catalog is within its declared context budgets${catalogRemaining === null ? '' : ` with ${catalogRemaining} canonical UTF-8 bytes remaining`}`
-        : `The active tool catalog exceeds ${exceeded.length} declared context budget${exceeded.length === 1 ? '' : 's'}`,
+        ? `The active tool catalog is within its declared resource limits${catalogRemaining === null ? '' : ` with ${catalogRemaining} canonical UTF-8 bytes remaining`}`
+        : `The active tool catalog exceeds ${exceeded.length} declared resource limit${exceeded.length === 1 ? '' : 's'}`,
       { exceeded, catalogRemaining },
     ))
   }

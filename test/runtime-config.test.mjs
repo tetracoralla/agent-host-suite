@@ -143,3 +143,55 @@ test('runtime configuration grants an installed Direct Capability the explicit H
     (error) => error.code === 'RUNTIME_WORKSPACE_REQUIRED',
   )
 })
+
+test('runtime config admits an empty set and a Provider-only set without pilot products', async () => {
+  const manifest = { components: { 'direct-execution-runtime': { version: '0.2.2' } } }
+  const empty = createRuntimeConfig(manifest)
+  assert.deepEqual(empty.providers, [])
+  assert.equal(empty.servicePreparation.mode, 'lazy')
+  const provider = {
+    providerId: 'io.example.independent', transport: 'capability-jsonl-v0.1', lifecycle: 'persistent',
+    rootPath: '/private/independent', profilePath: '/private/independent/profile.json',
+    manifestPath: '/private/independent/manifest.json', identityFiles: ['/private/independent/adapter.mjs'],
+    capabilityId: 'org.example.independent', capabilityVersion: '0.1.0',
+    contracts: [{ operationId: 'inspect', inputSchemaPath: '/private/independent/input.json', outputSchemaPath: '/private/independent/output.json' }],
+  }
+  manifest.components.independent = { capabilityProvider: provider }
+  const config = createRuntimeConfig(manifest)
+  assert.deepEqual(config.providers, [provider])
+  assert.deepEqual(config.servicePreparation.providerIds, ['io.example.independent'])
+  const validate = createValidator().compile(await loadBundledSchema('provider-config.schema.json'))
+  assert.equal(validate(config), true, JSON.stringify(validate.errors))
+  config.providers[0].contracts[0].operationId = 'changed-by-caller'
+  assert.equal(provider.contracts[0].operationId, 'inspect')
+  manifest.agentComponents = []
+  assert.equal(createRuntimeConfig(manifest).servicePreparation.mode, 'lazy')
+  assert.equal(createRuntimeConfig(manifest).providers.length, 1)
+})
+
+test('duplicate or malformed explicit Provider bindings fail before runtime files are created', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'ah-binding-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const manifest = runtimeManifest()
+  manifest.components.other = { capabilityProvider: { providerId: 'io.github.tetracoralla.math-anchor' } }
+  const runtime = join(root, 'runtime')
+  await assert.rejects(writeRuntimeFiles({ root, runtime }, manifest), { code: 'RUNTIME_PROVIDER_BINDING_CONFLICT' })
+  await assert.rejects(access(runtime), { code: 'ENOENT' })
+  for (const value of [null, undefined, [], {}, { providerId: '' }]) {
+    assert.throws(() => createRuntimeConfig({ components: { other: { capabilityProvider: value } } }),
+      { code: 'RUNTIME_PROVIDER_BINDING_INVALID' })
+  }
+})
+
+test('legacy Math identity containment rejects sibling paths with the same prefix', () => {
+  const manifest = runtimeManifest()
+  manifest.components['math-anchor'].identityFiles.push('/private/math-foreign/identity.json')
+  assert.deepEqual(createRuntimeConfig(manifest).providers[0].identityFiles, ['/private/math/bin'])
+})
+
+test('an explicit replacement binding does not also generate its legacy pilot Provider', () => {
+  const manifest = runtimeManifest()
+  manifest.components['math-anchor'].capabilityProvider = { providerId: 'io.example.replacement' }
+  assert.deepEqual(createRuntimeConfig(manifest).providers.map(({ providerId }) => providerId),
+    ['io.example.replacement', 'io.github.tetracoralla.migratory-time'])
+})

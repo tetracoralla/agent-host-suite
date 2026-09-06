@@ -85,8 +85,12 @@ verified application versions without changing tools or observations.
 Each Agent-app binding change requires a fresh Agent task before the new tool
 catalog is expected to appear.
 
-If a Direct Runtime scheduled-task replacement and its automatic rollback both
-fail, use the structured `agent-host service recover --recovery ID
+Interrupted environment changes retain their previous ownership records. Retrying
+the requested environment change first restores its recorded state. A later edit
+to the managed task, launcher or their access permissions stops that restoration
+and preserves the edited resource. Read-only status does not perform recovery.
+
+For a recovery action returned by an older installation, use the structured `agent-host service recover --recovery ID
 --manifest-sha256 SHA256` action returned by the error. The command accepts no
 bundle path, runs under the Host lifecycle lock, and restores only when the
 selected private state, current launcher and Task XML still match the recorded
@@ -133,3 +137,9 @@ deliberately unbound, so this command fails closed until actual Windows
 provider artifacts, licenses, SBOMs, and digests are supplied. The CI workflow
 uses deterministic fixture components only to check the packaging and
 source-independent lifecycle; it is not a public compatibility release.
+
+The isolated native service probe is `node scripts/probe-windows-service-journal.mjs`.
+It operates only unique temporary task names and named pipes, and invokes no
+Provider or model. A failed probe retains its own root and task identity in its
+report for diagnosis. Protocol tests on another operating system do not establish
+native Task Scheduler or login/reboot behavior.

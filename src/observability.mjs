@@ -806,7 +806,7 @@ async function maintenanceUnlocked(options, dependencies = {}, preparedPaths = n
 
 async function lockedObservabilityMutation(options, dependencies, operation, callback) {
   const paths = statePaths(resolveStateRoot(options.stateRoot))
-  return await withLifecycleMutation(paths, operation, dependencies, callback)
+  return await withLifecycleMutation(paths, operation, { ...dependencies, migrateState: true }, callback)
 }
 
 export async function enableObservability(options, dependencies = {}) {

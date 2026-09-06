@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, realpath, rm, rmdir } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
+import { resolveDirectBindings } from './provider-bindings.mjs'
 import { AgentHostError } from './errors.mjs'
 import { writePrivateJson } from './json.mjs'
 import { ensurePrivateDirectory } from './paths.mjs'
@@ -16,71 +17,11 @@ export function runtimeSocketDirectory(paths) {
 }
 
 export function createRuntimeConfig(manifest, options = {}) {
-  const math = manifest.components['math-anchor']
-  const time = manifest.components['migratory-time']
-  const activeComponentIds = new Set(manifest.agentComponents ?? Object.keys(manifest.components))
-  const installedCapabilityProviderEntries = Object.entries(manifest.components)
-    .flatMap(([componentId, component]) => component.capabilityProvider === undefined
-      ? []
-      : [{ componentId, provider: component.capabilityProvider }])
-  const installedCapabilityProviders = installedCapabilityProviderEntries
-    .map(({ provider: { workspaceRootRequired = false, ...provider } }) => ({
-      ...provider,
-      ...(workspaceRootRequired ? { workspaceRoot: options.workspaceRoot } : {}),
-    }))
-  if (installedCapabilityProviders.some((provider) => Object.hasOwn(provider, 'workspaceRoot') && typeof provider.workspaceRoot !== 'string')) {
-    throw new AgentHostError('RUNTIME_WORKSPACE_REQUIRED', 'An installed Direct Capability requires an explicit Host workspace root')
-  }
-  const providers = [
-    {
-      providerId: 'io.github.tetracoralla.math-anchor',
-      transport: 'mcp-stdio',
-      lifecycle: 'persistent',
-      rootPath: math.pluginRoot,
-      command: math.command,
-      args: math.args,
-      cwd: math.pluginRoot,
-      identityFiles: math.identityFiles.filter((path) => path.startsWith(math.pluginRoot)),
-      expectedServer: { name: 'Math Anchor', version: math.version },
-      allowedTools: ['math.run', 'math.batch', 'math.describe'],
-      operationProjections: [{
-        toolName: 'math.run',
-        operationField: 'operation',
-        argumentsField: 'arguments',
-        batchToolName: 'math.batch',
-        batchItemsField: 'items',
-        schemaLookup: {
-          toolName: 'math.describe',
-          operationField: 'operation',
-          resultPath: ['operation', 'inputSchema'],
-        },
-      }],
-    },
-    {
-      providerId: 'io.github.tetracoralla.migratory-time',
-      transport: 'capability-jsonl-v0.1',
-      lifecycle: 'persistent',
-      rootPath: time.root,
-      profilePath: time.profilePath,
-      manifestPath: time.manifestPath,
-      identityFiles: [time.adapterPath],
-      capabilityId: 'org.openadam.time-zone.convert',
-      capabilityVersion: '0.2.0',
-      contracts: [{
-        operationId: 'convert',
-        inputSchemaPath: time.inputSchemaPath,
-        outputSchemaPath: time.outputSchemaPath,
-      }],
-    },
-    ...installedCapabilityProviders,
-  ]
-  const preparedProviderIds = [
-    ...(activeComponentIds.has('math-anchor') ? ['io.github.tetracoralla.math-anchor'] : []),
-    ...(activeComponentIds.has('migratory-time') ? ['io.github.tetracoralla.migratory-time'] : []),
-    ...installedCapabilityProviderEntries
-      .filter(({ componentId, provider }) => activeComponentIds.has(componentId) && provider.lifecycle === 'persistent')
-      .map(({ provider }) => provider.providerId),
-  ]
+  const bindings = resolveDirectBindings(manifest, options)
+  const providers = bindings.map(({ provider }) => provider)
+  const preparedProviderIds = bindings
+    .filter(({ active, provider }) => active && provider.lifecycle === 'persistent')
+    .map(({ provider }) => provider.providerId)
   const runtimeVersion = manifest.components['direct-execution-runtime']?.version ?? '0.0.0'
   const version = runtimeVersion.match(/^(\d+)\.(\d+)\.(\d+)/u)?.slice(1).map(Number)
   const supportsPreparation = version !== undefined && (
@@ -156,68 +97,4 @@ export async function cleanupRuntimeSocket(paths, runtime, options = {}) {
     if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error
   }
   return { removed: true }
-}
-
-export function semanticProbeOrder(runtimeVersion = '0.2.2') {
-  const version = runtimeVersion.match(/^(\d+)\.(\d+)\.(\d+)/u)?.slice(1).map(Number)
-  const modern = version !== undefined && (version[0] > 0 || version[1] > 2 || (version[1] === 2 && version[2] >= 2))
-  return {
-    schemaVersion: modern ? 'openadam.direct-work-order.v0.2' : 'openadam.direct-work-order.v0.1',
-    ...(modern ? { purpose: 'diagnostic' } : {}),
-    id: 'agent-host-doctor',
-    calls: [
-      {
-        id: 'math',
-        timeoutMs: 30000,
-        providerId: 'io.github.tetracoralla.math-anchor',
-        target: {
-          kind: 'mcp-operation',
-          toolName: 'math.run',
-          operationId: 'expression.evaluate',
-        },
-        input: { operation: 'expression.evaluate', arguments: { expression: '6*7' } },
-      },
-      {
-        id: 'math-batch',
-        timeoutMs: 30000,
-        providerId: 'io.github.tetracoralla.math-anchor',
-        target: { kind: 'mcp-tool', toolName: 'math.batch' },
-        input: {
-          items: [
-            { operation: 'expression.evaluate', arguments: { expression: '6*7' } },
-            { operation: 'calculus.derivative', arguments: { expression: 'x^3', variable: 'x' } },
-          ],
-        },
-      },
-      {
-        id: 'time',
-        timeoutMs: 30000,
-        providerId: 'io.github.tetracoralla.migratory-time',
-        target: {
-          kind: 'capability',
-          capabilityId: 'org.openadam.time-zone.convert',
-          capabilityVersion: '0.2.0',
-          operationId: 'convert',
-        },
-        input: {
-          localDateTime: '2026-08-24T12:00',
-          sourceTimeZone: 'UTC',
-          targetTimeZones: ['Asia/Tokyo'],
-          disambiguation: 'reject',
-        },
-      },
-    ],
-  }
-}
-
-export function mathProjectionSelection() {
-  return {
-    schemaVersion: 'openadam.direct-contract-selection.v0.1',
-    providerId: 'io.github.tetracoralla.math-anchor',
-    target: {
-      kind: 'mcp-operation',
-      toolName: 'math.run',
-      operationId: 'expression.evaluate',
-    },
-  }
 }
