@@ -13,8 +13,8 @@
 - Preserve Codex script-reference uncertainty and explicit result error flags.
 - Ship Runtime 0.2.2 and Observer 0.6.0 with closed, backward-readable metadata
   extensions; retain platform fixes already merged into the source repository.
-
-
+- Retry stale-lock retirement once after the final scan confirms recovery
+  contenders have exited, rechecking owner identity before that last attempt.
 - Wait briefly for Windows readers to release an already retired lifecycle lock
   before removing it; persistent file sharing still prevents the mutation.
 - Preserve a completed browser Manager action when its status refresh fails,

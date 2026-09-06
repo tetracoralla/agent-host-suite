@@ -136,6 +136,10 @@ path gap before retirement, and after retirement their atomic publication race
 with the reaper admits only one lifecycle callback. Windows removal of the
 uniquely retired directory tolerates transient open files with bounded retries;
 persistent cleanup failures prevent the recovering caller's mutation callback.
+If the final sharing-failure scan observes that competing recovery claimants
+have exited, the elected contender makes one last retirement attempt through
+the same owner-identity and liveness checks. A replacement owner still blocks
+recovery, and persistent permission errors never grant a lease.
 When no state root exists, one private candidate containing the lock is renamed
 into place atomically, so losing contenders cannot create state subdirectories.
 Nested Suite operations may re-enter only with the authenticated in-process
