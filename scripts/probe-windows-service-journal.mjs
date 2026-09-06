@@ -26,6 +26,13 @@ function configuration(root, taskName, phase) {
     const request = command === 'powershell.exe' && args.at(-2) === '-File' ? JSON.parse(options.input) : null
     if (request?.operation === 'create' && phase === 'written') interruptAt(root, phase)
     const result = await runFile(command, args, options)
+    if (request?.operation === 'create' && result.status === 0) {
+      const actual = JSON.parse(result.stdout).task
+      for (const field of ['xml', 'sddl']) if (actual?.[field] !== request.task[field]) {
+        // These are this probe's generated task fields, never a user's task.
+        throw new Error('Native registration changed ' + field + ': ' + JSON.stringify({ expected: request.task[field], actual: actual?.[field] }).slice(0, 6000))
+      }
+    }
     if (result.status === 0 && ((request?.operation === 'create' && phase === 'registered')
       || (request?.operation === 'remove' && phase === 'removed'))) interruptAt(root, phase)
     return result
@@ -108,7 +115,7 @@ if (process.platform !== 'win32') {
       report.cases.push({ operation, phase, status: 'passed' })
     } catch (error) {
       failed = true
-      report.cases.push({ operation, phase, status: 'failed', code: error.code ?? 'PROBE_FAILED', message: error.message, retainedRoot: root, taskName })
+      report.cases.push({ operation, phase, status: 'failed', code: error.code ?? 'PROBE_FAILED', message: error.message, stack: error.stack?.slice(-2000), retainedRoot: root, taskName })
       process.exitCode = 1
     } finally {
       // Failed records remain for diagnosis. Do not use force-delete to turn a
