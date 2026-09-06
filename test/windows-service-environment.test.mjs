@@ -50,6 +50,19 @@ async function interrupt(root, operation, phase, action = '--interrupt') {
   assert.deepEqual(await read(join(root, 'interruption.json')), { phase: action === '--interrupt-recovery' ? 'recovery' : phase })
 }
 const recover = (f) => withLifecycleMutation({ root: f.paths.root }, 'fixture.recover', f.dependencies, async () => {})
+test('an inherited launcher ACL already matching the target is not rewritten', async (t) => {
+  const f = await fixture(t, false)
+  const { files, runtime } = fixtureConfiguration(f.root)
+  const runner = async (command, args, options) => {
+    assert.notEqual(JSON.parse(options.input).operation, 'set-file-security')
+    return f.dependencies.runner(command, args, options)
+  }
+  await withLifecycleMutation({ root: f.paths.root }, 'fixture.inherited-acl', { ...f.dependencies, runner }, async (_locked, paths) => {
+    const service = await installService(runtime, files, runner, null, { platformName: 'win32' })
+    await saveState(paths, { ...f.previous, runtime: { service } })
+  })
+  assert.equal((await f.getTask()).state, 4)
+})
 for (const operation of ['install', 'replace', 'remove']) {
   const phases = operation === 'install' ? ['prepared', 'written', 'registered', 'started', 'ready']
     : operation === 'remove' ? ['prepared', 'stopped', 'removed', 'ready'] : ['prepared', 'stopped', 'removed', 'written', 'registered', 'started', 'ready']
@@ -139,7 +152,7 @@ test('a later launcher ACL edit blocks whole-journal recovery without changing t
   const f = await fixture(t, true)
   await interrupt(f.root, 'replace', 'ready')
   const { securityPath } = fixtureConfiguration(f.root)
-  const records = await read(securityPath)
+  const records = await read(securityPath).catch((error) => error.code === 'ENOENT' ? {} : Promise.reject(error))
   const key = String((await lstat(f.file, { bigint: true })).ino)
   records[key] = 'O:fixture-userG:fixture-userD:P(A;;FR;;;fixture-user)'
   await writeFile(securityPath, JSON.stringify(records))

@@ -55,7 +55,12 @@ async function replaceCarrier(proof, file, taskName, runner) {
     await handle.sync()
     await handle.close()
     await chmod(path, file.mode)
-    if (await windowsTask('set-file-security', taskName, { path, security: file.security }, runner) !== file.security) throw conflict()
+    // A sibling temporary file normally already inherits the exact recorded
+    // ACL. Reapplying an identical ACL through Set-Acl can change Windows'
+    // inheritance control flags; keep the existing exact descriptor untouched.
+    const inheritedSecurity = await windowsTask('file-security', taskName, { path }, runner)
+    if (inheritedSecurity !== file.security
+      && await windowsTask('set-file-security', taskName, { path, security: file.security }, runner) !== file.security) throw conflict()
     await privateAccess(path, await existing(path))
     await checkProof(proof)
     await rename(path, proof.path)
