@@ -32,7 +32,10 @@ export async function windowsTask(operation, taskName, data = {}, runner = runFi
     throw new AgentHostError('SERVICE_STATE_UNAVAILABLE', 'Windows did not return a complete task response')
   }
   if (exactKeys(response, ['protocol', 'error']) && errors.has(response.error)) {
-    throw new AgentHostError(response.error, 'Windows could not perform the recorded task operation')
+    const native = /^task-native line=(\d{1,6}) hresult=(-?\d{1,12})\s*$/u.exec(result.stderr ?? '')
+    throw new AgentHostError(response.error, 'Windows could not perform the recorded task operation', {
+      operation, ...(native === null ? {} : { nativeLine: Number(native[1]), nativeHresult: Number(native[2]) }),
+    })
   }
   if (fileOperation && result.status === 0 && exactKeys(response, ['protocol', 'security'])
     && typeof response.security === 'string' && response.security.length > 0 && Buffer.byteLength(response.security) <= 65536) return response.security

@@ -160,6 +160,9 @@ try {
     @{ protocol = 'openadam.windows-task.v0.1'; task = $result } | ConvertTo-Json -Depth 8 -Compress | ForEach-Object { [Console]::Out.Write($_) }
 } catch {
     $code = [string]$_.Exception.Message
+    # Keep native diagnostics bounded and free of XML, ACLs, account names or
+    # command text, while retaining enough information to locate COM failures.
+    [Console]::Error.WriteLine(('task-native line={0} hresult={1}' -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.HResult))
     if ($code -cnotmatch '^(SERVICE_[A-Z_]+|ENVIRONMENT_RESOURCE_CHANGED)$') { $code = 'SERVICE_NATIVE_FAILED' }
     @{ protocol = 'openadam.windows-task.v0.1'; error = $code } | ConvertTo-Json -Compress | ForEach-Object { [Console]::Out.Write($_) }
     exit 1

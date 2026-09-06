@@ -85,7 +85,11 @@ if (process.platform !== 'win32') {
       // Windows represents TerminateProcess as an exit code rather than a POSIX
       // signal. The durable pointer/commit below proves the selected boundary.
       assert.notEqual(stopped.code, 0, stopped.stderr)
-      assert.deepEqual(JSON.parse(await readFile(join(root, 'interruption.json'), 'utf8')), { phase })
+      const interruption = await readFile(join(root, 'interruption.json'), 'utf8').catch((error) => {
+        if (error.code !== 'ENOENT') throw error
+        throw new Error('Native child exited before the selected interruption: ' + stopped.stderr.slice(-4096))
+      })
+      assert.deepEqual(JSON.parse(interruption), { phase })
       if (phase !== 'committed') await assert.rejects(loadState(paths), { code: 'ENVIRONMENT_RECOVERY_REQUIRED' })
       await withLifecycleMutation({ root: paths.root }, 'probe.recover', dependencies, async () => {})
       const restored = await loadState(paths)
