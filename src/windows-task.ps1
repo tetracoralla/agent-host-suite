@@ -107,7 +107,9 @@ try {
             $definition.RegistrationInfo.Date = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
             $definition.RegistrationInfo.URI = $request.taskName
             $definition.RegistrationInfo.Source = 'openadam.agent-host-runtime.v0.1'
-            $security = Sddl "O:${sid}G:${sid}D:P(A;;FA;;;SY)(A;;FA;;;${sid})"
+            # Task Scheduler sets AUTO_INHERITED even for this protected DACL.
+            # Record the observed control flag too; preserve every ACE exactly.
+            $security = Sddl "O:${sid}G:${sid}D:PAI(A;;FA;;;SY)(A;;FA;;;${sid})"
             $definition.RegistrationInfo.SecurityDescriptor = $security
             $definition.Principal.Id = 'Author'
             $definition.Principal.UserId = $sid

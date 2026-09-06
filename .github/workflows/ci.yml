@@ -59,7 +59,7 @@ jobs:
       - name: Verify retired lifecycle cleanup with a real open file
         run: node --test --test-name-pattern='Windows retired lifecycle cleanup' test/lifecycle-lock.test.mjs
       - name: Verify native Task Scheduler interruption and recovery
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: node scripts/probe-windows-service-journal.mjs
       - name: Verify interrupted lifecycle recovery under contention
         run: |

@@ -114,6 +114,7 @@ if (process.platform !== 'win32') {
       })
       assert.equal(await windowsTask('observe', taskName), null)
       report.cases.push({ operation, phase, status: 'passed' })
+      process.stdout.write(JSON.stringify({ operation, phase, status: 'passed' }) + '\n')
     } catch (error) {
       failed = true
       const registrationDifference = await readFile(join(root, 'registration-difference.json'), 'utf8').catch(() => null)
