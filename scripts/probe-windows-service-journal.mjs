@@ -30,7 +30,8 @@ function configuration(root, taskName, phase) {
       const actual = JSON.parse(result.stdout).task
       for (const field of ['xml', 'sddl']) if (actual?.[field] !== request.task[field]) {
         // These are this probe's generated task fields, never a user's task.
-        throw new Error('Native registration changed ' + field + ': ' + JSON.stringify({ expected: request.task[field], actual: actual?.[field] }).slice(0, 6000))
+        await writeFile(join(root, 'registration-difference.json'), JSON.stringify({ field, expected: request.task[field], actual: actual?.[field] }), { mode: 0o600 })
+        throw new Error('Native registration changed ' + field)
       }
     }
     if (result.status === 0 && ((request?.operation === 'create' && phase === 'registered')
@@ -115,7 +116,8 @@ if (process.platform !== 'win32') {
       report.cases.push({ operation, phase, status: 'passed' })
     } catch (error) {
       failed = true
-      report.cases.push({ operation, phase, status: 'failed', code: error.code ?? 'PROBE_FAILED', message: error.message, stack: error.stack?.slice(-2000), retainedRoot: root, taskName })
+      const registrationDifference = await readFile(join(root, 'registration-difference.json'), 'utf8').catch(() => null)
+      report.cases.push({ operation, phase, status: 'failed', code: error.code ?? 'PROBE_FAILED', message: error.message, stack: error.stack?.slice(-2000), registrationDifference: registrationDifference?.slice(0, 12000), retainedRoot: root, taskName })
       process.exitCode = 1
     } finally {
       // Failed records remain for diagnosis. Do not use force-delete to turn a
