@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, symlink } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
-import { platform } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { resolveLinkedSkillsRoot } from './agent-skill-location.mjs'
 import { fingerprintRelativeFiles } from './development-manifest.mjs'
 import { AgentHostError } from './errors.mjs'
+import { moveEnvironmentPath, setEnvironmentLink } from './environment-resources.mjs'
+import { afterEnvironmentCommit } from './environment-change.mjs'
 import { inspectCodex, installCodex, uninstallCodex } from './hosts/codex.mjs'
 import { writePrivateJson } from './json.mjs'
 
@@ -181,6 +182,7 @@ async function materializeCodexPlugin(paths, identity) {
     projectionRoot,
     component: {
       version: packageManifest.version,
+      hostProjectionRoot: projectionRoot,
       fingerprint: projectionFingerprint,
       marketplaceRoot,
       pluginRoot,
@@ -194,6 +196,7 @@ async function materializeCodexPlugin(paths, identity) {
 }
 
 function mergeCodexOwnership(previous, next) {
+  if (next.configurationVersion === 1) return next
   if (previous === null || previous === undefined) return next
   return {
     ...next,
@@ -234,6 +237,7 @@ export async function preflightOperationsSkill(host, paths, runner, options = {}
   if (host === 'codex') {
     const projection = await materializeCodexPlugin(paths, identity)
     const inspection = await inspectCodex(codexManifest(projection.component), runner, {
+      ...options,
       managedState: options.previous?.binding,
       replaceConflicts: options.replaceConflicts,
     })
@@ -274,6 +278,7 @@ export async function installOperationsSkill(host, paths, runner, previous = nul
   if (host === 'codex') {
     const projection = await materializeCodexPlugin(paths, identity)
     const binding = await installCodex(codexManifest(projection.component), runner, {
+      ...options,
       managedState: previous?.binding,
       replaceConflicts: options.replaceConflicts,
     })
@@ -299,25 +304,19 @@ export async function installOperationsSkill(host, paths, runner, previous = nul
         throw new AgentHostError('HOST_SKILL_CONFLICT', `${host} already exposes ${OPERATIONS_SKILL_ID} from another source`, { exposurePath })
       }
       const backupPath = join(paths.backups, `${host}-${OPERATIONS_SKILL_ID}-${randomUUID()}`)
-      await rename(exposurePath, backupPath)
+      await moveEnvironmentPath(exposurePath, backupPath)
       displaced = { backupPath }
     } else if (info !== null) {
-      await rm(exposurePath, { force: false })
+      await setEnvironmentLink(exposurePath, null)
     }
-    const temporary = `${exposurePath}.tmp-${process.pid}-${randomUUID()}`
-    try {
-      await symlink(projectionRoot, temporary, platform() === 'win32' ? 'junction' : 'dir')
-      await rename(temporary, exposurePath)
-    } finally {
-      await rm(temporary, { force: true })
-    }
+    await setEnvironmentLink(exposurePath, projectionRoot)
   }
   if (previous?.projectionRoot !== undefined && previous.projectionRoot !== projectionRoot) {
     const componentRoot = join(paths.hostProjections, 'operations-skills', host, OPERATIONS_SKILL_ID)
     if (!isContained(componentRoot, previous.projectionRoot)) {
       throw new AgentHostError('HOST_SKILL_PROJECTION_INVALID', 'Previous Agent Host Skill projection escaped private host storage')
     }
-    await rm(previous.projectionRoot, { recursive: true, force: true })
+    await afterEnvironmentCommit(() => rm(previous.projectionRoot, { recursive: true, force: true }))
   }
   return {
     kind: `${host}-skill-link`,
@@ -330,11 +329,12 @@ export async function installOperationsSkill(host, paths, runner, previous = nul
   }
 }
 
-export async function inspectOperationsSkill(managed, runner) {
+export async function inspectOperationsSkill(managed, runner, options = {}) {
   if (managed === null || managed === undefined) return { status: 'missing', id: OPERATIONS_SKILL_ID }
   if (managed.kind === 'codex-plugin') {
     try {
       const current = await inspectCodex(codexManifest(managedCodexComponent(managed)), runner, {
+        ...options,
         managedState: managed.binding,
         useManagedBindings: true,
       })
@@ -376,16 +376,16 @@ export async function inspectOperationsSkill(managed, runner) {
   }
 }
 
-export async function uninstallOperationsSkill(managed, runner) {
+export async function uninstallOperationsSkill(managed, runner, options = {}) {
   if (managed === null || managed === undefined) return { removed: false, restored: false }
-  if (managed.kind === 'codex-plugin') return uninstallCodex(managed.binding, runner)
+  if (managed.kind === 'codex-plugin') return uninstallCodex(managed.binding, runner, options)
   const exposureInfo = await existing(managed.exposurePath)
   const exposureTarget = await resolvedSymlink(managed.exposurePath, exposureInfo)
   let removed = false
   let preservedChangedTarget = false
   if (exposureInfo !== null) {
     if (exposureTarget === managed.projectionRoot) {
-      await rm(managed.exposurePath, { force: false })
+      await setEnvironmentLink(managed.exposurePath, null)
       removed = true
     } else {
       preservedChangedTarget = true
@@ -396,7 +396,7 @@ export async function uninstallOperationsSkill(managed, runner) {
     if (await existing(managed.exposurePath) !== null) {
       throw new AgentHostError('HOST_SKILL_RESTORE_CONFLICT', `Cannot restore the displaced ${OPERATIONS_SKILL_ID} Skill because its path is occupied`)
     }
-    await rename(managed.displaced.backupPath, managed.exposurePath)
+    await moveEnvironmentPath(managed.displaced.backupPath, managed.exposurePath)
     restored = true
   }
   return { removed, restored, preservedChangedTarget }

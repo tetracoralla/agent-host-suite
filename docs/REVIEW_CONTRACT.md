@@ -14,6 +14,13 @@ every item below cannot by itself end the review.
 
 ## Durable invariants
 
+The durable constraints are user outcomes, authority, data ownership, consumed
+semantics, and honest failure reporting. Named algorithms, internal formats,
+numerical policies, and historical test sequences below describe current
+mechanisms or reproduced risks. They may be replaced when the intended behavior
+is preserved and the replacement is verified. Neither their presence in this
+file nor a construction Skill is a reason to retain a mechanism.
+
 1. **Release and artifact authority.** Every component is independently
    released and admitted by exact archive bytes and digest, descriptor identity,
    version, platform, SPDX expression, complete inventory, and current typed
@@ -64,7 +71,7 @@ every item below cannot by itself end the review.
    runtime executing the current CLI for `suite-node`, reject an ambiguous
    simultaneous state-root selection, and leave both Agent Host state and
    Agent-app configuration absent.
-3. **Atomic lifecycle.** Setup, import, activation, tool-set changes, update,
+3. **Exclusive lifecycle and recovery.** Setup, import, activation, tool-set changes, update,
    rollback, remove, cleanup, and uninstall preflight the complete target state.
    Every state-root mutation must hold the same atomic, process-identity-bound
    exclusive lifecycle lease; nested operations re-enter only through that
@@ -116,15 +123,20 @@ every item below cannot by itself end the review.
    Service rollback must preserve loaded/running/ready as distinct facts:
    Windows uses the scheduled task state independently of named-pipe reachability,
    and a macOS loaded-but-stopped descriptor that cannot be reproduced exactly
-   blocks replacement before mutation. If a rollback removal command is
-   nonzero, an exact job/task query confirms absence before descriptor or
-   launcher bytes are removed or restored. Before replacement overwrites a
-   descriptor or launcher, the prior descriptor or launcher plus exact Windows
-   Task XML is persisted in a unique owner-only bundle and verified by content
-   digest. New-service success or exact prior-state restoration retires that
-   bundle. Present or unknown state retains it across process exit and returns
-   both bounded failure identities plus an opaque path-free recovery identity.
-   Before a later process may consume that identity, the bundle manifest digest,
+   blocks replacement before mutation. All new service writes must participate
+   in the environment journal before native effects; no standalone service writer
+   may bypass it. Exercise initial installation, replacement, removal, owner death
+   before/after native registration, state-commit failure, and undo-before-progress
+   persistence. A changed carrier, task definition, task ACL or launcher ACL blocks
+   whole-journal recovery before an unrelated resource is restored. Windows queued
+   or unknown prior states and read-only launchers block mutation; stopped/disabled
+   tasks retain that state after recovery. Native removal must be confirmed before
+   carrier files change, and native creation must reject a concurrent registration.
+   Complete environment commit, not service readiness, retires recovery authority.
+   Windows protocol fixtures and PowerShell parsing are distinct from actual Task
+   Scheduler, complete XML/ACL round-trip, named-pipe, login and reboot evidence.
+   Historical v0.2 service-recovery bundles retain their reader and dedicated CLI.
+   Before a later process may consume a historical bundle identity, the bundle manifest digest,
    pre-replacement lifecycle-state bytes, failed-replacement residue bytes, and
    exact job/task observation are revalidated. The shipped
    `agent-host service recover` entry accepts the opaque identity plus manifest
@@ -164,6 +176,13 @@ every item below cannot by itself end the review.
    components never enter the callable catalog or spawn Agent-session MCP
    processes. Normalized tool-name conflicts fail before deployment observation
    using the same semantic key as Observer.
+   Managed catalog byte/count limits are resource admission, not model-context
+   or token measurements. Distinguish Provider catalogs, native host inventory,
+   enabled/loaded Skills and the actual model request when making cost claims.
+   Ordinary MCP output schemas are optional: preserve omission and validate
+   advertised schemas without forcing on-demand contracts into discovery.
+   Formal semantic bindings and complete schema-pair exports keep their stricter
+   contract requirements; generic admission does not certify those semantics.
    The `developer` profile must install the Developer Kit without adding it to
    `agentComponents`, tool-set selection, catalog budgets, MCP health warm-up,
    or Direct Runtime configuration. Mutable source-root installation fails
@@ -183,9 +202,13 @@ every item below cannot by itself end the review.
 7. **Host inspection and mutation.** Absence, unverified configuration, and
    failed inspection remain distinct. ZCode management stays within its public
    user MCP/Skill configuration, preserves unrelated fields and exact displaced
-   entries, and never changes its model provider or credentials. Claude management stays at user setting
-   scope with Skills and Chrome integration disabled and without project/local
-   settings. A failed managed replacement restores the prior binding.
+   entries, and never changes its model provider or credentials. Claude management
+   uses its public user JSON and retains exact argv, non-stdio displaced entries,
+   aliases, and environment fields. Version discovery disables Skills and Chrome;
+   binding inspection neither loads project/local settings nor parses human
+   health-query prose. Later user edits and occupied displaced aliases are
+   preserved or rejected before writes. A failed recorded replacement restores
+   the prior binding; a legacy lossy record is not an exact restoration receipt.
 8. **Default inspection effect budget.** Manager startup and foreground refresh
    resolve Agent apps without launching their CLIs, retain deep local package,
    catalog, and direct semantic probes, and label Agent bindings configured but

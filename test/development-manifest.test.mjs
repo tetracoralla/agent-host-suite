@@ -8,7 +8,9 @@ import {
   buildDevelopmentObservabilityManifest,
   fingerprintIdentityFiles,
 } from '../src/development-manifest.mjs'
-import { createRuntimeConfig, mathProjectionSelection, semanticProbeOrder } from '../src/runtime-config.mjs'
+import { createRuntimeConfig } from '../src/runtime-config.mjs'
+import { resolveDirectBindings } from '../src/provider-bindings.mjs'
+import { createDiagnosticOrder } from '../src/provider-diagnostics.mjs'
 import { createDevelopmentObservabilityWorkspace, createDevelopmentWorkspace } from './helpers.mjs'
 
 test('development manifest binds runnable files and two different provider transports', async (t) => {
@@ -42,8 +44,9 @@ test('development manifest binds runnable files and two different provider trans
       resultPath: ['operation', 'inputSchema'],
     },
   }])
-  assert.equal(mathProjectionSelection().target.operationId, 'expression.evaluate')
-  const probes = semanticProbeOrder().calls
+  const bindings = resolveDirectBindings(manifest)
+  assert.equal(bindings[0].diagnostic.projection.selection.target.operationId, 'expression.evaluate')
+  const probes = createDiagnosticOrder(bindings).calls
   assert.equal(probes.every((call) => call.timeoutMs === 30000), true)
   assert.equal(probes.find((call) => call.id === 'math').target.kind, 'mcp-operation')
   assert.equal(probes.find((call) => call.id === 'math-batch').input.items.length, 2)

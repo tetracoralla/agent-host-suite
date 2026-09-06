@@ -86,6 +86,13 @@ test('Host catalog fails closed when an active expected Tool is absent', async (
   )
 })
 
+test('schema-pair export still rejects a Tool with no inline output schema', async (t) => {
+  const { paths } = await fixture(t)
+  await assert.rejects(exportSkillLinkCatalog({ stateRoot: paths.root }, {
+    listMcpTools: async () => [{ name: 'fixture.check', inputSchema: { type: 'object' } }],
+  }), { code: 'LINK_CATALOG_TOOL_SCHEMA_INCOMPLETE' })
+})
+
 test('Host catalog rejects conflicting exact identities', async (t) => {
   const { paths } = await fixture(t)
   const statePath = join(paths.root, 'state.json')

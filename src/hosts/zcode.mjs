@@ -1,10 +1,11 @@
-import { access, lstat, mkdir, realpath, rm } from 'node:fs/promises'
+import { access, lstat, mkdir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { AgentHostError } from '../errors.mjs'
-import { readJson, writePrivateJson } from '../json.mjs'
+import { readJson } from '../json.mjs'
 import { resolveExecutable, runFile } from '../process.mjs'
 import { componentEnvironment } from '../component-environment.mjs'
+import { writeEnvironmentJson } from '../environment-resources.mjs'
 
 const DEFAULT_CLI = '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'
 
@@ -156,8 +157,9 @@ export async function installZcode(manifest, runner = runFile, managedState = nu
   }
   await mkdir(dirname(inspection.configPath), { recursive: true, mode: 0o700 })
   let committed = false
+  const selectors = inspection.entries.map((entry) => ['mcp', 'servers', entry.name])
   try {
-    await writePrivateJson(inspection.configPath, { ...config, mcp: { ...(config.mcp ?? {}), servers } })
+    await writeEnvironmentJson(inspection.configPath, { ...config, mcp: { ...(config.mcp ?? {}), servers } }, selectors, configExisted ? config : null)
     committed = true
     const verified = await inspectZcode(manifest, runner, { configPath: inspection.configPath, workspaceRoot: options.workspaceRoot ?? managedState?.workspaceRoot ?? null, entries: installed }, { ...options, replaceConflicts: true })
     if (!verified.entries.every((entry) => entry.present && entry.identityMatched)) {
@@ -165,8 +167,7 @@ export async function installZcode(manifest, runner = runFile, managedState = nu
     }
   } catch (error) {
     if (committed) {
-      if (configExisted) await writePrivateJson(inspection.configPath, config).catch(() => {})
-      else await rm(inspection.configPath, { force: true }).catch(() => {})
+      await writeEnvironmentJson(inspection.configPath, configExisted ? config : null, selectors).catch(() => {})
     }
     throw error
   }
@@ -202,7 +203,17 @@ export async function uninstallZcode(hostState) {
       removed.push({ target: entry.name, kind: 'mcp', status: 'ok' })
     }
   }
-  await writePrivateJson(hostState.configPath, { ...config, mcp: { ...(config.mcp ?? {}), servers } })
+  // A configuration file the user already removed holds no Host entry or
+  // displaced binding left to restore; reporting the preserved entries is the
+  // complete result, and recreating that file would fabricate user state.
+  const configPresent = await lstat(hostState.configPath).catch((error) => {
+    if (error.code === 'ENOENT') return null
+    throw error
+  })
+  if (configPresent !== null) {
+    await writeEnvironmentJson(hostState.configPath, { ...config, mcp: { ...(config.mcp ?? {}), servers } },
+      (hostState.entries ?? []).map((entry) => ['mcp', 'servers', entry.name]), config)
+  }
   return { kind: 'zcode', removed }
 }
 
@@ -220,6 +231,7 @@ export async function suspendZcode(hostState) {
     delete servers[entry.name]
     suspended.push({ target: entry.name, kind: 'mcp' })
   }
-  await writePrivateJson(hostState.configPath, { ...config, mcp: { ...(config.mcp ?? {}), servers } })
+  await writeEnvironmentJson(hostState.configPath, { ...config, mcp: { ...(config.mcp ?? {}), servers } },
+    (hostState.entries ?? []).map((entry) => ['mcp', 'servers', entry.name]), config)
   return { kind: 'zcode', suspended }
 }

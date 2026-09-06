@@ -8,7 +8,7 @@ import { inspectCodex, installCodex, suspendCodex, uninstallCodex } from './host
 import { materializeCodexProjections, pruneCodexProjections, resolveWorkspaceRoot } from './hosts/codex-projection.mjs'
 import { CLAUDE_USER_CONFIG_ARGUMENTS, inspectClaude, installClaude, suspendClaude, uninstallClaude } from './hosts/claude.mjs'
 import { inspectZcode, installZcode, resolveZcodeExecutable, suspendZcode, uninstallZcode } from './hosts/zcode.mjs'
-import { canonicalJson, readJson, sha256 } from './json.mjs'
+import { readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { resolveExecutable, runFile } from './process.mjs'
 import { inspectService, installService, restoreServiceRecoveryBundle, uninstallService } from './service.mjs'
@@ -24,9 +24,11 @@ import { compareSuiteVersions, loadReleaseManifest, OBSERVABILITY_RELEASE_COMPON
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
 import { inspectOperationsSkill, installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
-import { preflightApplicationState } from './application-carrier.mjs'
+import { checkApplicationState } from './state-migration.mjs'
 import { validateComponentPathGrants } from './component-environment.mjs'
 import { retireLifecycleRoot, withLifecycleMutation } from './lifecycle-lock.mjs'
+import { removeEnvironmentDirectory } from './environment-resources.mjs'
+import { hasEnvironmentChange, recoverCurrentEnvironmentChange } from './environment-change.mjs'
 import {
   inspectDeveloperKitSkill,
   inspectProductSkills,
@@ -113,14 +115,6 @@ function updatedInstallationState({
   }
 }
 
-async function checkApplicationState(state, dependencies) {
-  return (dependencies.applicationStatePreflight ?? preflightApplicationState)(state, {
-    runner: dependencies.applicationRunner ?? runFile,
-    carrier: dependencies.applicationCarrier,
-    resolver: dependencies.resolveApplicationCarrier,
-  })
-}
-
 function activeManifest(manifest) {
   return hostFacingManifest(manifest, manifest.agentComponents ?? Object.keys(manifest.components))
 }
@@ -134,11 +128,12 @@ async function validateActiveComponentPathGrants(manifest) {
 }
 
 async function pruneStateCodexProjections(paths, state, prune = pruneCodexProjections) {
-  const active = (state.hosts.codex?.entries ?? []).map((entry) => entry.marketplaceRoot)
+  const active = [...(state.hosts.codex?.entries ?? []), ...(state.hosts.codex?.inactiveEntries ?? [])].map((entry) => entry.marketplaceRoot)
   return prune(join(paths.hostProjections, 'codex'), active)
 }
 
 function mergeHostOwnership(previous, next) {
+  if (next.configurationVersion === 1) return next
   if (previous === undefined) return next
   const previousEntries = [...(previous.entries ?? []), ...(previous.inactiveEntries ?? [])]
   if (next.kind === 'codex') {
@@ -157,17 +152,10 @@ function mergeHostOwnership(previous, next) {
       }),
     }
   }
-  return {
-    ...next,
-    entries: next.entries.map((entry) => {
-      const old = previousEntries.find((item) => item.name === entry.name)
-      return {
-        ...entry,
-        created: entry.created || old?.created === true,
-        displaced: old?.displaced ?? entry.displaced ?? null,
-      }
-    }),
-  }
+  // JSON host adapters receive previous ownership and return the complete next
+  // record. Reapplying an older displacement here would discard a later user
+  // binding that the adapter has just preserved during explicit replacement.
+  return next
 }
 
 async function installHost(id, manifest, previous, paths, runner, options, dependencies = {}) {
@@ -195,6 +183,8 @@ async function installHost(id, manifest, previous, paths, runner, options, depen
     ? await installCodex(manifest, runner, { replaceConflicts: options.replaceHostConflicts, managedState: previous })
     : id === 'claude'
       ? await installClaude(manifest, runner, previous, {
+          configPath: dependencies.claudeConfigPath,
+          homeRoot: dependencies.hostSkillHome,
           replaceConflicts: options.replaceHostConflicts,
           workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
         })
@@ -264,14 +254,14 @@ async function suspendHost(id, state, runner) {
 }
 
 function hostEntryKey(id, entry) {
-  return id === 'codex' ? entry.selector : entry.component
+  return entry.component
 }
 
 function hostManifestKeys(id, manifest) {
   if (id === 'codex') {
     return new Set(Object.values(manifest.components)
       .filter((component) => component.plugin !== undefined)
-      .map((component) => `${component.plugin}@${component.marketplace}`))
+      .map((component) => component.plugin))
   }
   return new Set(Object.keys(manifest.components))
 }
@@ -294,7 +284,14 @@ async function committedStep(warnings, code, message, task, fallback) {
   }
 }
 
+async function recoverRecordedService(paths) {
+  if (!hasEnvironmentChange(paths, 'launchd-service') && !hasEnvironmentChange(paths, 'windows-service')) return false
+  await recoverCurrentEnvironmentChange(paths)
+  return true
+}
+
 function activationRollbackState(id, next, previous) {
+  if (next.configurationVersion === 1) return next
   if (id !== 'codex' || previous === undefined) return next
   return {
     ...next,
@@ -309,22 +306,6 @@ function activationRollbackState(id, next, previous) {
       }
     }),
   }
-}
-
-export function hostStateOutsideManifest(id, current, manifest) {
-  let entries
-  if (id === 'codex') {
-    const desired = new Set(Object.values(manifest.components)
-      .filter((component) => component.plugin !== undefined)
-      .map((component) => `${component.plugin}@${component.marketplace}`))
-    entries = current.entries.filter((entry) => !desired.has(entry.selector))
-  } else if (id === 'claude' || id === 'zcode') {
-    const desired = new Set(Object.keys(manifest.components))
-    entries = current.entries.filter((entry) => !desired.has(entry.component))
-  } else {
-    return null
-  }
-  return entries.length === 0 ? null : { ...current, entries, operationsSkill: undefined, developerSkill: undefined, providerSkills: undefined, productSkills: undefined }
 }
 
 async function addHostUnlocked(options, dependencies = {}, preparedPaths = null) {
@@ -491,9 +472,10 @@ export async function hostStatus(options, dependencies = {}) {
   try {
     await validateActiveComponentPathGrants({ components: state.components, agentComponents: state.agentComponents })
     const inspection = options.target === 'codex'
-      ? await inspectCodex(stateManifest(state), runner, { managedState: managed, useManagedBindings: true })
+      ? await inspectCodex(stateManifest(state), runner, { managedState: managed, useManagedBindings: true, codexConfiguration: dependencies.codexConfiguration })
       : options.target === 'claude'
-        ? await inspectClaude(stateManifest(state), runner, managed, { workspaceRoot: state.workspaceRoot ?? null })
+        ? await inspectClaude(stateManifest(state), runner, managed, { workspaceRoot: state.workspaceRoot ?? null,
+            configPath: dependencies.claudeConfigPath, homeRoot: dependencies.hostSkillHome })
         : await inspectZcode(stateManifest(state), runner, managed, {
             workspaceRoot: state.workspaceRoot ?? null,
             configPath: dependencies.zcodeConfigPath,
@@ -502,7 +484,7 @@ export async function hostStatus(options, dependencies = {}) {
     const bindingHealthy = options.target === 'codex'
       ? inspection.entries.every((entry) => entry.pluginPresent && entry.pluginEnabled && entry.installedVersion === entry.requestedVersion && entry.installedIdentityMatched)
       : inspection.entries.every((entry) => entry.present && entry.identityMatched)
-    const operationsSkill = await inspectOperationsSkill(managed.operationsSkill, runner)
+    const operationsSkill = await inspectOperationsSkill(managed.operationsSkill, runner, { codexConfiguration: dependencies.codexConfiguration })
     const developerSkill = options.target === 'codex'
       ? { status: 'not-applicable', carrier: 'codex-plugin' }
       : await inspectDeveloperKitSkill(managed.developerSkill, runner)
@@ -581,11 +563,6 @@ async function activateState(paths, previous, manifest, runner, options, workspa
       ? null
         : await installService(manifest.components['direct-execution-runtime'], runtimeFiles, runner, previous.runtime.service, {
           allowMissingOwnedState: dependencies.allowMissingOwnedServiceState === true,
-          recoveryRoot: paths.serviceRecovery,
-          recoveryLifecycle: {
-            statePath: paths.state,
-            currentStateIdentity: sha256(canonicalJson(previous)),
-          },
         })
     const service = installedService === null ? null : { ...installedService, created: previous.runtime.service.created }
     return { hosts, runtime: { ...runtimeFiles, service } }
@@ -634,6 +611,8 @@ async function inspectActivation(previous, manifest, runner, options, workspaceR
         ? await inspectCodex(codexAgents, runner, { managedState: managed, replaceConflicts: options.replaceHostConflicts })
         : id === 'claude'
           ? await inspectClaude(agents, runner, managed, {
+              configPath: dependencies.claudeConfigPath,
+              homeRoot: dependencies.hostSkillHome,
               replaceConflicts: options.replaceHostConflicts,
               workspaceRoot,
             })
@@ -854,6 +833,7 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
     await (dependencies.saveState ?? saveState)(paths, next, { retainCurrent: true })
   } catch (error) {
     const rollbackFailures = []
+    const serviceRecovered = await recoverRecordedService(paths)
     if (enablingObservability && next?.observability?.enabled === true) {
       try {
         await (dependencies.teardownObservability ?? teardownObservability)(next, paths, runner)
@@ -862,14 +842,14 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
       }
     }
     try {
-      if (next !== null) {
+      if (next !== null && !serviceRecovered) {
         await uninstallService(next.runtime.service, runner)
         for (const [id, state] of Object.entries(next.hosts).reverse()) {
           await uninstallHost(id, activationRollbackState(id, state, previous.hosts[id]), runner)
         }
       }
       if (activationStarted) {
-        await activateState(paths, previous, { components: previous.components, agentComponents: previous.agentComponents }, runner, options, previous.workspaceRoot ?? null, dependencies)
+        if (!serviceRecovered) await activateState(paths, previous, { components: previous.components, agentComponents: previous.agentComponents }, runner, options, previous.workspaceRoot ?? null, dependencies)
         if (previous.observability?.enabled === true) await rebind(previous, paths, runner)
       }
     } catch (failure) {
@@ -1019,12 +999,13 @@ async function rollbackInstallationUnlocked(options, dependencies = {}, prepared
     await (dependencies.saveState ?? saveState)(paths, restored, { retainCurrent: true })
   } catch (error) {
     let restorationError = null
+    const serviceRecovered = await recoverRecordedService(paths)
     if (mutationStarted) {
       try {
         if (targetObservabilityTouched && current.observability?.enabled !== true) {
           await teardownObservability(restored ?? target, paths, runner)
         }
-        await activateState(
+        if (!serviceRecovered) await activateState(
           paths,
           { ...current, hosts: activated?.hosts ?? current.hosts, runtime: activated?.runtime ?? current.runtime },
           { components: current.components, agentComponents: current.agentComponents },
@@ -1145,8 +1126,9 @@ async function setActiveToolsUnlocked(options, dependencies = {}, preparedPaths 
     await (dependencies.saveState ?? saveState)(paths, next)
   } catch (error) {
     let rollbackError = null
+    const serviceRecovered = await recoverRecordedService(paths)
     try {
-      await activateState(
+      if (!serviceRecovered) await activateState(
         paths,
         { ...previous, hosts: activated?.hosts ?? previous.hosts, runtime: activated?.runtime ?? previous.runtime },
         { components: previous.components, agentComponents: current },
@@ -1248,9 +1230,10 @@ async function transitionComponentInventoryUnlocked(options, inventory, dependen
     await (dependencies.saveState ?? saveState)(paths, next)
   } catch (error) {
     let rollbackError = null
+    const serviceRecovered = await recoverRecordedService(paths)
     try {
       if (activationStarted) {
-        await activateState(
+        if (!serviceRecovered) await activateState(
           paths,
           { ...previous, hosts: activated?.hosts ?? previous.hosts, runtime: activated?.runtime ?? previous.runtime },
           { components: previous.components, agentComponents: previous.agentComponents ?? availableAgentComponents(previous) },
@@ -1319,7 +1302,7 @@ async function uninstallInstallationUnlocked(options, dependencies = {}, prepare
     for (const [id, host] of Object.entries(state.hosts).reverse()) {
       results.hosts[id] = await (dependencies.uninstallHost ?? uninstallHost)(id, host, runner)
     }
-    await rm(paths.hostProjections, { recursive: true, force: true })
+    await removeEnvironmentDirectory(paths.hostProjections, paths)
     results.hostProjections = { removed: true }
     await committedStep(
       warnings,
@@ -1335,6 +1318,9 @@ async function uninstallInstallationUnlocked(options, dependencies = {}, prepare
     let rollbackError = null
     if (mutationStarted) {
       try {
+        // Restore moved projections and recorded host fields before any
+        // service compensation can recreate paths needed by the journal.
+        if (hasEnvironmentChange(paths)) await recoverCurrentEnvironmentChange(paths)
         const restoredActivation = await activateState(
           paths,
           state,
@@ -1371,7 +1357,7 @@ async function uninstallInstallationUnlocked(options, dependencies = {}, prepare
 
 async function lockedLifecycle(options, dependencies, operation, callback) {
   const paths = statePaths(resolveStateRoot(options.stateRoot))
-  return await withLifecycleMutation(paths, operation, dependencies, (lockedDependencies, preparedPaths) =>
+  return await withLifecycleMutation(paths, operation, { ...dependencies, migrateState: operation !== 'service.recover', recoverEnvironmentChange: true, environmentDryRun: options.dryRun === true }, (lockedDependencies, preparedPaths) =>
     callback(lockedDependencies, preparedPaths))
 }
 
@@ -1472,7 +1458,7 @@ export async function uninstallInstallation(options, dependencies = {}) {
   }
   const paths = statePaths(root)
   let retiredRoot = null
-  const result = await withLifecycleMutation(paths, 'environment.uninstall', dependencies, async (locked, preparedPaths) => {
+  const result = await withLifecycleMutation(paths, 'environment.uninstall', { ...dependencies, migrateState: true, recoverEnvironmentChange: true }, async (locked, preparedPaths) => {
     const value = await uninstallInstallationUnlocked(options, locked, preparedPaths)
     if (options.purgeData) retiredRoot = await retireLifecycleRoot(locked.lifecycleLease, 'purged')
     return value

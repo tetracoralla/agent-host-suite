@@ -34,6 +34,8 @@ import {
 import { COMPONENT_WARMUP_POLICY_VERSION, warmInstalledAgentComponents } from './component-warmup.mjs'
 import { preflightManagedCatalog } from './context-exporter.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
+import { hasEnvironmentChange, recoverCurrentEnvironmentChange } from './environment-change.mjs'
+import { checkApplicationState } from './state-migration.mjs'
 
 const HOSTS = new Set(['codex', 'claude', 'zcode'])
 const ACTIVITY_LOG_WARNING = Object.freeze({
@@ -56,6 +58,8 @@ async function inspectHost(host, manifest, paths, runner, options, dependencies)
     ? await inspectCodex(manifest, runner, { replaceConflicts: options.replaceHostConflicts })
     : host === 'claude'
       ? await inspectClaude(manifest, runner, null, {
+          configPath: dependencies.claudeConfigPath,
+          homeRoot: dependencies.hostSkillHome,
           replaceConflicts: options.replaceHostConflicts,
           workspaceRoot: options.workspaceRoot ?? null,
         })
@@ -105,6 +109,8 @@ async function installHost(host, manifest, paths, runner, options, dependencies)
     ? await installCodex(manifest, runner, { replaceConflicts: options.replaceHostConflicts })
     : host === 'claude'
       ? await installClaude(manifest, runner, null, {
+          configPath: dependencies.claudeConfigPath,
+          homeRoot: dependencies.hostSkillHome,
           replaceConflicts: options.replaceHostConflicts,
           workspaceRoot: options.workspaceRoot ?? null,
         })
@@ -173,7 +179,13 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
   if (profile.id === 'developer' && options.developmentRoot !== undefined) {
     throw new AgentHostError('DEVELOPER_PROFILE_RELEASE_REQUIRED', 'The developer profile requires one version-bound release; it cannot expose a mutable source-root CLI')
   }
-  let paths = preparedPaths
+  let paths = preparedPaths ?? await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  // Reject an existing installation before entering cleanup for a new one.
+  // Otherwise an ordinary ALREADY_INSTALLED error could remove its state and
+  // projections as though they belonged to this failed setup attempt.
+  if (!options.dryRun && await loadState(paths) !== null) {
+    throw new AgentHostError('ALREADY_INSTALLED', 'An Agent environment is already installed; use update')
+  }
   let releasePreparation = null
   let releaseSourceProvenance = null
   let manifest
@@ -243,39 +255,6 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     const preflight = {}
     for (const host of hosts) preflight[host] = await inspectHost(host, host === 'codex' ? codexManifest : hostManifest, operationsProjectionPaths, runner, { ...options, workspaceRoot }, dependencies)
     const servicePreflight = options.noService ? null : await preflightServiceInstallation(runner)
-    if (options.dryRun) {
-      catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(Object.fromEntries(
-        activeAgentComponents.map((id) => [id, manifest.components[id]]),
-      ))
-      await cleanupMaterializedRelease(releasePreparation)
-      if (codexProjectionTemporaryRoot !== null) await rm(codexProjectionTemporaryRoot, { recursive: true, force: true })
-      await rm(operationsProjectionPaths.hostProjections, { recursive: true, force: true })
-      return {
-        status: 'ready', dryRun: true, profile: profile.id, profileDisplayName: profile.displayName,
-        hosts: preflight, service: servicePreflight, components: manifest.components,
-        availableAgentComponents: profile.agentComponents, agentComponents: activeAgentComponents,
-        catalogPreflight,
-      }
-    }
-    paths ??= await prepareStatePaths(resolveStateRoot(options.stateRoot))
-    if (await loadState(paths) !== null) throw new AgentHostError('ALREADY_INSTALLED', 'An Agent environment is already installed; use update')
-    if (releasePreparation !== null) {
-      componentWarmup = await (dependencies.componentWarmup ?? warmInstalledAgentComponents)({
-        manifest,
-        componentIds: activeAgentComponents,
-        workspaceRoot,
-      }, { probe: dependencies.mcpProbe })
-    }
-    catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(Object.fromEntries(
-      activeAgentComponents.map((id) => [id, manifest.components[id]]),
-    ))
-    runtimeFiles = await (dependencies.writeRuntimeFiles ?? writeRuntimeFiles)(paths, manifest, { workspaceRoot })
-    for (const host of hosts) installedHosts[host] = await installHost(host, host === 'codex' ? codexManifest : hostManifest, paths, runner, { ...options, workspaceRoot }, dependencies)
-    if (!options.noService) {
-      serviceState = await installService(manifest.components['direct-execution-runtime'], runtimeFiles, runner, null, {
-        recoveryRoot: paths.serviceRecovery,
-      })
-    }
     const now = new Date().toISOString()
     const state = {
       schemaVersion: STATE_SCHEMA,
@@ -298,9 +277,42 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
       agentComponents: activeAgentComponents,
       ...(releasePreparation === null ? {} : { componentWarmupVersion: COMPONENT_WARMUP_POLICY_VERSION }),
       hosts: installedHosts,
-      runtime: { ...runtimeFiles, service: serviceState },
+      runtime: {},
       observability: { enabled: false },
     }
+    const applicationCompatibility = await checkApplicationState(state, dependencies)
+    if (options.dryRun) {
+      catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(Object.fromEntries(
+        activeAgentComponents.map((id) => [id, manifest.components[id]]),
+      ))
+      await cleanupMaterializedRelease(releasePreparation)
+      if (codexProjectionTemporaryRoot !== null) await rm(codexProjectionTemporaryRoot, { recursive: true, force: true })
+      await rm(operationsProjectionPaths.hostProjections, { recursive: true, force: true })
+      return {
+        status: 'ready', dryRun: true, profile: profile.id, profileDisplayName: profile.displayName,
+        hosts: preflight, service: servicePreflight, components: manifest.components,
+        availableAgentComponents: profile.agentComponents, agentComponents: activeAgentComponents,
+        catalogPreflight, applicationCompatibility,
+      }
+    }
+    paths ??= await prepareStatePaths(resolveStateRoot(options.stateRoot))
+    if (await loadState(paths) !== null) throw new AgentHostError('ALREADY_INSTALLED', 'An Agent environment is already installed; use update')
+    if (releasePreparation !== null) {
+      componentWarmup = await (dependencies.componentWarmup ?? warmInstalledAgentComponents)({
+        manifest,
+        componentIds: activeAgentComponents,
+        workspaceRoot,
+      }, { probe: dependencies.mcpProbe })
+    }
+    catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(Object.fromEntries(
+      activeAgentComponents.map((id) => [id, manifest.components[id]]),
+    ))
+    runtimeFiles = await (dependencies.writeRuntimeFiles ?? writeRuntimeFiles)(paths, manifest, { workspaceRoot })
+    for (const host of hosts) installedHosts[host] = await installHost(host, host === 'codex' ? codexManifest : hostManifest, paths, runner, { ...options, workspaceRoot }, dependencies)
+    if (!options.noService) {
+      serviceState = await installService(manifest.components['direct-execution-runtime'], runtimeFiles, runner)
+    }
+    state.runtime = { ...runtimeFiles, service: serviceState }
     await (dependencies.saveState ?? saveState)(paths, state)
     const warnings = []
     try {
@@ -325,6 +337,8 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     return { status: 'installed', stateRoot: paths.root, profile: state.profile, hosts: Object.keys(installedHosts), service: serviceState, componentWarmup, catalogPreflight, restartRequired: hosts.length > 0, ...(warnings.length === 0 ? {} : { warnings }) }
   } catch (error) {
     const rollback = []
+    const serviceRecovered = paths !== null && (hasEnvironmentChange(paths, 'launchd-service') || hasEnvironmentChange(paths, 'windows-service'))
+    if (serviceRecovered) await recoverCurrentEnvironmentChange(paths)
     const rollbackStep = async (step, task) => {
       try {
         await task()
@@ -332,12 +346,12 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
         rollback.push({ step, message: failure.message })
       }
     }
-    if (serviceState !== null) await rollbackStep('service.uninstall', () => (dependencies.uninstallService ?? uninstallService)(serviceState, runner))
+    if (serviceState !== null && !serviceRecovered) await rollbackStep('service.uninstall', () => (dependencies.uninstallService ?? uninstallService)(serviceState, runner))
     for (const [host, state] of Object.entries(installedHosts).reverse()) {
       await rollbackStep(`host.${host}.uninstall`, () => (dependencies.uninstallHost ?? uninstallHost)(host, state, runner))
     }
-    if (rollback.length === 0 && paths !== null) {
-      await rollbackStep('state.remove', () => rm(paths.state, { force: true }))
+    if (rollback.length === 0 && paths !== null && !options.dryRun) {
+      if (!hasEnvironmentChange(paths)) await rollbackStep('state.remove', () => rm(paths.state, { force: true }))
       await rollbackStep('host-projections.remove', () => rm(paths.hostProjections, { recursive: true, force: true }))
       if (runtimeFiles !== null) await rollbackStep('runtime-config.remove', () => rm(runtimeFiles.configPath, { force: true }))
     }
@@ -364,7 +378,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
 export async function setup(options, dependencies = {}) {
   const root = resolveStateRoot(options.stateRoot)
   const paths = statePaths(root)
-  return await withLifecycleMutation(paths, 'environment.setup', dependencies, (lockedDependencies, preparedPaths) =>
+  return await withLifecycleMutation(paths, 'environment.setup', { ...dependencies, recoverEnvironmentChange: true, environmentDryRun: options.dryRun === true }, (lockedDependencies, preparedPaths) =>
     setupUnlocked(options, lockedDependencies, preparedPaths))
 }
 

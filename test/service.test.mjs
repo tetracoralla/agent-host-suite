@@ -1,26 +1,19 @@
 import { assertPrivateAccess } from '../src/private-permissions.mjs'
 import assert from 'node:assert/strict'
-import { execFile, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { access, lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { promisify } from 'node:util'
 import { inspectService, installService, launchAgentContents, preflightServiceInstallation, retainedLaunchAgentProgram, restoreServiceRecoveryBundle, SERVICE_LABEL, uninstallService } from '../src/service.mjs'
 import { bindServiceRecoveryFailure, loadServiceRecoveryBundle, persistServiceRecoveryBundle } from '../src/service-recovery.mjs'
 import { recoverServiceInstallation } from '../src/lifecycle.mjs'
 import { withLifecycleMutation } from '../src/lifecycle-lock.mjs'
 import { canonicalJson } from '../src/json.mjs'
 
-const execFileAsync = promisify(execFile)
-const serviceModuleUrl = new URL('../src/service.mjs', import.meta.url).href
 const cliModuleUrl = new URL('../src/cli.mjs', import.meta.url).href
 const TEST_STATE_IDENTITY = `sha256:${createHash('sha256').update('absent-state-file').digest('hex')}`
-
-function recoveryLifecycle(directory) {
-  return { statePath: join(directory, 'state.json'), currentStateIdentity: TEST_STATE_IDENTITY }
-}
 
 function installedHostState(service) {
   return {
@@ -44,34 +37,6 @@ function stateIdentity(state) {
 function bytesIdentity(contents) {
   return `sha256:${createHash('sha256').update(contents).digest('hex')}`
 }
-
-test('service replacement rejects a stale lifecycle identity even when the state file disappeared', { skip: process.platform !== 'darwin' }, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-missing-state-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launchAgentPath = join(directory, 'agent-host.plist')
-  await writeFile(launchAgentPath, 'prior descriptor\n')
-  let calls = 0
-  await assert.rejects(
-    installService(
-      { command: '/opt/new-node', args: ['/opt/new-runtime/cli.mjs'] },
-      { configPath: join(directory, 'config.json'), socketPath: join(directory, 'new.sock'), observationLog: join(directory, 'observations.jsonl') },
-      async (_command, args) => {
-        calls += 1
-        if (args[0] === 'print') return { status: 0, stdout: 'state = running\n', stderr: '' }
-        throw new Error('service replacement mutated after a stale lifecycle identity')
-      },
-      { launchAgentPath, socketPath: join(directory, 'old.sock'), created: true },
-      {
-        platformName: 'darwin',
-        existingEndpointReady: true,
-        recoveryLifecycle: { statePath: join(directory, 'state.json'), currentStateIdentity: `sha256:${'7'.repeat(64)}` },
-      },
-    ),
-    (error) => error.code === 'SERVICE_RECOVERY_CONTEXT_INVALID',
-  )
-  assert.equal(calls, 1)
-  assert.equal(await readFile(launchAgentPath, 'utf8'), 'prior descriptor\n')
-})
 
 test('service recovery cannot enter while another lifecycle mutation owns the selected state root', async (t) => {
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-service-recovery-lock-'))
@@ -268,214 +233,7 @@ test('service inspection distinguishes a loaded crash loop from a ready socket s
   assert.equal(status.lastExitCode, 1)
 })
 
-test('fresh macOS service readiness failure removes its descriptor and Socket', { skip: process.platform !== 'darwin' }, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-fresh-failure-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launchAgentPath = join(directory, 'agent-host.plist')
-  const socketPath = join(directory, 'runtime.sock')
-  await writeFile(socketPath, 'stale')
-  const calls = []
-  const runner = async (command, args) => {
-    calls.push([command, ...args])
-    return { status: 0, stdout: '', stderr: '' }
-  }
-  await assert.rejects(
-    installService(
-      { command: '/opt/node', args: ['/opt/runtime/cli.mjs'] },
-      { configPath: join(directory, 'config.json'), socketPath, observationLog: join(directory, 'observations.jsonl') },
-      runner,
-      null,
-      { platformName: 'darwin', launchAgentPath, waitForEndpoint: async () => false },
-    ),
-    (error) => error.code === 'SERVICE_START_FAILED',
-  )
-  await assert.rejects(() => access(launchAgentPath), (error) => error.code === 'ENOENT')
-  await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
-  assert.equal(calls.some((call) => call[1] === 'bootout'), true)
-})
-
-test('macOS replacement failure restores exact prior descriptor and running service', { skip: process.platform !== 'darwin' }, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-replace-failure-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launchAgentPath = join(directory, 'agent-host.plist')
-  const oldSocketPath = join(directory, 'old.sock')
-  const newSocketPath = join(directory, 'new.sock')
-  const priorProgram = '/opt/old-node'
-  const priorContents = Buffer.from(launchAgentContents(
-    { command: priorProgram, args: ['/opt/old-runtime/cli.mjs'] },
-    { configPath: join(directory, 'old-config.json'), socketPath: oldSocketPath, observationLog: join(directory, 'old-observations.jsonl') },
-  ))
-  await writeFile(launchAgentPath, priorContents, { mode: 0o640 })
-  const calls = []
-  const waits = []
-  const runner = async (command, args) => {
-    calls.push([command, ...args])
-    if (args[0] === 'print') {
-      return { status: 0, stdout: `path = ${launchAgentPath}\nprogram = ${priorProgram}\nstate = running\n`, stderr: '' }
-    }
-    return { status: 0, stdout: '', stderr: '' }
-  }
-  await assert.rejects(
-    installService(
-      { command: '/opt/new-node', args: ['/opt/new-runtime/cli.mjs'] },
-      { configPath: join(directory, 'new-config.json'), socketPath: newSocketPath, observationLog: join(directory, 'observations.jsonl') },
-      runner,
-      { launchAgentPath, socketPath: oldSocketPath, created: true },
-      {
-        platformName: 'darwin',
-        recoveryLifecycle: recoveryLifecycle(directory),
-        existingEndpointReady: true,
-        waitForEndpoint: async (path) => {
-          waits.push(path)
-          return waits.length > 1
-        },
-      },
-    ),
-    (error) => error.code === 'SERVICE_START_FAILED',
-  )
-  assert.deepEqual(await readFile(launchAgentPath), priorContents)
-  assert.deepEqual(waits, [newSocketPath, oldSocketPath])
-  assert.equal(calls.filter((call) => call[1] === 'bootstrap').length, 2)
-  assert.equal(calls.filter((call) => call[1] === 'kickstart').length, 2)
-})
-
-test('macOS replacement retains recovery when rollback commands leave the replacement job active', { skip: process.platform !== 'darwin' }, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-restore-verification-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launchAgentPath = join(directory, 'agent-host.plist')
-  const recoveryRoot = join(directory, 'service-recovery')
-  const oldSocketPath = join(directory, 'old.sock')
-  const newSocketPath = join(directory, 'new.sock')
-  const priorProgram = '/opt/old-node'
-  const replacementProgram = '/opt/new-node'
-  const priorContents = Buffer.from(launchAgentContents(
-    { command: priorProgram, args: ['/opt/old-runtime/cli.mjs'] },
-    { configPath: join(directory, 'old-config.json'), socketPath: oldSocketPath, observationLog: join(directory, 'old-observations.jsonl') },
-  ))
-  await writeFile(launchAgentPath, priorContents, { mode: 0o640 })
-  let bootstrapCalls = 0
-  let readinessCalls = 0
-  const runner = async (_command, args) => {
-    if (args[0] === 'print') {
-      const program = bootstrapCalls > 1 ? replacementProgram : priorProgram
-      return { status: 0, stdout: `path = ${launchAgentPath}\nprogram = ${program}\nstate = running\n`, stderr: '' }
-    }
-    if (args[0] === 'bootstrap') bootstrapCalls += 1
-    return { status: 0, stdout: '', stderr: '' }
-  }
-
-  let failure
-  try {
-    await installService(
-      { command: replacementProgram, args: ['/opt/new-runtime/cli.mjs'] },
-      { configPath: join(directory, 'new-config.json'), socketPath: newSocketPath, observationLog: join(directory, 'new-observations.jsonl') },
-      runner,
-      { launchAgentPath, socketPath: oldSocketPath, created: true },
-      {
-        platformName: 'darwin', recoveryRoot, recoveryLifecycle: recoveryLifecycle(directory), existingEndpointReady: true,
-        waitForEndpoint: async () => {
-          readinessCalls += 1
-          return readinessCalls > 1
-        },
-      },
-    )
-  } catch (error) {
-    failure = error
-  }
-
-  assert.equal(failure?.code, 'SERVICE_INSTALL_ROLLBACK_FAILED')
-  assert.equal(failure.details.rollback.code, 'SERVICE_RESTORE_FAILED')
-  assert.match(failure.details.recovery.identity, /^service-recovery-v2-/u)
-  assert.deepEqual(await readFile(launchAgentPath), priorContents)
-  assert.deepEqual(await readdir(recoveryRoot), [failure.details.recovery.identity])
-})
-
-test('macOS failed rollback cleanup verifies absence and otherwise preserves recovery files', { skip: process.platform !== 'darwin' }, async (t) => {
-  for (const replacement of [false, true]) {
-    for (const outcome of ['absent', 'present', 'query-failure']) {
-      const directory = await mkdtemp(join(tmpdir(), `agent-host-service-cleanup-${replacement}-${outcome}-`))
-      t.after(() => rm(directory, { recursive: true, force: true }))
-      const launchAgentPath = join(directory, 'agent-host.plist')
-      const socketPath = join(directory, 'new.sock')
-      const priorProgram = '/opt/old-node'
-      const priorContents = Buffer.from(launchAgentContents(
-        { command: priorProgram, args: ['/opt/old-runtime/cli.mjs'] },
-        { configPath: join(directory, 'old-config.json'), socketPath: join(directory, 'old.sock'), observationLog: join(directory, 'old-observations.jsonl') },
-      ))
-      if (replacement) await writeFile(launchAgentPath, priorContents, { mode: 0o640 })
-      await writeFile(socketPath, 'stale socket placeholder\n')
-      let printCalls = 0
-      let bootoutCalls = 0
-      let bootstrapCalls = 0
-      const runner = async (command, args) => {
-        if (args[0] === 'print') {
-          printCalls += 1
-          if (replacement && printCalls === 1) return { status: 0, stdout: 'state = running\n', stderr: '' }
-          if (replacement && bootstrapCalls > 1) {
-            return { status: 0, stdout: `path = ${launchAgentPath}\nprogram = ${priorProgram}\nstate = running\n`, stderr: '' }
-          }
-          if (outcome === 'absent') {
-            return { status: 113, stdout: '', stderr: `Could not find service "${SERVICE_LABEL}" in domain\n` }
-          }
-          if (outcome === 'present') return { status: 0, stdout: 'state = running\n', stderr: '' }
-          return { status: 5, stdout: '', stderr: 'permission denied\n' }
-        }
-        if (args[0] === 'bootout') {
-          bootoutCalls += 1
-          if (replacement && bootoutCalls === 1) return { status: 0, stdout: '', stderr: '' }
-          return { status: 5, stdout: '', stderr: 'bootout failed\n' }
-        }
-        if (args[0] === 'bootstrap') bootstrapCalls += 1
-        return { status: 0, stdout: '', stderr: '' }
-      }
-      let failure
-      try {
-        await installService(
-          { command: '/opt/new-node', args: ['/opt/new-runtime/cli.mjs'] },
-          { configPath: join(directory, 'config.json'), socketPath, observationLog: join(directory, 'observations.jsonl') },
-          runner,
-          replacement ? { launchAgentPath, socketPath: join(directory, 'old.sock'), created: true } : null,
-          {
-            platformName: 'darwin',
-            launchAgentPath,
-            ...(replacement ? { recoveryLifecycle: recoveryLifecycle(directory) } : {}),
-            existingEndpointReady: false,
-            waitForEndpoint: async () => false,
-          },
-        )
-      } catch (error) {
-        failure = error
-      }
-      assert.notEqual(failure, undefined, `${replacement}:${outcome}`)
-      if (outcome === 'absent') {
-        assert.equal(failure.code, 'SERVICE_START_FAILED')
-        if (replacement) assert.deepEqual(await readFile(launchAgentPath), priorContents)
-        else await assert.rejects(() => access(launchAgentPath), (error) => error.code === 'ENOENT')
-        await assert.rejects(() => access(socketPath), (error) => error.code === 'ENOENT')
-      } else {
-        assert.equal(failure.code, 'SERVICE_INSTALL_ROLLBACK_FAILED')
-        assert.equal(failure.details.installation.code, 'SERVICE_START_FAILED')
-        assert.equal(
-          failure.details.rollback.code,
-          outcome === 'present' ? 'SERVICE_ROLLBACK_CLEANUP_INCOMPLETE' : 'SERVICE_ROLLBACK_STATE_UNAVAILABLE',
-        )
-        assert.equal(failure.details.installation.message.includes(directory), false)
-        assert.equal(failure.details.rollback.message.includes(directory), false)
-        assert.equal([...failure.details.installation.message].length <= 512, true)
-        assert.equal([...failure.details.rollback.message].length <= 512, true)
-        assert.equal(failure.details.recovery === undefined, !replacement)
-        if (replacement) {
-          assert.match(failure.details.recovery.identity, /^service-recovery-v2-/u)
-          assert.equal(JSON.stringify(failure.details.recovery).includes(directory), false)
-        }
-        assert.match(await readFile(launchAgentPath, 'utf8'), /<key>Label<\/key>/u)
-        assert.equal(await readFile(socketPath, 'utf8'), 'stale socket placeholder\n')
-      }
-    }
-  }
-})
-
-test('macOS replacement persists an owner-only recovery bundle that another process can restore', { skip: process.platform === 'win32' }, async (t) => {
+test('a historical macOS recovery bundle can be restored by another process', { skip: process.platform === 'win32' }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-durable-recovery-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launchAgentPath = join(directory, 'agent-host.plist')
@@ -491,59 +249,23 @@ test('macOS replacement persists an owner-only recovery bundle that another proc
   const originalState = installedHostState({ launchAgentPath, socketPath: priorSocketPath, created: true })
   const originalStateBytes = Buffer.from(`${JSON.stringify(originalState, null, 2)}\n`)
   await writeFile(lifecycleStatePath, originalStateBytes, { mode: 0o600 })
-  const installScript = String.raw`
-const { installService, SERVICE_LABEL } = await import(process.argv[1])
-let printCalls = 0
-let bootoutCalls = 0
-const runner = async (_command, args) => {
-  if (args[0] === 'print') {
-    printCalls += 1
-    const program = printCalls === 1 ? '/opt/old-node' : '/opt/new-node'
-    return { status: 0, stdout: ['path = ' + process.argv[2], 'program = ' + program, 'state = running', ''].join(String.fromCharCode(10)), stderr: '' }
-  }
-  if (args[0] === 'bootout') {
-    bootoutCalls += 1
-    return bootoutCalls === 1
-      ? { status: 0, stdout: '', stderr: '' }
-      : { status: 5, stdout: '', stderr: 'still present' }
-  }
-  return { status: 0, stdout: '', stderr: '' }
-}
-try {
-  await installService(
+  const replacement = Buffer.from(launchAgentContents(
     { command: '/opt/new-node', args: ['/opt/new-runtime/cli.mjs'] },
-    { configPath: process.argv[3], socketPath: process.argv[4], observationLog: process.argv[5] },
-    runner,
-    { launchAgentPath: process.argv[2], socketPath: process.argv[6], created: true },
-    {
-      platformName: 'darwin',
-      existingEndpointReady: true,
-      waitForEndpoint: async () => false,
-      recoveryLifecycle: { statePath: process.argv[7], currentStateIdentity: process.argv[8] },
-    },
-  )
-  process.exitCode = 2
-} catch (error) {
-  process.stdout.write(JSON.stringify({ code: error.code, details: error.details }) + String.fromCharCode(10))
-}
-`
-  const installed = await execFileAsync(process.execPath, [
-    '--input-type=module', '-e', installScript,
-    serviceModuleUrl, launchAgentPath, configPath, join(directory, 'new.sock'), join(directory, 'observations.jsonl'), priorSocketPath, lifecycleStatePath, stateIdentity(originalState),
-  ], { encoding: 'utf8' })
-  const failure = JSON.parse(installed.stdout)
-  assert.equal(failure.code, 'SERVICE_INSTALL_ROLLBACK_FAILED')
-  assert.equal(JSON.stringify(failure).includes(directory), false)
-  assert.deepEqual(failure.details.recovery.action, {
-    command: 'agent-host',
-    arguments: [
-      'service', 'recover',
-      '--recovery', failure.details.recovery.identity,
-      '--manifest-sha256', failure.details.recovery.manifestSha256,
-    ],
+    { configPath, socketPath: join(directory, 'new.sock'), observationLog: join(directory, 'observations.jsonl') },
+  ))
+  const persisted = await persistServiceRecoveryBundle({
+    recoveryRoot, platform: 'darwin',
+    target: { launchAgentPath, priorSocketPath, replacementSocketPath: join(directory, 'new.sock') },
+    prior: { loaded: true, running: true, ready: true },
+    descriptor: { contents: priorContents, mode: 0o640 },
+    replacement: { identity: bytesIdentity(replacement), fileContents: replacement, task: { label: SERVICE_LABEL } },
+    lifecycle: { statePath: lifecycleStatePath, currentStateIdentity: stateIdentity(originalState), stateContents: originalStateBytes },
   })
-  const recoveryIdentity = failure.details.recovery.identity
-  const recoveryReference = failure.details.recovery
+  await writeFile(launchAgentPath, replacement, { mode: 0o600 })
+  const recoveryReference = await bindServiceRecoveryFailure(recoveryRoot, persisted.identity, persisted.manifestSha256, {
+    carrierContents: replacement, task: { configured: true, path: launchAgentPath, program: '/opt/new-node', state: 'running' },
+  })
+  const recoveryIdentity = recoveryReference.identity
   const bundleDirectory = join(recoveryRoot, recoveryIdentity)
   assert.deepEqual((await readdir(bundleDirectory)).sort(), ['launch-agent.plist', 'manifest.json'])
   await assertPrivateAccess(recoveryRoot, await lstat(recoveryRoot))
@@ -775,230 +497,7 @@ process.exitCode = status
   await assert.rejects(() => access(bundleDirectory), (error) => error.code === 'ENOENT')
 })
 
-test('fresh Windows service readiness failure deletes its task and launcher', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-windows-service-fresh-failure-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const files = {
-    configPath: join(directory, 'config.json'),
-    socketPath: '\\\\.\\pipe\\agent-host-fresh-test',
-    observationLog: join(directory, 'observations.jsonl'),
-  }
-  const calls = []
-  const runner = async (command, args) => {
-    calls.push([command, ...args])
-    return { status: 0, stdout: '', stderr: '' }
-  }
-  await assert.rejects(
-    installService(
-      { command: 'C:\\AgentHost\\node.exe', args: ['C:\\AgentHost\\cli.mjs'] },
-      files,
-      runner,
-      null,
-      { platformName: 'win32', waitForEndpoint: async () => false },
-    ),
-    (error) => error.code === 'SERVICE_START_FAILED',
-  )
-  await assert.rejects(() => access(join(directory, 'direct-runtime-service.cmd')), (error) => error.code === 'ENOENT')
-  assert.equal(calls.some((call) => call.includes('/Delete')), true)
-})
-
-test('Windows replacement failure restores exact launcher and retained task XML', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-windows-service-replace-failure-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launcherPath = join(directory, 'service.cmd')
-  const priorContents = Buffer.from('@echo prior\r\n')
-  await writeFile(launcherPath, priorContents, { mode: 0o600 })
-  const oldSocketPath = '\\\\.\\pipe\\agent-host-old-test'
-  const newSocketPath = '\\\\.\\pipe\\agent-host-new-test'
-  const priorXml = '<Task version="1.4"><Actions/></Task>'
-  const calls = []
-  const waits = []
-  const runner = async (command, args) => {
-    calls.push([command, ...args])
-    if (args[0] === '/Query' && args.includes('/XML')) return { status: 0, stdout: priorXml, stderr: '' }
-    if (command === 'powershell.exe') return { status: 0, stdout: 'PRESENT:Running\n', stderr: '' }
-    return { status: 0, stdout: '', stderr: '' }
-  }
-  await assert.rejects(
-    installService(
-      { command: 'C:\\AgentHost\\new-node.exe', args: ['C:\\AgentHost\\new-cli.mjs'] },
-      { configPath: join(directory, 'new-config.json'), socketPath: newSocketPath, observationLog: join(directory, 'observations.jsonl') },
-      runner,
-      { launcherPath, socketPath: oldSocketPath, taskName: '\\openAdam\\AgentHostRuntime', created: true },
-      {
-        platformName: 'win32',
-        recoveryLifecycle: recoveryLifecycle(directory),
-        existingEndpointReady: true,
-        waitForEndpoint: async (path) => {
-          waits.push(path)
-          return waits.length > 1
-        },
-      },
-    ),
-    (error) => error.code === 'SERVICE_START_FAILED',
-  )
-  assert.deepEqual(await readFile(launcherPath), priorContents)
-  assert.deepEqual(waits, [newSocketPath, oldSocketPath])
-  assert.equal(calls.some((call) => call.includes('/XML') && call[1] === '/Create'), true)
-  assert.equal(calls.some((call) => call.includes('/Delete')), true)
-})
-
-test('Windows replacement retains recovery when rollback commands restore the wrong task', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-windows-restore-verification-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launcherPath = join(directory, 'service.cmd')
-  const recoveryRoot = join(directory, 'service-recovery')
-  const priorContents = Buffer.from('@echo prior\r\n')
-  const priorXml = '<Task version="1.4"><Actions><Exec>prior</Exec></Actions></Task>'
-  await writeFile(launcherPath, priorContents, { mode: 0o600 })
-  let taskRestored = false
-  let readinessCalls = 0
-  const runner = async (command, args) => {
-    if (args[0] === '/Query' && args.includes('/XML')) {
-      return {
-        status: 0,
-        stdout: taskRestored ? '<Task version="1.4"><Actions><Exec>replacement</Exec></Actions></Task>' : priorXml,
-        stderr: '',
-      }
-    }
-    if (args[0] === '/Create' && args.includes('/XML')) taskRestored = true
-    if (command === 'powershell.exe') return { status: 0, stdout: 'PRESENT:Running\n', stderr: '' }
-    return { status: 0, stdout: '', stderr: '' }
-  }
-
-  let failure
-  try {
-    await installService(
-      { command: 'C:\\AgentHost\\new-node.exe', args: ['C:\\AgentHost\\new-cli.mjs'] },
-      { configPath: join(directory, 'new-config.json'), socketPath: '\\\\.\\pipe\\agent-host-new-verify', observationLog: join(directory, 'new-observations.jsonl') },
-      runner,
-      { launcherPath, socketPath: '\\\\.\\pipe\\agent-host-old-verify', taskName: '\\openAdam\\AgentHostRuntime', created: true },
-      {
-        platformName: 'win32', recoveryRoot, recoveryLifecycle: recoveryLifecycle(directory), existingEndpointReady: true,
-        waitForEndpoint: async () => {
-          readinessCalls += 1
-          return readinessCalls > 1
-        },
-      },
-    )
-  } catch (error) {
-    failure = error
-  }
-
-  assert.equal(failure?.code, 'SERVICE_INSTALL_ROLLBACK_FAILED')
-  assert.equal(failure.details.rollback.code, 'SERVICE_RESTORE_FAILED')
-  assert.match(failure.details.recovery.identity, /^service-recovery-v2-/u)
-  assert.deepEqual(await readFile(launcherPath), priorContents)
-  assert.deepEqual(await readdir(recoveryRoot), [failure.details.recovery.identity])
-})
-
-test('service replacement retires its recovery bundle when descriptor mutation never starts', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-pre-mutation-failure-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launcherPath = join(directory, `${'x'.repeat(240)}.cmd`)
-  const priorContents = Buffer.from('@echo unchanged prior\r\n')
-  const recoveryRoot = join(directory, 'recovery')
-  await writeFile(launcherPath, priorContents, { mode: 0o600 })
-  const runner = async (command, args) => {
-    if (args[0] === '/Query' && args.includes('/XML')) {
-      return { status: 0, stdout: '<Task version="1.4"><Actions/></Task>', stderr: '' }
-    }
-    if (command === 'powershell.exe') return { status: 0, stdout: 'PRESENT:Ready\n', stderr: '' }
-    return { status: 0, stdout: '', stderr: '' }
-  }
-  await assert.rejects(
-    installService(
-      { command: 'C:\\AgentHost\\new-node.exe', args: ['C:\\AgentHost\\new-cli.mjs'] },
-      { configPath: join(directory, 'config.json'), socketPath: '\\\\.\\pipe\\agent-host-new-pre-mutation', observationLog: join(directory, 'observations.jsonl') },
-      runner,
-      { launcherPath, socketPath: '\\\\.\\pipe\\agent-host-old-pre-mutation', taskName: '\\openAdam\\AgentHostRuntime', created: true },
-      { platformName: 'win32', existingEndpointReady: false, recoveryRoot, recoveryLifecycle: recoveryLifecycle(directory) },
-    ),
-    (error) => error.code === 'ENAMETOOLONG' || (process.platform === 'win32' && error.code === 'ENOENT'),
-  )
-  assert.deepEqual(await readFile(launcherPath), priorContents)
-  assert.deepEqual(await readdir(recoveryRoot), [])
-})
-
-test('Windows failed rollback cleanup verifies absence after End and Delete before touching the launcher', async (t) => {
-  const cases = [
-    { replacement: false, failingCommand: '/End', outcome: 'absent' },
-    { replacement: false, failingCommand: '/Delete', outcome: 'present' },
-    { replacement: false, failingCommand: '/Delete', outcome: 'query-failure' },
-    { replacement: true, failingCommand: '/Delete', outcome: 'absent' },
-    { replacement: true, failingCommand: '/End', outcome: 'present' },
-    { replacement: true, failingCommand: '/End', outcome: 'query-failure' },
-  ]
-  for (const fixture of cases) {
-    const directory = await mkdtemp(join(tmpdir(), `agent-host-windows-cleanup-${fixture.replacement}-${fixture.outcome}-`))
-    t.after(() => rm(directory, { recursive: true, force: true }))
-    const launcherPath = join(directory, 'service.cmd')
-    const effectiveLauncherPath = fixture.replacement ? launcherPath : join(directory, 'direct-runtime-service.cmd')
-    const priorContents = Buffer.from('@echo prior\r\n')
-    if (fixture.replacement) await writeFile(launcherPath, priorContents, { mode: 0o600 })
-    let powershellCalls = 0
-    let taskRestored = false
-    const runner = async (command, args) => {
-      if (args[0] === '/Query' && args.includes('/XML')) {
-        return { status: 0, stdout: '<Task version="1.4"><Actions/></Task>', stderr: '' }
-      }
-      if (args[0] === '/Create' && args.includes('/XML')) taskRestored = true
-      if (command === 'powershell.exe') {
-        powershellCalls += 1
-        if (fixture.replacement && powershellCalls === 1) return { status: 0, stdout: 'PRESENT:Running\n', stderr: '' }
-        if (taskRestored) return { status: 0, stdout: 'PRESENT:Running\n', stderr: '' }
-        if (fixture.outcome === 'query-failure') return { status: 5, stdout: '', stderr: 'query failed\n' }
-        return { status: 0, stdout: `${fixture.outcome.toUpperCase()}\n`, stderr: '' }
-      }
-      if (args[0] === fixture.failingCommand) return { status: 5, stdout: '', stderr: 'removal failed\n' }
-      return { status: 0, stdout: '', stderr: '' }
-    }
-    const files = {
-      configPath: join(directory, 'config.json'),
-      socketPath: '\\\\.\\pipe\\agent-host-cleanup-test',
-      observationLog: join(directory, 'observations.jsonl'),
-    }
-    let failure
-    try {
-      await installService(
-        { command: 'C:\\AgentHost\\new-node.exe', args: ['C:\\AgentHost\\new-cli.mjs'] },
-        files,
-        runner,
-        fixture.replacement
-          ? { launcherPath, socketPath: '\\\\.\\pipe\\agent-host-old-cleanup-test', taskName: '\\openAdam\\AgentHostRuntime', created: true }
-          : null,
-        {
-          platformName: 'win32',
-          ...(fixture.replacement ? { recoveryLifecycle: recoveryLifecycle(directory) } : {}),
-          existingEndpointReady: false,
-          waitForEndpoint: async () => false,
-        },
-      )
-    } catch (error) {
-      failure = error
-    }
-    assert.notEqual(failure, undefined, JSON.stringify(fixture))
-    if (fixture.outcome === 'absent') {
-      assert.equal(failure.code, 'SERVICE_START_FAILED')
-      if (fixture.replacement) assert.deepEqual(await readFile(effectiveLauncherPath), priorContents)
-      else await assert.rejects(() => access(effectiveLauncherPath), (error) => error.code === 'ENOENT')
-    } else {
-      assert.equal(failure.code, 'SERVICE_INSTALL_ROLLBACK_FAILED')
-      assert.equal(failure.details.installation.code, 'SERVICE_START_FAILED')
-      assert.equal(
-        failure.details.rollback.code,
-        fixture.outcome === 'present' ? 'SERVICE_ROLLBACK_CLEANUP_INCOMPLETE' : 'SERVICE_ROLLBACK_STATE_UNAVAILABLE',
-      )
-      assert.equal(failure.details.installation.message.includes(directory), false)
-      assert.equal(failure.details.rollback.message.includes(directory), false)
-      assert.equal([...failure.details.installation.message].length <= 512, true)
-      assert.equal([...failure.details.rollback.message].length <= 512, true)
-      assert.match(await readFile(effectiveLauncherPath, 'utf8'), /new-node\.exe/u)
-    }
-  }
-})
-
-test('Windows replacement retains checksummed launcher and Task XML until exact recovery', async (t) => {
+test('a historical Windows bundle retains checksummed launcher and Task XML until exact recovery', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-host-windows-durable-recovery-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const launcherPath = join(directory, 'service.cmd')
@@ -1007,32 +506,19 @@ test('Windows replacement retains checksummed launcher and Task XML until exact 
   const priorContents = Buffer.from('@echo durable prior\r\n')
   const priorXml = '<Task version="1.4"><Actions><Exec/></Actions></Task>'
   await writeFile(launcherPath, priorContents, { mode: 0o600 })
-  let powershellCalls = 0
-  const installRunner = async (command, args) => {
-    if (args[0] === '/Query' && args.includes('/XML')) return { status: 0, stdout: priorXml, stderr: '' }
-    if (command === 'powershell.exe') {
-      powershellCalls += 1
-      return { status: 0, stdout: 'PRESENT:Running\n', stderr: '' }
-    }
-    if (args[0] === '/Delete') return { status: 5, stdout: '', stderr: 'still present' }
-    return { status: 0, stdout: '', stderr: '' }
-  }
-  let failure
-  try {
-    await installService(
-      { command: 'C:\\AgentHost\\new-node.exe', args: ['C:\\AgentHost\\new-cli.mjs'] },
-      { configPath, socketPath: '\\\\.\\pipe\\agent-host-new-durable', observationLog: join(directory, 'observations.jsonl') },
-      installRunner,
-      { launcherPath, socketPath: '\\\\.\\pipe\\agent-host-old-durable', taskName: '\\openAdam\\AgentHostRuntime', created: true },
-      { platformName: 'win32', existingEndpointReady: true, waitForEndpoint: async () => false, recoveryLifecycle: recoveryLifecycle(directory) },
-    )
-  } catch (error) {
-    failure = error
-  }
-  assert.equal(failure.code, 'SERVICE_INSTALL_ROLLBACK_FAILED')
-  assert.equal(JSON.stringify(failure.details.recovery).includes(directory), false)
-  const recoveryIdentity = failure.details.recovery.identity
-  const recoveryReference = failure.details.recovery
+  const replacement = Buffer.from('@echo C:\\AgentHost\\new-node.exe\r\n')
+  const persisted = await persistServiceRecoveryBundle({
+    recoveryRoot, platform: 'win32',
+    target: { launcherPath, taskName: '\\openAdam\\AgentHostRuntime', priorSocketPath: '\\\\.\\pipe\\agent-host-old-durable', replacementSocketPath: '\\\\.\\pipe\\agent-host-new-durable' },
+    prior: { running: true, ready: true }, launcher: { contents: priorContents, mode: 0o600 }, taskXml: priorXml,
+    replacement: { identity: bytesIdentity(replacement), fileContents: replacement, task: { taskName: '\\openAdam\\AgentHostRuntime', launcherPath } },
+    lifecycle: { statePath: join(directory, 'state.json'), currentStateIdentity: TEST_STATE_IDENTITY, stateContents: null },
+  })
+  await writeFile(launcherPath, replacement, { mode: 0o600 })
+  const recoveryReference = await bindServiceRecoveryFailure(recoveryRoot, persisted.identity, persisted.manifestSha256, {
+    carrierContents: replacement, task: { configured: true, xmlSha256: bytesIdentity(Buffer.from(priorXml)) },
+  })
+  const recoveryIdentity = recoveryReference.identity
   const retained = await loadServiceRecoveryBundle(recoveryRoot, recoveryIdentity)
   assert.deepEqual(retained.launcher.contents, priorContents)
   assert.equal(retained.taskXml.toString('utf8'), priorXml)
@@ -1086,98 +572,6 @@ test('Windows replacement retains checksummed launcher and Task XML until exact 
   await assert.rejects(() => access(retained.directory), (error) => error.code === 'ENOENT')
 })
 
-test('macOS replacement refuses a loaded but stopped service before any mutation', { skip: process.platform !== 'darwin' }, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-stopped-replace-failure-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launchAgentPath = join(directory, 'agent-host.plist')
-  const priorContents = Buffer.from('prior stopped launch agent bytes\n')
-  await writeFile(launchAgentPath, priorContents, { mode: 0o640 })
-  const calls = []
-  const runner = async (command, args) => {
-    calls.push([command, ...args])
-    if (args[0] === 'print') return { status: 0, stdout: 'state = exited\nlast exit code = 0\n', stderr: '' }
-    return { status: 0, stdout: '', stderr: '' }
-  }
-  await assert.rejects(
-    installService(
-      { command: '/opt/new-node', args: ['/opt/new-runtime/cli.mjs'] },
-      { configPath: join(directory, 'new-config.json'), socketPath: join(directory, 'new.sock'), observationLog: join(directory, 'observations.jsonl') },
-      runner,
-      { launchAgentPath, socketPath: join(directory, 'old.sock'), created: true },
-      { platformName: 'darwin', existingEndpointReady: false, waitForEndpoint: async () => false },
-    ),
-    (error) => error.code === 'SERVICE_PRIOR_STATE_UNRESTORABLE',
-  )
-  assert.deepEqual(await readFile(launchAgentPath), priorContents)
-  assert.equal(calls.length, 1)
-  assert.equal(calls[0][1], 'print')
-})
-
-test('macOS replacement refuses an unverified prior service state before any mutation', { skip: process.platform !== 'darwin' }, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-unverified-replace-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launchAgentPath = join(directory, 'agent-host.plist')
-  const priorContents = Buffer.from('prior launch agent bytes\n')
-  await writeFile(launchAgentPath, priorContents, { mode: 0o640 })
-  const calls = []
-  const runner = async (command, args) => {
-    calls.push([command, ...args])
-    return { status: 5, stdout: '', stderr: 'permission denied\n' }
-  }
-  await assert.rejects(
-    installService(
-      { command: '/opt/new-node', args: ['/opt/new-runtime/cli.mjs'] },
-      { configPath: join(directory, 'new-config.json'), socketPath: join(directory, 'new.sock'), observationLog: join(directory, 'observations.jsonl') },
-      runner,
-      { launchAgentPath, socketPath: join(directory, 'old.sock'), created: true },
-      { platformName: 'darwin', existingEndpointReady: false, waitForEndpoint: async () => false },
-    ),
-    (error) => error.code === 'SERVICE_STATE_UNAVAILABLE',
-  )
-  assert.deepEqual(await readFile(launchAgentPath), priorContents)
-  assert.equal(calls.length, 1)
-  assert.equal(calls[0][1], 'print')
-})
-
-test('Windows replacement failure restores a stopped scheduled task without running it', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-windows-service-stopped-replace-failure-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const launcherPath = join(directory, 'service.cmd')
-  const priorContents = Buffer.from('@echo prior stopped\r\n')
-  await writeFile(launcherPath, priorContents, { mode: 0o600 })
-  const priorXml = '<Task version="1.4"><Actions/></Task>'
-  const calls = []
-  const waits = []
-  const runner = async (command, args) => {
-    calls.push([command, ...args])
-    if (args[0] === '/Query' && args.includes('/XML')) return { status: 0, stdout: priorXml, stderr: '' }
-    if (command === 'powershell.exe') return { status: 0, stdout: 'PRESENT:Ready\n', stderr: '' }
-    return { status: 0, stdout: '', stderr: '' }
-  }
-  await assert.rejects(
-    installService(
-      { command: 'C:\\AgentHost\\new-node.exe', args: ['C:\\AgentHost\\new-cli.mjs'] },
-      { configPath: join(directory, 'new-config.json'), socketPath: '\\\\.\\pipe\\agent-host-new-stopped-test', observationLog: join(directory, 'observations.jsonl') },
-      runner,
-      { launcherPath, socketPath: '\\\\.\\pipe\\agent-host-old-stopped-test', taskName: '\\openAdam\\AgentHostRuntime', created: true },
-      {
-        platformName: 'win32',
-        recoveryLifecycle: recoveryLifecycle(directory),
-        existingEndpointReady: false,
-        waitForEndpoint: async (path) => {
-          waits.push(path)
-          return false
-        },
-      },
-    ),
-    (error) => error.code === 'SERVICE_START_FAILED',
-  )
-  assert.deepEqual(await readFile(launcherPath), priorContents)
-  assert.equal(calls.filter((call) => call[1] === '/Run').length, 1)
-  assert.deepEqual(waits, ['\\\\.\\pipe\\agent-host-new-stopped-test'])
-  assert.equal(calls.some((call) => call.includes('/XML') && call[1] === '/Create'), true)
-})
-
 test('Windows inspection reports scheduled-task state separately from endpoint readiness', async () => {
   const serviceState = {
     launcherPath: 'C:\\AgentHost\\runtime.cmd',
@@ -1202,39 +596,11 @@ test('Windows inspection reports scheduled-task state separately from endpoint r
   )
 })
 
-test('service uninstall retains its descriptor or launcher unless removal succeeds or exact absence is confirmed', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-host-service-uninstall-'))
-  t.after(() => rm(directory, { recursive: true, force: true }))
-  const macDescriptor = join(directory, 'agent-host.plist')
-  const windowsLauncher = join(directory, 'agent-host.cmd')
-  await writeFile(macDescriptor, 'descriptor\n')
-  await writeFile(windowsLauncher, 'launcher\n')
 
-  if (process.platform === 'darwin') {
-    await assert.rejects(
-      uninstallService(
-        { created: true, launchAgentPath: macDescriptor },
-        async (_command, args) => args[0] === 'bootout'
-          ? { status: 5, stdout: '', stderr: 'failed' }
-          : { status: 0, stdout: 'state = running\n', stderr: '' },
-        { platformName: 'darwin' },
-      ),
-      (error) => error.code === 'SERVICE_ROLLBACK_CLEANUP_INCOMPLETE',
-    )
-    assert.equal(await readFile(macDescriptor, 'utf8'), 'descriptor\n')
-  }
-
-  await assert.rejects(
-    uninstallService(
-      { created: true, taskName: '\\openAdam\\AgentHostRuntime', launcherPath: windowsLauncher },
-      async (command, args) => command === 'powershell.exe'
-        ? { status: 5, stdout: '', stderr: 'query failed' }
-        : args[0] === '/End'
-          ? { status: 0, stdout: '', stderr: '' }
-          : { status: 5, stdout: '', stderr: 'delete failed' },
-      { platformName: 'win32' },
-    ),
-    (error) => error.code === 'SERVICE_ROLLBACK_STATE_UNAVAILABLE',
-  )
-  assert.equal(await readFile(windowsLauncher, 'utf8'), 'launcher\n')
+for (const platformName of ['darwin', 'win32']) test(`service mutations on ${platformName} require a lifecycle transaction before any native command`, async () => {
+  let calls = 0
+  const runner = async () => { calls += 1; throw new Error('unexpected native mutation') }
+  await assert.rejects(installService({}, {}, runner, null, { platformName }), { code: 'SERVICE_LIFECYCLE_REQUIRED' })
+  await assert.rejects(uninstallService({ created: true }, runner, { platformName }), { code: 'SERVICE_LIFECYCLE_REQUIRED' })
+  assert.equal(calls, 0)
 })

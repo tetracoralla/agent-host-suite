@@ -1,6 +1,6 @@
 {
   "name": "@openadam/agent-host-suite",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Install and manage one compatible local environment for Agent tools.",
   "license": "Apache-2.0",
   "author": "openAdam",
@@ -54,7 +54,6 @@
     "probe:provider-discovery": "node scripts/probe-provider-discovery.mjs",
     "check:packaged-trace-plane": "node scripts/check-packaged-trace-plane.mjs",
     "probe:direct-capability-release": "node scripts/probe-direct-capability-release.mjs",
-    "measure:local-dogfood": "node scripts/run-local-dogfood-cost-experiment.mjs",
     "measure:profile-catalogs": "node scripts/measure-profile-catalogs.mjs",
     "check:skill-refinery-vertical": "node scripts/check-skill-refinery-vertical.mjs",
     "check": "npm run check:syntax && npm test && npm run check:direct-runtime && npm run check:http-bridge && npm run check:observer && npm run check:context-analyzer && npm run check:repository && npm run check:package",

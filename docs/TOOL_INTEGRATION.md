@@ -72,6 +72,22 @@ Runtime binding stays available while the component is installed even when
 its MCP surface is outside the active Agent catalog. It is neither semantic
 discovery nor a fallback from a missing Provider adapter.
 
+Release materialization and private import lower these validated versioned
+records through `src/tool-component.mjs`. Runtime configuration and diagnostics
+consume the ephemeral normalized view in `src/provider-bindings.mjs`; this does
+not add another persisted state format. The original Math Anchor and Migratory
+Time records are read by explicit compatibility adapters in
+`src/provider-pilot-bindings.mjs`. Their product operations and expected results
+remain there, outside the generic configuration generator and doctor.
+
+Direct Provider identity must be unique across installed components, including
+inactive ones. An installed explicit Capability binding takes precedence over
+the legacy component adapter and does not inherit that adapter's semantic
+diagnostic. A configured Provider without a declared diagnostic is reported as
+unobserved, even when the execution service is ready. The runtime layer accepts
+empty and Provider-only inventories; profile membership and required release
+components remain separate installation policy.
+
 The separate backstage Developer Kit component uses
 `schemas/agent-host-developer-kit-integration.schema.v0.1.json`. That closed
 record binds one `suite-node` CLI entrypoint and version argv, one Skill-only
@@ -126,8 +142,12 @@ confirm all of the following from unpacked immutable bytes:
 
 1. no links, special files, source-checkout paths, or unbound absolute runtime
    commands occur in the component;
-2. every expected MCP tool is present and advertises both `inputSchema` and
-   `outputSchema`;
+2. every expected MCP tool is present with a valid `inputSchema`; an advertised
+   `outputSchema` must be valid, but an absent output schema stays absent.
+   A Provider may offer large result contracts separately as on-demand MCP
+   resources. Generic catalog admission neither fetches those resources nor
+   invents an output schema. Exact input/output pairs remain required for a
+   declared Capability, Procedure or typed Skill-link contract;
 3. the real stdio server starts within its declared cold-start window;
 4. Codex can install the contained marketplace without adopting unrelated
    user-owned entries;

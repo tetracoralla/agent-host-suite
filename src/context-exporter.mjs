@@ -4,6 +4,8 @@ import { canonicalJson, sha256 } from './json.mjs'
 import { ManagedMcpStdioTransport } from './managed-mcp-stdio-transport.mjs'
 import { closeMcpProbeTransport } from './mcp-probe-cleanup.mjs'
 
+// Resource admission for the selected managed catalog. These limits do not
+// measure a host's assembled prompt, deferred tools, or model token usage.
 export const MANAGED_CATALOG_BUDGETS = Object.freeze({
   maxCatalogUtf8Bytes: 65_536,
   maxToolCount: 64,
@@ -27,14 +29,14 @@ async function listProviderToolsOnce(id, component) {
       throw new AgentHostError('CATALOG_EXPORT_LIMIT', `${id} returned an invalid or oversized tool catalog`)
     }
     return result.tools.map((tool) => {
-      if (typeof tool.name !== 'string' || typeof tool.description !== 'string' || tool.inputSchema === undefined || tool.outputSchema === undefined) {
-        throw new AgentHostError('CATALOG_EXPORT_INVALID', `${id} tool ${tool.name ?? 'unknown'} lacks a complete typed catalog entry`)
+      if (typeof tool.name !== 'string' || typeof tool.description !== 'string' || tool.inputSchema === undefined) {
+        throw new AgentHostError('CATALOG_EXPORT_INVALID', `${id} tool ${tool.name ?? 'unknown'} lacks its name, description or input schema`)
       }
       return {
         name: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema,
-        outputSchema: tool.outputSchema,
+        ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
       }
     })
   } catch (error) {
@@ -152,7 +154,7 @@ export async function preflightManagedCatalog(components) {
   if (assessment.status === 'exceeded') {
     throw new AgentHostError(
       'AGENT_TOOL_CATALOG_BUDGET_EXCEEDED',
-      'The proposed Agent tool set exceeds its declared context budget; activate a smaller working set',
+      'The proposed Agent tool catalog exceeds its declared resource limits; activate a smaller working set',
       { components: expected, ...assessment },
     )
   }

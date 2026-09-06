@@ -1,246 +1,307 @@
+import { randomUUID } from 'node:crypto'
+import { cp, lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { homedir } from 'node:os'
 import { AgentHostError } from '../errors.mjs'
 import { resolveExecutable, runFile } from '../process.mjs'
 import { fingerprintRelativeFiles } from '../development-manifest.mjs'
+import { writePrivateJson } from '../json.mjs'
+import { environmentDependencies } from '../environment-change.mjs'
+import { equal, getCell, restoreFields } from '../environment-resource-state.mjs'
+import { withCodexConfiguration } from './codex-config.mjs'
+import { writeEnvironmentCodex } from './codex-config-resource.mjs'
 
-function parseJsonOutput(result, label) {
-  try {
-    return JSON.parse(result.stdout)
-  } catch (error) {
-    throw new AgentHostError('HOST_PROTOCOL_INVALID', `${label} returned invalid JSON: ${error.message}`)
-  }
+const error = (code, message) => new AgentHostError(code, message)
+const entriesOf = (state) => [...(state?.entries ?? []), ...(state?.inactiveEntries ?? [])]
+const pluginKey = (selector) => ['plugins', selector]
+const enabledKey = (selector) => ['plugins', selector, 'enabled']
+const cellValue = (cell) => cell.present ? cell.value : null
+const legacyUnsafe = (entry) => entry?.restorePlugin === true || entry?.displacedMarketplace != null || (entry?.displacedPlugins ?? []).some((item) => item.before === undefined)
+
+function parse(result) {
+  try { return JSON.parse(result.stdout) } catch { throw error('HOST_PROTOCOL_INVALID', 'Codex returned an invalid plugin response') }
 }
 
-export async function inspectCodex(manifest, runner = runFile, options = {}) {
+async function session(runner, options, callback) {
+  const inherited = environmentDependencies() ?? {}
   const executable = await resolveExecutable('codex', runner)
-  if (executable === null) throw new AgentHostError('CODEX_NOT_INSTALLED', 'Codex CLI is not installed or not on PATH')
-  const versionResult = await runner(executable, ['--version'])
-  const marketplaces = parseJsonOutput(await runner(executable, ['plugin', 'marketplace', 'list', '--json']), 'Codex marketplace list')
-  const plugins = parseJsonOutput(await runner(executable, ['plugin', 'list', '--json']), 'Codex plugin list')
+  if (executable === null) throw error('CODEX_NOT_INSTALLED', 'Codex CLI is not installed or not on PATH')
+  const home = options.homeRoot ?? inherited.hostSkillHome
+  const configRoot = options.managedState?.configPath === undefined
+    ? options.configRoot ?? inherited.codexConfigRoot ?? (home === undefined ? undefined : join(home, '.codex'))
+    : dirname(options.managedState.configPath)
+  const factory = options.codexConfiguration ?? inherited.codexConfiguration ?? withCodexConfiguration
+  return factory(executable, { configRoot, cwd: homedir(), signal: options.signal ?? inherited.signal }, async (client) => {
+    const snapshot = await client.read()
+    const invoke = (args) => runner(executable, args, {
+      env: { ...process.env, CODEX_HOME: dirname(snapshot.filePath) }, cwd: dirname(snapshot.filePath),
+    })
+    const version = (await invoke(['--version'])).stdout.trim()
+    return callback({ client, executable, version, invoke, snapshot })
+  })
+}
+
+async function cacheMatches(path, files, fingerprint) {
+  if (typeof path !== 'string' || !isAbsolute(path)) return false
+  try {
+    if (!Array.isArray(files) || files.length === 0 || new Set(files).size !== files.length
+      || files.some((name) => typeof name !== 'string' || name.includes('\\') || name.split('/').some((part) => ['', '.', '..'].includes(part)))) return false
+    const info = await lstat(path)
+    if (!info.isDirectory() || info.isSymbolicLink()) return false
+    const expected = new Set(files)
+    const remaining = new Set(files)
+    const pending = ['']
+    while (pending.length > 0) {
+      const prefix = pending.pop()
+      for (const entry of await readdir(join(path, prefix), { withFileTypes: true })) {
+        const name = prefix === '' ? entry.name : prefix + '/' + entry.name
+        if (entry.isSymbolicLink()) return false
+        if (entry.isDirectory()) pending.push(name)
+        else if (entry.isFile() && expected.has(name)) remaining.delete(name)
+        else return false
+      }
+    }
+    if (remaining.size > 0) return false
+    return await fingerprintRelativeFiles(path, files) === fingerprint
+  } catch { return false }
+}
+
+async function inspect(session, manifest, options) {
+  const listed = parse(await session.invoke(['plugin', 'list', '--json']))
+  if (!Array.isArray(listed.installed)) throw error('HOST_PROTOCOL_INVALID', 'Codex plugin listing lacks installed entries')
+  const previous = entriesOf(options.managedState)
   const entries = []
+  const seenComponents = new Set()
   for (const component of Object.values(manifest.components).filter((item) => item.plugin !== undefined)) {
-    const managedEntry = options.managedState?.entries?.find((item) => item.selector === `${component.plugin}@${component.marketplace}`)
-    const expectedMarketplaceRoot = options.useManagedBindings === true && managedEntry?.marketplaceRoot !== undefined
-      ? managedEntry.marketplaceRoot
-      : component.marketplaceRoot
-    const expectedPluginRoot = options.useManagedBindings === true && managedEntry?.pluginRoot !== undefined
-      ? managedEntry.pluginRoot
-      : component.pluginRoot
-    const expectedIdentityRelativeFiles = options.useManagedBindings === true && managedEntry?.pluginIdentityRelativeFiles !== undefined
-      ? managedEntry.pluginIdentityRelativeFiles
-      : component.pluginIdentityRelativeFiles
-    const expectedIdentityFingerprint = options.useManagedBindings === true && managedEntry?.pluginIdentityFingerprint !== undefined
-      ? managedEntry.pluginIdentityFingerprint
-      : component.pluginIdentityFingerprint
-    const existingMarketplace = marketplaces.marketplaces.find((item) => item.name === component.marketplace)
-    const existingPlugin = plugins.installed.find((item) => item.pluginId === `${component.plugin}@${component.marketplace}`)
-    const duplicatePlugins = plugins.installed.filter((item) => item.name === component.plugin && item.pluginId !== `${component.plugin}@${component.marketplace}` && item.installed === true && item.enabled === true)
-    if (existingMarketplace !== undefined) {
-      const existingSource = existingMarketplace.marketplaceSource?.source ?? existingMarketplace.root
-      if (existingSource !== expectedMarketplaceRoot && existingMarketplace.root !== expectedMarketplaceRoot) {
-        if (managedEntry?.marketplaceCreated !== true && options.replaceConflicts !== true) {
-          throw new AgentHostError('CODEX_MARKETPLACE_CONFLICT', `Codex marketplace ${component.marketplace} already points elsewhere`, {
-            current: existingSource,
-            requested: expectedMarketplaceRoot,
-          })
-        }
-      }
+    if (seenComponents.has(component.plugin) || new Set(previous.filter((item) => item.component === component.plugin).map((item) => item.selector)).size > 1) {
+      throw error('CODEX_BINDING_AMBIGUOUS', 'A Codex component has more than one candidate or retained binding')
     }
-    const migratableDuplicates = []
-    for (const duplicate of duplicatePlugins) {
-      const sourcePath = duplicate.source?.path
-      if (typeof sourcePath !== 'string') {
-        throw new AgentHostError('CODEX_PLUGIN_CONFLICT', `Codex already enables ${duplicate.pluginId} with a different or unverifiable identity`, {
-          currentVersion: duplicate.version ?? null,
-          requestedVersion: component.version,
-        })
-      }
-      let duplicateFingerprint
-      try {
-        duplicateFingerprint = await fingerprintRelativeFiles(sourcePath, expectedIdentityRelativeFiles)
-      } catch (error) {
-        throw new AgentHostError('CODEX_PLUGIN_CONFLICT', `Codex already enables ${duplicate.pluginId}, but its plugin bytes cannot be verified`, { message: error.message })
-      }
-      if (duplicateFingerprint !== expectedIdentityFingerprint && options.replaceConflicts !== true) {
-        throw new AgentHostError('CODEX_PLUGIN_CONFLICT', `Codex already enables ${duplicate.pluginId} with different plugin bytes`)
-      }
-      migratableDuplicates.push({
-        selector: duplicate.pluginId,
-        marketplace: duplicate.marketplaceName,
-        version: duplicate.version,
-        sourcePath,
-        identityMatched: duplicateFingerprint === expectedIdentityFingerprint,
-      })
+    seenComponents.add(component.plugin)
+    const managed = previous.find((item) => item.component === component.plugin)
+    const expected = options.useManagedBindings === true && managed !== undefined ? managed : component
+    const target = managed === undefined ? null : listed.installed.find((item) => item.pluginId === managed.selector)
+    const installedIdentityMatched = target?.installed === true && await cacheMatches(managed?.installedPath, expected.pluginIdentityRelativeFiles, expected.pluginIdentityFingerprint)
+    const duplicates = listed.installed.filter((item) => item.name === component.plugin && item.installed === true && item.enabled === true && item.pluginId !== managed?.selector)
+    const ownedSelectors = new Set(previous.filter((item) => item.pluginCreated === true).map((item) => item.selector))
+    if (duplicates.some((item) => !ownedSelectors.has(item.pluginId)) && options.replaceConflicts !== true && options.useManagedBindings !== true) {
+      throw error('CODEX_PLUGIN_CONFLICT', 'Codex already enables another installation of ' + component.plugin + '; replacement must explicitly allow disabling it')
     }
-    let installedIdentityMatched = false
-    let installedIdentityError = null
-    if (existingPlugin?.installed === true && typeof existingPlugin.source?.path === 'string') {
-      try {
-        const installedFingerprint = await fingerprintRelativeFiles(existingPlugin.source.path, expectedIdentityRelativeFiles)
-        installedIdentityMatched = installedFingerprint === expectedIdentityFingerprint
-      } catch (error) {
-        installedIdentityError = error.message
+    if (legacyUnsafe(managed) && options.useManagedBindings !== true) {
+      throw error('CODEX_LEGACY_RESTORE_UNVERIFIABLE', 'The older Codex binding lacks exact recoverable displacement records')
+    }
+    if (managed !== undefined && managed.configurationVersion !== 1 && options.useManagedBindings !== true) {
+      const registration = getCell(session.snapshot.config, pluginKey(managed.selector))
+      const marketplace = getCell(session.snapshot.config, ['marketplaces', managed.marketplace])
+      const otherRegistrations = Object.keys(session.snapshot.config.plugins ?? {}).filter((selector) =>
+        selector !== managed.selector && selector.endsWith('@' + managed.marketplace))
+      if (managed.pluginCreated !== true || managed.marketplaceCreated !== true || otherRegistrations.length > 0
+        || !equal(marketplace, { present: true, value: { source_type: 'local', source: managed.marketplaceRoot } })
+        || (registration.present && !equal(registration.value, { enabled: true }) && !equal(registration.value, { enabled: false }))) {
+        throw error('CODEX_LEGACY_IDENTITY_UNVERIFIABLE', 'The legacy registration cannot be retired without changing shared or user-modified configuration')
       }
     }
     entries.push({
-      component: component.plugin,
-      marketplace: component.marketplace,
-      marketplaceRoot: expectedMarketplaceRoot,
-      pluginRoot: expectedPluginRoot,
-      pluginIdentityRelativeFiles: expectedIdentityRelativeFiles,
-      pluginIdentityFingerprint: expectedIdentityFingerprint,
-      selector: `${component.plugin}@${component.marketplace}`,
-      marketplacePresent: existingMarketplace !== undefined,
-      marketplaceSource: existingMarketplace?.marketplaceSource?.source ?? existingMarketplace?.root ?? null,
-      marketplaceNeedsReplacement: existingMarketplace !== undefined &&
-        (existingMarketplace.marketplaceSource?.source ?? existingMarketplace.root) !== expectedMarketplaceRoot &&
-        existingMarketplace.root !== expectedMarketplaceRoot,
-      pluginPresent: existingPlugin?.installed === true,
-      pluginEnabled: existingPlugin?.enabled === true,
-      installedVersion: existingPlugin?.version ?? null,
-      installedIdentityMatched,
-      installedIdentityError,
-      requestedVersion: component.version,
-      managedTarget: managedEntry?.pluginCreated === true,
-      migratableDuplicates,
+      component: component.plugin, marketplace: managed?.marketplace ?? component.marketplace,
+      selector: managed?.selector ?? component.plugin + '@' + component.marketplace,
+      marketplaceRoot: expected.marketplaceRoot, pluginRoot: expected.pluginRoot,
+      pluginIdentityRelativeFiles: expected.pluginIdentityRelativeFiles, pluginIdentityFingerprint: expected.pluginIdentityFingerprint,
+      marketplacePresent: managed !== undefined && getCell(session.snapshot.config, ['marketplaces', managed.marketplace]).present,
+      pluginPresent: target?.installed === true, pluginEnabled: target?.enabled === true,
+      installedVersion: target?.version ?? null, requestedVersion: component.version,
+      installedIdentityMatched, installedIdentityError: installedIdentityMatched ? null : 'No matching cached installation was verified from an installation receipt',
+      managedTarget: managed?.pluginCreated === true, migratableDuplicates: duplicates.map((item) => ({ selector: item.pluginId, marketplace: item.marketplaceName })),
     })
   }
-  return { executable, version: versionResult.stdout.trim(), entries }
+  return { executable: session.executable, version: session.version, configPath: session.snapshot.filePath, entries }
 }
 
-async function rollbackCodexJournal(executable, journal, runner) {
-  for (const entry of [...journal].reverse()) {
-    if (entry.pluginAdded) await runner(executable, ['plugin', 'remove', entry.selector, '--json'], { allowFailure: true })
-    if (entry.marketplaceAdded) await runner(executable, ['plugin', 'marketplace', 'remove', entry.marketplace, '--json'], { allowFailure: true })
-    if (entry.displacedMarketplace !== null) {
-      await runner(executable, ['plugin', 'marketplace', 'add', entry.displacedMarketplace, '--json'], { allowFailure: true })
+export async function inspectCodex(manifest, runner = runFile, options = {}) {
+  return session(runner, options, (current) => inspect(current, manifest, options))
+}
+
+async function freshBinding(component) {
+  const base = component.hostProjectionRoot
+  if (typeof base !== 'string' || !isAbsolute(base)) throw error('CODEX_PROJECTION_REQUIRED', 'Codex installation requires a materialized Host projection')
+  const root = await realpath(base)
+  const pluginSource = await realpath(component.pluginRoot)
+  const part = relative(root, pluginSource)
+  if (part === '' || part === '..' || part.startsWith('..' + sep) || isAbsolute(part)) throw error('CODEX_PROJECTION_INVALID', 'The plugin is outside its Host projection')
+  if (!await cacheMatches(pluginSource, component.pluginIdentityRelativeFiles, component.pluginIdentityFingerprint)) {
+    throw error('CODEX_PROJECTION_INVALID', 'The projected plugin differs from its verified source')
+  }
+  const marketplace = 'agent-host-' + randomUUID().replaceAll('-', '')
+  const nativeRoot = join(root, 'native-bindings', marketplace)
+  const marketplaceRoot = join(nativeRoot, 'marketplace')
+  const pluginRoot = join(marketplaceRoot, 'plugins', component.plugin)
+  try {
+    await mkdir(join(marketplaceRoot, '.agents', 'plugins'), { recursive: true, mode: 0o700 })
+    await cp(pluginSource, pluginRoot, { recursive: true, errorOnExist: true, force: false })
+    await writePrivateJson(join(marketplaceRoot, '.agents', 'plugins', 'marketplace.json'), {
+      name: marketplace, interface: { displayName: 'Agent Host Local' },
+      plugins: [{ name: component.plugin, source: { source: 'local', path: './plugins/' + component.plugin },
+        policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' } }],
+    })
+    if (!await cacheMatches(pluginRoot, component.pluginIdentityRelativeFiles, component.pluginIdentityFingerprint)) {
+      throw error('CODEX_PROJECTION_INVALID', 'The native binding copy differs from its verified projection')
     }
-    if (entry.restorePlugin) await runner(executable, ['plugin', 'add', entry.selector, '--json'], { allowFailure: true })
-    for (const displaced of entry.displacedPlugins ?? []) {
-      await runner(executable, ['plugin', 'add', displaced.selector, '--json'], { allowFailure: true })
+  } catch (failure) { await rm(nativeRoot, { recursive: true, force: true }); throw failure }
+  return { marketplace, nativeMarketplaceRoot: marketplaceRoot, selector: component.plugin + '@' + marketplace }
+}
+
+async function changeSession(current, callback) {
+  const undo = []
+  const change = async (changes, apply = null) => {
+    const before = await current.client.read()
+    const record = { changes: changes.map(({ keys, value }) => ({ keys, before: getCell(before.config, keys),
+      after: value === null ? { present: false } : { present: true, value } })) }
+    undo.push(record)
+    return writeEnvironmentCodex(current.client, before, changes, apply)
+  }
+  try { return await callback(change) } catch (cause) {
+    // The lifecycle engine owns multi-resource recovery. Standalone adapter
+    // callers still receive compensation through the same native field rules.
+    if (environmentDependencies() === null) {
+      try {
+        for (const step of undo.reverse()) {
+          const before = await current.client.read()
+          restoreFields(step, before.config)
+          const changes = step.changes.filter((item) => !equal(getCell(before.config, item.keys), item.before))
+            .map((item) => ({ keys: item.keys, value: cellValue(item.before) }))
+          if (changes.length > 0) await writeEnvironmentCodex(current.client, before, changes)
+        }
+      } catch (recovery) {
+        throw new AgentHostError('CODEX_RECOVERY_REQUIRED', 'Codex configuration could not be fully restored; its conflicting entries were preserved', {
+          causeCode: cause.code ?? 'HOST_COMMAND_FAILED', recoveryCode: recovery.code ?? 'HOST_COMMAND_FAILED',
+        })
+      }
     }
+    throw cause
   }
 }
 
 export async function installCodex(manifest, runner = runFile, options = {}) {
-  const inspection = await inspectCodex(manifest, runner, options)
-  const installed = []
-  try {
-    for (const entry of inspection.entries) {
-      const journalEntry = {
-        ...entry,
-        marketplaceCreated: false,
-        pluginCreated: false,
-        displacedPlugins: [],
-        marketplaceAdded: false,
-        pluginAdded: false,
-        displacedMarketplace: null,
-        restorePlugin: false,
-      }
-      installed.push(journalEntry)
-      for (const duplicate of entry.migratableDuplicates) {
-        await runner(inspection.executable, ['plugin', 'remove', duplicate.selector, '--json'])
-        journalEntry.displacedPlugins.push(duplicate)
-      }
-      if (entry.marketplaceNeedsReplacement) {
-        if (entry.pluginPresent) {
-          await runner(inspection.executable, ['plugin', 'remove', entry.selector, '--json'])
-          journalEntry.restorePlugin = true
+  return session(runner, options, async (current) => {
+    const inspection = await inspect(current, manifest, options)
+    return changeSession(current, async (change) => {
+      const installed = []
+      for (const component of Object.values(manifest.components).filter((item) => item.plugin !== undefined)) {
+        const prior = entriesOf(options.managedState).find((item) => item.component === component.plugin)
+        const observed = inspection.entries.find((item) => item.component === component.plugin)
+        const snapshot = await current.client.read()
+        const priorCell = prior === undefined ? { present: false } : getCell(snapshot.config, pluginKey(prior.selector))
+        const displacedPlugins = [...(prior?.displacedPlugins ?? [])]
+        for (const duplicate of observed.migratableDuplicates) {
+          const before = await current.client.read()
+          const keys = enabledKey(duplicate.selector)
+          if (!displacedPlugins.some((item) => item.selector === duplicate.selector)) {
+            displacedPlugins.push({ ...duplicate, before: getCell(before.config, keys) })
+          }
+          await change([{ keys, value: false }])
         }
-        await runner(inspection.executable, ['plugin', 'marketplace', 'remove', entry.marketplace, '--json'])
-        journalEntry.displacedMarketplace = entry.marketplaceSource
-        await runner(inspection.executable, ['plugin', 'marketplace', 'add', entry.marketplaceRoot, '--json'])
-        journalEntry.marketplaceAdded = true
-        journalEntry.marketplaceCreated = true
-      } else if (!entry.marketplacePresent) {
-        await runner(inspection.executable, ['plugin', 'marketplace', 'add', entry.marketplaceRoot, '--json'])
-        journalEntry.marketplaceAdded = true
-        journalEntry.marketplaceCreated = true
-      }
-      if (entry.pluginPresent && !entry.marketplaceNeedsReplacement && entry.installedVersion !== entry.requestedVersion) {
-        if (!entry.managedTarget && options.replaceConflicts !== true) {
-          throw new AgentHostError('CODEX_PLUGIN_CONFLICT', `${entry.selector} is installed at ${entry.installedVersion}, not ${entry.requestedVersion}`)
+        const sameProjection = prior?.configurationVersion === 1 && prior.pluginRoot === component.pluginRoot
+          && prior.pluginIdentityFingerprint === component.pluginIdentityFingerprint
+        if (sameProjection && observed.installedIdentityMatched) {
+          const expected = { ...(prior.pluginBinding ?? {}), enabled: observed.pluginEnabled }
+          if (!equal(priorCell, { present: true, value: expected }) && options.replaceConflicts !== true) {
+            throw error('CODEX_PLUGIN_CHANGED', 'The managed Codex registration changed after installation')
+          }
+          if (!observed.pluginEnabled) await change([{ keys: enabledKey(prior.selector), value: true }])
+          installed.push({ ...prior, pluginBinding: { ...priorCell.value, enabled: true }, displacedPlugins })
+          continue
         }
-        await runner(inspection.executable, ['plugin', 'remove', entry.selector, '--json'])
-        journalEntry.restorePlugin = true
-        await runner(inspection.executable, ['plugin', 'add', entry.selector, '--json'])
-        journalEntry.pluginAdded = true
-        journalEntry.pluginCreated = entry.managedTarget
-      } else if (entry.pluginPresent && !entry.marketplaceNeedsReplacement && !entry.installedIdentityMatched) {
-        if (!entry.managedTarget && options.replaceConflicts !== true) {
-          throw new AgentHostError('CODEX_PLUGIN_CONFLICT', `${entry.selector} is installed with different or unavailable plugin bytes`)
+        if (sameProjection && priorCell.present && options.replaceConflicts !== true) {
+          throw error('CODEX_PLUGIN_CHANGED', 'The cached Codex installation changed or cannot be verified; replacement requires a new Host binding')
         }
-        await runner(inspection.executable, ['plugin', 'remove', entry.selector, '--json'])
-        journalEntry.restorePlugin = true
-        await runner(inspection.executable, ['plugin', 'add', entry.selector, '--json'])
-        journalEntry.pluginAdded = true
-        journalEntry.pluginCreated = entry.managedTarget
-      } else if (entry.marketplaceNeedsReplacement || !entry.pluginPresent || !entry.pluginEnabled) {
-        await runner(inspection.executable, ['plugin', 'add', entry.selector, '--json'])
-        journalEntry.pluginAdded = true
-        journalEntry.pluginCreated = true
+        const native = await freshBinding(component)
+        const available = await current.client.read()
+        if (getCell(available.config, pluginKey(native.selector)).present || getCell(available.config, ['marketplaces', native.marketplace]).present) {
+          throw error('CODEX_PLUGIN_CONFLICT', 'The new Host binding identity is already registered')
+        }
+        const marketplaceBinding = { source_type: 'local', source: native.nativeMarketplaceRoot }
+        await change([{ keys: ['marketplaces', native.marketplace], value: marketplaceBinding },
+          { keys: pluginKey(native.selector), value: { enabled: false } }])
+        let receipt
+        // Codex's public installer writes enabled=true as well as filling its
+        // own cache. The fresh selector was previously unreferenced, so undo
+        // can remove its registration without overwriting an earlier cache.
+        await change([{ keys: enabledKey(native.selector), value: true }], async () => {
+          receipt = parse(await current.invoke(['plugin', 'add', native.selector, '--json']))
+        })
+        if (!await cacheMatches(receipt?.installedPath, component.pluginIdentityRelativeFiles, component.pluginIdentityFingerprint)) {
+          throw error('CODEX_PLUGIN_UNAVAILABLE', 'Codex did not install the verified plugin bytes at its returned installation path')
+        }
+        if (prior !== undefined && prior.pluginCreated === true) {
+          const before = await current.client.read()
+          const existing = getCell(before.config, pluginKey(prior.selector))
+          if (prior.configurationVersion === 1 && existing.present && !equal(existing.value, prior.pluginBinding)
+            && !equal(existing.value, { ...prior.pluginBinding, enabled: false })) {
+            throw error('CODEX_PLUGIN_CHANGED', 'The previous managed Codex registration changed after installation')
+          }
+          await change([{ keys: pluginKey(prior.selector), value: null }])
+          const previousMarketplace = prior.configurationVersion === 1 ? prior.marketplaceBinding
+            : { source_type: 'local', source: prior.marketplaceRoot }
+          if (prior.marketplaceCreated === true
+            && equal(getCell((await current.client.read()).config, ['marketplaces', prior.marketplace]), { present: true, value: previousMarketplace })) {
+            await change([{ keys: ['marketplaces', prior.marketplace], value: null }])
+          }
+        } else if (prior !== undefined && priorCell.present) {
+          if (options.replaceConflicts !== true) throw error('CODEX_PLUGIN_CONFLICT', 'Replacing an adopted Codex plugin requires explicit replacement')
+          if (!displacedPlugins.some((item) => item.selector === prior.selector)) {
+            displacedPlugins.push({ selector: prior.selector, marketplace: prior.marketplace, before: getCell(snapshot.config, enabledKey(prior.selector)) })
+          }
+          await change([{ keys: enabledKey(prior.selector), value: false }])
+        }
+        installed.push({ ...native, component: component.plugin, configurationVersion: 1,
+          marketplaceRoot: component.marketplaceRoot, pluginRoot: component.pluginRoot,
+          pluginIdentityRelativeFiles: component.pluginIdentityRelativeFiles, pluginIdentityFingerprint: component.pluginIdentityFingerprint,
+          requestedVersion: component.version, installedVersion: component.version, installedPath: receipt.installedPath,
+          marketplaceCreated: true, pluginCreated: true, marketplaceBinding, pluginBinding: { enabled: true },
+          displacedMarketplace: null, restorePlugin: false, displacedPlugins })
       }
-    }
-    const current = await inspectCodex(manifest, runner, { replaceConflicts: true, managedState: options.managedState })
-    for (const entry of current.entries) {
-      if (!entry.pluginPresent || !entry.pluginEnabled || entry.installedVersion !== entry.requestedVersion || !entry.installedIdentityMatched) {
-        throw new AgentHostError('CODEX_PLUGIN_UNAVAILABLE', `Codex did not expose installed plugin ${entry.selector}`)
-      }
-    }
-  } catch (error) {
-    await rollbackCodexJournal(inspection.executable, installed, runner).catch(() => {})
-    throw error
-  }
-  return {
-    kind: 'codex',
-    version: inspection.version,
-    entries: installed.map(({ marketplaceAdded, pluginAdded, ...entry }) => entry),
-    restartRequired: true,
-  }
+      return { kind: 'codex', configurationVersion: 1, configPath: current.snapshot.filePath, version: current.version, entries: installed, restartRequired: true }
+    })
+  })
 }
 
-export async function uninstallCodex(hostState, runner = runFile) {
-  const executable = await resolveExecutable('codex', runner)
-  if (executable === null) return { kind: 'codex', unavailable: true, removed: [] }
-  const removed = []
-  for (const entry of [...hostState.entries].reverse()) {
-    if (entry.pluginCreated) {
-      const result = await runner(executable, ['plugin', 'remove', entry.selector, '--json'], { allowFailure: true })
-      removed.push({ target: entry.selector, kind: 'plugin', status: result.status })
+async function remove(hostState, runner, options, suspend) {
+  return session(runner, { ...options, managedState: hostState }, (current) => changeSession(current, async (change) => {
+    const results = []
+    for (const entry of [...hostState.entries].reverse()) {
+      if (legacyUnsafe(entry)) throw error('CODEX_LEGACY_RESTORE_UNVERIFIABLE', 'The older Codex binding lacks exact recoverable displacement records')
+      if (entry.pluginCreated !== true) {
+        if (suspend) throw error('TOOL_SET_UNMANAGED_BINDING', 'An adopted Codex plugin cannot be hidden without explicit replacement')
+        continue
+      }
+      if (entry.configurationVersion !== 1) throw error('CODEX_LEGACY_IDENTITY_UNVERIFIABLE', 'The older Codex installation has no cached-byte receipt; migrate it before removal')
+      const snapshot = await current.client.read()
+      const actual = getCell(snapshot.config, pluginKey(entry.selector))
+      const suspended = { ...entry.pluginBinding, enabled: false }
+      if (Object.keys(snapshot.config.plugins ?? {}).some((selector) => selector !== entry.selector && selector.endsWith('@' + entry.marketplace))) {
+        throw error('CODEX_MARKETPLACE_CHANGED', 'Another registration now depends on the Host marketplace; its supporting files must remain recorded')
+      }
+      if (actual.present && !equal(actual.value, entry.pluginBinding) && !equal(actual.value, suspended)) {
+        // This registration may still depend on Host-owned source and runtime
+        // paths. Keep its ownership state until the changed binding is resolved;
+        // forgetting it here would let a later purge delete referenced bytes.
+        throw error('CODEX_PLUGIN_CHANGED', 'The managed Codex registration was changed by another writer; its binding and supporting files must remain recorded')
+      }
+      if (actual.present) await change([{ keys: suspend ? enabledKey(entry.selector) : pluginKey(entry.selector), value: suspend ? false : null }])
+      if (!suspend) {
+        for (const displaced of entry.displacedPlugins ?? []) {
+          const keys = enabledKey(displaced.selector)
+          const value = getCell((await current.client.read()).config, keys)
+          if (equal(value, { present: true, value: false })) await change([{ keys, value: cellValue(displaced.before) }])
+          else if (!equal(value, displaced.before)) results.push({ target: displaced.selector, status: 'preserved-user-change' })
+        }
+        if (equal(getCell((await current.client.read()).config, ['marketplaces', entry.marketplace]), { present: true, value: entry.marketplaceBinding })) {
+          await change([{ keys: ['marketplaces', entry.marketplace], value: null }])
+        }
+      }
+      results.push({ target: entry.selector, kind: 'plugin', status: 0 })
     }
-    if (entry.marketplaceCreated) {
-      const result = await runner(executable, ['plugin', 'marketplace', 'remove', entry.marketplace, '--json'], { allowFailure: true })
-      removed.push({ target: entry.marketplace, kind: 'marketplace', status: result.status })
-    }
-    if (entry.displacedMarketplace !== null && entry.displacedMarketplace !== undefined) {
-      const result = await runner(executable, ['plugin', 'marketplace', 'add', entry.displacedMarketplace, '--json'], { allowFailure: true })
-      removed.push({ target: entry.marketplace, kind: 'restored-marketplace', status: result.status })
-    }
-    if (entry.restorePlugin === true) {
-      const result = await runner(executable, ['plugin', 'add', entry.selector, '--json'], { allowFailure: true })
-      removed.push({ target: entry.selector, kind: 'restored-plugin', status: result.status })
-    }
-    for (const displaced of entry.displacedPlugins ?? []) {
-      const result = await runner(executable, ['plugin', 'add', displaced.selector, '--json'], { allowFailure: true })
-      removed.push({ target: displaced.selector, kind: 'restored-plugin', status: result.status })
-    }
-  }
-  return { kind: 'codex', removed }
+    return { kind: 'codex', [suspend ? 'suspended' : 'removed']: results }
+  }))
 }
 
-export async function suspendCodex(hostState, runner = runFile) {
-  const executable = await resolveExecutable('codex', runner)
-  if (executable === null) throw new AgentHostError('CODEX_NOT_INSTALLED', 'Codex CLI is not installed or not on PATH')
-  const removed = []
-  for (const entry of [...hostState.entries].reverse()) {
-    if (entry.pluginCreated !== true) {
-      throw new AgentHostError('TOOL_SET_UNMANAGED_BINDING', `Agent Host cannot hide unmanaged Codex plugin ${entry.selector} without changing user-owned configuration`)
-    }
-    await runner(executable, ['plugin', 'remove', entry.selector, '--json'])
-    removed.push({ target: entry.selector, kind: 'plugin' })
-    if (entry.marketplaceCreated === true) {
-      await runner(executable, ['plugin', 'marketplace', 'remove', entry.marketplace, '--json'])
-      removed.push({ target: entry.marketplace, kind: 'marketplace' })
-    }
-  }
-  return { kind: 'codex', suspended: removed }
-}
+export async function uninstallCodex(hostState, runner = runFile, options = {}) { return remove(hostState, runner, options, false) }
+export async function suspendCodex(hostState, runner = runFile, options = {}) { return remove(hostState, runner, options, true) }

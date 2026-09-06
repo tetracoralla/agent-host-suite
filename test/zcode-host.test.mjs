@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -104,6 +104,35 @@ test('ZCode uninstall preserves a binding changed by the user after installation
   const result = await uninstallZcode(installed)
   assert.equal(result.removed[0].status, 'preserved-user-change')
   assert.deepEqual((await readConfig(item.configPath)).mcp.servers['math-anchor'], changed.mcp.servers['math-anchor'])
+})
+
+test('ZCode uninstall completes without recreating a user-removed configuration file', async (t) => {
+  const item = await fixture()
+  t.after(() => rm(item.root, { recursive: true, force: true }))
+  const installed = await installZcode(item.manifest, item.runner, null, {
+    configPath: item.configPath,
+    executable: process.execPath,
+    workspaceRoot: item.workspaceRoot,
+    replaceConflicts: true,
+  })
+  await rm(item.configPath)
+  const result = await uninstallZcode(installed)
+  assert.equal(result.removed[0].status, 'preserved-user-change')
+  await assert.rejects(lstat(item.configPath), (error) => error.code === 'ENOENT')
+})
+
+test('ZCode uninstall tolerates a wholly removed configuration directory', async (t) => {
+  const item = await fixture()
+  t.after(() => rm(item.root, { recursive: true, force: true }))
+  const installed = await installZcode(item.manifest, item.runner, null, {
+    configPath: item.configPath,
+    executable: process.execPath,
+    workspaceRoot: item.workspaceRoot,
+    replaceConflicts: true,
+  })
+  await rm(join(item.root, '.zcode'), { recursive: true, force: true })
+  const result = await uninstallZcode(installed)
+  assert.equal(result.removed[0].status, 'preserved-user-change')
 })
 
 test('ZCode suspension removes an owned active tool while inspection stays read-only', async (t) => {

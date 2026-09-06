@@ -8,6 +8,8 @@ import { promisify } from 'node:util'
 import { AgentHostError } from './errors.mjs'
 import { readJson, writePrivateJson } from './json.mjs'
 import { prepareStatePaths, statePaths } from './state.mjs'
+import { withEnvironmentChange } from './environment-change.mjs'
+import { preflightStateMigration } from './state-migration.mjs'
 
 const LOCK_DIRECTORY = '.lifecycle-lock'
 const OWNER_FILE = 'owner.json'
@@ -600,7 +602,10 @@ function completedMutationCleanupFailure(operation, cleanupError, roots) {
 export async function withLifecycleMutation(paths, operation, dependencies, callback) {
   const inherited = dependencies.lifecycleLease
   if (liveLeases.has(inherited) && (inherited.root === paths.root || inherited.requestedRoot === paths.root)) {
-    return await callback(dependencies, paths)
+    // Nested callers may still use the requested spelling (for example /var
+    // versus /private/var). Keep their state access in the canonical journal
+    // namespace already owned by the outer lease.
+    return await callback(dependencies, statePaths(inherited.root))
   }
   const lease = await acquireLifecycleLease(paths, operation, dependencies)
   let preparedPaths = statePaths(lease.root)
@@ -609,8 +614,15 @@ export async function withLifecycleMutation(paths, operation, dependencies, call
   let scaffoldRecoveryError
   let retiredRoot = null
   try {
-    preparedPaths = await prepareStatePaths(lease.root)
-    result = await callback({ ...dependencies, lifecycleLease: lease }, preparedPaths)
+    result = await withEnvironmentChange(preparedPaths, operation, dependencies, async () => {
+      // Recovery may need a deliberately absent projection directory. Creating
+      // the normal scaffold first would occupy that path and obstruct its undo.
+      preparedPaths = await prepareStatePaths(lease.root)
+      if (dependencies.migrateState === true) {
+        await preflightStateMigration(preparedPaths, dependencies)
+      }
+      return callback({ ...dependencies, lifecycleLease: lease }, preparedPaths)
+    })
   } catch (error) {
     mutationError = error
   }

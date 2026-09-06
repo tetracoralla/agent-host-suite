@@ -35,10 +35,11 @@ export async function probeMcpTools(component) {
     if (missing.length > 0) throw new AgentHostError('TOOL_HEALTH_TOOLS_MISSING', `${component.displayName ?? 'Installed tool'} did not expose its expected tools`, { missing })
     const incomplete = response.tools
       .filter((tool) => (component.expectedTools ?? names).includes(tool.name))
-      .filter((tool) => tool.inputSchema === null || typeof tool.inputSchema !== 'object' || tool.outputSchema === null || typeof tool.outputSchema !== 'object')
+      .filter((tool) => tool.inputSchema === null || typeof tool.inputSchema !== 'object'
+        || (tool.outputSchema !== undefined && (tool.outputSchema === null || typeof tool.outputSchema !== 'object')))
       .map((tool) => tool.name)
     if (incomplete.length > 0) {
-      throw new AgentHostError('TOOL_HEALTH_CATALOG_INCOMPLETE', `${component.displayName ?? 'Installed tool'} lacks complete typed tool catalog entries`, { tools: incomplete })
+      throw new AgentHostError('TOOL_HEALTH_CATALOG_INCOMPLETE', `${component.displayName ?? 'Installed tool'} has incomplete input or invalid advertised output schemas`, { tools: incomplete })
     }
     const serializedCatalog = JSON.stringify(response.tools)
     const toolUtf8Bytes = response.tools.map((tool) => Buffer.byteLength(JSON.stringify(tool), 'utf8'))

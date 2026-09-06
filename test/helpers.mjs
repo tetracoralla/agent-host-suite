@@ -1,4 +1,9 @@
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { after } from 'node:test'
+import { createHash } from 'node:crypto'
+import { AgentHostError } from '../src/errors.mjs'
 import { join } from 'node:path'
 
 async function write(path, contents, mode = 0o600) {
@@ -88,73 +93,91 @@ export async function compatibleApplicationState() {
   return { status: 'compatible', checked: true, carrier: 'test-application' }
 }
 
+// A public-config fixture: registrations, source trees and cached bytes have
+// distinct lifetimes. The JSON file is a test transport, not a TOML parser.
 export function createCodexRunner({ mathPresent = true, timePresent = false, legacyTimeRoot = null, mathVersion = '0.3.0', mathMarketplace = 'math-anchor', mathMarketplaceRoot = null } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'agent-host-codex-fixture-'))
+  after(() => rm(root, { recursive: true, force: true }))
+  const filePath = join(root, 'config.toml')
   const calls = []
   const marketplaces = new Map()
+  const plugins = new Map()
+  const caches = new Map()
+  let config = { plugins: {}, marketplaces: {} }
   if (mathPresent) marketplaces.set(mathMarketplace, mathMarketplaceRoot)
-  let plugins = new Map()
-  if (mathPresent) plugins.set(`math-anchor@${mathMarketplace}`, { version: mathVersion, enabled: true })
-  if (timePresent) plugins.set('migratory-time@migratory-time', { version: '2.0.0', enabled: true })
-  if (legacyTimeRoot !== null) plugins.set('migratory-time@personal', { version: '2.0.0+legacy', enabled: true, sourcePath: legacyTimeRoot })
-
+  if (mathPresent) plugins.set(`math-anchor@${mathMarketplace}`, { version: mathVersion, enabled: true, installed: true })
+  if (timePresent) plugins.set('migratory-time@migratory-time', { version: '2.0.0', enabled: true, installed: true })
+  if (legacyTimeRoot !== null) plugins.set('migratory-time@personal', { version: '2.0.0+legacy', enabled: true, installed: true, sourcePath: legacyTimeRoot })
+  const version = () => 'sha256:' + createHash('sha256').update(JSON.stringify(config)).digest('hex')
+  const clone = (value) => structuredClone(value)
+  async function snapshot() {
+    // Existing test callers may seed another user registration before a read.
+    for (const [name, source] of marketplaces) config.marketplaces[name] ??= { source_type: 'local', source }
+    for (const [selector, value] of plugins) config.plugins[selector] ??= { enabled: value.enabled }
+    await writeFile(filePath, JSON.stringify(config), { mode: 0o600 })
+    return { filePath, config: clone(config), version: version() }
+  }
+  function reflect() {
+    for (const selector of plugins.keys()) if (!Object.hasOwn(config.plugins, selector)) plugins.delete(selector)
+    for (const [selector, binding] of Object.entries(config.plugins)) {
+      plugins.set(selector, { ...(plugins.get(selector) ?? caches.get(selector) ?? { installed: false }), enabled: binding.enabled !== false })
+    }
+    marketplaces.clear()
+    for (const [name, binding] of Object.entries(config.marketplaces)) marketplaces.set(name, binding.source)
+  }
+  const client = {
+    read: snapshot,
+    async write(previous, changes) {
+      if (previous.version !== version()) throw new AgentHostError('CODEX_CONFIG_CHANGED', 'Fixture version changed')
+      for (const { keys, value } of changes) {
+        let target = config
+        for (const key of keys.slice(0, -1)) {
+          if (!Object.hasOwn(target, key)) Object.defineProperty(target, key, { value: {}, writable: true, configurable: true, enumerable: true })
+          target = target[key]
+        }
+        if (value === null) delete target[keys.at(-1)]
+        else Object.defineProperty(target, keys.at(-1), { value: clone(value), writable: true, configurable: true, enumerable: true })
+      }
+      reflect()
+      return snapshot()
+    },
+  }
+  const configuration = async (_executable, _options, callback) => callback(client)
   async function runner(command, args, options = {}) {
     calls.push({ command, args: [...args], options })
     if (command === 'where.exe' || (command === '/usr/bin/env' && args[0] === 'which')) return { status: 0, stdout: `/fake/${args.at(-1)}\n`, stderr: '' }
     if (command === '/fake/codex' && args[0] === '--version') return { status: 0, stdout: 'codex-cli test\n', stderr: '' }
-    if (command === '/fake/codex' && args.join(' ') === 'plugin marketplace list --json') {
-      return {
-        status: 0,
-        stdout: JSON.stringify({ marketplaces: [...marketplaces].map(([name, source]) => ({ name, root: source, marketplaceSource: { sourceType: 'local', source } })) }),
-        stderr: '',
-      }
-    }
     if (command === '/fake/codex' && args.join(' ') === 'plugin list --json') {
-      return {
-        status: 0,
-        stdout: JSON.stringify({ installed: [...plugins].map(([pluginId, value]) => {
-          const [name, marketplaceName] = pluginId.split('@')
-          const marketplaceRoot = marketplaces.get(marketplaceName)
-          const sourcePath = value.sourcePath ?? (typeof marketplaceRoot === 'string' ? join(marketplaceRoot, 'plugins', name) : undefined)
-          return { pluginId, name, marketplaceName, installed: true, enabled: value.enabled, version: value.version, source: sourcePath === undefined ? undefined : { source: 'local', path: sourcePath } }
-        }) }),
-        stderr: '',
-      }
-    }
-    if (command === '/fake/codex' && args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
-      const source = args[3]
-      let name = source.endsWith('calculator') || source.includes('/math-anchor/') ? mathMarketplace : 'migratory-time'
-      try {
-        const marketplace = JSON.parse(await readFile(join(source, '.agents', 'plugins', 'marketplace.json'), 'utf8'))
-        name = marketplace.name
-      } catch {}
-      marketplaces.set(name, source)
-      return { status: 0, stdout: '{}', stderr: '' }
+      await snapshot()
+      return { status: 0, stdout: JSON.stringify({ installed: [...plugins].map(([pluginId, value]) => {
+        const [name, marketplaceName] = pluginId.split('@')
+        const marketplaceRoot = marketplaces.get(marketplaceName)
+        const sourcePath = value.sourcePath ?? (typeof marketplaceRoot === 'string' ? join(marketplaceRoot, 'plugins', name) : undefined)
+        return { pluginId, name, marketplaceName, installed: value.installed !== false, enabled: value.enabled, version: value.version,
+          source: sourcePath === undefined ? undefined : { source: 'local', path: sourcePath } }
+      }) }), stderr: '' }
     }
     if (command === '/fake/codex' && args[0] === 'plugin' && args[1] === 'add') {
       const selector = args[2]
       const [name, marketplaceName] = selector.split('@')
-      let version = selector.startsWith('math') ? mathVersion : '2.0.0'
       const marketplaceRoot = marketplaces.get(marketplaceName)
-      if (typeof marketplaceRoot === 'string') {
-        try {
-          const plugin = JSON.parse(await readFile(join(marketplaceRoot, 'plugins', name, '.codex-plugin', 'plugin.json'), 'utf8'))
-          version = plugin.version
-        } catch {}
-      }
-      plugins.set(selector, { version, enabled: true })
-      return { status: 0, stdout: '{}', stderr: '' }
-    }
-    if (command === '/fake/codex' && args[0] === 'plugin' && args[1] === 'remove') {
-      plugins.delete(args[2])
-      return { status: 0, stdout: '{}', stderr: '' }
-    }
-    if (command === '/fake/codex' && args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'remove') {
-      marketplaces.delete(args[3])
-      return { status: 0, stdout: '{}', stderr: '' }
+      const sourcePath = join(marketplaceRoot, 'plugins', name)
+      const manifest = JSON.parse(await readFile(join(sourcePath, '.codex-plugin', 'plugin.json'), 'utf8'))
+      const installedPath = join(root, 'cache', selector)
+      await mkdir(join(root, 'cache'), { recursive: true })
+      await cp(sourcePath, installedPath, { recursive: true, errorOnExist: true, force: false })
+      const record = { version: manifest.version, enabled: true, installed: true, sourcePath, installedPath }
+      caches.set(selector, record)
+      plugins.set(selector, record)
+      config.plugins[selector] = { ...config.plugins[selector], enabled: true }
+      await snapshot()
+      return { status: 0, stdout: JSON.stringify({ installedPath, pluginId: selector }), stderr: '' }
     }
     throw new Error(`unexpected fake command: ${command} ${args.join(' ')}`)
   }
-  return { runner, calls, marketplaces, get plugins() { return plugins } }
+  return { runner, configuration, client, calls, marketplaces, plugins, caches, root,
+    enabledPlugins(name) { return [...plugins].filter(([selector, value]) => selector.split('@')[0] === name && value.installed !== false && value.enabled).map(([selector, value]) => ({ selector, ...value })) },
+  }
 }
 
 export function createClaudeRunner() {

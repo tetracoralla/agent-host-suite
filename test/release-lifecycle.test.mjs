@@ -25,7 +25,7 @@ async function healthyComponentWarmup({ manifest, componentIds }) {
 
 function releaseDependencies(fake, values = {}) {
   return {
-    runner: fake.runner,
+    runner: fake.runner, codexConfiguration: fake.configuration,
     componentWarmup: healthyComponentWarmup,
     catalogPreflight: healthyCatalogPreflight,
     applicationStatePreflight: compatibleApplicationState,
@@ -93,7 +93,7 @@ test('release setup, update, rollback, and purge retain immutable versions witho
   assert.equal(rolledBack.suiteVersion, '0.1.4')
   assert.equal((await loadState(paths)).rolledBackFrom, '0.1.5')
   assert.equal(typeof (await loadState(paths)).releaseActivatedAt, 'string')
-  const removed = await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner })
+  const removed = await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner, codexConfiguration: fake.configuration })
   assert.equal(removed.status, 'uninstalled')
   assert.equal(fake.plugins.size, 0)
   assert.equal(fake.marketplaces.size, 0)
@@ -183,8 +183,8 @@ test('a failed monitoring opt-in keeps the prior standard installation intact', 
   for (const id of ['agent-tool-observer', 'context-surface-analyzer']) {
     assert.deepEqual((await readdir(join(paths.packages, id))).filter((name) => !name.startsWith('.')), [])
   }
-  assert.equal(fake.plugins.has('math-anchor@openadam'), true)
-  assert.equal(fake.plugins.has('migratory-time@migratory-time'), true)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, true)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, true)
 })
 
 test('a monitoring opt-in commit failure removes its activated external carriers', async (t) => {
@@ -515,12 +515,12 @@ test('developer profile installs a Skill-only Codex plugin without enlarging the
   assert.equal(state.components['agent-tool-development-kit'].skillOnly, true)
   assert.deepEqual(state.availableAgentComponents, [])
   assert.deepEqual(state.agentComponents, [])
-  assert.equal(fake.plugins.has('agent-tool-development-kit@openadam-developer-tools'), true)
-  const entry = state.hosts.codex.entries.find((item) => item.selector === 'agent-tool-development-kit@openadam-developer-tools')
+  assert.equal(fake.enabledPlugins('agent-tool-development-kit').length > 0, true)
+  const entry = state.hosts.codex.entries.find((item) => item.component === 'agent-tool-development-kit')
   await assert.rejects(readFile(join(entry.pluginRoot, '.mcp.json')), (error) => error.code === 'ENOENT')
   assert.match(await readFile(join(entry.pluginRoot, 'skills', 'build-openadam-agent-tools', 'scripts', process.platform === 'win32' ? 'openadam-dev.cmd' : 'openadam-dev'), 'utf8'), process.platform === 'win32' ? /^@echo off/u : /^#!\/bin\/sh\nexec /u)
-  await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner })
-  assert.equal(fake.plugins.has('agent-tool-development-kit@openadam-developer-tools'), false)
+  await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner, codexConfiguration: fake.configuration })
+  assert.equal(fake.enabledPlugins('agent-tool-development-kit').length > 0, false)
 })
 
 test('developer profile gives a fresh Claude home an owned Skill launcher without a Developer Kit MCP entry', async (t) => {
@@ -542,7 +542,7 @@ test('developer profile gives a fresh Claude home an owned Skill launcher withou
   const version = JSON.parse(runSkillLauncher(developerSkill.launcherPath, developerSkill.versionArguments))
   assert.equal(version.version, '0.1.0')
   assert.deepEqual([...fake.entries.keys()], [])
-  await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner })
+  await uninstallInstallation({ stateRoot, purgeData: true }, { runner: fake.runner, codexConfiguration: fake.configuration })
   await assert.rejects(lstat(developerSkill.exposurePath), (error) => error.code === 'ENOENT')
 })
 
@@ -789,7 +789,7 @@ test('an update cannot select a consent-bearing profile before local monitoring 
   await setup({ profile: 'standard', hosts: [], releaseManifest: manifest, stateRoot, noService: true, dryRun: false, enableObservability: false }, releaseDependencies(fake, { hostSkillHome: join(root, 'host-home') }))
 
   await assert.rejects(
-    updateInstallation({ stateRoot, releaseManifest: manifest, profile: 'observability', dryRun: true }, { runner: fake.runner }),
+    updateInstallation({ stateRoot, releaseManifest: manifest, profile: 'observability', dryRun: true }, { runner: fake.runner, codexConfiguration: fake.configuration }),
     (error) => error.code === 'OBSERVABILITY_CONSENT_REQUIRED',
   )
   assert.equal((await loadState(await prepareStatePaths(stateRoot))).profile, 'standard')
@@ -822,7 +822,7 @@ test('development to release migration restores the development environment when
     updateInstallation(
       { stateRoot, releaseManifest: manifest, dryRun: false, replaceHostConflicts: true },
       releaseDependencies(fake, {
-        runner: fake.runner,
+        runner: fake.runner, codexConfiguration: fake.configuration,
         rebindObservability: async (state) => {
           reboundChannels.push(state.channel)
           if (state.channel === 'release') throw new Error('injected monitoring rebind failure')
@@ -836,10 +836,10 @@ test('development to release migration restores the development environment when
   const resolvedWorkspace = await realpath(workspace)
   assert.equal(restored.channel, 'development')
   assert.equal(restored.developmentRoot, resolvedWorkspace)
-  assert.equal(fake.marketplaces.get('math-anchor').startsWith(join(paths.hostProjections, 'codex')), true)
-  assert.equal(fake.marketplaces.get('migratory-time').startsWith(join(paths.hostProjections, 'codex')), true)
-  assert.equal(fake.plugins.has('math-anchor@math-anchor'), true)
-  assert.equal(fake.plugins.has('migratory-time@migratory-time'), true)
+  assert.equal(fake.enabledPlugins('math-anchor')[0].sourcePath.startsWith(join(paths.hostProjections, 'codex')), true)
+  assert.equal(fake.enabledPlugins('migratory-time')[0].sourcePath.startsWith(join(paths.hostProjections, 'codex')), true)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, true)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, true)
 })
 
 test('failed update retains materialized release packages when restoration also fails', async (t) => {

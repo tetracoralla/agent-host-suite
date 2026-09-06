@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { platform } from 'node:os'
 import { resolveLinkedSkillsRoot } from './agent-skill-location.mjs'
 import { fingerprintRelativeFiles } from './development-manifest.mjs'
 import { AgentHostError } from './errors.mjs'
+import { moveEnvironmentPath, setEnvironmentLink } from './environment-resources.mjs'
+import { afterEnvironmentCommit } from './environment-change.mjs'
 import { runFile } from './process.mjs'
 
 const COMPONENT_ID = 'agent-tool-development-kit'
@@ -263,23 +265,17 @@ async function installLinkedComponent(host, component, paths, previous, options)
     if (info !== null && !previousManaged) {
       if (options.replaceConflicts !== true) throw new AgentHostError('DEVELOPER_SKILL_CONFLICT', `${host} already exposes ${prepared.id} from another source`)
       const backupPath = join(paths.backups, `${host}-${prepared.id}-${randomUUID()}`)
-      await rename(prepared.exposurePath, backupPath)
+      await moveEnvironmentPath(prepared.exposurePath, backupPath)
       displaced = { backupPath }
     } else if (info !== null) {
-      await rm(prepared.exposurePath, { force: false })
+      await setEnvironmentLink(prepared.exposurePath, null)
     }
-    const temporary = `${prepared.exposurePath}.tmp-${process.pid}-${randomUUID()}`
-    try {
-      await symlink(prepared.projectionRoot, temporary, platform() === 'win32' ? 'junction' : 'dir')
-      await rename(temporary, prepared.exposurePath)
-    } finally {
-      await rm(temporary, { force: true })
-    }
+    await setEnvironmentLink(prepared.exposurePath, prepared.projectionRoot)
   }
   if (previous?.projectionRoot !== undefined && previous.projectionRoot !== prepared.projectionRoot) {
     const componentRoot = join(paths.hostProjections, component.projectionCollection ?? 'developer-skills', host, prepared.id)
     if (!isContained(componentRoot, previous.projectionRoot)) throw new AgentHostError('DEVELOPER_SKILL_PROJECTION_INVALID', 'Previous Developer Skill projection escaped private Host storage')
-    await rm(previous.projectionRoot, { recursive: true, force: true })
+    await afterEnvironmentCommit(() => rm(previous.projectionRoot, { recursive: true, force: true }))
   }
   return {
     kind: `${host}-skill-link`,
@@ -463,7 +459,7 @@ export async function uninstallDeveloperKitSkill(managed) {
   let preservedChangedTarget = false
   if (exposureInfo !== null) {
     if (exposureTarget === managed.projectionRoot) {
-      await rm(managed.exposurePath, { force: false })
+      await setEnvironmentLink(managed.exposurePath, null)
       removed = true
     } else {
       preservedChangedTarget = true
@@ -472,7 +468,7 @@ export async function uninstallDeveloperKitSkill(managed) {
   let restored = false
   if (!preservedChangedTarget && managed.displaced?.backupPath !== undefined && await existing(managed.displaced.backupPath) !== null) {
     if (await existing(managed.exposurePath) !== null) throw new AgentHostError('DEVELOPER_SKILL_RESTORE_CONFLICT', `Cannot restore the displaced ${managed.id} Skill because its path is occupied`)
-    await rename(managed.displaced.backupPath, managed.exposurePath)
+    await moveEnvironmentPath(managed.displaced.backupPath, managed.exposurePath)
     restored = true
   }
   return { removed, restored, preservedChangedTarget }

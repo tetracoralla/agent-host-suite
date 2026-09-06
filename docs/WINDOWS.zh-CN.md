@@ -56,7 +56,11 @@ Agent Host 应用自身，并保留紧邻的上一应用版本；“开始”菜
 Agent Host”可交换两个经过验证的应用版本，而不改动工具或观测数据。Agent 应用绑定
 变更后，需要启动新任务才能载入新目录。
 
-如果 Direct Runtime 任务计划替换及其自动回滚都失败，请执行错误中返回的结构化
+中断的环境变更会保留先前的归属记录。重试所请求的环境变更时，会先恢复记录中的
+状态；若任务计划、启动文件或其访问权限后来被修改，恢复会停止并保留该修改。
+只读状态检查不会执行恢复。
+
+如果旧版本安装返回了恢复动作，请执行其中的结构化
 `agent-host service recover --recovery ID --manifest-sha256 SHA256` 动作。该命令不
 接受 bundle 路径，并在 Host 生命周期锁内运行；只有所选私有状态、当前 launcher 和
 Task XML 仍与失败记录一致时才会恢复。过期、已变更、被篡改、摘要错误或未知的引用
@@ -91,3 +95,8 @@ npm run package:windows
 产物写入 `.build\windows\distribution`。仓库跟踪的目录有意保持未绑定，因此在真实
 Windows Provider 软件包、许可证、SBOM 与摘要就绪前会安全失败。CI 使用的确定性
 fixture 只验证打包和脱离源码的生命周期，不是公开兼容性发布。
+
+隔离的 Windows 原生服务验证入口为 `node scripts/probe-windows-service-journal.mjs`。
+它仅操作唯一的临时任务名和命名管道，不调用 Provider 或模型。失败时保留其自己的
+临时目录和任务标识，写入报告以便诊断。其他系统上的协议测试不代表 Windows
+任务计划、登录或重启后的实际行为已经通过验证。

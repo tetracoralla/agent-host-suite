@@ -94,7 +94,7 @@ const { writeFileSync } = require("node:fs")
 const version = process.argv[1]
 const destination = process.argv[2]
 const timestamp = "2026-01-01T00:00:00.000Z"
-writeFileSync(destination, JSON.stringify({ schemaVersion: "openadam.agent-host-state.v0.1", suiteVersion: version, channel: "release", profile: "standard", installedAt: timestamp, updatedAt: timestamp, components: {}, hosts: {}, runtime: {}, observability: {} }) + "\n", { mode: 0o600 })
+writeFileSync(destination, JSON.stringify({ schemaVersion: "openadam.agent-host-state.v0.2", suiteVersion: version, channel: "release", profile: "standard", installedAt: timestamp, updatedAt: timestamp, components: {}, hosts: {}, runtime: {}, observability: {} }) + "\n", { mode: 0o600 })
 ' "${bundled_suite_version}" "${bootstrap_root}/status-state/state.json"
 status_json="$(AGENT_HOST_BOOTSTRAP_ROOT="${bootstrap_root}" "${bundled_launcher}" status --state-root "${bootstrap_root}/status-state" --json)"
 status_version="$(node -e 'const value=JSON.parse(process.argv[1]); if (value.status !== "ok" || value.configured !== true) process.exit(1); process.stdout.write(value.suiteVersion)' "${status_json}")"

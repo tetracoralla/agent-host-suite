@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-09-06
+
+- Recover interrupted environment changes through one journal for owned
+  configuration fields, Skill links, native Codex registrations and services.
+  Preserve conflicting user edits and withdrawn configuration files.
+- Migrate state to v0.2 only on a successful change, retain the legacy ownership
+  record, and reject updates that the installed Manager cannot read.
+- Consolidate Provider materialization, runtime binding and diagnostics while
+  preserving public Capability and Procedure semantics.
+- Accept MCP tools that omit optional output schemas without weakening exact
+  typed schema-pair exports or catalog resource bounds.
+- Remove the forced-tool experiment and implicit model selection. Natural task
+  evaluation remains in the private evaluation workspace.
+- Add native Windows Task Scheduler interruption and recovery checks to CI.
+  See `docs/ARCHITECTURE_RENEWAL.md` for migration and observation limits.
+
 ## 0.1.6 — 2026-09-06
 
 - Preserve compact execution history across component updates and raw-event

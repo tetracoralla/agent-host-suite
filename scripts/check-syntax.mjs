@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -19,4 +19,10 @@ async function modules(directory) {
 
 const files = [...await modules(join(root, 'src')), ...await modules(join(root, 'scripts'))]
 for (const file of files) await execFileAsync(process.execPath, ['--check', file])
+if (process.platform === 'win32') {
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    "$parseTokens = $null; $parseErrors = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile([Console]::In.ReadToEnd(), [ref]$parseTokens, [ref]$parseErrors); if ($parseErrors.Count -gt 0) { $parseErrors | ForEach-Object { Write-Output $_.Message }; exit 1 }"],
+  { input: join(root, 'src', 'windows-task.ps1'), encoding: 'utf8', timeout: 15000, windowsHide: true })
+  if (result.error || result.status !== 0) throw new Error('Windows service PowerShell syntax failed: ' + (result.error?.message ?? result.stdout + result.stderr))
+}
 console.log(`syntax passed for ${files.length} modules`)

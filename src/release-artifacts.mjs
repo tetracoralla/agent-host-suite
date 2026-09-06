@@ -7,6 +7,7 @@ import { basename, dirname, posix, isAbsolute, join, relative, resolve, sep } fr
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { materializeToolComponent } from './tool-component.mjs'
 import { AgentHostError } from './errors.mjs'
 import { fingerprintIdentityFiles, fingerprintRelativeFiles } from './development-manifest.mjs'
 import { readJson } from './json.mjs'
@@ -23,7 +24,7 @@ import {
 } from './release-manifest.mjs'
 import { runFile } from './process.mjs'
 import { isDeveloperKitIntegrationSchema } from './developer-kit-integration.mjs'
-import { isToolIntegrationSchema, TOOL_INTEGRATION_SCHEMA_V2, TOOL_INTEGRATION_SCHEMA_V3, TOOL_INTEGRATION_SCHEMA_V4, TOOL_INTEGRATION_SCHEMA_V5 } from './tool-integration.mjs'
+import { isToolIntegrationSchema } from './tool-integration.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
 
 function fail(code, message, details) {
@@ -559,73 +560,17 @@ async function buildRuntimeManifest(release, installed) {
   for (const [id, item] of installed) {
     if (!isToolIntegrationSchema(item.descriptor.integration?.schemaVersion)) continue
     const tool = item.descriptor.integration
-    const pluginRoot = directoryPath(item.root, tool.codex.pluginRoot, `${tool.displayName} plugin root`)
-    const runtimeEntrypoint = containedComponentPath(item.root, tool.runtime.command, `${tool.displayName} runtime command`)
-    const usesSuiteNode = [TOOL_INTEGRATION_SCHEMA_V2, TOOL_INTEGRATION_SCHEMA_V3, TOOL_INTEGRATION_SCHEMA_V4, TOOL_INTEGRATION_SCHEMA_V5].includes(tool.schemaVersion) && tool.runtime.executor === 'suite-node'
-    let providerSkill = null
-    if (tool.schemaVersion === TOOL_INTEGRATION_SCHEMA_V3) {
-      const discovery = tool.discovery
-      const skillRoot = directoryPath(item.root, discovery.skill.root, `${tool.displayName} discovery Skill root`)
-      const discoveryEntrypoint = containedComponentPath(item.root, discovery.runtime.command, `${tool.displayName} discovery CLI entrypoint`)
-      providerSkill = {
-        id: discovery.skill.id,
-        root: skillRoot,
-        identityRelativeFiles: discovery.skill.identityFiles,
-        identityFingerprint: await fingerprintRelativeFiles(skillRoot, discovery.skill.identityFiles),
-        launcherRelativePath: discovery.skill.launcher,
-        command: discovery.runtime.executor === 'suite-node' ? nodeCommand : discoveryEntrypoint,
-        args: discovery.runtime.executor === 'suite-node'
-          ? [discoveryEntrypoint, ...discovery.runtime.args]
-          : discovery.runtime.args,
-        versionArguments: discovery.runtime.versionArguments,
-        expectedVersion: item.descriptor.version,
-      }
-    }
+    const resolved = await materializeToolComponent(item,
+      release.components.find((entry) => entry.id === id), nodeCommand)
     const auxiliaryCli = id === 'context-surface-analyzer' && components[id] !== undefined
       ? { cliCommand: components[id].command, cliArgs: components[id].args }
       : {}
-    const capabilityProvider = tool.schemaVersion === TOOL_INTEGRATION_SCHEMA_V4
-      ? {
-          providerId: tool.directCapability.providerId,
-          transport: tool.directCapability.transport,
-          lifecycle: tool.directCapability.lifecycle,
-          workspaceRootRequired: tool.directCapability.workspaceRoot === 'host-required',
-          rootPath: pluginRoot,
-          profilePath: containedComponentPath(item.root, tool.directCapability.profile, `${tool.displayName} Capability Profile`),
-          manifestPath: containedComponentPath(item.root, tool.directCapability.manifest, `${tool.displayName} Provider Manifest`),
-          identityFiles: tool.directCapability.identityFiles.map((path) => containedComponentPath(item.root, path, `${tool.displayName} Capability identity file`)),
-          capabilityId: tool.directCapability.capabilityId,
-          capabilityVersion: tool.directCapability.capabilityVersion,
-          contracts: tool.directCapability.contracts.map((contract) => ({
-            operationId: contract.operationId,
-            inputSchemaPath: containedComponentPath(item.root, contract.inputSchema, `${tool.displayName} Capability input schema`),
-            outputSchemaPath: containedComponentPath(item.root, contract.outputSchema, `${tool.displayName} Capability output schema`),
-          })),
-        }
-      : null
-    components[id] = await component(item, {
-      displayName: tool.displayName,
-      summary: tool.summary,
-      pluginRoot,
-      marketplaceRoot: directoryPath(item.root, tool.codex.marketplaceRoot, `${tool.displayName} marketplace root`),
-      marketplace: tool.codex.marketplace,
-      plugin: tool.codex.plugin,
-      pluginIdentityRelativeFiles: tool.codex.identityFiles,
-      pluginIdentityFingerprint: await fingerprintRelativeFiles(pluginRoot, tool.codex.identityFiles),
-      productSkills: await productSkills(pluginRoot, tool.codex.identityFiles),
-      command: usesSuiteNode ? nodeCommand : runtimeEntrypoint,
-      args: usesSuiteNode ? [runtimeEntrypoint, ...tool.runtime.args] : tool.runtime.args,
-      cwd: directoryPath(item.root, tool.runtime.cwd, `${tool.displayName} runtime directory`),
-      workspaceEnvironment: tool.runtime.workspaceEnvironment ?? [],
-      optionalPathEnvironment: tool.runtime.optionalPathEnvironment ?? [],
+    components[id] = {
+      ...resolved,
+      productSkills: await productSkills(resolved.pluginRoot, tool.codex.identityFiles),
       pathGrants: {},
-      expectedTools: tool.runtime.expectedTools,
-      healthTimeoutMs: tool.runtime.timeoutMs,
-      toolIntegrationSchema: tool.schemaVersion,
-      ...(providerSkill === null ? {} : { providerSkill }),
-      ...(capabilityProvider === null ? {} : { capabilityProvider }),
       ...auxiliaryCli,
-    })
+    }
   }
   return {
     schemaVersion: release.schemaVersion,

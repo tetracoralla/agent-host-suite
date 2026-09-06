@@ -2,15 +2,14 @@ import { lstat, mkdtemp, realpath, rm, rmdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { AgentHostError } from './errors.mjs'
-import { fingerprintIdentityFiles, fingerprintRelativeFiles } from './development-manifest.mjs'
+import { materializeToolComponent } from './tool-component.mjs'
 import { recordActivity } from './activity.mjs'
-import { containedComponentPath, currentReleasePlatform, installDirectoryName } from './release-manifest.mjs'
+import { currentReleasePlatform, installDirectoryName } from './release-manifest.mjs'
 import { materializeObservedLocalComponentArtifact, observeLocalComponentArtifact, verifyReleaseComponent } from './release-artifacts.mjs'
 import { probeMcpToolsFirstAndRepeat } from './mcp-health.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { loadState, prepareStatePaths, readStatePaths, statePaths } from './state.mjs'
 import { transitionComponentInventory } from './lifecycle.mjs'
-import { TOOL_INTEGRATION_SCHEMA_V2, TOOL_INTEGRATION_SCHEMA_V3, TOOL_INTEGRATION_SCHEMA_V4, TOOL_INTEGRATION_SCHEMA_V5 } from './tool-integration.mjs'
 import { resolveWorkspaceRoot } from './hosts/codex-projection.mjs'
 import { resolvePathGrant, validateComponentPathGrants } from './component-environment.mjs'
 import { readJson } from './json.mjs'
@@ -52,15 +51,7 @@ async function cleanupUnadoptedPackage(prepared) {
   }
 }
 
-function directoryPath(root, value, label) {
-  if (typeof value !== 'string' || value.includes('\\')) fail('COMPONENT_DESCRIPTOR_INVALID', `${label} is invalid`)
-  const target = resolve(root, value)
-  const relation = relative(root, target)
-  if (relation === '..' || relation.startsWith(`..${sep}`) || isAbsolute(relation)) {
-    fail('COMPONENT_DESCRIPTOR_INVALID', `${label} escapes the installed component`)
-  }
-  return target
-}
+
 
 function bindingFromObservation(observation, spdx) {
   if (!isSpdxExpressionSyntax(spdx)) {
@@ -90,85 +81,7 @@ function assertAgentTool(installed) {
 
 async function runtimeComponent(installed, releaseComponent, state) {
   assertAgentTool(installed)
-  const integration = installed.descriptor.integration
-  const identities = [
-    installed.descriptorPath,
-    ...installed.descriptor.identityFiles.map((path) => containedComponentPath(installed.root, path, `${installed.descriptor.id} identity file`)),
-  ]
-  const pluginRoot = directoryPath(installed.root, integration.codex.pluginRoot, `${integration.displayName} plugin root`)
-  const marketplaceRoot = directoryPath(installed.root, integration.codex.marketplaceRoot, `${integration.displayName} marketplace root`)
-  const runtimeEntrypoint = containedComponentPath(installed.root, integration.runtime.command, `${integration.displayName} runtime command`)
-  const usesSuiteNode = [TOOL_INTEGRATION_SCHEMA_V2, TOOL_INTEGRATION_SCHEMA_V3, TOOL_INTEGRATION_SCHEMA_V4, TOOL_INTEGRATION_SCHEMA_V5].includes(integration.schemaVersion) && integration.runtime.executor === 'suite-node'
-  const nodeCommand = state.components['node-runtime']?.command
-  if (usesSuiteNode && typeof nodeCommand !== 'string') {
-    fail('LOCAL_COMPONENT_EXECUTOR_UNAVAILABLE', 'The installed Agent environment has no verified Suite Node executor')
-  }
-  let providerSkill = null
-  if (integration.schemaVersion === TOOL_INTEGRATION_SCHEMA_V3) {
-    const discovery = integration.discovery
-    const skillRoot = directoryPath(installed.root, discovery.skill.root, `${integration.displayName} discovery Skill root`)
-    const discoveryEntrypoint = containedComponentPath(installed.root, discovery.runtime.command, `${integration.displayName} discovery CLI entrypoint`)
-    providerSkill = {
-      id: discovery.skill.id,
-      root: skillRoot,
-      identityRelativeFiles: discovery.skill.identityFiles,
-      identityFingerprint: await fingerprintRelativeFiles(skillRoot, discovery.skill.identityFiles),
-      launcherRelativePath: discovery.skill.launcher,
-      command: discovery.runtime.executor === 'suite-node' ? nodeCommand : discoveryEntrypoint,
-      args: discovery.runtime.executor === 'suite-node'
-        ? [discoveryEntrypoint, ...discovery.runtime.args]
-        : discovery.runtime.args,
-      versionArguments: discovery.runtime.versionArguments,
-      expectedVersion: installed.descriptor.version,
-    }
-  }
-  let capabilityProvider = null
-  if (integration.schemaVersion === TOOL_INTEGRATION_SCHEMA_V4) {
-    const capability = integration.directCapability
-    capabilityProvider = {
-      providerId: capability.providerId,
-      transport: capability.transport,
-      lifecycle: capability.lifecycle,
-      workspaceRootRequired: capability.workspaceRoot === 'host-required',
-      rootPath: pluginRoot,
-      profilePath: containedComponentPath(installed.root, capability.profile, `${integration.displayName} Capability Profile`),
-      manifestPath: containedComponentPath(installed.root, capability.manifest, `${integration.displayName} Provider Manifest`),
-      identityFiles: capability.identityFiles.map((path) => containedComponentPath(installed.root, path, `${integration.displayName} Capability identity file`)),
-      capabilityId: capability.capabilityId,
-      capabilityVersion: capability.capabilityVersion,
-      contracts: capability.contracts.map((contract) => ({
-        operationId: contract.operationId,
-        inputSchemaPath: containedComponentPath(installed.root, contract.inputSchema, `${integration.displayName} Capability input schema`),
-        outputSchemaPath: containedComponentPath(installed.root, contract.outputSchema, `${integration.displayName} Capability output schema`),
-      })),
-    }
-  }
-  return {
-    version: installed.descriptor.version,
-    root: installed.root,
-    identityFiles: identities,
-    fingerprint: await fingerprintIdentityFiles(identities),
-    descriptorPath: installed.descriptorPath,
-    releaseArtifact: releaseComponent,
-    displayName: integration.displayName,
-    summary: integration.summary,
-    pluginRoot,
-    marketplaceRoot,
-    marketplace: integration.codex.marketplace,
-    plugin: integration.codex.plugin,
-    pluginIdentityRelativeFiles: integration.codex.identityFiles,
-    pluginIdentityFingerprint: await fingerprintRelativeFiles(pluginRoot, integration.codex.identityFiles),
-    command: usesSuiteNode ? nodeCommand : runtimeEntrypoint,
-    args: usesSuiteNode ? [runtimeEntrypoint, ...integration.runtime.args] : integration.runtime.args,
-    cwd: directoryPath(installed.root, integration.runtime.cwd, `${integration.displayName} runtime directory`),
-    workspaceEnvironment: integration.runtime.workspaceEnvironment ?? [],
-    optionalPathEnvironment: integration.runtime.optionalPathEnvironment ?? [],
-    expectedTools: integration.runtime.expectedTools,
-    healthTimeoutMs: integration.runtime.timeoutMs,
-    toolIntegrationSchema: integration.schemaVersion,
-    ...(providerSkill === null ? {} : { providerSkill }),
-    ...(capabilityProvider === null ? {} : { capabilityProvider }),
-  }
+  return materializeToolComponent(installed, releaseComponent, state.components['node-runtime']?.command)
 }
 
 async function bindOptionalPathGrants(component, inputs, previous = {}) {
@@ -535,7 +448,7 @@ async function rollbackLocalComponentUnlocked(options, dependencies = {}, prepar
 
 async function lockedComponentMutation(options, dependencies, operation, callback) {
   const paths = statePaths(resolveStateRoot(options.stateRoot))
-  return await withLifecycleMutation(paths, operation, dependencies, callback)
+  return await withLifecycleMutation(paths, operation, { ...dependencies, migrateState: true, recoverEnvironmentChange: true, environmentDryRun: options.dryRun === true }, callback)
 }
 
 export async function importLocalComponent(options, dependencies = {}) {
