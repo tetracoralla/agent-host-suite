@@ -62,6 +62,44 @@ function Matches($actual, $expected) {
     if ($null -eq $actual -or $null -eq $expected) { return $null -eq $actual -and $null -eq $expected }
     return $actual.xml -ceq $expected.xml -and $actual.sddl -ceq $expected.sddl
 }
+function StopTaskTree($task) {
+    # Task.Stop alone can terminate cmd.exe while leaving its Runtime child
+    # alive. Resolve only this task's launcher beneath its native task engine;
+    # never terminate the shared engine or select processes by image name alone.
+    $instances = $task.GetInstances(0)
+    $engines = @()
+    for ($index = 1; $index -le $instances.Count; $index++) { $engines += [uint32]$instances.Item($index).EnginePID }
+    $launcher = [string]$task.Definition.Actions.Item(1).Path
+    $tail = '(?i)\s/c\s+(?:""' + [Regex]::Escape($launcher) + '""|"' + [Regex]::Escape($launcher) + '"|' + [Regex]::Escape($launcher) + ')\s*$'
+    $shell = [IO.Path]::Combine([Environment]::SystemDirectory, 'cmd.exe')
+    $owned = @()
+    try {
+        if ($engines.Count -gt 0) {
+            $candidates = @(Get-CimInstance Win32_Process -Filter "Name='cmd.exe'")
+            foreach ($candidate in $candidates) {
+                if (($engines -notcontains [uint32]$candidate.ParentProcessId -and $engines -notcontains [uint32]$candidate.ProcessId) -or
+                    -not [string]::Equals($candidate.ExecutablePath, $shell, [StringComparison]::OrdinalIgnoreCase) -or $candidate.CommandLine -notmatch $tail) { continue }
+                $process = Get-Process -Id $candidate.ProcessId
+                # Hold the kernel process object until termination finishes, so
+                # a recycled numeric PID can never become the taskkill target.
+                $null = $process.Handle
+                $again = Get-CimInstance Win32_Process -Filter ('ProcessId=' + [uint32]$candidate.ProcessId)
+                if ($null -eq $again -or $again.CreationDate -ne $candidate.CreationDate -or $again.CommandLine -cne $candidate.CommandLine -or $again.ParentProcessId -ne $candidate.ParentProcessId) {
+                    $process.Dispose()
+                    Fail 'SERVICE_PRIOR_STATE_UNRESTORABLE'
+                }
+                $owned += $process
+            }
+        }
+        if ($owned.Count -ne $instances.Count) { Fail 'SERVICE_PRIOR_STATE_UNRESTORABLE' }
+        if (-not (Matches (Describe (Task)) $request.expected)) { Fail 'ENVIRONMENT_RESOURCE_CHANGED' }
+        foreach ($process in $owned) {
+            & ([IO.Path]::Combine([Environment]::SystemDirectory, 'taskkill.exe')) /PID ([string]$process.Id) /T /F | Out-Null
+            if (-not $process.WaitForExit(5000)) { Fail 'SERVICE_ROLLBACK_CLEANUP_INCOMPLETE' }
+        }
+        $task.Stop(0)
+    } finally { foreach ($process in $owned) { $process.Dispose() } }
+}
 
 try {
     $inputText = [Console]::In.ReadToEnd()
@@ -139,7 +177,7 @@ try {
             if (-not (Matches $actual $request.expected)) { Fail 'ENVIRONMENT_RESOURCE_CHANGED' }
             if ($request.operation -ceq 'remove') {
                 if ($null -ne $task) {
-                    $task.Stop(0)
+                    StopTaskTree $task
                     $until = [DateTime]::UtcNow.AddSeconds(6)
                     do {
                         $task = Task
