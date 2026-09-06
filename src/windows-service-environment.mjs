@@ -95,7 +95,9 @@ async function waitForTask(step, expected, runner) {
     const current = await observe(step, runner)
     recoverable(step, current)
     if (sameTask(current.task, expected) && current.task?.state === expected?.state) return current
-    if (Date.now() >= deadline) throw new AgentHostError('SERVICE_RESTORE_FAILED', 'The Windows task did not reach its recorded running or stopped state')
+    if (Date.now() >= deadline) throw new AgentHostError('SERVICE_RESTORE_FAILED', 'The Windows task did not reach its recorded running or stopped state', {
+      expectedState: expected?.state ?? null, observedState: current.task?.state ?? null,
+    })
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
 }

@@ -72,7 +72,16 @@ if (process.platform !== 'win32') {
     let failed = false
     try {
       await secureWindowsDirectory(root)
-      await writeFile(join(root, 'fixture.mjs'), 'import {createServer} from "node:net"; const socket=process.argv[process.argv.indexOf("--socket")+1]; const server=createServer(s=>s.end()); server.listen(socket); process.on("SIGTERM",()=>server.close(()=>process.exit(0)));\n')
+      await writeFile(join(root, 'fixture.mjs'), `import {createServer} from 'node:net';
+import {appendFileSync} from 'node:fs';
+const log = (event, details = {}) => appendFileSync(new URL('./fixture-events.jsonl', import.meta.url), JSON.stringify({event, pid:process.pid, ...details})+'\\n');
+log('started');
+process.on('uncaughtExceptionMonitor', error => log('uncaught', {code:error.code,message:error.message}));
+const socket=process.argv[process.argv.indexOf('--socket')+1];
+const server=createServer(s=>s.end());
+server.listen(socket,()=>log('listening'));
+process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
+`)
       await writeFile(join(root, 'user.json'), '{"selected":"before"}')
       await withLifecycleMutation({ root: join(root, 'state') }, 'probe.seed', dependencies, async (_locked, paths) => {
         const service = operation === 'install' ? null : await installService({ command: process.execPath, args: [join(root, 'fixture.mjs'), 'old'] }, files, dependencies.runner)
@@ -118,7 +127,8 @@ if (process.platform !== 'win32') {
     } catch (error) {
       failed = true
       const registrationDifference = await readFile(join(root, 'registration-difference.json'), 'utf8').catch(() => null)
-      report.cases.push({ operation, phase, status: 'failed', code: error.code ?? 'PROBE_FAILED', message: error.message, stack: error.stack?.slice(-2000), registrationDifference: registrationDifference?.slice(0, 12000), retainedRoot: root, taskName })
+      const fixtureEvents = await readFile(join(root, 'fixture-events.jsonl'), 'utf8').catch(() => null)
+      report.cases.push({ operation, phase, status: 'failed', code: error.code ?? 'PROBE_FAILED', message: error.message, details: error.details, stack: error.stack?.slice(-2000), registrationDifference: registrationDifference?.slice(0, 12000), fixtureEvents: fixtureEvents?.slice(-6000), retainedRoot: root, taskName })
       process.exitCode = 1
     } finally {
       // Failed records remain for diagnosis. Do not use force-delete to turn a
