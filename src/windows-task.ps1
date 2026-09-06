@@ -45,6 +45,11 @@ function Definition([string]$xml) {
     if ($definition.Actions.Count -ne 1 -or $definition.Actions.Item(1).Type -ne 0) { Fail 'SERVICE_PRIOR_STATE_UNRESTORABLE' }
     # A logon trigger can be restored without replaying a registration/time event.
     if ($definition.Triggers.Count -ne 1 -or $definition.Triggers.Item(1).Type -ne 9) { Fail 'SERVICE_PRIOR_STATE_UNRESTORABLE' }
+    if (-not [string]::IsNullOrEmpty([string]$definition.RegistrationInfo.SecurityDescriptor)) {
+        # Task Scheduler may spell machine-relative SIDs as SDDL aliases.
+        # Canonicalize the complete descriptor without dropping any ACE/flags.
+        $definition.RegistrationInfo.SecurityDescriptor = Sddl ([string]$definition.RegistrationInfo.SecurityDescriptor)
+    }
     return $definition
 }
 function Describe($task) {
@@ -102,6 +107,9 @@ try {
             $definition.RegistrationInfo.Date = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
             $definition.RegistrationInfo.URI = $request.taskName
             $definition.RegistrationInfo.Source = 'openadam.agent-host-runtime.v0.1'
+            $security = Sddl "O:${sid}G:${sid}D:P(A;;FA;;;SY)(A;;FA;;;${sid})"
+            $definition.RegistrationInfo.SecurityDescriptor = $security
+            $definition.Principal.Id = 'Author'
             $definition.Principal.UserId = $sid
             $definition.Principal.LogonType = 3
             $definition.Principal.RunLevel = 0
@@ -111,13 +119,17 @@ try {
             $definition.Settings.StopIfGoingOnBatteries = $false
             $definition.Settings.MultipleInstances = 2
             $trigger = $definition.Triggers.Create(9)
-            $trigger.UserId = $sid
+            # Registration resolves a logon-trigger SID to the account name.
+            # Record that native spelling, and the principal/action context,
+            # before journaling so registration does not add unrecorded fields.
+            $trigger.UserId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+            $definition.Actions.Context = 'Author'
             $action = $definition.Actions.Create(0)
             $action.Path = $request.launcherPath
             $definition = Definition $definition.XmlText
             # Explicit current-user + SYSTEM permissions; registration must not
             # silently add a different principal ACE to the recorded ACL.
-            $result = @{ xml = [string]$definition.XmlText; sddl = (Sddl "O:${sid}G:${sid}D:P(A;;FA;;;SY)(A;;FA;;;${sid})"); state = 4 }
+            $result = @{ xml = [string]$definition.XmlText; sddl = $security; state = 4 }
         }
         { $_ -ceq 'remove' -or $_ -ceq 'create' -or $_ -ceq 'run' } {
             $task = Task
