@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { withLifecycleMutation } from '../../src/lifecycle-lock.mjs'
 import { writeEnvironmentCodex } from '../../src/hosts/codex-config-resource.mjs'
@@ -7,6 +8,10 @@ import { writeEnvironmentJson } from '../../src/environment-resources.mjs'
 import { saveState, STATE_SCHEMA } from '../../src/state.mjs'
 
 const server = fileURLToPath(new URL('./codex-config-server.mjs', import.meta.url))
+function interruptAtBoundary() {
+  writeFileSync(join(process.argv[3], 'interruption.json'), JSON.stringify({ action: process.argv[2], phase: process.argv[4] }), { mode: 0o600 })
+  process.kill(process.pid, 'SIGKILL')
+}
 export function recoveryDependencies(native = false) {
   const env = { ...process.env }
   for (const name of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'AZURE_OPENAI_API_KEY']) delete env[name]
@@ -24,7 +29,7 @@ if (process.argv[2] === '--interrupt') {
   const phase = process.argv[4]
   const native = process.argv[5] === 'native'
   const dependencies = recoveryDependencies(native)
-  if (phase === 'prepared') dependencies.afterEnvironmentChangePrepared = () => process.kill(process.pid, 'SIGKILL')
+  if (phase === 'prepared') dependencies.afterEnvironmentChangePrepared = interruptAtBoundary
   await withLifecycleMutation({ root: join(root, 'state') }, 'fixture.codex-transition', dependencies, async (_locked, paths) => {
     await dependencies.codexConfiguration(native ? 'codex' : process.execPath, { configRoot: join(root, 'codex') }, async (client) => {
       const before = await client.read()
@@ -36,13 +41,13 @@ if (process.argv[2] === '--interrupt') {
       installedAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z',
       components: {}, hosts: {}, runtime: {}, observability: { enabled: false },
     })
-    process.kill(process.pid, 'SIGKILL')
+    interruptAtBoundary()
   })
 }
 
 if (process.argv[2] === '--interrupt-recovery') {
   await withLifecycleMutation({ root: join(process.argv[3], 'state') }, 'fixture.codex-recovery', {
     ...recoveryDependencies(process.argv[5] === 'native'),
-    afterEnvironmentRecoveryStep: ({ remaining }) => { if (remaining === 0) process.kill(process.pid, 'SIGKILL') },
+    afterEnvironmentRecoveryStep: ({ remaining }) => { if (remaining === 0) interruptAtBoundary() },
   }, async () => {})
 }

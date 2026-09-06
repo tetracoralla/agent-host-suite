@@ -1,9 +1,15 @@
 import { join } from 'node:path'
+import { writeFileSync } from 'node:fs'
 import { setup } from '../../src/setup.mjs'
 import { archiveAndRemoveState, saveState } from '../../src/state.mjs'
 import { uninstallInstallation } from '../../src/lifecycle.mjs'
 import { withLifecycleMutation } from '../../src/lifecycle-lock.mjs'
 import { compatibleApplicationState, healthyCatalogPreflight } from '../helpers.mjs'
+
+function interruptAtBoundary() {
+  writeFileSync(join(process.argv[3], 'interruption.json'), JSON.stringify({ action: process.argv[2], phase: process.argv[4], host: process.argv[5] }), { mode: 0o600 })
+  process.kill(process.pid, 'SIGKILL')
+}
 
 export const runner = async (_command, args) => {
   if (args[0] === 'version') return { status: 0, stdout: '{"version":"fixture"}', stderr: '' }
@@ -27,19 +33,19 @@ if (process.argv[2] === '--interrupt') {
   const { options, dependencies } = configuration(process.argv[3], process.argv[5])
   await setup(options, { ...dependencies, saveState: async (...args) => {
     if (process.argv[4] === 'after-commit') await saveState(...args)
-    process.kill(process.pid, 'SIGKILL')
+    interruptAtBoundary()
   } })
 }
 
 if (process.argv[2] === '--interrupt-prepared') {
   const { options, dependencies } = configuration(process.argv[3], process.argv[5])
-  await setup(options, { ...dependencies, afterEnvironmentChangePrepared: () => process.kill(process.pid, 'SIGKILL') })
+  await setup(options, { ...dependencies, afterEnvironmentChangePrepared: interruptAtBoundary })
 }
 
 if (process.argv[2] === '--interrupt-recovery') {
   await withLifecycleMutation({ root: join(process.argv[3], 'state') }, 'test.recover', {
     recoverEnvironmentChange: true,
-    afterEnvironmentRecoveryStep: () => process.kill(process.pid, 'SIGKILL'),
+    afterEnvironmentRecoveryStep: interruptAtBoundary,
   }, async () => {})
 }
 
@@ -49,7 +55,7 @@ if (process.argv[2] === '--interrupt-uninstall') {
     ...dependencies,
     archiveAndRemoveState: async (...args) => {
       if (process.argv[4] === 'after-commit') await archiveAndRemoveState(...args)
-      process.kill(process.pid, 'SIGKILL')
+      interruptAtBoundary()
     },
   })
 }

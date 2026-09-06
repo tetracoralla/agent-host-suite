@@ -22,6 +22,7 @@ async function fixture(t) {
   return root
 }
 async function interrupt(root, phase = 'before-commit', action = '--interrupt') {
+  await rm(join(root, 'interruption.json'), { force: true })
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [script, action, root, phase], { stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
@@ -29,7 +30,9 @@ async function interrupt(root, phase = 'before-commit', action = '--interrupt') 
     child.once('error', reject)
     child.once('close', (code, signal) => resolve({ code, signal, stderr }))
   })
-  assert.equal(result.signal, 'SIGKILL', result.stderr)
+  if (process.platform === 'win32') assert.notEqual(result.code, 0, result.stderr)
+  else assert.equal(result.signal, 'SIGKILL', result.stderr)
+  assert.deepEqual(await read(join(root, 'interruption.json')), { action, phase })
 }
 const recover = (root) => withLifecycleMutation({ root: join(root, 'state') }, 'fixture.recover', recoveryDependencies(), async () => {})
 

@@ -132,6 +132,15 @@ test('Host Windows cleanup reports its confirmed owned process scope', async () 
   })
 })
 
+test('Host Windows cleanup never targets the PID of an already exited root or claims its tree is absent', async () => {
+  const child = { pid: 6262, exitCode: 0, signalCode: null }
+  const calls = []
+  await assert.rejects(closeOwnedProcessTree(child, {
+    platformName: 'win32', windowsTreeKiller: async (pid) => { calls.push(pid); return { status: 0 } },
+  }), error => error.code === 'HOST_PROCESS_TREE_CLEANUP_FAILED' && error.details.termination.scopeStatus === 'not-confirmed')
+  assert.deepEqual(calls, [])
+})
+
 test('Host POSIX cleanup never signals a recycled process-group identity after root close', async () => {
   const child = new EventEmitter()
   child.pid = 6262

@@ -122,7 +122,7 @@ test('private component import locks preview facts, activates through Codex proj
   assert.equal(imported.status, 'imported')
   assert.equal(imported.component.active, true)
   assert.equal(fake.enabledPlugins('private-fixture').length > 0, true)
-  assert.equal(fake.enabledPlugins('private-fixture')[0].sourcePath.includes(join(stateRoot, 'host-projections', 'codex')), true)
+  assert.equal(fake.enabledPlugins('private-fixture')[0].sourcePath.includes(join(await realpath(stateRoot), 'host-projections', 'codex')), true)
   const listed = await localComponentStatus({ stateRoot })
   assert.deepEqual(listed.components.map((item) => [item.id, item.active]), [['private-fixture', true]])
 

@@ -31,6 +31,7 @@ async function fixture(t) {
 }
 
 async function interrupt(root, phase = 'before-commit', action = '--interrupt', host = 'zcode') {
+  await rm(join(root, 'interruption.json'), { force: true })
   const exited = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [fixturePath, action, root, phase, host], { stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
@@ -38,7 +39,9 @@ async function interrupt(root, phase = 'before-commit', action = '--interrupt', 
     child.once('error', reject)
     child.once('close', (code, signal) => resolve({ code, signal, stderr }))
   })
-  assert.equal(exited.signal, 'SIGKILL', exited.stderr)
+  if (process.platform === 'win32') assert.notEqual(exited.code, 0, exited.stderr)
+  else assert.equal(exited.signal, 'SIGKILL', exited.stderr)
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'interruption.json'), 'utf8')), { action, phase, host })
 }
 
 test('process death before state commit retains displacement; retry and uninstall restore user config and Skill', async (t) => {

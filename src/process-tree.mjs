@@ -142,6 +142,10 @@ export async function closeOwnedProcessTree(child, options = {}) {
   const platformName = options.platformName ?? platform()
   if (child?.pid === undefined) return terminationReport(platformName, 'not-required', 'not-started', true, 'confirmed-absent')
   if (platformName === 'win32') {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      const report = terminationReport(platformName, 'unconfirmed', 'root-exited-before-cleanup', true, 'not-confirmed')
+      throw scopeFailure('The Windows root already exited; its former tree cannot be addressed safely by a numeric PID', report)
+    }
     const result = await (options.windowsTreeKiller ?? runWindowsTreeKiller)(child.pid)
     if (result?.status !== 0) {
       const report = terminationReport(platformName, 'unconfirmed', 'taskkill-tree-failed', false, 'not-confirmed')

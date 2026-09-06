@@ -66,7 +66,9 @@ export async function withCodexConfiguration(executable, options, callback) {
   const close = () => {
     if (closing === null) {
       closed = true
-      child.stdin.end()
+      // Windows tree termination needs its root to remain alive. Sending EOF
+      // first lets a fast app-server exit before taskkill can address its tree.
+      if (process.platform !== 'win32') child.stdin.end()
       closing = closeOwnedProcessTree(child, { gracefulWaitMs: 100, termWaitMs: 500 })
     }
     return closing
@@ -165,8 +167,14 @@ export async function withCodexConfiguration(executable, options, callback) {
     options.signal?.removeEventListener('abort', onAbort)
     for (const waiter of pending.values()) { clearTimeout(waiter.timer); waiter.reject(failure('CODEX_CONFIG_CLOSED', 'The Codex configuration connection closed')) }
     pending.clear()
-    try { await close() } catch {
-      operationError = new AgentHostError('CODEX_CONFIG_CLEANUP_FAILED', 'The owned Codex configuration process could not be closed', {
+    try { await close() } catch (cleanupError) {
+      if (process.platform === 'win32' && operationError !== null && (child.exitCode !== null || child.signalCode !== null)) {
+        // Keep the failed protocol outcome when the server already exited.
+        // This does not claim that an exited Windows root proves tree cleanup.
+        operationError = new AgentHostError(operationError.code, operationError.message, {
+          ...operationError.details, cleanupCode: cleanupError.code ?? 'HOST_PROCESS_TREE_CLEANUP_FAILED', processTreeStatus: 'not-confirmed',
+        })
+      } else operationError = new AgentHostError('CODEX_CONFIG_CLEANUP_FAILED', 'The owned Codex configuration process could not be closed', {
         causeCode: operationError?.code ?? null,
       })
     }

@@ -46,7 +46,9 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    # Native recovery plus the complete ACL-backed source/package suite can
+    # exceed thirty minutes. Individual operation and test-file bounds remain.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
