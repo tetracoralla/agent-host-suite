@@ -1,6 +1,6 @@
 {
   "name": "@openadam/agent-tool-observer",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "type": "module",
   "description": "Agent Host internal local-only observation of Agent tool usage across supported clients.",

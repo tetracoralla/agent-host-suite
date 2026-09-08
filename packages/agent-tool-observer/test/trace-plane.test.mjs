@@ -11,6 +11,7 @@ import {
   putTraceToolEvent,
   putTraceTurnEvent
 } from "../src/db.mjs";
+import { traceToolEventSummaryRows } from "../src/db-read.mjs";
 import { buildReport } from "../src/report.mjs";
 import { maintainDatabase } from "../src/maintenance.mjs";
 import { scanTraceBridges, validateTraceBridgeRecord } from "../src/providers/trace-bridge.mjs";
@@ -1035,6 +1036,31 @@ test("retention removes expired trace events but preserves current events and ad
     assert.equal(database.prepare("SELECT count(*) AS n FROM trace_turn_event").get().n, 1);
     database.close();
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("trace tool report joins requests through a covering index and preserves timestamp fallback", () => {
+  const root = temporaryRoot();
+  let database;
+  try {
+    const { config } = fixtureConfig(root);
+    database = openStateDatabase(config);
+    const common = { provider: "zcode", adapterId: "openadam.zcode-model-io", adapterVersion: "0.1.0", sourceId: "a".repeat(64), sourceFormat: "zcode-model-io-jsonl", requestHash: "b".repeat(64) };
+    putTraceModelStep(database, { ...common, eventId: "c".repeat(64), occurredAtMs: 200, status: "completed", recordedAtMs: 200 });
+    putTraceToolEvent(database, { ...common, eventId: "d".repeat(64), occurredAtMs: null, kind: "tool-call", toolName: "exec", status: "observed", recordedAtMs: 50 });
+    putTraceToolEvent(database, { ...common, eventId: "e".repeat(64), occurredAtMs: 50, kind: "tool-call", toolName: "exec", status: "observed", recordedAtMs: 300 });
+    let query;
+    const measured = { prepare(sql) { query = sql; return database.prepare(sql); } };
+    assert.equal(traceToolEventSummaryRows(measured, 100)[0].tool_calls, 1);
+    const plan = database.prepare(`EXPLAIN QUERY PLAN ${query}`).all(100);
+    assert.ok(plan.some((row) => /SEARCH step USING COVERING INDEX.*request_hash=/u.test(row.detail)), JSON.stringify(plan));
+    database.close();
+    database = openStateDatabase(config);
+    assert.equal(traceToolEventSummaryRows(database, 100)[0].tool_calls, 1);
+  } finally {
+    database?.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
