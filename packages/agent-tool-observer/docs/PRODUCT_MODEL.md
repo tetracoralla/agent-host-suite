@@ -129,6 +129,13 @@ and provider error text are not columns. Trace cursors and adapter health are
 operational state; time-bounded model, tool, offer, and turn observations are
 removed by ordinary retention.
 
+On macOS the scheduled process keeps a reduced CPU priority, with ordinary
+disk scheduling. Discretionary background I/O can starve SQLite reads during
+foreground disk activity and delay a five-minute report for many minutes.
+Catalog aggregation selects the time-bounded model steps once before joining
+their offered tools, rather than fetching the same model-step row for every
+catalog member. These choices preserve the report's counts and time window.
+
 Direct Runtime observations retain only hashed work-order/call identity,
 versioned semantic target and provider identity, binding/contract digests,
 terminal status and stable error code, timing, cold/warm session state, and
