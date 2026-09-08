@@ -6,10 +6,14 @@ import { exceedsJsonDepth } from "./json-depth.mjs";
 
 const READ_BUFFER_BYTES = 64 * 1024;
 
-function assertRealDirectory(root) {
+function resolveConfiguredDirectory(root) {
   let stat;
+  let resolved;
   try {
-    stat = fs.lstatSync(root);
+    // Resolve only the explicitly selected root, including a relocated archive.
+    // Discovery below this canonical boundary still skips every symbolic link.
+    resolved = fs.realpathSync(root);
+    stat = fs.lstatSync(resolved);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -17,7 +21,7 @@ function assertRealDirectory(root) {
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new ObserverError("SOURCE_ROOT_INVALID", "Provider source root must be a real directory");
   }
-  return fs.realpathSync(root);
+  return resolved;
 }
 
 export function discoverJsonlFiles(roots, options = {}) {
@@ -26,12 +30,14 @@ export function discoverJsonlFiles(roots, options = {}) {
   const minimumMtimeMs = options.minimumMtimeMs ?? 0;
   const files = [];
   let presentRoots = 0;
+  const seenRoots = new Set();
   let skippedSymlinks = 0;
   let truncated = false;
 
   for (const configuredRoot of roots) {
-    const realRoot = assertRealDirectory(configuredRoot);
-    if (realRoot === null) continue;
+    const realRoot = resolveConfiguredDirectory(configuredRoot);
+    if (realRoot === null || seenRoots.has(realRoot)) continue;
+    seenRoots.add(realRoot);
     presentRoots += 1;
     const pending = [{ directory: realRoot, depth: 0 }];
     while (pending.length > 0 && files.length < maximumFiles) {

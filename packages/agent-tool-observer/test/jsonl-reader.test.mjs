@@ -177,3 +177,34 @@ test("a fully consumed source reports no backlog at exact byte or line limits", 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("relocated configured roots are canonicalized once while nested links stay excluded", () => {
+  const parent = temporaryRoot();
+  const outside = temporaryRoot();
+  try {
+    const archive = path.join(parent, "archive");
+    const alias = path.join(parent, "configured-root");
+    fs.mkdirSync(archive);
+    fs.writeFileSync(path.join(archive, "events.jsonl"), '{}\n');
+    fs.writeFileSync(path.join(outside, "secret.jsonl"), '{}\n');
+    fs.symlinkSync(archive, alias, "junction");
+    fs.symlinkSync(outside, path.join(archive, "nested-link"), "junction");
+    const found = discoverJsonlFiles([alias, archive]);
+    assert.equal(found.presentRoots, 1);
+    assert.deepEqual(found.files.map((file) => file.filePath), [fs.realpathSync(path.join(archive, "events.jsonl"))]);
+    assert.equal(found.skippedSymlinks, 1);
+    const original = fs.readFileSync(found.files[0].filePath);
+    const records = [];
+    readJsonlIncremental({ filePath: found.files[0].filePath, ...LIMITS, onRecord: (record) => records.push(record) });
+    assert.deepEqual(records, [{}]);
+    assert.deepEqual(fs.readFileSync(found.files[0].filePath), original);
+    fs.unlinkSync(alias);
+    fs.symlinkSync(path.join(parent, "absent"), alias, "junction");
+    assert.equal(discoverJsonlFiles([alias, archive]).files.length, 1);
+    assert.throws(() => discoverJsonlFiles([path.join(archive, "events.jsonl")]), { code: "SOURCE_ROOT_INVALID" });
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});

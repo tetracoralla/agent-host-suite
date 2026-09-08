@@ -577,3 +577,35 @@ test("an additive dogfood schema 12 marker is normalized so a v11 rollback reade
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("Codex collection survives a root relocation and remains idempotent", () => {
+  const root = temporaryRoot();
+  let database;
+  try {
+    const { config, paths } = fixtureConfig(root, { ATO_DISABLE_PROVIDERS: "claude,zcode" });
+    const now = Date.parse("2026-08-21T12:00:00.000Z");
+    const records = [
+      { timestamp: "2026-08-21T10:00:00.000Z", type: "session_meta", payload: { id: "relocated-session" } },
+      { timestamp: "2026-08-21T10:00:01.000Z", type: "response_item", payload: { type: "function_call", call_id: "before-move", name: "mcp__laniakea__read_mind_map" } }
+    ];
+    const file = path.join(paths.codex, "rollout.jsonl");
+    writeJsonl(file, records);
+    database = openStateDatabase(config);
+    assert.equal(collect(database, config, now).status, "completed");
+    const archive = path.join(root, "relocated");
+    fs.renameSync(paths.codex, archive);
+    fs.symlinkSync(archive, paths.codex, "junction");
+    records.push({ timestamp: "2026-08-21T10:00:02.000Z", type: "response_item", payload: { type: "function_call", call_id: "after-move", name: "mcp__laniakea__search_mind_map" } });
+    const archivedFile = path.join(archive, "rollout.jsonl");
+    writeJsonl(archivedFile, records);
+    const bytes = fs.readFileSync(archivedFile);
+    assert.equal(collect(database, config, now + 1000).status, "completed");
+    assert.equal(database.prepare("SELECT count(*) AS n FROM tool_event WHERE provider='codex'").get().n, 2);
+    assert.equal(collect(database, config, now + 2000).status, "completed");
+    assert.equal(database.prepare("SELECT count(*) AS n FROM tool_event WHERE provider='codex'").get().n, 2);
+    assert.deepEqual(fs.readFileSync(archivedFile), bytes);
+  } finally {
+    database?.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
