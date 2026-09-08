@@ -93,6 +93,10 @@ export function traceToolEventSummaryRows(database, cutoffMs) {
 
 export function traceToolOfferRows(database, cutoffMs, limit = 100) {
   return database.prepare(`
+    WITH selected_steps AS MATERIALIZED (
+      SELECT event_id, provider, adapter_id, occurred_at_ms
+      FROM trace_model_step WHERE occurred_at_ms >= ?
+    )
     SELECT
       step.provider, step.adapter_id, offer.tool_name, offer.tool_namespace,
       offer.route_class, offer.is_openadam,
@@ -100,8 +104,7 @@ export function traceToolOfferRows(database, cutoffMs, limit = 100) {
       min(step.occurred_at_ms) AS first_observed_at_ms,
       max(step.occurred_at_ms) AS last_observed_at_ms
     FROM trace_tool_offer AS offer
-    JOIN trace_model_step AS step ON step.event_id = offer.event_id
-    WHERE step.occurred_at_ms >= ?
+    JOIN selected_steps AS step ON step.event_id = offer.event_id
     GROUP BY step.provider, step.adapter_id, offer.tool_name,
       offer.tool_namespace, offer.route_class, offer.is_openadam
     ORDER BY observed_request_catalogs DESC, step.provider, offer.tool_name

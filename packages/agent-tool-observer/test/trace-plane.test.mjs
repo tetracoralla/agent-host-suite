@@ -11,7 +11,7 @@ import {
   putTraceToolEvent,
   putTraceTurnEvent
 } from "../src/db.mjs";
-import { traceToolEventSummaryRows } from "../src/db-read.mjs";
+import { traceToolEventSummaryRows, traceToolOfferRows } from "../src/db-read.mjs";
 import { buildReport } from "../src/report.mjs";
 import { maintainDatabase } from "../src/maintenance.mjs";
 import { scanTraceBridges, validateTraceBridgeRecord } from "../src/providers/trace-bridge.mjs";
@@ -1059,6 +1059,33 @@ test("trace tool report joins requests through a covering index and preserves ti
     database.close();
     database = openStateDatabase(config);
     assert.equal(traceToolEventSummaryRows(database, 100)[0].tool_calls, 1);
+  } finally {
+    database?.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("offered-tool reports count selected model-step catalogs once with bounded results", () => {
+  const root = temporaryRoot();
+  let database;
+  try {
+    const { config } = fixtureConfig(root);
+    database = openStateDatabase(config);
+    const common = { provider: "zcode", adapterId: "openadam.zcode-model-io", adapterVersion: "0.1.0", sourceId: "a".repeat(64), sourceFormat: "zcode-model-io-jsonl", status: "completed", recordedAtMs: 300 };
+    for (const [id, time, provider] of [["b", 50, "zcode"], ["c", 100, "zcode"], ["d", 200, "zcode"], ["e", null, "zcode"], ["f", 150, "claude"]]) {
+      putTraceModelStep(database, { ...common, eventId: id.repeat(64), occurredAtMs: time, provider });
+      for (const name of ["alpha", "beta"])
+        database.prepare("INSERT INTO trace_tool_offer VALUES (?, ?, ?, ?, ?)").run(id.repeat(64), name, null, "unknown", 0);
+    }
+    const rows = traceToolOfferRows(database, 100);
+    assert.deepEqual(rows.map(({ provider, tool_name, observed_request_catalogs, first_observed_at_ms, last_observed_at_ms }) => ({ provider, tool_name, observed_request_catalogs, first_observed_at_ms, last_observed_at_ms })), [
+      { provider: "zcode", tool_name: "alpha", observed_request_catalogs: 2, first_observed_at_ms: 100, last_observed_at_ms: 200 },
+      { provider: "zcode", tool_name: "beta", observed_request_catalogs: 2, first_observed_at_ms: 100, last_observed_at_ms: 200 },
+      { provider: "claude", tool_name: "alpha", observed_request_catalogs: 1, first_observed_at_ms: 150, last_observed_at_ms: 150 },
+      { provider: "claude", tool_name: "beta", observed_request_catalogs: 1, first_observed_at_ms: 150, last_observed_at_ms: 150 }
+    ]);
+    assert.deepEqual(traceToolOfferRows(database, 100, 1), rows.slice(0, 1));
+    assert.deepEqual(traceToolOfferRows(database, 201), []);
   } finally {
     database?.close();
     fs.rmSync(root, { recursive: true, force: true });

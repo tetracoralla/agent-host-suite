@@ -308,14 +308,12 @@ export function renderLaunchAgent({ nodePath, cliPath, stdoutPath, stderrPath, d
   <key>StartInterval</key>
   <integer>${intervalSeconds}</integer>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>ATO_DIRECT_RUNTIME_LOGS</key>
     <string>${xmlEscape(directRuntimeLogValue)}</string>
   </dict>
-  <key>LowPriorityIO</key>
-  <true/>
   <key>Nice</key>
   <integer>10</integer>
   <key>ThrottleInterval</key>
