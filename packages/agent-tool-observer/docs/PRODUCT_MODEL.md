@@ -57,7 +57,9 @@ short-lived `collect` command at login and every five minutes. Each run:
    as an error, and never overlaps a live holder;
 2. resolves each explicitly configured provider root to its canonical directory,
    so a relocated root may be a directory link; discovers regular JSONL files
-   beneath that boundary without following links found inside it;
+   beneath that boundary without following links found inside it; the selected
+   root spelling keys the hashed cursor, while file identity still guards reuse
+   after a relocation or replacement;
 3. reads only bytes after each hashed source cursor, retaining an incomplete
    final line for the next run; an incremental Codex source fails closed if its
    bounded prefix cannot recover the session identity needed for correlation;

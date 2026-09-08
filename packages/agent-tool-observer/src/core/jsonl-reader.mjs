@@ -39,6 +39,9 @@ export function discoverJsonlFiles(roots, options = {}) {
     if (realRoot === null || seenRoots.has(realRoot)) continue;
     seenRoots.add(realRoot);
     presentRoots += 1;
+    // Keep the selected root spelling stable for hashed cursors across a move.
+    const selectedRoot = path.resolve(configuredRoot);
+    const cursorRoot = path.join(fs.realpathSync(path.dirname(selectedRoot)), path.basename(selectedRoot));
     const pending = [{ directory: realRoot, depth: 0 }];
     while (pending.length > 0 && files.length < maximumFiles) {
       const current = pending.pop();
@@ -77,6 +80,7 @@ export function discoverJsonlFiles(roots, options = {}) {
         }
         files.push({
           filePath: candidate,
+          sourceIdentityPath: path.join(cursorRoot, path.relative(realRoot, candidate)),
           sizeBytes: stat.size,
           mtimeMs: stat.mtimeMs,
           fileIdentity: `${stat.dev}:${stat.ino}`

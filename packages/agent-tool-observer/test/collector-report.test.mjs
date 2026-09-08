@@ -595,6 +595,10 @@ test("Codex collection survives a root relocation and remains idempotent", () =>
     const archive = path.join(root, "relocated");
     fs.renameSync(paths.codex, archive);
     fs.symlinkSync(archive, paths.codex, "junction");
+    const afterMove = collect(database, config, now + 500);
+    assert.equal(afterMove.status, "completed");
+    assert.equal(afterMove.providers.find((item) => item.provider === "codex").bytesRead, 0);
+    assert.equal(database.prepare("SELECT count(*) AS n FROM source_cursor").get().n, 1);
     records.push({ timestamp: "2026-08-21T10:00:02.000Z", type: "response_item", payload: { type: "function_call", call_id: "after-move", name: "mcp__laniakea__search_mind_map" } });
     const archivedFile = path.join(archive, "rollout.jsonl");
     writeJsonl(archivedFile, records);
