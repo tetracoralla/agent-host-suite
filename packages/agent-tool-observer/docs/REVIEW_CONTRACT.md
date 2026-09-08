@@ -16,9 +16,9 @@ Completing every item below cannot by itself end the review.
 
 1. Production code has no networking import, URL source, listener, or model
    invocation.
-2. Provider files and databases are opened read-only. Source discovery never
-   follows symlinks and accepts only regular files beneath exact configured
-   roots. Tests compare representative source bytes before and after collection.
+2. Provider files and databases are opened read-only. Source discovery resolves explicitly configured roots to canonical
+   directories, skips all links encountered beneath them, and accepts only
+   regular files within those boundaries. Tests compare representative source bytes before and after collection.
 3. Persisted schemas contain no prompt, message, reasoning, path, command,
    argument, input/result content, output content, or provider error message.
    Source, session, turn, call, and message identifiers are context-hashed

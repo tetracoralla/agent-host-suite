@@ -20,7 +20,8 @@ language.
 - Hash session, turn, call, message, and source identifiers before storage.
   Tool names and provider names are the only ordinary source strings retained.
 - Provider adapters are read-only and failure-isolated. Codex and Claude JSONL
-  readers skip symlinks, bound bytes and line sizes, retain partial-line
+  readers resolve configured root aliases once, skip nested symlinks, bound bytes
+  and line sizes, retain partial-line
   cursors, and tolerate unknown records. ZCode opens its SQLite store read-only
   and must never copy raw provider metadata or error text.
 - Automatic collection is a macOS LaunchAgent or current-user Windows scheduled

@@ -58,7 +58,7 @@ export function scanJsonlProvider(options) {
       health.backlogSources += 1;
       continue;
     }
-    const sourceId = hashIdentifier(`source:${options.provider}`, file.filePath);
+    const sourceId = hashIdentifier(`source:${options.provider}`, file.sourceIdentityPath);
     const cursor = getCursor(options.database, sourceId);
     const identityMatches = cursor?.file_identity === file.fileIdentity;
     const sizeMatches = cursor && cursor.offset_bytes <= file.sizeBytes;

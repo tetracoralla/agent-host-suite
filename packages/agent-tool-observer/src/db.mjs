@@ -149,6 +149,7 @@ CREATE INDEX IF NOT EXISTS trace_model_step_time_idx ON trace_model_step(occurre
 CREATE INDEX IF NOT EXISTS trace_model_step_provider_idx ON trace_model_step(provider, occurred_at_ms);
 CREATE INDEX IF NOT EXISTS trace_model_step_turn_idx ON trace_model_step(provider, turn_hash, occurred_at_ms);
 CREATE INDEX IF NOT EXISTS trace_model_step_session_idx ON trace_model_step(provider, session_hash, occurred_at_ms);
+CREATE INDEX IF NOT EXISTS trace_model_step_request_idx ON trace_model_step(provider, adapter_id, request_hash, occurred_at_ms);
 
 CREATE TABLE IF NOT EXISTS trace_tool_offer (
   event_id TEXT NOT NULL REFERENCES trace_model_step(event_id) ON DELETE CASCADE,
