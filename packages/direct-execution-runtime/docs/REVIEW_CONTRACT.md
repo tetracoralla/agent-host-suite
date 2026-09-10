@@ -1,16 +1,15 @@
 # Review contract
 
-Review current source and runtime; `.verify/`, old pilot output, and prior green
-checks are only routes back to current facts. This contract records durable
-host boundaries and reproduced high-risk sequences. It is minimum coverage,
-not a feature inventory, fixed test script, or completion runway.
+Use the Host [review contract](../../../docs/REVIEW_CONTRACT.md) for scope,
+evidence selection and completion. This document supplies runtime-specific
+semantics and failure cases; read the sections affected by the current task.
+Inspect current callers, transports and recovery paths when they bear on the
+outcome. Prior pilot output is a route back to evidence, not current proof.
 
-Before applying the named checks, reconstruct the current library, CLI, local
-service protocol, provider transports, resolution surface, limits, and
-failure/recovery states from source and runtime. Perform and report at least one
-independent discovery route derived from that model rather than from this file,
-test names, prior findings, or the changed-file list. Completing every item
-below cannot by itself end the review.
+Product semantics remain binding. Internal algorithms and historical test
+recipes may evolve when those semantics are preserved and the replacement is
+verified. Projection limits do not restrict the construction Agent's ability
+to compare approaches or implement authorized improvements.
 
 ## Durable invariants
 
@@ -130,6 +129,9 @@ current fixture and command spelling.
 
 ## Validation lanes
 
+Choose the entries that establish the current claim. This is not a required
+sequence or an instruction to run every pilot after every change.
+
 - **Development regression:** `npm run check`, current schemas, repository and
   package invariants, unit/integration tests, and CLI behavior.
 - **Runtime direct flow:** `npm run check:local-pilots` plus any focused pilot
@@ -168,6 +170,7 @@ current fixture and command spelling.
 - **Runtime human flow:** diagnostic CLI only; no product UI is promised.
 - **Business/experience acceptance:** owner judgment, separate from all lanes.
 
-Every PASS names the current command or flow and observable. End with
-`tools-dev workspace escalations`, including any Capability/Procedure drift,
-installed-host conflict, adjacent provider dependency, or shared resource risk.
+Support conclusions with the relevant command or observed flow. Report actual
+Capability/Procedure drift, installed-host conflict, adjacent provider
+dependency or shared-resource concerns when found, without a fixed section or
+finding count.

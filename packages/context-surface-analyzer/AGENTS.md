@@ -1,8 +1,8 @@
 # Context Surface Analyzer package contract
 
 This is a backstage Agent Host analysis package. Read `docs/PRODUCT_MODEL.md`
-and `docs/REVIEW_CONTRACT.md` before changing behavior, schemas, limits, or
-claims.
+and the affected sections of `docs/REVIEW_CONTRACT.md` before changing behavior,
+schemas, limits, or claims.
 
 ## Authority and boundaries
 
@@ -41,5 +41,8 @@ claims.
 - Do not commit, push, publish, install globally, or edit a sibling repository
   without explicit owner authorization.
 
-Run `npm run check` before handoff. Report development regression, runtime Agent
-flow, runtime human flow, and owner business/experience acceptance separately.
+Select validation using the Host [review contract](../../docs/REVIEW_CONTRACT.md).
+Exercise affected core and carrier behavior; `npm run check` is the broad
+development entrypoint. Inspect the rendered flow when UI behavior changes.
+Keep development, installed Agent flow and user experience distinct when they
+affect the conclusion.

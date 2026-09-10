@@ -7,3 +7,6 @@ dist/
 *.sock
 catalog/local/
 .codex/
+.v2c/
+.video_agent/
+.venv/

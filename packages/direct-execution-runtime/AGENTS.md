@@ -1,7 +1,7 @@
 # Direct Execution Runtime package contract
 
-Read `docs/PRODUCT_MODEL.md` and `docs/REVIEW_CONTRACT.md` before changing or
-reviewing this runtime.
+Read `docs/PRODUCT_MODEL.md` for runtime semantics and the affected sections of
+`docs/REVIEW_CONTRACT.md` when changing or reviewing behavior.
 
 This Agent Host package owns host execution mechanics for already selected,
 structured, read-only provider calls. It does not own domain Capability
@@ -45,7 +45,9 @@ or a model-facing generic invocation tool.
   Do not commit, push, publish,
   install globally, or deploy without explicit owner authorization.
 
-Run `npm run check` for development regression and `npm run check:local-pilots`
-for the maintainer pilots currently registered by source. Derive provider count
-and identity from the current runner rather than this prose. Report installed-
-host, performance/load, and owner business acceptance separately.
+Select validation using the Host [review contract](../../docs/REVIEW_CONTRACT.md).
+Run affected regressions and real-provider pilots when the changed boundary
+requires them. `npm run check` is the broad development entrypoint;
+`npm run check:local-pilots` exercises the maintainer integrations registered by
+source. Derive provider identities from the runner. Keep installed-host,
+performance and owner-acceptance claims distinct when relevant.

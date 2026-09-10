@@ -11,8 +11,8 @@ boundary being changed:
 - `docs/RELEASE.md`, `docs/LOCAL_DOGFOOD.md`, or the platform guide for build,
   installation, packaging, or release work;
 - `docs/TERMINOLOGY.md` for product copy, naming, or stable identifiers; and
-- `docs/REVIEW_CONTRACT.md` for any review and for changes that touch a listed
-  high-risk seam.
+- the relevant sections of `docs/REVIEW_CONTRACT.md` for review scope,
+  evidence selection and affected high-risk seams.
 
 Do not treat README prose, a dated history entry, a prior generated catalog, or
 an earlier runtime report as current installation or release authority. Profile
@@ -49,6 +49,11 @@ source.
   provider value, universal Agent-app support, or runtime health.
 - Use Apache-2.0 and the public author identity `openAdam`.
 
-Run `npm run check` before proposing a change. Run the macOS app build and its
-actual setup/status/recovery flow separately when that surface changes. Do not
-commit, push, tag, publish, sign, or notarize without explicit owner authority.
+Verify the changed behavior and relevant consumers. Use `npm run check` for
+broad development regression when shared changes or unresolved interactions
+warrant it. Documentation-only changes need semantic, link and relevant
+consumer checks. Run the app build and affected setup/status/recovery flows
+when that surface changes. The review contract selects evidence from the
+intended outcome; it does not require unrelated checks before proposing an
+improvement or authorize extra reviewers. Do not commit, push, tag, publish,
+sign, or notarize without explicit owner authority.

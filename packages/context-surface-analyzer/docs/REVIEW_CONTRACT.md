@@ -1,8 +1,9 @@
 # Review contract
 
-This is the minimum current-source review route. Passing it establishes only
-the named development checks and local runtime observations; it is not
-installed-host routing or owner visual acceptance.
+Use the Host [review contract](../../../docs/REVIEW_CONTRACT.md) for scope,
+evidence selection and completion. Read the analysis, transport or UI sections
+affected by the task. Local checks establish their observed behavior; installed
+routing and owner experience require their own evidence when claimed.
 
 ## Authority chain
 
@@ -15,7 +16,11 @@ installed-host routing or owner visual acceptance.
 6. `test/` holds executable regressions. `npm run check` is the full local
    development entry point.
 
-## Required commands
+## Validation entrypoints
+
+Choose the entrypoint that exercises the affected behavior. The full check is
+available for broad regression; start the UI only when a rendered flow needs
+inspection. This list is not a mandatory sequence for every change.
 
 ```sh
 npm run check
@@ -85,15 +90,18 @@ until the product ships a real 2026 per-era transport.
 
 ## Reporting lanes
 
+Distinguish these observations when they affect the conclusion; omit unrelated
+lanes rather than treating their absence as a defect.
+
 - **development regression:** syntax, build, unit/integration tests, and smoke;
 - **runtime Agent flow:** actual stdio MCP lifecycle and calls, then installed
   plugin activation and cold-host selection as a separate observation;
 - **runtime human flow:** actual local HTTP entry, analyze, compare, and invalid
   recovery;
-- **business/experience acceptance:** owner judgment remains pending.
+- **business/experience acceptance:** report the owner's actual decision when
+  available; development checks do not supply it.
 
-## Tools-dev workspace escalations
-
-Report any proposed shared schema, provider manifest, Observer/Evals coupling,
-installed namespace conflict, or aggregate context/resource concern to the
-workspace owner. Do not solve it with a private local standard.
+Report a shared schema, provider manifest, Observer/Evals coupling, installed
+namespace conflict or aggregate resource concern when it affects the task.
+Do not solve shared semantic drift with a private local standard; no fixed
+escalation section is required.
