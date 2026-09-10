@@ -1,8 +1,8 @@
 # Agent Tool Observer package contract
 
-Read `docs/PRODUCT_MODEL.md` and `docs/REVIEW_CONTRACT.md` before changing
-provider adapters, storage, automatic collection, privacy projection, or claim
-language.
+Read `docs/PRODUCT_MODEL.md` and the affected sections of
+`docs/REVIEW_CONTRACT.md` before changing provider adapters, storage, automatic
+collection, privacy projection, or claim language.
 
 - This Agent Host package owns passive, owner-local observation of Agent tool-use and
   model-usage metadata from explicitly supported client stores.
@@ -63,6 +63,9 @@ language.
 - Do not commit, push, publish, notify, delete history, or modify another
   repository without explicit owner authorization.
 
-Review the current product before applying the review contract and include one
-independent discovery route. Report development regression, installed automatic
-runtime, provider coverage, and owner business acceptance separately.
+Select validation using the Host [review contract](../../docs/REVIEW_CONTRACT.md)
+and the changed collection, privacy or report boundary. Explore unresolved
+interactions from current behavior. Passive-report restrictions do not prevent
+the construction Agent from reasoning, comparing alternatives or making
+authorized improvements. Keep development, installed collection, provider
+coverage and owner-acceptance claims distinct when relevant.

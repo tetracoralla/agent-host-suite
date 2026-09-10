@@ -1,16 +1,15 @@
 # Review contract
 
-Review the current observer as one passive collection, local persistence,
-reporting, and scheduled-runtime product. This contract records durable claim
-boundaries and high-risk seams; it is minimum coverage, not a reasoning script
-or completion runway.
+Use the Host [review contract](../../../docs/REVIEW_CONTRACT.md) for scope,
+evidence selection and completion. Select the collection, storage, reporting
+or scheduled-runtime boundaries affected by the task, then inspect the current
+sources, consumers and failure paths needed to verify them.
 
-Before following the named checks, reconstruct the current supported source
-families, explicit import surfaces, schemas, report fields, retention behavior,
-and installed LaunchAgent from source and runtime. Perform and report at least
-one independent discovery route derived from those current surfaces rather
-than from this file, test names, prior findings, or the changed-file list.
-Completing every item below cannot by itself end the review.
+The privacy and reporting limits below govern this passive product. They do
+not prevent the construction Agent from reasoning about current evidence,
+comparing alternatives or implementing authorized improvements. Internal
+mechanisms may change when the intended privacy, semantics and recovery
+outcomes are preserved and verified.
 
 ## Privacy and authority
 
@@ -132,6 +131,9 @@ Completing every item below cannot by itself end the review.
 
 ## Validation lanes
 
+Select evidence for the affected claim; these entries do not require a new
+installation, a fixed discovery count or every source adapter on each change.
+
 - **Development regression:** current registered source adapters and explicit
   importers; repeat collection; partial, malformed, oversized, truncated,
   replaced, and symlinked sources; source-byte conservation; schema/privacy and
@@ -153,6 +155,6 @@ Completing every item below cannot by itself end the review.
 - **Owner business acceptance:** whether the passive portfolio view changes a
   useful decision remains owner judgment, separate from the lanes above.
 
-Every PASS names the current command or flow and observable. End with
-`tools-dev workspace escalations`, including any Agent Host schema consumer,
-Capability/Procedure boundary, installed-runtime, or shared-resource concern.
+Support conclusions with the relevant command or observed flow. Report actual
+Agent Host consumer, Capability/Procedure, installed-runtime or shared-resource
+concerns when found; no fixed ending or empty escalation section is required.

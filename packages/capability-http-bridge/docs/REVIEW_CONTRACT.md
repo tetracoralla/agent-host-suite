@@ -1,8 +1,9 @@
 # Review contract
 
-Review the current bridge as one local adapter, Provider Instance descriptor,
-credential lookup, remote HTTP boundary, and Direct Runtime composition. A
-loopback green check is not a production endpoint or privacy approval.
+Use the Host [review contract](../../../docs/REVIEW_CONTRACT.md) for scope,
+evidence selection and completion. Select the local adapter, instance,
+credential, HTTP or Direct Runtime boundaries affected by the task. A loopback
+check cannot establish production endpoint availability or privacy approval.
 
 ## Durable invariants
 
@@ -26,6 +27,9 @@ loopback green check is not a production endpoint or privacy approval.
 
 ## Current checks
 
+`npm run check` is the broad development entrypoint. Select affected tests or
+pilots for a bounded change; do not probe a real endpoint merely to review docs.
+
 ```sh
 npm run check
 ```
@@ -36,7 +40,7 @@ Capability Provider, freezes adapter plus instance identities, crosses a real
 loopback HTTP server, validates the result through the current Profile schemas,
 and verifies per-call process cleanup.
 
-Separately report:
+Keep the following claims distinct when relevant to the task:
 
 - repository regression;
 - Direct Runtime carrier pilot;
@@ -46,8 +50,8 @@ Separately report:
 - Capability conformance and substitution;
 - owner acceptance.
 
-Independent review should also inspect contradictions next to the covered
-route: alternate URL spellings, IPv6 and DNS rebinding assumptions, Keychain
+Explore unresolved interactions next to the affected route, such as alternate
+URL spellings, IPv6 and DNS rebinding assumptions, Keychain
 failure text, streaming bodies without Content-Length, response compression,
 timeout during body read, session replacement, and whether any Host UI or
 resolver overstates local execution as no network egress.

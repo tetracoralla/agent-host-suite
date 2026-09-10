@@ -1,7 +1,7 @@
 # Capability HTTP Bridge package contract
 
-Read `docs/PRODUCT_MODEL.md` and `docs/REVIEW_CONTRACT.md` before changing or
-reviewing this package.
+Read `docs/PRODUCT_MODEL.md` and the affected sections of
+`docs/REVIEW_CONTRACT.md` when changing or reviewing this package's behavior.
 
 This Agent Host internal package is a local transport bridge for one already selected and typed
 Capability Provider instance. It is not a Capability, provider registry,
@@ -24,6 +24,8 @@ protocol.
 - Do not commit, publish, install, or configure a real remote endpoint without
   explicit owner authority.
 
-Run `npm run check`. Report repository regression, Direct Runtime pilot,
-remote endpoint/credential availability, installed Agent flow, and owner
-acceptance separately.
+Select validation using the Host [review contract](../../docs/REVIEW_CONTRACT.md).
+Use affected adapter tests and the Direct Runtime pilot for transport changes;
+`npm run check` is the broad development entrypoint. Keep local regression,
+remote endpoint/credential availability and installed behavior distinct when
+relevant; documentation edits do not require a production endpoint probe.
