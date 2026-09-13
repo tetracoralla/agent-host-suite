@@ -102,7 +102,8 @@ bound release. This document defines profile behavior, not a copied inventory:
   required Host runtime.
 - `featured` extends standard with the independently released tools admitted
   for external users (currently Armorial). Membership is the profile file, not
-  `local-dogfood`.
+  `local-dogfood`. It requires a bound compatibility release and rejects
+  development-root installation.
 - `observability` extends standard with opt-in local observation and analysis.
   Those components remain backstage and add no tools or MCP processes to an
   ordinary Agent session. Consent remains off until the user selects the

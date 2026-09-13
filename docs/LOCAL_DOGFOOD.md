@@ -4,7 +4,9 @@ Local dogfood makes the development Mac behave like an external Agent Host
 installation while Agents continue to work in authorized source repositories.
 It isolates executable provenance, not workspace access. This is the
 **tools-dev** path. It is not the external-user download, not a public
-marketplace, and not a notarized DMG. Current installed
+marketplace, and not a notarized DMG. The `featured` profile is the
+external-user admission list and is not this dogfood inventory; see
+[`FEATURED_CATALOG.md`](FEATURED_CATALOG.md). Current installed
 state and rerunnable checks control runtime claims; this document defines the
 stable boundary only. Session discovery vs Host working-set status is in
 [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md).

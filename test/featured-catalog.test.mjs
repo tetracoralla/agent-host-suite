@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { doctor } from '../src/doctor.mjs'
-import { setActiveTools, toolSetStatus } from '../src/lifecycle.mjs'
+import { setActiveTools, toolSetStatus, updateInstallation } from '../src/lifecycle.mjs'
 import { defaultToolsForProfile } from '../src/profile.mjs'
 import { setup } from '../src/setup.mjs'
 import { loadState, prepareStatePaths } from '../src/state.mjs'
@@ -41,6 +41,9 @@ test('featured setup fails closed against the tracked unbound catalog', async ()
   const cli = spawnSync(process.execPath, [cliPath, 'setup', '--profile', 'featured', '--no-service', '--dry-run', '--json'], { encoding: 'utf8' })
   assert.equal(cli.status, 1)
   assert.equal(JSON.parse(cli.stderr).error.code, 'RELEASE_UNBOUND')
+  const unknownProfile = spawnSync(process.execPath, [cliPath, 'tools', 'set', '--profile', 'not-a-catalog', '--json'], { encoding: 'utf8' })
+  assert.equal(unknownProfile.status, 1)
+  assert.equal(JSON.parse(unknownProfile.stderr).error.code, 'PROFILE_UNKNOWN')
 })
 
 test('featured setup cannot use a development root as a substitute for a bound catalog', async (t) => {
@@ -53,7 +56,29 @@ test('featured setup cannot use a development root as a substitute for a bound c
       profile: 'featured', hosts: [], developmentRoot: root, stateRoot,
       noService: true, dryRun: true, enableObservability: false,
     }),
-    (error) => error.code === 'PROFILE_COMPONENTS_MISSING' && error.details?.components?.includes('armorial'),
+    (error) => error.code === 'FEATURED_PROFILE_RELEASE_REQUIRED',
+  )
+  const cli = spawnSync(process.execPath, [
+    cliPath, 'setup', '--profile', 'featured', '--development-root', root,
+    '--no-service', '--dry-run', '--json',
+  ], { encoding: 'utf8' })
+  assert.equal(cli.status, 1)
+  assert.equal(JSON.parse(cli.stderr).error.code, 'FEATURED_PROFILE_RELEASE_REQUIRED')
+})
+
+test('featured cannot be selected by updating a development install without a bound catalog', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-featured-update-development-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-featured-update-development-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  await setup({
+    profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot,
+    noService: true, dryRun: false, enableObservability: false,
+  }, releaseDependencies(fake, { hostSkillHome: join(stateRoot, 'host-home') }))
+  await assert.rejects(
+    updateInstallation({ profile: 'featured', stateRoot, dryRun: true }, releaseDependencies(fake)),
+    (error) => error.code === 'FEATURED_PROFILE_RELEASE_REQUIRED',
   )
 })
 
@@ -113,6 +138,7 @@ test('a bound featured profile is selectable through setup, profiles list, and t
   const membership = report.checks.find((item) => item.id === 'profile.catalog')
   assert.equal(membership?.status, 'ok')
   assert.equal(membership.detail.profile, 'featured')
+  assert.deepEqual(membership.detail.defaultAgentComponents, ['math-anchor', 'migratory-time', 'armorial'])
 })
 
 test('doctor reports missing featured Agent tools', async () => {
@@ -134,4 +160,5 @@ test('doctor reports missing featured Agent tools', async () => {
   const membership = report.checks.find((item) => item.id === 'profile.catalog')
   assert.equal(membership.status, 'error')
   assert.deepEqual(membership.detail.missing, ['armorial'])
+  assert.deepEqual(membership.detail.defaultAgentComponents, ['math-anchor', 'migratory-time', 'armorial'])
 })

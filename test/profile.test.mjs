@@ -74,6 +74,7 @@ test('featured membership matches the catalog document and fails closed without 
   assert.match(catalogDoc, /profiles list/u)
   assert.match(catalogDoc, /armorial/u)
   assert.match(catalogDoc, /draft-unbound/u)
+  assert.match(catalogDoc, /--development-root/u)
   assert.match(catalogDoc, /not a public marketplace/u)
   assert.match(catalogDoc, /Publishing a notarized DMG, GitHub Release, or public marketplace/u)
   const standardOnly = {

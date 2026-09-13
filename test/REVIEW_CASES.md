@@ -187,7 +187,7 @@ Start with [profile.test.mjs](profile.test.mjs), [featured-catalog.test.mjs](fea
 The `featured` profile is the external admission list, including Armorial,
 and is not `local-dogfood`. `profiles list` and `tools set --profile` select
 that JSON membership through the existing setup/tools APIs. A tracked
-`draft-unbound` catalog still fails closed.
+`draft-unbound` catalog and `--development-root` setup still fail closed.
 
 Installed components, Agent-visible components,
 and the smaller active tool set remain distinct. Backstage observation

@@ -73,7 +73,8 @@ agent-host tools set --profile featured
 agent-host doctor --deep --json
 ```
 
-跟踪的 `draft-unbound` catalog 上 setup 会失败。详见
+跟踪的 `draft-unbound` catalog 上 setup 会失败。`--development-root` 是
+tools-dev 路径，不是 featured。详见
 [精选目录 v1](docs/FEATURED_CATALOG.md)。
 
 ## 常用流程

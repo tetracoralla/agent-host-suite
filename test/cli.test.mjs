@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { human } from '../src/cli.mjs'
+import { listProfileIds } from '../src/profile.mjs'
 
 const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
 
@@ -167,7 +168,7 @@ test('human observability status renders monitoring state instead of crashing on
   assert.equal(notInstalled, 'Observability off · no Agent environment installed.')
 })
 
-test('profiles list names the featured admission set without a store', () => {
+test('profiles list names the featured admission set without a store', async () => {
   const listed = spawnSync(process.execPath, [cliPath, 'profiles', 'list', '--json'], { encoding: 'utf8' })
   assert.equal(listed.status, 0, listed.stderr)
   const catalog = JSON.parse(listed.stdout)
@@ -185,6 +186,7 @@ test('profiles list names the featured admission set without a store', () => {
   assert.equal(help.status, 0, help.stderr)
   assert.match(help.stdout, /agent-host profiles list/u)
   assert.match(help.stdout, /--profile standard\|featured\|developer\|observability\|local-dogfood/u)
+  for (const id of await listProfileIds()) assert.match(help.stdout, new RegExp(`\\b${id}\\b`, 'u'))
   const humanOutput = human(catalog)
   assert.match(humanOutput, /Featured catalog · not a marketplace · bound release required/u)
   assert.match(humanOutput, /featured · Featured tools · featured · math-anchor, migratory-time, armorial/u)

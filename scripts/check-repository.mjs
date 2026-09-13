@@ -67,6 +67,10 @@ const featured = JSON.parse(await readFile(join(root, 'catalog/profiles/featured
 if (featured.id !== 'featured' || featured.extends !== 'standard' || !featured.components.includes('armorial') || !featured.agentComponents.includes('armorial')) {
   throw new Error('featured catalog must admit armorial on top of standard')
 }
+const featuredDefaults = featured.defaultAgentComponents ?? []
+if (!['math-anchor', 'migratory-time', 'armorial'].every((id) => featuredDefaults.includes(id))) {
+  throw new Error('featured default working set must include math-anchor, migratory-time, and armorial')
+}
 const dogfood = JSON.parse(await readFile(join(root, 'catalog/profiles/local-dogfood.json'), 'utf8'))
 const dogfoodOnly = dogfood.components.filter((id) => id !== 'armorial')
 if (dogfoodOnly.some((id) => featured.components.includes(id))) {
@@ -76,8 +80,8 @@ const featuredDoc = await readFile(join(root, 'docs/FEATURED_CATALOG.md'), 'utf8
 if (!featuredDoc.includes('--profile featured') || !featuredDoc.includes('profiles list') || !featuredDoc.includes('draft-unbound')) {
   throw new Error('featured catalog document must name the CLI path and unbound fail-closed')
 }
-if (!featuredDoc.includes('not a public marketplace')) {
-  throw new Error('featured catalog document must remain a non-marketplace admission list')
+if (!featuredDoc.includes('not a public marketplace') || !featuredDoc.includes('--development-root')) {
+  throw new Error('featured catalog document must remain a non-marketplace admission list with a bound-release path')
 }
 const infoPlist = await readFile(join(root, 'macos/Info.plist'), 'utf8')
 if (!infoPlist.includes('<key>CFBundleIconFile</key><string>AgentHost</string>')) throw new Error('macOS app icon is not bound in Info.plist')

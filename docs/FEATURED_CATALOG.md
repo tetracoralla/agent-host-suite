@@ -42,7 +42,8 @@ agent-host doctor --deep --json
 ```
 
 `setup` against this repository's tracked `catalog/releases/draft-unbound`
-fails closed.
+fails closed. `--development-root` is the tools-dev path (`local-dogfood`),
+not featured.
 
 | Intent | Existing API |
 | --- | --- |

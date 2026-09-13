@@ -100,7 +100,8 @@ agent-host tools set --profile featured
 agent-host doctor --deep --json
 ```
 
-Tracked `draft-unbound` setup fails closed. Details:
+Tracked `draft-unbound` setup fails closed. `--development-root` is the
+tools-dev path, not featured. Details:
 [Featured catalog v1](docs/FEATURED_CATALOG.md).
 
 ## Typical operator flow

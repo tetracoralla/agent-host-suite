@@ -45,7 +45,7 @@ export async function doctor(state, {
         missing.length === 0
           ? `${profile.displayName} Agent tools are installed`
           : `${profile.displayName} Agent tools are missing from the installed environment`,
-        { profile: profile.id, missing },
+        { profile: profile.id, missing, defaultAgentComponents: profile.defaultAgentComponents },
       ))
     } catch (error) {
       checks.push(check('profile.catalog', 'error', 'The installed profile catalog could not be loaded', error.message))

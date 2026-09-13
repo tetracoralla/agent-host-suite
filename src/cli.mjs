@@ -34,7 +34,7 @@ const USAGE = `Usage:
   agent-host doctor [--deep] [--skip-agent-apps] [--state-root PATH] [--json]
   agent-host update [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--workspace-root PATH] [--release-manifest PATH] [--enable-observability] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools status [--state-root PATH] [--json]
-  agent-host tools set (--tool COMPONENT | --profile PROFILE) [--tool COMPONENT] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host tools set (--tool COMPONENT [--tool COMPONENT] | --profile PROFILE) [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools reset [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host component preview --artifact PATH --license-spdx EXPRESSION [--workspace-root PATH] [--path-grant NAME=PATH] [--standalone | --state-root PATH] [--json]
   agent-host component import --artifact PATH --binding PATH [--activate] [--replace] [--workspace-root PATH] [--path-grant NAME=PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
@@ -436,8 +436,9 @@ async function run(options, dependencies = {}) {
   if (options.command === 'tools') {
     if (options.action === 'status') return toolSetStatus(options)
     if (options.action === 'set') {
-      const tools = options.profile === undefined ? options.tools : await defaultToolsForProfile(options.profile)
-      return setActiveTools({ ...options, tools })
+      const selectedProfile = options.profile
+      const tools = selectedProfile === undefined ? options.tools : await defaultToolsForProfile(selectedProfile)
+      return setActiveTools({ ...options, tools, profile: undefined })
     }
     if (options.action === 'reset') return setActiveTools({ ...options, resetTools: true })
     throw new AgentHostError('CLI_USAGE', `Unknown tools action: ${options.action}`)
