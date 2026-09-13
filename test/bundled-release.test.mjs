@@ -7,6 +7,18 @@ import { stageBundledReleaseCatalog, stageBundledReleaseCatalogForProfiles } fro
 import { createReleaseFixture } from './release-helpers.mjs'
 import { currentReleasePlatform } from '../src/release-manifest.mjs'
 
+test('a featured application payload cannot be staged from a catalog that omits Armorial', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-bundled-featured-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const manifestPath = await createReleaseFixture(join(root, 'source'), {
+    suiteVersion: '0.1.0-beta.1', releaseId: 'fixture-beta-1', marker: 'bundle',
+  })
+  await assert.rejects(
+    stageBundledReleaseCatalog(dirname(manifestPath), join(root, 'featured'), 'featured'),
+    (error) => error.code === 'BUNDLED_RELEASE_PROFILE_INCOMPLETE' && error.details.components.includes('armorial'),
+  )
+})
+
 test('a standard application payload excludes optional monitoring and dogfood artifacts', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-bundled-release-'))
   t.after(() => rm(root, { recursive: true, force: true }))

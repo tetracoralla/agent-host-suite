@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "openadam.agent-host-profile.v0.2",
+  "id": "featured",
+  "displayName": "Featured tools",
+  "extends": "standard",
+  "components": [
+    "armorial"
+  ],
+  "agentComponents": [
+    "armorial"
+  ],
+  "defaultAgentComponents": [
+    "math-anchor",
+    "migratory-time",
+    "armorial"
+  ]
+}

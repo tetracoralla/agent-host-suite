@@ -248,6 +248,7 @@ enum L10n {
         "Install": "安装",
         "Selected": "已选择",
         "Standard": "标准",
+        "Featured tools": "精选工具",
         "Standard + Monitoring": "标准 + 监控",
         "Standard + Local tools": "标准 + 本地工具",
         "Monitoring": "监控",

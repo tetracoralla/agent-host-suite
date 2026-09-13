@@ -183,7 +183,11 @@ are preserved.
 
 ## Profile and tool truth
 
-Start with [profile.test.mjs](profile.test.mjs), [mcp-catalog.test.mjs](mcp-catalog.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs).
+Start with [profile.test.mjs](profile.test.mjs), [featured-catalog.test.mjs](featured-catalog.test.mjs), [mcp-catalog.test.mjs](mcp-catalog.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs).
+The `featured` profile is the external admission list, including Armorial,
+and is not `local-dogfood`. `profiles list` and `tools set --profile` select
+that JSON membership through the existing setup/tools APIs. A tracked
+`draft-unbound` catalog still fails closed.
 
 Installed components, Agent-visible components,
 and the smaller active tool set remain distinct. Backstage observation

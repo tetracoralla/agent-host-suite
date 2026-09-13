@@ -83,6 +83,7 @@ struct SettingsView: View {
 
     private var currentToolSet: String {
         switch store.suite?.profile {
+        case "featured": L10n.text("Featured tools")
         case "local-dogfood": L10n.text("Standard + Local tools")
         case "observability": L10n.text("Standard + Monitoring")
         default: L10n.text("Standard")

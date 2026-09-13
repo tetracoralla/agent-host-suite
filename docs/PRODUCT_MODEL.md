@@ -17,10 +17,11 @@ checkouts use [`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md) so installed execution
 matches a stranger's package bytes while they still edit those repositories.
 `local-dogfood` remains a local feedback profile, not a store.
 
-A featured catalog, if used, is an owner-selected subset of independently
-released tools installed through the existing setup, profile, `tools set`, and
-private-import APIs. See [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md). Host
-working-set selection is not current-session discovery; see
+The `featured` profile is the external-user admission list: an owner-selected
+subset of independently released tools installed through the existing setup,
+`profiles list`, `tools set`, and private-import APIs. It is not
+`local-dogfood` and not a store. See [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md).
+Host working-set selection is not current-session discovery; see
 [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md).
 
 The user chooses an installed profile and a smaller active tool set, reviews
@@ -99,6 +100,9 @@ bound release. This document defines profile behavior, not a copied inventory:
 
 - `standard` is the deliberately small default Agent-visible set plus the
   required Host runtime.
+- `featured` extends standard with the independently released tools admitted
+  for external users (currently Armorial). Membership is the profile file, not
+  `local-dogfood`.
 - `observability` extends standard with opt-in local observation and analysis.
   Those components remain backstage and add no tools or MCP processes to an
   ordinary Agent session. Consent remains off until the user selects the
