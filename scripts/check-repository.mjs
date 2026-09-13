@@ -9,7 +9,7 @@ const required = [
   'Package.swift', 'macos/Info.plist', 'macos/AgentHostIcon.svg', 'macos/AgentHostMenuBar.svg', 'scripts/build-app-icon.sh',
   'windows/Install Agent Host.cmd', 'windows/Install-AgentHost.ps1', 'windows/Uninstall-AgentHost.ps1', 'scripts/package-windows.mjs',
   'docs/PRODUCT_MODEL.md', 'docs/ARCHITECTURE.md', 'docs/TERMINOLOGY.md', 'docs/TOOL_INTEGRATION.md', 'docs/BRAND.md', 'docs/RELEASE.md', 'docs/REVIEW_CONTRACT.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md',
-  'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md',
+  'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md', 'docs/ADOPTION_ACCEPTANCE.md',
   'scripts/check-manager-models.sh', 'scripts/write-internal-beta-distribution.mjs', 'scripts/check-macos-distribution.sh', 'Tests/AgentHostManagerChecks/main.swift',
   'scripts/release-source-provenance.mjs', 'scripts/check-release-source-provenance.mjs', 'scripts/provider-source-build.mjs', 'src/release-provenance.mjs',
   'schemas/agent-host-activity.schema.v0.1.json', 'schemas/agent-host-usage.schema.v0.1.json',
@@ -82,6 +82,33 @@ if (!featuredDoc.includes('--profile featured') || !featuredDoc.includes('profil
 }
 if (!featuredDoc.includes('not a public marketplace') || !featuredDoc.includes('--development-root')) {
   throw new Error('featured catalog document must remain a non-marketplace admission list with a bound-release path')
+}
+if (!featuredDoc.includes('ADOPTION_ACCEPTANCE.md')) {
+  throw new Error('featured catalog document must point at the unnamed adoption protocol')
+}
+const adoptionDoc = await readFile(join(root, 'docs/ADOPTION_ACCEPTANCE.md'), 'utf8')
+if (!adoptionDoc.includes('fresh Agent task') || !adoptionDoc.includes('not adoption evidence') || !adoptionDoc.includes('doctor --featured-readiness')) {
+  throw new Error('adoption protocol must require a fresh Agent task and refuse Host status as evidence')
+}
+if (!adoptionDoc.includes('docs/fixtures/adoption') || !adoptionDoc.includes('did **not** complete live unnamed adoption')) {
+  throw new Error('adoption protocol must ship unnamed fixtures and refuse a construction-box completion claim')
+}
+const adoptionFixtureRoot = join(root, 'docs/fixtures/adoption')
+const steered = /\barmorial\b|\blucide\b|\biconpark\b|请使用/iu
+async function adoptionFixtures(directory) {
+  const output = []
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) output.push(...await adoptionFixtures(path))
+    else output.push(path)
+  }
+  return output
+}
+const adoptionFiles = await adoptionFixtures(adoptionFixtureRoot)
+if (adoptionFiles.length === 0) throw new Error('adoption fixtures are missing')
+for (const path of adoptionFiles) {
+  const text = await readFile(path, 'utf8')
+  if (steered.test(text)) throw new Error(`${relative(root, path)} names a steered icon product`)
 }
 const infoPlist = await readFile(join(root, 'macos/Info.plist'), 'utf8')
 if (!infoPlist.includes('<key>CFBundleIconFile</key><string>AgentHost</string>')) throw new Error('macOS app icon is not bound in Info.plist')

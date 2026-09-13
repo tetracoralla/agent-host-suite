@@ -104,6 +104,23 @@ Tracked `draft-unbound` setup fails closed. `--development-root` is the
 tools-dev path, not featured. Details:
 [Featured catalog v1](docs/FEATURED_CATALOG.md).
 
+## Unnamed adoption acceptance
+
+This checkout does not record a completed live adoption. A Linux construction
+box without Host GUI or a full Agent session cannot score it. On a machine
+that already has Agent Host and a supported Agent app, follow
+[Unnamed adoption acceptance](docs/ADOPTION_ACCEPTANCE.md): copy the page
+fixtures out of this repository, start a **fresh Agent task**, and judge
+whether icons entered the work without naming Armorial.
+
+```text
+agent-host doctor --featured-readiness --json
+```
+
+That command only checks that the featured working set is selected and that
+connected projection receipts are healthy. It always reports
+`adoptionEvidence: false`. Host status and call counts are not adoption.
+
 ## Typical operator flow
 
 ```text
@@ -174,6 +191,8 @@ to the source repository:
   cache and session Skill/MCP paths.
 - [Featured catalog v1](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) — owner-selected tools through existing
   install APIs, not a marketplace.
+- [Unnamed adoption acceptance](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md) — page tasks and a Host-only
+  readiness probe; not a live-adoption claim from this checkout.
 - [Review contract](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md) — minimum high-risk review seams,
   not a completion claim.
 - [Terminology](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TERMINOLOGY.md) — canonical product language and stable

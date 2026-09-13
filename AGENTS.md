@@ -6,6 +6,8 @@ boundary being changed:
 - `docs/ARCHITECTURE.md` and `docs/DISCOVERY_PROJECTION.md` for Host, carrier,
   lifecycle, service, state, Direct Runtime, Codex/Claude/ZCode projection, or
   observability architecture;
+- `docs/ADOPTION_ACCEPTANCE.md` for unnamed natural-adoption tasks and the
+  Host-precondition limit (`doctor --featured-readiness` is not adoption);
 - `docs/PRIVACY.md` and `docs/TRACE_PLANE.md` for observation, collection, or
   trace export behavior;
 - `docs/TOOL_INTEGRATION.md` for Provider admission and integration records;

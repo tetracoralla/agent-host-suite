@@ -75,7 +75,9 @@ Default Manager refresh does not launch an Agent app. `doctor --deep` without
 `--skip-agent-apps` and **Run Full Check** are explicit current binding probes.
 A real fresh Agent task is still required to assess discovery and natural
 selection; an installed binding, historical call, or offered tool is not an
-adoption result.
+adoption result. Runnable unnamed tasks live in
+[`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md). `doctor --featured-readiness`
+only checks the featured working set and projection receipts.
 
 For Trace Plane cost, run the packaged Observer measurement against exact
 user-authorized ZCode sources. It copies them into a temporary owner-only

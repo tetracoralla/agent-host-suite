@@ -14,6 +14,7 @@ import { exportSkillLinkCatalog } from './skill-link-catalog.mjs'
 import { usageSummary } from './usage-summary.mjs'
 import { startWebManager } from './web-manager.mjs'
 import { defaultToolsForProfile, featuredCatalog, FEATURED_CATALOG_SCHEMA } from './profile.mjs'
+import { FEATURED_READINESS_SCHEMA, inspectFeaturedReadiness } from './featured-readiness.mjs'
 import { isAbsolute, join, resolve } from 'node:path'
 
 const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'service', 'profiles'])
@@ -31,7 +32,7 @@ const USAGE = `Usage:
   agent-host storage [--state-root PATH] [--json]
   agent-host cleanup [--dry-run] [--state-root PATH] [--json]
   agent-host maintenance [--state-root PATH] [--json]
-  agent-host doctor [--deep] [--skip-agent-apps] [--state-root PATH] [--json]
+  agent-host doctor [--deep | --featured-readiness] [--skip-agent-apps] [--state-root PATH] [--json]
   agent-host update [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--workspace-root PATH] [--release-manifest PATH] [--enable-observability] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools status [--state-root PATH] [--json]
   agent-host tools set (--tool COMPONENT [--tool COMPONENT] | --profile PROFILE) [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
@@ -65,7 +66,7 @@ const ROUTE_ARGUMENTS = Object.freeze({
   manager: ['--state-root', '--no-open'],
   storage: ['--state-root', '--json'],
   cleanup: ['--state-root', '--dry-run', '--json'],
-  doctor: ['--state-root', '--deep', '--skip-agent-apps', '--json'],
+  doctor: ['--state-root', '--deep', '--featured-readiness', '--skip-agent-apps', '--json'],
   update: ['--profile', '--tool', '--workspace-root', '--release-manifest', '--enable-observability', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   rollback: ['--workspace-root', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   uninstall: ['--purge-data', '--state-root', '--json'],
@@ -119,6 +120,7 @@ function parseArgs(argv) {
     activate: false,
     replace: false,
     skipAgentApps: false,
+    featuredReadiness: false,
     quick: false,
     standalone: false,
     noOpen: false,
@@ -133,7 +135,8 @@ function parseArgs(argv) {
     ['--enable-observability', 'enableObservability'], ['--purge-data', 'purgeData'],
     ['--replace-host-conflicts', 'replaceHostConflicts'],
     ['--activate', 'activate'], ['--replace', 'replace'],
-    ['--skip-agent-apps', 'skipAgentApps'], ['--quick', 'quick'], ['--standalone', 'standalone'], ['--no-open', 'noOpen'],
+    ['--skip-agent-apps', 'skipAgentApps'], ['--featured-readiness', 'featuredReadiness'],
+    ['--quick', 'quick'], ['--standalone', 'standalone'], ['--no-open', 'noOpen'],
     ['--include-selected-content', 'includeSelectedContent'], ['--confirm-sensitive-content', 'confirmSensitiveContent'],
   ])
   const start = options.command === 'host' ? 3 : options.command === 'component' && options.target !== undefined ? 3 : ACTION_COMMANDS.has(options.command) ? 2 : 1
@@ -216,6 +219,9 @@ function parseArgs(argv) {
   }
   if (options.fromMs !== undefined && options.toMs !== undefined && options.fromMs > options.toMs) {
     throw new AgentHostError('CLI_USAGE', '--from-ms must not be after --to-ms')
+  }
+  if (route === 'doctor' && options.featuredReadiness === true && options.deep === true) {
+    throw new AgentHostError('CLI_USAGE', 'doctor --featured-readiness does not accept --deep')
   }
   if (route === 'service recover') {
     if (!/^service-recovery-v2-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(options.recovery ?? '')) {
@@ -326,6 +332,14 @@ export function human(result) {
   if (result.schemaVersion === 'openadam.agent-host-service-recovery-result.v0.1') {
     const service = result.service
     return `Service restored · ${service.running === true ? 'running' : service.loaded === true ? 'loaded' : 'configured'} · ${service.ready === true ? 'ready' : 'not ready'}`
+  }
+  if (result.schemaVersion === FEATURED_READINESS_SCHEMA) {
+    const mark = (status) => (status === 'ok' ? '✓' : status === 'warning' ? '!' : '✗')
+    return [
+      'Featured readiness · Host precondition only · not adoption',
+      ...result.checks.map((item) => `${mark(item.status)} ${item.message}`),
+      result.assessmentBoundary,
+    ].join('\n')
   }
   if (result.status === 'ok' && Array.isArray(result.checks)) {
     return [`Doctor: ${result.status}`, ...result.checks.map((item) => `${item.status === 'ok' ? '✓' : '✗'} ${item.message}`)].join('\n')
@@ -472,6 +486,9 @@ async function run(options, dependencies = {}) {
     const paths = await readStatePaths(resolveStateRoot(options.stateRoot))
     const state = await loadState(paths)
     if (state === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
+    if (options.featuredReadiness === true) {
+      return inspectFeaturedReadiness(state, { inspectAgentApps: !options.skipAgentApps })
+    }
     const contextAnalysis = state.observability?.enabled === true
       ? await readJson(join(paths.context, 'managed-catalog.analysis.json')).catch(() => null)
       : null

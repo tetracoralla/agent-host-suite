@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an unnamed Armorial adoption protocol: copy-out page fixtures, a
+  fresh-session scorecard, and `doctor --featured-readiness` for featured
+  working-set plus projection receipts only. Host status and call counts
+  remain not adoption; this checkout does not record a completed live run.
 - Wire featured-catalog v1 to the existing install APIs: named `featured`
   profile (standard plus Armorial, not `local-dogfood`), `profiles list`, and
   `tools set --profile`. Doctor checks catalog membership; draft-unbound and

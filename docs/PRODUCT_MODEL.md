@@ -228,6 +228,8 @@ task and keep these kinds of evidence distinct when they affect the claim:
 
 These categories are not a mandatory reporting template or work queue. The
 local installed route and its fresh-session adoption limit are defined in
-[`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md). Select affected risks and evidence using
+[`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md). Unnamed page-task scoring, when a
+machine has Host plus Agent, is [`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md);
+Host status is not that score. Select affected risks and evidence using
 [`REVIEW_CONTRACT.md`](REVIEW_CONTRACT.md). CI or cross-compilation cannot
 establish physical-device runtime or owner acceptance.

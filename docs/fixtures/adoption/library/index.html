@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>North Pier — harbor library</title>
+  <style>
+    :root {
+      --paper: #f3eee4;
+      --ink: #1b2430;
+      --muted: #5c6570;
+      --line: #d4cbbd;
+      --sea: #1f5c4d;
+      --slot: #b7a99a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.5 "Avenir Next", "Segoe UI", sans-serif;
+    }
+    main { max-width: 44rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+    h1 {
+      font-family: Palatino, "Palatino Linotype", serif;
+      font-weight: 500;
+      font-size: 1.8rem;
+      margin: 0 0 0.35rem;
+    }
+    .lede { color: var(--muted); margin-bottom: 1.25rem; }
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+      text-align: center;
+      padding: 2.2rem 1rem;
+      border: 1px solid var(--line);
+      border-radius: 0.8rem;
+      background: #faf7f0;
+      margin-bottom: 1.25rem;
+    }
+    .hero p { margin: 0; color: var(--muted); max-width: 28rem; }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font: inherit;
+      border-radius: 0.4rem;
+      padding: 0.45rem 0.8rem;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    button.primary { background: var(--sea); color: #f7f3ea; border-color: var(--sea); }
+    h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+    ul { list-style: none; padding: 0; margin: 0; border: 1px solid var(--line); border-radius: 0.7rem; overflow: hidden; }
+    li {
+      display: grid;
+      grid-template-columns: 1.6rem 1fr auto;
+      gap: 0.7rem;
+      align-items: center;
+      padding: 0.7rem 0.85rem;
+      border-top: 1px solid var(--line);
+      background: #faf7f0;
+    }
+    li:first-child { border-top: 0; }
+    .meta { color: var(--muted); font-size: 0.85rem; }
+    .icon-slot {
+      display: inline-block;
+      width: 1.15rem;
+      height: 1.15rem;
+      border: 1px dashed var(--slot);
+      border-radius: 0.28rem;
+      background: repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(27, 36, 48, 0.06) 3px, rgba(27, 36, 48, 0.06) 6px);
+      flex: 0 0 1.15rem;
+    }
+    .icon-slot.hero { width: 3rem; height: 3rem; border-radius: 0.7rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Harbor library</h1>
+    <p class="lede">Charts, tide tables, and berth photos for members. New accounts start empty.</p>
+
+    <section class="hero">
+      <span class="icon-slot hero" aria-hidden="true"></span>
+      <p>Nothing in this berth’s library yet. Add a chart or a folder so the night desk can find it in fog.</p>
+      <div class="actions">
+        <button type="button" class="primary"><span class="icon-slot" aria-hidden="true"></span>Upload chart</button>
+        <button type="button"><span class="icon-slot" aria-hidden="true"></span>New folder</button>
+      </div>
+    </section>
+
+    <h2>Sample rows (preview)</h2>
+    <ul>
+      <li>
+        <span class="icon-slot" aria-hidden="true"></span>
+        <span>Approaches to North Pier</span>
+        <span class="meta">chart · 2.1 MB</span>
+      </li>
+      <li>
+        <span class="icon-slot" aria-hidden="true"></span>
+        <span>September tide table</span>
+        <span class="meta">table · 84 KB</span>
+      </li>
+      <li>
+        <span class="icon-slot" aria-hidden="true"></span>
+        <span>Finger pier after hail</span>
+        <span class="meta">photo · 1.4 MB</span>
+      </li>
+      <li>
+        <span class="icon-slot" aria-hidden="true"></span>
+        <span>Fuel dock closed Sunday</span>
+        <span class="meta">notice · 12 KB</span>
+      </li>
+    </ul>
+  </main>
+</body>
+</html>
