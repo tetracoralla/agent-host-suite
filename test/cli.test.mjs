@@ -163,6 +163,18 @@ test('human observability status renders monitoring state instead of crashing on
   assert.equal(notInstalled, 'Observability off · no Agent environment installed.')
 })
 
+test('human tool-set status reports Host selection rather than Agent-app enablement', () => {
+  const output = human({
+    schemaVersion: 'openadam.agent-host-tool-set.v0.1',
+    status: 'ok',
+    activeAgentComponents: ['math-anchor'],
+    availableAgentComponents: ['math-anchor', 'migratory-time'],
+    inactiveAgentComponents: ['migratory-time'],
+    freshSession: { requiredAfterChange: true, currentSessionUptake: 'not-observed' },
+  })
+  assert.equal(output, 'Agent tools · 1 of 2 selected for new tasks')
+})
+
 test('human private component result surfaces a post-commit activity warning without reporting failure', () => {
   const output = human({
     status: 'imported',

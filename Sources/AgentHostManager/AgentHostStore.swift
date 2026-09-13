@@ -551,7 +551,7 @@ final class AgentHostStore: ObservableObject {
             systemImage: systemImage,
             version: component?.version,
             state: state,
-            availability: availableHosts.isEmpty ? L10n.text("Not available in an Agent app") : L10n.format("Available in {apps}", ["apps": availableHosts.joined(separator: L10n.text(" and "))]),
+            availability: availableHosts.isEmpty ? L10n.text("Not selected for an Agent app") : L10n.format("Selected for {apps}", ["apps": availableHosts.joined(separator: L10n.text(" and "))]),
             ownership: ownership,
             active: active
         )

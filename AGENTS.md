@@ -3,8 +3,9 @@
 Start with `docs/PRODUCT_MODEL.md`, then read the documents that own the
 boundary being changed:
 
-- `docs/ARCHITECTURE.md` for Host, carrier, lifecycle, service, state, Direct
-  Runtime, or observability architecture;
+- `docs/ARCHITECTURE.md` and `docs/DISCOVERY_PROJECTION.md` for Host, carrier,
+  lifecycle, service, state, Direct Runtime, Codex/Claude/ZCode projection, or
+  observability architecture;
 - `docs/PRIVACY.md` and `docs/TRACE_PLANE.md` for observation, collection, or
   trace export behavior;
 - `docs/TOOL_INTEGRATION.md` for Provider admission and integration records;

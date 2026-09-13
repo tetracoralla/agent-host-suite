@@ -224,7 +224,11 @@ up and restore an occupied user Skill; uninstall preserves a later changed targe
 Start with [codex-host.test.mjs](codex-host.test.mjs), [claude-host.test.mjs](claude-host.test.mjs), [zcode-host.test.mjs](zcode-host.test.mjs).
 
 Absence, unverified configuration, and
-failed inspection remain distinct. ZCode management stays within its public
+failed inspection remain distinct. A missing Host-owned Codex cache is
+distinct from changed cache bytes: the former may be recopied through public
+`plugin add` without conflict replacement; the latter still requires explicit
+replacement. Host `status` / `tools status` remain Host-state and do not
+establish current-session Skill or MCP uptake. ZCode management stays within its public
 user MCP/Skill configuration, preserves unrelated fields and exact displaced
 entries, and never changes its model provider or credentials. Claude management
 uses its public user JSON and retains exact argv, non-stdio displaced entries,

@@ -198,6 +198,32 @@ test('legacy migration rejects shared or user-modified registrations before inst
   assert.equal(fake.caches.size, 0)
 })
 
+test('a missing Host-owned Codex cache is distinct from a changed cache and can be recopied without conflict replacement', async (t) => {
+  const { manifest, fake, options } = await fixture(t)
+  const installed = await installCodex(manifest, fake.runner, options)
+  const math = entry(installed, 'math-anchor')
+  await rm(math.installedPath, { recursive: true, force: true })
+  const missing = entry(await inspectCodex(manifest, fake.runner, { ...options, managedState: installed }), 'math-anchor')
+  assert.equal(missing.pluginEnabled, true)
+  assert.equal(missing.installedIdentityMatched, false)
+  assert.equal(missing.cacheStatus, 'missing')
+  const repaired = await installCodex(manifest, fake.runner, { ...options, managedState: installed })
+  assert.notEqual(entry(repaired, 'math-anchor').selector, math.selector)
+  assert.equal(entry(await inspectCodex(manifest, fake.runner, { ...options, managedState: repaired }), 'math-anchor').installedIdentityMatched, true)
+})
+
+test('Codex inspect uses a live plugin-list cache path when Codex reports one', async (t) => {
+  const { manifest, fake, options } = await fixture(t)
+  const installed = await installCodex(manifest, fake.runner, options)
+  const math = entry(installed, 'math-anchor')
+  fake.plugins.get(math.selector).installedPath = join(fake.root, 'missing-live-cache')
+  const inspection = entry(await inspectCodex(manifest, fake.runner, { ...options, managedState: installed }), 'math-anchor')
+  assert.equal(inspection.liveCacheObserved, true)
+  assert.equal(inspection.cacheStatus, 'missing')
+  assert.equal(inspection.installedIdentityMatched, false)
+  assert.match(inspection.installedIdentityError, /live plugin cache path that is gone/u)
+})
+
 test('cached identity rejects added Skills and symlinks even when every expected file has the original bytes', async (t) => {
   const { manifest, fake, options } = await fixture(t)
   const installed = await installCodex(manifest, fake.runner, options)

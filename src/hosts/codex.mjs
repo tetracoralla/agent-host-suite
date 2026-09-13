@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { AgentHostError } from '../errors.mjs'
 import { resolveExecutable, runFile } from '../process.mjs'
@@ -17,6 +17,18 @@ const pluginKey = (selector) => ['plugins', selector]
 const enabledKey = (selector) => ['plugins', selector, 'enabled']
 const cellValue = (cell) => cell.present ? cell.value : null
 const legacyUnsafe = (entry) => entry?.restorePlugin === true || entry?.displacedMarketplace != null || (entry?.displacedPlugins ?? []).some((item) => item.before === undefined)
+const publicAbsolutePath = (value) => typeof value === 'string' && isAbsolute(value) && resolve(value) === value ? value : null
+
+function identityErrorFor(cacheStatus, { managed, liveObserved }) {
+  if (managed === undefined) return 'No matching cached installation was verified from an installation receipt'
+  if (cacheStatus === 'missing') {
+    return liveObserved
+      ? 'Codex reports a live plugin cache path that is gone'
+      : 'The Codex cache recorded at install time is gone'
+  }
+  if (cacheStatus === 'changed') return 'The Codex cache no longer matches the verified projection'
+  return 'No matching cached installation was verified from an installation receipt'
+}
 
 function parse(result) {
   try { return JSON.parse(result.stdout) } catch { throw error('HOST_PROTOCOL_INVALID', 'Codex returned an invalid plugin response') }
@@ -66,6 +78,18 @@ async function cacheMatches(path, files, fingerprint) {
   } catch { return false }
 }
 
+async function inspectCache(path, files, fingerprint) {
+  const target = publicAbsolutePath(path)
+  if (target === null) return 'missing'
+  try {
+    await lstat(target)
+  } catch (failure) {
+    if (failure.code === 'ENOENT') return 'missing'
+    return 'unverifiable'
+  }
+  return await cacheMatches(target, files, fingerprint) ? 'matched' : 'changed'
+}
+
 async function inspect(session, manifest, options) {
   const listed = parse(await session.invoke(['plugin', 'list', '--json']))
   if (!Array.isArray(listed.installed)) throw error('HOST_PROTOCOL_INVALID', 'Codex plugin listing lacks installed entries')
@@ -80,7 +104,11 @@ async function inspect(session, manifest, options) {
     const managed = previous.find((item) => item.component === component.plugin)
     const expected = options.useManagedBindings === true && managed !== undefined ? managed : component
     const target = managed === undefined ? null : listed.installed.find((item) => item.pluginId === managed.selector)
-    const installedIdentityMatched = target?.installed === true && await cacheMatches(managed?.installedPath, expected.pluginIdentityRelativeFiles, expected.pluginIdentityFingerprint)
+    const liveInstalledPath = publicAbsolutePath(target?.installedPath)
+    const receiptPath = publicAbsolutePath(managed?.installedPath)
+    const identityPath = liveInstalledPath ?? receiptPath
+    const cacheStatus = await inspectCache(identityPath, expected.pluginIdentityRelativeFiles, expected.pluginIdentityFingerprint)
+    const installedIdentityMatched = target?.installed === true && cacheStatus === 'matched'
     const duplicates = listed.installed.filter((item) => item.name === component.plugin && item.installed === true && item.enabled === true && item.pluginId !== managed?.selector)
     const ownedSelectors = new Set(previous.filter((item) => item.pluginCreated === true).map((item) => item.selector))
     if (duplicates.some((item) => !ownedSelectors.has(item.pluginId)) && options.replaceConflicts !== true && options.useManagedBindings !== true) {
@@ -108,7 +136,8 @@ async function inspect(session, manifest, options) {
       marketplacePresent: managed !== undefined && getCell(session.snapshot.config, ['marketplaces', managed.marketplace]).present,
       pluginPresent: target?.installed === true, pluginEnabled: target?.enabled === true,
       installedVersion: target?.version ?? null, requestedVersion: component.version,
-      installedIdentityMatched, installedIdentityError: installedIdentityMatched ? null : 'No matching cached installation was verified from an installation receipt',
+      cacheStatus, liveCacheObserved: liveInstalledPath !== null,
+      installedIdentityMatched, installedIdentityError: installedIdentityMatched ? null : identityErrorFor(cacheStatus, { managed, liveObserved: liveInstalledPath !== null }),
       managedTarget: managed?.pluginCreated === true, migratableDuplicates: duplicates.map((item) => ({ selector: item.pluginId, marketplace: item.marketplaceName })),
     })
   }
@@ -209,7 +238,10 @@ export async function installCodex(manifest, runner = runFile, options = {}) {
           installed.push({ ...prior, pluginBinding: { ...priorCell.value, enabled: true }, displacedPlugins })
           continue
         }
-        if (sameProjection && priorCell.present && options.replaceConflicts !== true) {
+        // A vanished Host-owned cache is not a user edit. Recopy through the
+        // public plugin installer with a fresh marketplace identity. Changed
+        // or unverifiable bytes still require explicit replacement.
+        if (sameProjection && priorCell.present && observed.cacheStatus !== 'missing' && options.replaceConflicts !== true) {
           throw error('CODEX_PLUGIN_CHANGED', 'The cached Codex installation changed or cannot be verified; replacement requires a new Host binding')
         }
         const native = await freshBinding(component)

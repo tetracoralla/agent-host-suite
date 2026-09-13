@@ -366,7 +366,11 @@ test('the installed tool working set changes Codex exposure without removing pac
   assert.deepEqual(state.agentComponents, ['math-anchor'])
   assert.equal(typeof state.bindingsActivatedAt, 'string')
   assert.equal(state.components['migratory-time'] !== undefined, true)
-  assert.deepEqual((await toolSetStatus({ stateRoot })).inactiveAgentComponents, ['migratory-time'])
+  const tools = await toolSetStatus({ stateRoot })
+  assert.deepEqual(tools.inactiveAgentComponents, ['migratory-time'])
+  assert.equal(tools.tools.find((item) => item.id === 'math-anchor').active, true)
+  assert.match(tools.assessmentBoundary, /not Agent-app cache verification/u)
+  assert.equal(tools.freshSession.currentSessionUptake, 'not-observed')
 
   const reset = await setActiveTools({ stateRoot, resetTools: true, dryRun: false }, lifecycleDependencies(fake, stateRoot))
   assert.deepEqual(reset.activeAgentComponents, ['math-anchor', 'migratory-time'])

@@ -97,7 +97,9 @@ MCP tools, workspace grants, provider invocation, Capability or Procedure
 semantics, or publication state.
 
 Ratings, screenshots, categories for discovery, payment, reviews, featured
-placement, and speculative host adapters are deliberately absent.
+placement, and speculative host adapters are deliberately absent. An
+owner-selected featured list, if used, is a profile or working set over these
+same install APIs, not a store; see [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md).
 
 ## Execution-path boundary
 

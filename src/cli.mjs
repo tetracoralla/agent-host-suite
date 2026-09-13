@@ -266,7 +266,7 @@ export function human(result) {
     const active = result.activeAgentComponents?.length ?? 0
     const available = result.availableAgentComponents?.length ?? active + (result.inactiveAgentComponents?.length ?? 0)
     const suffix = result.restartRequired === true ? ' · start a fresh Agent task' : ''
-    return `Agent tools · ${active} of ${available} active${suffix}`
+    return `Agent tools · ${active} of ${available} selected for new tasks${suffix}`
   }
   if (result.schemaVersion === 'openadam.agent-host-operations-snapshot.v0.1') {
     if (result.configured !== true) return 'No Agent environment is installed.'
@@ -357,6 +357,7 @@ async function status(options) {
     }])),
     workspaceRoot: state.workspaceRoot ?? null,
     service: state.runtime.service, observability: observabilitySummary(state.observability),
+    assessmentBoundary: 'This status is Host state. It does not verify Agent-app caches, current-session Skill paths, or MCP catalogs. Use doctor --deep without --skip-agent-apps, or host status without --quick, for binding verification.',
   }
 }
 

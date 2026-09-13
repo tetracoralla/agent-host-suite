@@ -1075,6 +1075,7 @@ export async function toolSetStatus(options = {}) {
       requiredAfterChange: true,
       currentSessionUptake: 'not-observed',
     },
+    assessmentBoundary: 'active is the Host working set for new Agent tasks. It is not Agent-app cache verification, a current-session Skill path, MCP presence in an open task, or adoption.',
   }
 }
 

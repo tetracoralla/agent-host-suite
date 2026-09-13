@@ -411,9 +411,17 @@ Native Codex bindings use a fresh Host-specific marketplace identity for each
 new projection installation. User plugins are disabled and their prior enabled
 cell is retained; their marketplaces and cached bytes remain untouched. The
 native install receipt identifies the cached path, whose complete file inventory
-and contents must match the verified projection. An upstream source path does
-not establish installed identity. Working-set suspension preserves the cache
+and contents must match the verified projection. When the public `plugin list`
+includes an absolute `installedPath`, inspection uses that live cache path
+rather than assuming the receipt is what a session will open. An upstream
+source path does not establish installed identity. A Host-owned cache that is
+gone is recopied through public `plugin add` and a new marketplace identity;
+changed or unverifiable cache bytes still require explicit replacement.
+Working-set suspension preserves the cache
 and registration, and inactive projections remain retained until removal.
+`status` and `tools status` report Host state and working-set membership.
+They do not verify Agent-app caches or current-session Skill/MCP uptake.
+See [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md).
 
 The public config API provides version-checked field writes. The native plugin
 installer's enablement side effect is journaled before invocation; its cache

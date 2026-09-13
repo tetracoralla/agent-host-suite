@@ -10,6 +10,11 @@ the Agent apps themselves.
 This repository contains the **Agent Host Suite** distribution unit. The npm
 package, CLI, schemas, and other stable technical identifiers retain that name.
 
+This checkout is source and a developer preview. It does not include a public
+GitHub Release, a notarized macOS DMG, or a public tool marketplace. A Host
+working-set selection is not proof that an open Agent session loaded those
+tools.
+
 ## Scope
 
 - Capability contracts define stable typed operation meaning.
@@ -43,6 +48,23 @@ report or release manifest.
 
 The tracked release catalog is deliberately unbound, so the source checkout
 does not silently claim a public installable release.
+
+## Audiences
+
+- **External user.** Installs a **bound** compatibility release through a
+  packaged carrier or `setup --release-manifest` pointing at that catalog.
+  Tools come from the selected profile's membership in that release, then a
+  fresh Agent task. This git checkout's tracked catalog is `draft-unbound`, so
+  public setup fails closed until a bound manifest is supplied.
+- **tools-dev dogfood.** Developers with authorized source checkouts follow
+  [Local dogfood](docs/LOCAL_DOGFOOD.md). Sibling repositories are build
+  inputs, not runtime paths, and `local-dogfood` is a local feedback profile,
+  not a store.
+
+A [featured catalog v1](docs/FEATURED_CATALOG.md) is an owner-selected subset
+of independently released tools installed through those same APIs. It is not a
+marketplace. How Codex projections relate to session Skill/MCP paths is in
+[Discovery and projection](docs/DISCOVERY_PROJECTION.md).
 
 ## Profiles
 
@@ -96,19 +118,24 @@ built-in catalog is already bound.
 
 ## Distribution boundary
 
-The repository is an Apache-2.0 developer preview. Public binary readiness is
-determined per release candidate:
+The repository is an Apache-2.0 developer preview. This source tree does not
+claim a public download, GitHub Release, notarized DMG, or tool marketplace.
 
+- There is no public Agent Host marketplace and no third-party plugin store.
+- A public macOS DMG, if one is ever shipped, still requires Developer ID
+  signing, notarization, stapling, Gatekeeper assessment, and clean-device
+  acceptance. Those steps are release-campaign facts; they are not provided by
+  this checkout. Local or internal ad-hoc-signed builds are validation
+  artifacts, not public downloads.
 - Windows packaging and clean-device requirements are in
-  [Windows distribution](docs/WINDOWS.md).
-- macOS public binaries require Developer ID signing, notarization, stapling,
-  Gatekeeper assessment, and clean-device acceptance.
-- Local or internal ad-hoc-signed builds are validation artifacts, not public
-  downloads.
+  [Windows distribution](docs/WINDOWS.md). They do not establish that a public
+  Windows installer is published.
 
 Repository maintainers can read the
 [release boundary](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/RELEASE.md)
-for source, compatibility, internal, and public release requirements.
+for source, compatibility, internal, and public release **requirements**.
+Meeting a requirement in that document is not a claim that a public candidate
+exists.
 
 ## Source-repository documentation
 
@@ -122,7 +149,11 @@ to the source repository:
 - [Tool integration](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TOOL_INTEGRATION.md) — supported integration record
   versions and admission semantics.
 - [Local dogfood](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/LOCAL_DOGFOOD.md) — isolated installation and current
-  runtime verification method.
+  runtime verification method for tools-dev machines.
+- [Discovery and projection](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md) — Host working set vs Agent-app
+  cache and session Skill/MCP paths.
+- [Featured catalog v1](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) — owner-selected tools through existing
+  install APIs, not a marketplace.
 - [Review contract](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md) — minimum high-risk review seams,
   not a completion claim.
 - [Terminology](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TERMINOLOGY.md) — canonical product language and stable

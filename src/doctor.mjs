@@ -81,6 +81,8 @@ export async function doctor(state, {
             requestedVersion: entry.requestedVersion,
             identityMatched: entry.installedIdentityMatched,
             identityError: entry.installedIdentityError,
+            cacheStatus: entry.cacheStatus,
+            liveCacheObserved: entry.liveCacheObserved === true,
           },
         ))
       }
