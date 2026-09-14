@@ -2,18 +2,20 @@
 
 A featured catalog is an owner-selected, version-locked subset of independently
 released Agent tools that already have a closed tool-integration record in a
-**bound** compatibility release. It is a Host admission list, not a public
-marketplace, store, ranking, review, payment, or third-party plugin index.
+**bound** compatibility release. It is a Host admission list, not a public marketplace,
+store, ranking, review, payment, or third-party plugin index.
 
 This source checkout does not operate a catalog service and does not ship a
-browseable store. v1 is the design for pointing that list at the installation
-APIs that already exist.
+browseable store. v1 is the named `featured` profile plus `profiles list` /
+`tools set --profile` over the installation APIs that already exist.
 
-## What v1 is allowed to be
+## What v1 is
 
-- A named profile, or a documented default working set inside an existing
-  profile, whose membership is only `catalog/profiles/*.json` plus the selected
-  bound release manifest.
+- Profile `featured` in `catalog/profiles/featured.json`. It extends `standard`
+  and admits Armorial. Exact membership is that JSON file plus the selected
+  bound release, not this paragraph.
+- The documented default working set is the profile's `defaultAgentComponents`
+  (Math Anchor, Migratory Time, and Armorial). That set is not `local-dogfood`.
 - A private overlay of extra sealed archives through
   `agent-host component preview` / `component import`, inactive by default.
 - Human copy that names the independently released product (Armorial, Math
@@ -23,29 +25,36 @@ v1 is not: search, featured placement scores, screenshots, ratings, a public
 plugin registry, an Agent-facing import prompt, or a promise that a selected
 tool is loaded in an already open session.
 
-## Install through existing APIs
+## External path without a public Release
 
-External-user install of a featured set uses the same lifecycle as any other
-bound environment. There is no second installer.
+This checkout has no public GitHub Release and no notarized DMG. Obtain a
+**bound** compatibility catalog (manifest, artifacts, and
+`build-provenance.json`) from an owner-issued internal or preview distribution.
+Point setup at that catalog. A featured list in prose cannot substitute for
+those bytes.
 
 ```text
-agent-host setup --profile standard --host zcode --release-manifest /absolute/current.json
+agent-host profiles list --json
+agent-host setup --profile featured --host zcode --release-manifest /absolute/current.json
+agent-host tools set --profile featured
 agent-host tools set --tool math-anchor --tool armorial
 agent-host doctor --deep --json
 ```
 
+`setup` against this repository's tracked `catalog/releases/draft-unbound`
+fails closed. `--development-root` is the tools-dev path (`local-dogfood`),
+not featured.
+
 | Intent | Existing API |
 | --- | --- |
-| Choose the admitted inventory | `catalog/profiles/*.json` (`components`, `agentComponents`, `defaultAgentComponents`) |
+| List admitted profiles and the featured set | `agent-host profiles list` (`catalog/profiles/*.json`) |
+| Choose the admitted inventory | `setup --profile featured` / `update --profile featured` |
 | Bind exact bytes | bound release catalog + `build-provenance.json`; `setup` / `update --release-manifest` |
-| Select the working set after install | `agent-host tools set --tool …` / Manager tool toggles |
+| Select the working set after install | `agent-host tools set --profile featured` or `tools set --tool …` / Manager tool toggles |
 | Add one extra owner-selected archive | `component preview` then `component import` (inactive until `--activate` or `tools set`) |
 | Connect an Agent app | `host add` / setup `--host`, public marketplace/plugin/MCP/Skill extension points only |
 | Verify projection vs live binding | `doctor --deep` without `--skip-agent-apps`; `host status` without `--quick` |
 | Observe session discovery | a **new** Agent task after `restartRequired` |
-
-`setup` against this repository's tracked `catalog/releases/draft-unbound`
-fails closed. A featured list in prose cannot substitute for a bound manifest.
 
 tools-dev dogfood is a different audience: `docs/LOCAL_DOGFOOD.md`, profile
 `local-dogfood`, and sibling checkouts as **build inputs**. Those paths are
@@ -73,3 +82,4 @@ generations and the Host vs session honesty boundary.
 - Publishing a notarized DMG, GitHub Release, or public marketplace from this
   document.
 - Treating `local-dogfood` membership as an external featured set.
+- A Manager marketplace UI.

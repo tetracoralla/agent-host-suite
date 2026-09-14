@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { human } from '../src/cli.mjs'
+import { listProfileIds } from '../src/profile.mjs'
 
 const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
 
@@ -32,6 +33,10 @@ test('manager --no-open prints a usable local entry before the server closes', {
 
 test('CLI rejects known options that do not belong to the selected operation', () => {
   const cases = [
+    [['profiles', 'list', '--state-root', '/tmp/state'], 'profiles list does not accept --state-root'],
+    [['tools', 'set', '--tool', 'math-anchor', '--profile', 'featured'], 'tools set requires --tool or --profile, not both'],
+    [['tools', 'set'], 'tools set requires --tool or --profile, not both'],
+    [['profiles'], 'profiles requires an action'],
     [['status', '--deep'], 'status does not accept --deep'],
     [['status', '--quick'], 'status does not accept --quick'],
     [['doctor', '--quick'], 'doctor does not accept --quick'],
@@ -161,6 +166,31 @@ test('human observability status renders monitoring state instead of crashing on
   assert.equal(disabled, 'Observability disabled · local data preserved.')
   const notInstalled = human({ status: 'ok', configured: false, enabled: false, privacy: {} })
   assert.equal(notInstalled, 'Observability off · no Agent environment installed.')
+})
+
+test('profiles list names the featured admission set without a store', async () => {
+  const listed = spawnSync(process.execPath, [cliPath, 'profiles', 'list', '--json'], { encoding: 'utf8' })
+  assert.equal(listed.status, 0, listed.stderr)
+  const catalog = JSON.parse(listed.stdout)
+  assert.equal(catalog.marketplace, false)
+  assert.equal(catalog.boundReleaseRequired, true)
+  assert.equal(catalog.featuredProfile, 'featured')
+  const featured = catalog.profiles.find((profile) => profile.id === 'featured')
+  assert.equal(featured.featured, true)
+  assert.equal(featured.dogfood, false)
+  assert.equal(featured.agentComponents.includes('armorial'), true)
+  const dogfood = catalog.profiles.find((profile) => profile.id === 'local-dogfood')
+  assert.equal(dogfood.dogfood, true)
+  assert.equal(dogfood.featured, false)
+  const help = spawnSync(process.execPath, [cliPath, '--help'], { encoding: 'utf8' })
+  assert.equal(help.status, 0, help.stderr)
+  assert.match(help.stdout, /agent-host profiles list/u)
+  assert.match(help.stdout, /--profile standard\|featured\|developer\|observability\|local-dogfood/u)
+  for (const id of await listProfileIds()) assert.match(help.stdout, new RegExp(`\\b${id}\\b`, 'u'))
+  const humanOutput = human(catalog)
+  assert.match(humanOutput, /Featured catalog · not a marketplace · bound release required/u)
+  assert.match(humanOutput, /featured · Featured tools · featured · math-anchor, migratory-time, armorial/u)
+  assert.match(humanOutput, /local-dogfood · Standard \+ local tools · dogfood/u)
 })
 
 test('human tool-set status reports Host selection rather than Agent-app enablement', () => {

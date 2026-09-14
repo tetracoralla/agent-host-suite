@@ -78,7 +78,7 @@ async function component(catalogRoot, fixtureRoot, definition, marker) {
   }
 }
 
-export async function createReleaseFixture(root, { suiteVersion, releaseId, marker, includeObservability = false, includeDeveloper = false }) {
+export async function createReleaseFixture(root, { suiteVersion, releaseId, marker, includeObservability = false, includeDeveloper = false, includeArmorial = false }) {
   const catalogRoot = join(root, 'catalog')
   await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
   const nodeEntrypoint = platform() === 'win32' ? 'bin/node.exe' : 'bin/node'
@@ -186,6 +186,61 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
         skill: {
           id: 'build-openadam-agent-tools', root: skillRoot,
           identityFiles: ['SKILL.md', 'agents/openai.yaml'], launcher: 'scripts/openadam-dev',
+        },
+        ownership: { uninstall: 'agent-host-created-only' },
+      },
+    })
+  }
+  if (includeArmorial) {
+    const pluginRoot = 'marketplace/plugins/armorial'
+    const identityFiles = ['.codex-plugin/plugin.json', '.mcp.json', 'skills/use-armorial/SKILL.md']
+    definitions.push({
+      id: 'armorial', version: '0.7.0', kind: 'agent-tool',
+      files: [
+        ['marketplace/.agents/plugins/marketplace.json', ['{"name":"armorial-local"}\n', false]],
+        [`${pluginRoot}/.codex-plugin/plugin.json`, ['{"name":"armorial","version":"0.7.0","skills":"./skills/","mcpServers":"./.mcp.json"}\n', false]],
+        [`${pluginRoot}/.mcp.json`, ['{"mcpServers":{"armorial":{"command":"./server.mjs","args":[],"cwd":"."}}}\n', false]],
+        [`${pluginRoot}/skills/use-armorial/SKILL.md`, ['---\nname: use-armorial\n---\n', false]],
+        [`${pluginRoot}/server.mjs`, [`// ${marker}\nprocess.stdin.resume()\n`, false]],
+        [`${pluginRoot}/cli.mjs`, ["process.stdout.write('0.7.0\\n')\n", false]],
+      ],
+      identityFiles: ['marketplace/.agents/plugins/marketplace.json', ...identityFiles.map((path) => `${pluginRoot}/${path}`)],
+      entrypoints: { server: `${pluginRoot}/server.mjs` },
+      integration: {
+        schemaVersion: 'openadam.agent-host-tool-integration.v0.3',
+        displayName: 'Armorial',
+        summary: 'Choose project-aware icons without redrawing them.',
+        codex: {
+          marketplaceRoot: 'marketplace',
+          marketplace: 'armorial-local',
+          pluginRoot,
+          plugin: 'armorial',
+          identityFiles,
+        },
+        runtime: {
+          transport: 'mcp-stdio',
+          executor: 'suite-node',
+          command: `${pluginRoot}/server.mjs`,
+          args: [],
+          cwd: pluginRoot,
+          workspaceEnvironment: [],
+          expectedTools: ['armorial.select'],
+          timeoutMs: 5000,
+        },
+        discovery: {
+          kind: 'skill-cli',
+          skill: {
+            id: 'use-armorial',
+            root: `${pluginRoot}/skills/use-armorial`,
+            identityFiles: ['SKILL.md'],
+            launcher: 'scripts/armorial',
+          },
+          runtime: {
+            executor: 'suite-node',
+            command: `${pluginRoot}/cli.mjs`,
+            args: [],
+            versionArguments: ['--version'],
+          },
         },
         ownership: { uninstall: 'agent-host-created-only' },
       },

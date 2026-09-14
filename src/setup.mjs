@@ -18,7 +18,7 @@ import { cleanupMaterializedRelease, discardMaterializedDownloads, materializeRe
 import { loadReleaseManifest } from './release-manifest.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { OBSERVABILITY_RELEASE_COMPONENTS } from './release-manifest.mjs'
-import { agentFacingManifest, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
+import { agentFacingManifest, FEATURED_PROFILE_ID, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
 import { installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
 import {
   installDeveloperKitSkill,
@@ -178,6 +178,9 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
   }
   if (profile.id === 'developer' && options.developmentRoot !== undefined) {
     throw new AgentHostError('DEVELOPER_PROFILE_RELEASE_REQUIRED', 'The developer profile requires one version-bound release; it cannot expose a mutable source-root CLI')
+  }
+  if (profile.id === FEATURED_PROFILE_ID && options.developmentRoot !== undefined) {
+    throw new AgentHostError('FEATURED_PROFILE_RELEASE_REQUIRED', 'The featured profile requires a bound compatibility release; it cannot use a development source root')
   }
   let paths = preparedPaths ?? await prepareStatePaths(resolveStateRoot(options.stateRoot))
   // Reject an existing installation before entering cleanup for a new one.

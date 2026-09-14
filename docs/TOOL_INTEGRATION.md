@@ -257,6 +257,16 @@ tool; active MCP management remains limited to Claude integrations the Host
 explicitly supports. Conflict replacement and uninstall preserve or restore a
 displaced user-owned Skill instead of deleting it.
 
+## Featured profile
+
+`featured` is the external-user admission list. It extends `standard` and
+admits independently released tools that already have a closed integration
+record in a bound compatibility release (currently Armorial). List it with
+`agent-host profiles list` and select its default working set with
+`agent-host tools set --profile featured`. It is not a marketplace. The
+profile file, rather than this document, owns exact membership.
+`local-dogfood` remains a separate tools-dev inventory.
+
 ## Local dogfood profile
 
 `local-dogfood` composes the Standard set with the locally admitted tools. It

@@ -61,14 +61,18 @@ does not silently claim a public installable release.
   inputs, not runtime paths, and `local-dogfood` is a local feedback profile,
   not a store.
 
-A [featured catalog v1](docs/FEATURED_CATALOG.md) is an owner-selected subset
-of independently released tools installed through those same APIs. It is not a
-marketplace. How Codex projections relate to session Skill/MCP paths is in
+A [featured catalog v1](docs/FEATURED_CATALOG.md) is the named `featured`
+profile: an owner-selected subset of independently released tools installed
+through those same APIs. It is not a marketplace. How Codex projections relate
+to session Skill/MCP paths is in
 [Discovery and projection](docs/DISCOVERY_PROJECTION.md).
 
 ## Profiles
 
 - `standard` is the small default Agent-visible tool set.
+- `featured` is the external-user admission list. It extends `standard` and
+  admits Armorial. List it with `agent-host profiles list`. It is not
+  `local-dogfood`.
 - `observability` adds explicitly consented local monitoring without adding
   monitoring tools to the ordinary Agent catalog.
 - `local-dogfood` adds the wider development inventory while retaining a
@@ -83,6 +87,22 @@ Exact membership must be read from the profile files and the selected bound
 release, not copied from prose. Installed inventory and active Agent-visible
 tools are separate; after a binding change, start a fresh Agent task before
 assessing discovery or natural tool selection.
+
+## External featured path
+
+There is no public GitHub Release in this checkout. With a bound catalog from
+an owner-issued preview distribution:
+
+```text
+agent-host profiles list --json
+agent-host setup --profile featured --host zcode --release-manifest /absolute/current.json
+agent-host tools set --profile featured
+agent-host doctor --deep --json
+```
+
+Tracked `draft-unbound` setup fails closed. `--development-root` is the
+tools-dev path, not featured. Details:
+[Featured catalog v1](docs/FEATURED_CATALOG.md).
 
 ## Typical operator flow
 

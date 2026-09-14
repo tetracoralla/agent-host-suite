@@ -1,8 +1,14 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { AgentHostError } from './errors.mjs'
 
 const PROFILE_SCHEMA = 'openadam.agent-host-profile.v0.2'
 const PROFILE_ID = /^[a-z][a-z0-9-]*$/u
+const PROFILE_DIRECTORY = new URL('../catalog/profiles/', import.meta.url)
+
+export const FEATURED_PROFILE_ID = 'featured'
+export const LOCAL_DOGFOOD_PROFILE_ID = 'local-dogfood'
+export const FEATURED_CATALOG_SCHEMA = 'openadam.agent-host-profile-catalog.v0.1'
 
 function fail(message, details) {
   throw new AgentHostError('PROFILE_INVALID', message, details)
@@ -70,6 +76,44 @@ export async function loadProfile(id) {
     agentComponents,
     defaultAgentComponents,
     requiresConsent: chain.some((profile) => profile.requiresConsent === true),
+  }
+}
+
+export async function listProfileIds() {
+  const names = (await readdir(fileURLToPath(PROFILE_DIRECTORY)))
+    .filter((name) => name.endsWith('.json'))
+    .map((name) => name.slice(0, -'.json'.length))
+    .sort()
+  if (names.length === 0) fail('No profiles are published')
+  return names
+}
+
+export async function listProfiles() {
+  const ids = await listProfileIds()
+  return Promise.all(ids.map(async (id) => {
+    const profile = await loadProfile(id)
+    return {
+      ...profile,
+      featured: id === FEATURED_PROFILE_ID,
+      dogfood: id === LOCAL_DOGFOOD_PROFILE_ID,
+    }
+  }))
+}
+
+export async function defaultToolsForProfile(id) {
+  const profile = await loadProfile(id)
+  return [...profile.defaultAgentComponents]
+}
+
+export async function featuredCatalog() {
+  const profiles = await listProfiles()
+  return {
+    schemaVersion: FEATURED_CATALOG_SCHEMA,
+    status: 'ok',
+    marketplace: false,
+    boundReleaseRequired: true,
+    featuredProfile: FEATURED_PROFILE_ID,
+    profiles,
   }
 }
 

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Wire featured-catalog v1 to the existing install APIs: named `featured`
+  profile (standard plus Armorial, not `local-dogfood`), `profiles list`, and
+  `tools set --profile`. Doctor checks catalog membership; draft-unbound and
+  development-root setup still fail closed. This is not a marketplace or
+  public Release.
 - Distinguish Host working-set selection from Agent-app cache and session
   discovery in status, tools status, and Manager copy. Recopy a vanished
   Host-owned Codex plugin cache through the public installer without treating

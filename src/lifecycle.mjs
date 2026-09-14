@@ -22,7 +22,7 @@ import { COMPONENT_WARMUP_POLICY_VERSION, warmInstalledAgentComponents } from '.
 import { preflightManagedCatalog } from './context-exporter.mjs'
 import { compareSuiteVersions, loadReleaseManifest, OBSERVABILITY_RELEASE_COMPONENTS } from './release-manifest.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
-import { hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
+import { FEATURED_PROFILE_ID, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
 import { inspectOperationsSkill, installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
 import { checkApplicationState } from './state-migration.mjs'
 import { validateComponentPathGrants } from './component-environment.mjs'
@@ -663,6 +663,9 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   const previous = await loadState(paths)
   if (previous === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   const profile = await loadProfile(options.profile ?? previous.profile)
+  if (profile.id === FEATURED_PROFILE_ID && options.releaseManifest === undefined && previous.channel !== 'release') {
+    throw new AgentHostError('FEATURED_PROFILE_RELEASE_REQUIRED', 'The featured profile requires a bound compatibility release; it cannot be selected from a development source root')
+  }
   const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
   const enablingObservability = profile.requiresConsent
     && previous.observability?.enabled !== true

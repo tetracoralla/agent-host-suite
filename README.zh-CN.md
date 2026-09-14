@@ -41,13 +41,15 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
   [Local dogfood](docs/LOCAL_DOGFOOD.md)。兄弟仓库只是构建输入，不是运行时路径；
   `local-dogfood` 是本机反馈 profile，不是商店。
 
-[精选目录 v1](docs/FEATURED_CATALOG.md) 是通过上述同一套安装 API 选出的独立发布工具
-子集，不是市场。Codex 投影与会话 Skill/MCP 路径见
+[精选目录 v1](docs/FEATURED_CATALOG.md) 是名为 `featured` 的 profile：通过上述同一套
+安装 API 选出的独立发布工具子集，不是市场。Codex 投影与会话 Skill/MCP 路径见
 [发现与投影](docs/DISCOVERY_PROJECTION.md)。
 
 ## Profile
 
 - `standard`：小型默认 Agent 工具集。
+- `featured`：面向外部用户的准入列表，在 `standard` 上增加 Armorial。用
+  `agent-host profiles list` 查看；它不是 `local-dogfood`。
 - `observability`：经用户明确同意后增加本机监测，但不把监测组件加入普通 Agent 工具目录。
 - `local-dogfood`：增加开发期工具库存，同时保留较小的默认启用集合。
 - `developer`：以 Skill-only 后台组件安装 Agent Tool Development Kit；该 profile 不提供
@@ -58,6 +60,22 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
 准确成员必须从 profile 文件与所选 release manifest 读取，不应从文档中的数量或列表推断。
 已安装库存与 Agent 当前可见工具是两回事；修改连接后，需要新建 Agent 任务再判断工具发现
 与自然采用。
+
+## 外部精选路径
+
+本 checkout 没有公开 GitHub Release。若已有所有者发放的绑定 catalog（预览/内部
+分发）：
+
+```text
+agent-host profiles list --json
+agent-host setup --profile featured --host zcode --release-manifest /absolute/current.json
+agent-host tools set --profile featured
+agent-host doctor --deep --json
+```
+
+跟踪的 `draft-unbound` catalog 上 setup 会失败。`--development-root` 是
+tools-dev 路径，不是 featured。详见
+[精选目录 v1](docs/FEATURED_CATALOG.md)。
 
 ## 常用流程
 

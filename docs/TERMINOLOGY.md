@@ -17,6 +17,7 @@ released tools, and their Agent-app integrations.
 | **Agent app** | **Agent 应用** | A product such as Codex, ZCode, or Claude Code that hosts an Agent and loads tool integrations. Use **host** only in technical contracts, adapters, commands, and stable data fields. Do not describe an Agent app as an Agent Host client. |
 | **Agent tool** | **Agent 工具** | An independently released product that an Agent calls to perform domain work, such as Math Anchor or Migratory Time. Each tool retains its own name, release, license, and semantics. |
 | **Standard tool set** | **标准工具集** | The small set of Agent tools selected by the `standard` profile. Direct Runtime is an infrastructure component and is not counted as a Standard tool. |
+| **Featured tool set** | **精选工具集** | The external-user admission list selected by the `featured` profile. It is not a marketplace and is not the `local-dogfood` inventory. |
 | **tool integration** | **工具接入** or **工具集成包** | The supported carrier that makes one Agent tool available in one Agent app, such as a Codex Plugin or ZCode/Claude MCP binding. A plugin or binding is not the tool itself. |
 | **Direct Execution Runtime** / **Direct Runtime** | **直接执行运行时** | The infrastructure component that runs already-selected structured work without another model relay. It is not a generic model-facing Agent tool. |
 | **compatibility set** | **兼容集** | The exact versions, artifacts, hashes, integrations, and local state intended to work together. An installed compatibility set is the device's Agent environment. |
