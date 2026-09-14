@@ -149,7 +149,7 @@ struct UsageReliabilityView: View {
                 ActivityMetric(value: usage.reliability.toolErrors, label: L10n.text("Errors"))
                 ActivityMetric(value: usage.reliability.toolCancellations, label: L10n.text("Cancelled"))
             }
-            Text(L10n.text("Outcome counts cover mapped Agent Host tools with provider-reported runtime state; an unmeasured call is not treated as success."))
+            Text(L10n.text("Unmeasured calls are not counted as success."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -211,7 +211,7 @@ struct UsageReliabilityView: View {
                 Text(L10n.text("Version history")).font(.headline)
                 Spacer()
                 Button(L10n.text(copiedAnalysis ? "Analysis request copied" : "Copy analysis request")) {
-                    let prompt = L10n.text("Use the installed Agent Host operations skill to read the current usage report. Analyze tool activity, version history, runtime errors, collection coverage, and unknowns. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; do not infer adoption or correctness from counts alone.")
+                    let prompt = L10n.text("Open the usage report in your Agent.")
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(prompt, forType: .string)
                     copiedAnalysis = true

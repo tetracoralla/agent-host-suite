@@ -81,9 +81,9 @@ enum ManagerSetupPolicy {
     static let profiles = ["featured", "standard", "developer", "observability"]
     static let defaultProfile = "featured"
     static let featuredToolIDs = ["math-anchor", "migratory-time", "armorial"]
-    static let unsignedMacOSGatekeeperNote = "Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview."
-    static let publicDownloadNotConfiguredNote = "Public download is not configured. This checkout does not publish GitHub Release assets. After an owner publishes a Release or an HTTPS index, set AGENT_HOST_FEATURED_CATALOG_URL to that preview-distribution.json (or a bound current.json). This is not an app store."
-    static let workingSetNote = "Switches enable the working set of already-installed tools. They do not install missing inventory. tools set --profile is the same working-set action, not an installer."
+    static let unsignedMacOSGatekeeperNote = "Unsigned build: Control-click the app, then Open."
+    static let publicDownloadNotConfiguredNote = "Public download is not configured."
+    static let workingSetNote = ""
 
     static func isSetupProfile(_ id: String) -> Bool {
         profiles.contains(id)
