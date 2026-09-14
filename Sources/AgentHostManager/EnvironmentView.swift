@@ -6,7 +6,7 @@ struct EnvironmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Agent environment", subtitle: L10n.format("{toolSet} on this Mac", ["toolSet": toolSetName])) {
+                PageHeader(title: "Overview", subtitle: L10n.format("{toolSet} on this Mac", ["toolSet": toolSetName])) {
                     HealthPill(health: store.health)
                 }
 
@@ -30,7 +30,7 @@ struct EnvironmentView: View {
                             title: store.agentAppsVerified ? "Your environment is ready" : "Your local environment is ready",
                             message: store.agentAppsVerified
                                 ? "Open a fresh task in a connected Agent app to use the installed tools."
-                                : "Connected Agent apps are configured. Run Full Check when you want to verify their current bindings.",
+                                : "Run Full Check to verify bindings.",
                             systemImage: "checkmark.circle.fill",
                             color: .green
                         )

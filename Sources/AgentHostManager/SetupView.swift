@@ -6,15 +6,12 @@ struct SetupView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Set up your Agent environment", subtitle: "Install one verified local environment. Connecting an Agent app can wait.") {
+                PageHeader(title: "Set up", subtitle: nil) {
                     HealthPill(health: store.health)
                 }
 
                 Panel {
                     Text(L10n.text("Tool set")).font(.headline)
-                    Text(L10n.text("Featured is the owner-selected catalog, including Armorial. It is not a marketplace."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     ForEach(Array(ManagerSetupPolicy.profiles.enumerated()), id: \.element) { index, profile in
                         if index > 0 { Divider() }
                         ProfileChoiceRow(
@@ -53,7 +50,7 @@ struct SetupView: View {
                     if !store.hasDetectedSetupHost {
                         NoticeView(
                             title: "No supported Agent app was found",
-                            message: "You can install Agent Host now and connect an Agent app later from Agent Apps.",
+                            message: "Install now; connect an Agent later.",
                             systemImage: "info.circle.fill",
                             color: .blue
                         )
@@ -69,28 +66,6 @@ struct SetupView: View {
                     }
                 }
 
-                if let url = store.featuredCatalogDownloadURL {
-                    NoticeView(
-                        title: "Featured catalog download",
-                        message: ManagerSetupPolicy.unsignedMacOSGatekeeperNote,
-                        systemImage: "arrow.down.circle",
-                        color: .orange
-                    )
-                    Text(url)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                } else {
-                    NoticeView(
-                        title: "Public download is not configured",
-                        message: ManagerSetupPolicy.publicDownloadNotConfiguredNote,
-                        systemImage: "info.circle",
-                        color: .secondary
-                    )
-                    Text(L10n.text(ManagerSetupPolicy.unsignedMacOSGatekeeperNote))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
 
                 HStack {
                     Button(L10n.text("Review Setup")) {
@@ -102,7 +77,7 @@ struct SetupView: View {
 
                     Text(L10n.text(store.connectsAgentDuringSetup
                         ? "Local monitoring stays off until you turn it on."
-                        : "Agent Host will be installed without connecting an Agent app. Connect one later from Agent Apps."))
+                        : "Install without an Agent for now."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -158,7 +133,7 @@ struct SetupPlanView: View {
             } else {
                 NoticeView(
                     title: L10n.text("Connect an Agent app when it is installed"),
-                    message: L10n.text("Host inventory can be installed first. After a supported Agent app is detected, connect it from Agent Apps and start a fresh task."),
+                    message: L10n.text("Connect an Agent afterward, then start a new task."),
                     systemImage: "arrow.clockwise.circle.fill",
                     color: .blue
                 )

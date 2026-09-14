@@ -231,13 +231,12 @@ enum L10n {
         "Cached": "缓存结果",
         "Freshness unknown": "新鲜度未知",
         "Local metadata only": "仅本地元数据",
-        "Set up your Agent environment": "设置 Agent 环境",
-        "Install one verified local environment for your Agent app.": "为 Agent 应用安装一套经过验证的本地环境。",
-        "Install one verified local environment. Connecting an Agent app can wait.": "安装一套经过验证的本地环境。连接 Agent 应用可以稍后进行。",
+        "Set up your Agent environment": "设置",
+        "Install one verified local environment for your Agent app.": "安装本地环境。",
         "Standard tools": "标准工具",
         "Reliable calculation and time conversion": "可靠计算与时区转换",
         "Local service": "本地服务",
-        "Keeps installed tools ready on this Mac": "让已安装工具在这台 Mac 上保持就绪",
+        "Keeps installed tools ready on this Mac": "保持本机工具可用",
         "Agent app": "Agent 应用",
         "Review Setup": "查看设置方案",
         "Local monitoring stays off until you turn it on.": "本地监控会保持关闭，直到你主动开启。",
@@ -250,6 +249,18 @@ enum L10n {
         "Selected": "已选择",
         "Standard": "标准",
         "Featured tools": "精选工具",
+        "Overview": "总览",
+        "Agents": "连接 Agent",
+        "History": "记录",
+        "Advanced": "高级",
+        "Usage": "使用情况",
+        "Set up": "设置",
+        "New tasks pick up tool changes.": "新任务会用上工具变更。",
+        "Run Full Check to verify bindings.": "运行完整检查以核对绑定。",
+        "Open tasks keep their old tools.": "已打开的任务仍用旧工具。",
+        "Unmeasured calls are not counted as success.": "未计量的调用不计为成功。",
+        "Unsigned build: Control-click the app, then Open.": "未签名：按住 Control 点开应用。",
+        "Public download is not configured.": "尚未配置公开下载。",
         "Standard + Monitoring": "标准 + 监控",
         "Standard + Local tools": "标准 + 本地工具",
         "Monitoring": "监控",
@@ -318,31 +329,22 @@ enum L10n {
         ,"{count} live suite processes": "{count} 个活跃 Suite 进程"
         ,"{size} resident": "常驻内存 {size}"
         ,"Workspace access": "工作区访问"
-        ,"Featured is the owner-selected catalog, including Armorial. It is not a marketplace.": "精选是所有者选定的目录，包含 Armorial；不是应用市场。"
         ,"Check again": "重新检测"
         ,"No supported Agent app was found": "未找到受支持的 Agent 应用"
-        ,"You can install Agent Host now and connect an Agent app later from Agent Apps.": "可以先安装 Agent Host，稍后再从“Agent 应用”连接。"
-        ,"Featured catalog download": "精选目录下载"
+        ,"Install now; connect an Agent later.": "先安装，稍后再连 Agent。"
         ,"Public download is not configured": "尚未配置公开下载"
-        ,"Public download is not configured. This checkout does not publish GitHub Release assets. After an owner publishes a Release or an HTTPS index, set AGENT_HOST_FEATURED_CATALOG_URL to that preview-distribution.json (or a bound current.json). This is not an app store.": "尚未配置公开下载。此 checkout 没有发布 GitHub Release 资产。所有者发布 Release 或 HTTPS 清单后，将 AGENT_HOST_FEATURED_CATALOG_URL 设为该 preview-distribution.json（或绑定的 current.json）。这不是应用商店。"
-        ,"Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.": "未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。"
-        ,"Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview.": "未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请按住 Control 点击 Agent Host.app（或 DMG 中的应用），选择“打开”，再确认 Gatekeeper 提示。该提示是此预览的预期步骤。"
-        ,"Agent Host will be installed without connecting an Agent app. Connect one later from Agent Apps.": "将安装 Agent Host 且暂不连接 Agent 应用；稍后可从“Agent 应用”连接。"
+        ,"Install without an Agent for now.": "先不连 Agent，直接安装。"
         ,"Connect later": "稍后连接"
         ,"Connect an Agent app when it is installed": "安装 Agent 应用后再连接"
-        ,"Host inventory can be installed first. After a supported Agent app is detected, connect it from Agent Apps and start a fresh task.": "可以先安装 Host 库存。检测到受支持的 Agent 应用后，从“Agent 应用”连接并启动新任务。"
+        ,"Connect an Agent afterward, then start a new task.": "装好后再连接 Agent，并新开任务。"
         ,"Agent Host will install the {toolSet}, connect them to {app}, and start local execution.": "Agent Host 将安装{toolSet}、连接到 {app} 并启动本地执行。"
         ,"Agent Host will install the {toolSet} and start local execution. No Agent app will be connected yet.": "Agent Host 将安装{toolSet}并启动本地执行，暂不连接 Agent 应用。"
         ,"Use {toolSet} for setup": "使用 {toolSet} 进行设置"
         ,"Not installed · connect after setup": "未安装 · 设置后再连接"
-        ,"Get catalog inventory, then enable a working set for new Agent tasks": "先获取目录库存，再为新的 Agent 任务启用工作集"
-        ,"Featured catalog": "精选目录"
-        ,"Owner-selected tools, including Armorial. Not a marketplace, store, ranking, or payment catalog.": "所有者精选的工具（含 Armorial）。不是应用市场、商店、排行或付费目录。"
-        ,"Switches enable the working set of already-installed tools. They do not install missing inventory. tools set --profile is the same working-set action, not an installer.": "开关只启用已经安装的工具工作集，不会安装尚未入库的工具。tools set --profile 同样只选择工作集，不是安装器。"
-        ,"Get featured tools": "获取精选工具"
-        ,"Get runs update --profile featured against the same bound catalog as CLI setup. It installs inventory; switches below only change the working set.": "“获取”会按与 CLI 相同的绑定目录执行 update --profile featured，用于安装库存；下方开关只改变工作集。"
-        ,"Working set for new tasks": "新任务的工作集"
-        ,"Not installed in this environment": "此环境尚未安装"
+        ,"Featured": "精选"
+        ,"Get": "获取"
+        ,"For new tasks": "用于新任务"
+        ,"Missing": "未安装"
         ,"Featured tools installed": "已安装精选工具"
         ,"Agent environment installed": "已安装 Agent 环境"
         ,"Installing tools": "正在安装工具"

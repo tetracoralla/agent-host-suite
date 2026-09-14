@@ -6,7 +6,7 @@ struct ActivityView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Activity", subtitle: "Changes made to this environment") {
+                PageHeader(title: "History", subtitle: nil) {
                     EmptyView()
                 }
 

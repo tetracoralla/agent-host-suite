@@ -205,8 +205,8 @@ do {
         "unsigned preview copy must not promise a future notarized build"
     )
     expect(
-        ManagerSetupPolicy.publicDownloadNotConfiguredNote.contains("AGENT_HOST_FEATURED_CATALOG_URL"),
-        "unconfigured download copy must name the HTTPS catalog hook"
+        ManagerSetupPolicy.publicDownloadNotConfiguredNote == "Public download is not configured.",
+        "unconfigured download UI copy stays short; HTTPS catalog hook belongs in docs, not resident Manager copy"
     )
     expect(
         ManagerSetupPolicy.featuredToolIDs == ["math-anchor", "migratory-time", "armorial"],
@@ -240,8 +240,8 @@ do {
         "acquiring featured inventory must reuse update --profile featured"
     )
     expect(
-        ManagerSection.allCases.map(\.rawValue) == ["overview", "tools", "agentApps", "usage", "activity"],
-        "usage and reliability must be a first-class Manager destination"
+        ManagerSection.primaryCases.map(\.rawValue) == ["overview", "tools", "agentApps", "activity"],
+        "primary Manager destinations follow Overview → Tools → Agents → History"
     )
 
     let usagePayload = Data(#"""
@@ -432,10 +432,14 @@ do {
     )
 
     UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)
-    expect(L10n.text("Usage & Reliability") == "使用情况与可靠性", "the Manager must provide Simplified Chinese product copy")
-    expect(L10n.text("Get featured tools") == "获取精选工具", "featured acquire must provide Simplified Chinese copy")
+    expect(L10n.text("Overview") == "总览", "overview destination must provide Simplified Chinese copy")
+    expect(L10n.text("Agents") == "连接 Agent", "agents destination must provide Simplified Chinese copy")
+    expect(L10n.text("History") == "记录", "history destination must provide Simplified Chinese copy")
+    expect(L10n.text("Advanced") == "高级", "advanced section must provide Simplified Chinese copy")
+    expect(L10n.text("Usage") == "使用情况", "the Manager must provide Simplified Chinese product copy")
+    expect(L10n.text("Get") == "获取", "featured acquire must provide Simplified Chinese copy")
     expect(L10n.text("Connect later") == "稍后连接", "host-later setup must provide Simplified Chinese copy")
-    expect(L10n.text("Working set for new tasks") == "新任务的工作集", "working-set copy must stay distinct from inventory install")
+    expect(L10n.text("For new tasks") == "用于新任务", "working-set copy must stay distinct from inventory install")
     expect(L10n.text("Retained trace sessions") == "保留的轨迹会话", "retained trace controls must provide Simplified Chinese copy")
     expect(L10n.locale.identifier.hasPrefix("zh"), "dates must follow the explicit Simplified Chinese Manager language")
     expect(L10n.text("Complete") == "完整" && L10n.text("Running") == "运行中", "dynamic health values must be localized")
@@ -444,7 +448,7 @@ do {
     expect(L10n.format("{count} live suite processes", ["count": "3"]) == "3 个活跃 Suite 进程", "runtime summaries must be localized")
     expect(ManagerLanguage.system.title == "跟随系统", "the language control must expose a system-default choice")
     UserDefaults.standard.set(ManagerLanguage.english.rawValue, forKey: ManagerLanguage.storageKey)
-    expect(L10n.text("Usage & Reliability") == "Usage & Reliability", "the Manager must allow an explicit English override")
+    expect(L10n.text("Usage") == "Usage", "the Manager must allow an explicit English override")
     expect(L10n.locale.identifier.hasPrefix("en"), "dates must follow the explicit English Manager language")
 
     print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup")
