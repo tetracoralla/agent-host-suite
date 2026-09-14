@@ -205,8 +205,8 @@ do {
         "unsigned preview copy must not promise a future notarized build"
     )
     expect(
-        ManagerSetupPolicy.publicDownloadNotConfiguredNote.contains("AGENT_HOST_FEATURED_CATALOG_URL"),
-        "unconfigured download copy must name the HTTPS catalog hook"
+        ManagerSetupPolicy.publicDownloadNotConfiguredNote == "Public download is not configured.",
+        "unconfigured download UI copy stays short; HTTPS catalog hook belongs in docs, not resident Manager copy"
     )
     expect(
         ManagerSetupPolicy.featuredToolIDs == ["math-anchor", "migratory-time", "armorial"],
