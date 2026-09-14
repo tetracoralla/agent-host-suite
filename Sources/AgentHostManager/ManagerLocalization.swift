@@ -143,12 +143,14 @@ enum L10n {
         "Connected Agent apps are configured. Run Full Check when you want to verify their current bindings.": "已配置连接的 Agent 应用；需要核验当前绑定时可运行完整检查。",
         "Run a full check to identify the affected tool or Agent app.": "运行完整检查以定位受影响的工具或 Agent 应用。",
         "Available in connected Agent apps": "可供已连接的 Agent 应用使用",
+        "Selected for new Agent tasks": "已为新的 Agent 任务选中",
         "Check All": "检查全部",
         "Start a fresh Agent task": "请启动新的 Agent 任务",
         "New tasks load this tool selection. Tasks already open keep the tools they started with.": "新任务会载入当前工具选择；已打开的任务保留启动时的工具。",
         "Context cost": "上下文成本",
         "Available": "可用",
         "Make {tool} available in Agent apps": "让 Agent 应用可使用 {tool}",
+        "Include {tool} in new Agent tasks": "将 {tool} 纳入新的 Agent 任务",
         "Where your tools are available": "工具可用的位置",
         "Start a fresh task after changes": "更改后请启动新任务",
         "Agent apps load installed tool catalogs when a new task starts.": "Agent 应用会在新任务启动时载入已安装的工具目录。",
@@ -274,6 +276,7 @@ enum L10n {
         ,"Agent apps checked": "已检查的 Agent 应用"
         ,"Agent tool availability": "Agent 工具可用性"
         ,"Available in {apps}": "可用于 {apps}"
+        ,"Selected for {apps}": "已为 {apps} 选中"
         ,"Catalog measurement": "目录测量"
         ,"Changes": "变更"
         ,"Components changing": "变更的组件"
@@ -286,6 +289,7 @@ enum L10n {
         ,"Installed Agent tool": "已安装的 Agent 工具"
         ,"No measurement (monitoring off or not refreshed)": "无测量结果（监控已关闭或尚未刷新）"
         ,"Not available in an Agent app": "尚不可用于 Agent 应用"
+        ,"Not selected for an Agent app": "未选入 Agent 应用"
         ,"Not configured": "未配置"
         ,"Observed locally over the last {days} days": "最近 {days} 天的本地观测"
         ,"Off": "已关闭"

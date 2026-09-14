@@ -154,7 +154,8 @@ export function createCodexRunner({ mathPresent = true, timePresent = false, leg
         const marketplaceRoot = marketplaces.get(marketplaceName)
         const sourcePath = value.sourcePath ?? (typeof marketplaceRoot === 'string' ? join(marketplaceRoot, 'plugins', name) : undefined)
         return { pluginId, name, marketplaceName, installed: value.installed !== false, enabled: value.enabled, version: value.version,
-          source: sourcePath === undefined ? undefined : { source: 'local', path: sourcePath } }
+          source: sourcePath === undefined ? undefined : { source: 'local', path: sourcePath },
+          ...(typeof value.installedPath === 'string' ? { installedPath: value.installedPath } : {}) }
       }) }), stderr: '' }
     }
     if (command === '/fake/codex' && args[0] === 'plugin' && args[1] === 'add') {

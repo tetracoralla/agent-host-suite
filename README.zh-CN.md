@@ -8,6 +8,10 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
 本仓库是 **Agent Host Suite** 的分发单元；npm 包、CLI、schema 等稳定技术标识继续使用
 这个名称。
 
+当前源码树是开发者预览：不包含公开 GitHub Release、经过 Apple 公证的 macOS DMG，也
+没有公开工具市场。Host 工作集里的「已选中」不能证明正在打开的 Agent 会话已经载入这些
+工具。
+
 ## 范围与事实来源
 
 - Capability contract 定义稳定的类型化操作语义；Procedure contract 定义已经稳定的多阶段
@@ -26,6 +30,20 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
   判断，不能互相替代。
 
 仓库内置的发布目录故意保持未绑定，因此源码仓库不会假装已经提供可公开安装的版本。
+
+## 读者对象
+
+- **外部用户**：安装一份**已绑定**的兼容版本（打包载体，或
+  `setup --release-manifest` 指向该 catalog）。工具来自该版本中所选 profile 的成员，
+  并需要新建 Agent 任务。本仓库跟踪的 catalog 是 `draft-unbound`，没有绑定 manifest
+  时公开 setup 会失败。
+- **tools-dev dogfood**：有授权源码仓库的开发者遵循
+  [Local dogfood](docs/LOCAL_DOGFOOD.md)。兄弟仓库只是构建输入，不是运行时路径；
+  `local-dogfood` 是本机反馈 profile，不是商店。
+
+[精选目录 v1](docs/FEATURED_CATALOG.md) 是通过上述同一套安装 API 选出的独立发布工具
+子集，不是市场。Codex 投影与会话 Skill/MCP 路径见
+[发现与投影](docs/DISCOVERY_PROJECTION.md)。
 
 ## Profile
 
@@ -72,17 +90,22 @@ Agent Host 默认保留用户拥有的应用配置与数据。本机监测需要
 
 ## 分发边界
 
-本仓库是 Apache-2.0 开发者预览。每个候选版本必须独立判断公共二进制是否可发布：
+本仓库是 Apache-2.0 开发者预览。源码树本身不声称已有公开下载、GitHub Release、公证
+DMG 或工具市场。
 
+- 不存在公开的 Agent Host 市场或第三方插件商店。
+- 若将来发布 macOS 公共 DMG，仍需要 Developer ID 签名、Apple 公证、stapling、
+  Gatekeeper 检查与干净设备验收。这些是发布活动事实，不是本 checkout 提供的产物。
+  本机或内部 ad-hoc 签名构建只是验证产物，不是公共下载。
 - Windows 打包与干净设备要求见 [`docs/WINDOWS.zh-CN.md`](docs/WINDOWS.zh-CN.md)。
-- macOS 公共二进制需要 Developer ID 签名、Apple 公证、stapling、Gatekeeper 检查与干净
-  设备验收。
-- 本机或内部使用的 ad-hoc 签名构建只是验证产物，不是公共下载。
+  满足这些要求并不表示已经发布公开安装包。
 
 完整产品模型、架构、集成 schema、发布流程与复核契约以英文文档为准。这些维护者文档不随
 npm 包分发；请从源码仓库阅读
 [`PRODUCT_MODEL.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/PRODUCT_MODEL.md)、
 [`ARCHITECTURE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ARCHITECTURE.md)、
 [`TOOL_INTEGRATION.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TOOL_INTEGRATION.md)、
-[`RELEASE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/RELEASE.md) 与
-[`REVIEW_CONTRACT.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md)。
+[`RELEASE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/RELEASE.md)、
+[`REVIEW_CONTRACT.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md)、
+[`DISCOVERY_PROJECTION.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md) 与
+[`FEATURED_CATALOG.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md)。

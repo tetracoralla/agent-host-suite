@@ -198,6 +198,89 @@ test('legacy migration rejects shared or user-modified registrations before inst
   assert.equal(fake.caches.size, 0)
 })
 
+test('a missing Host-owned Codex cache is distinct from a changed cache and can be recopied without conflict replacement', async (t) => {
+  const { manifest, fake, options } = await fixture(t)
+  const installed = await installCodex(manifest, fake.runner, options)
+  const math = entry(installed, 'math-anchor')
+  await rm(math.installedPath, { recursive: true, force: true })
+  const missing = entry(await inspectCodex(manifest, fake.runner, { ...options, managedState: installed }), 'math-anchor')
+  assert.equal(missing.pluginEnabled, true)
+  assert.equal(missing.installedIdentityMatched, false)
+  assert.equal(missing.cacheStatus, 'missing')
+  const repaired = await installCodex(manifest, fake.runner, { ...options, managedState: installed })
+  assert.notEqual(entry(repaired, 'math-anchor').selector, math.selector)
+  assert.equal(entry(await inspectCodex(manifest, fake.runner, { ...options, managedState: repaired }), 'math-anchor').installedIdentityMatched, true)
+})
+
+test('missing-cache recopy refuses to retire a marketplace still referenced by another plugin', async (t) => {
+  const { manifest, fake, options } = await fixture(t)
+  const installed = await installCodex(manifest, fake.runner, options)
+  const math = entry(installed, 'math-anchor')
+  const extraSelector = 'user-extra@' + math.marketplace
+  await edit(fake, ['plugins', extraSelector], { enabled: false })
+  await rm(math.installedPath, { recursive: true, force: true })
+  const before = (await fake.client.read()).config
+  const addsBefore = fake.calls.filter(({ args }) => args[0] === 'plugin' && args[1] === 'add').length
+  await assert.rejects(installCodex(manifest, fake.runner, { ...options, managedState: installed }), { code: 'CODEX_MARKETPLACE_CHANGED' })
+  const after = (await fake.client.read()).config
+  assert.deepEqual(after, before)
+  assert.deepEqual(after.plugins[extraSelector], { enabled: false })
+  assert.equal(Object.hasOwn(after.marketplaces, math.marketplace), true)
+  assert.deepEqual(after.marketplaces[math.marketplace], before.marketplaces[math.marketplace])
+  assert.equal(Object.hasOwn(after.plugins, math.selector), true)
+  assert.equal(fake.calls.filter(({ args }) => args[0] === 'plugin' && args[1] === 'add').length, addsBefore)
+})
+
+test('missing-cache recopy refuses a user-modified Host registration before writing a new binding', async (t) => {
+  const { manifest, fake, options } = await fixture(t)
+  const installed = await installCodex(manifest, fake.runner, options)
+  const math = entry(installed, 'math-anchor')
+  await edit(fake, ['plugins', math.selector], { enabled: true, user: 'retained' })
+  await rm(math.installedPath, { recursive: true, force: true })
+  const before = (await fake.client.read()).config
+  await assert.rejects(installCodex(manifest, fake.runner, { ...options, managedState: installed }), { code: 'CODEX_PLUGIN_CHANGED' })
+  assert.deepEqual((await fake.client.read()).config, before)
+  assert.deepEqual((await fake.client.read()).config.plugins[math.selector], { enabled: true, user: 'retained' })
+})
+
+test('Codex inspect uses a live plugin-list cache path when Codex reports one', async (t) => {
+  const { manifest, fake, options } = await fixture(t)
+  const installed = await installCodex(manifest, fake.runner, options)
+  const math = entry(installed, 'math-anchor')
+  fake.plugins.get(math.selector).installedPath = join(fake.root, 'missing-live-cache')
+  const inspection = entry(await inspectCodex(manifest, fake.runner, { ...options, managedState: installed }), 'math-anchor')
+  assert.equal(inspection.liveCacheObserved, true)
+  assert.equal(inspection.cacheStatus, 'missing')
+  assert.equal(inspection.installedIdentityMatched, false)
+  assert.match(inspection.installedIdentityError, /live plugin cache path that is gone/u)
+})
+
+test('a trailing-slash live installedPath is the advertised cache, not a fallback to the install receipt', async (t) => {
+  const { manifest, fake, options } = await fixture(t)
+  const installed = await installCodex(manifest, fake.runner, options)
+  const math = entry(installed, 'math-anchor')
+  assert.equal((await lstat(math.installedPath)).isDirectory(), true)
+  fake.plugins.get(math.selector).installedPath = join(fake.root, 'relocated-live-cache') + '/'
+  const inspection = entry(await inspectCodex(manifest, fake.runner, { ...options, managedState: installed }), 'math-anchor')
+  assert.equal(inspection.liveCacheObserved, true)
+  assert.equal(inspection.cacheStatus, 'missing')
+  assert.equal(inspection.installedIdentityMatched, false)
+  assert.match(inspection.installedIdentityError, /live plugin cache path that is gone/u)
+})
+
+test('an invalid advertised installedPath is unverifiable and does not fall back to the receipt', async (t) => {
+  const { manifest, fake, options } = await fixture(t)
+  const installed = await installCodex(manifest, fake.runner, options)
+  const math = entry(installed, 'math-anchor')
+  assert.equal((await lstat(math.installedPath)).isDirectory(), true)
+  fake.plugins.get(math.selector).installedPath = 'relative/not-absolute'
+  const inspection = entry(await inspectCodex(manifest, fake.runner, { ...options, managedState: installed }), 'math-anchor')
+  assert.equal(inspection.liveCacheObserved, false)
+  assert.equal(inspection.cacheStatus, 'unverifiable')
+  assert.equal(inspection.installedIdentityMatched, false)
+  assert.match(inspection.installedIdentityError, /not a verifiable absolute location/u)
+})
+
 test('cached identity rejects added Skills and symlinks even when every expected file has the original bytes', async (t) => {
   const { manifest, fake, options } = await fixture(t)
   const installed = await installCodex(manifest, fake.runner, options)

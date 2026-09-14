@@ -246,7 +246,7 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
             output.append(("Replaced version", previousVersion))
         }
         if let active = values["active"]?.displayText {
-            output.append(("Availability", active == "yes" ? "Available in connected Agent apps" : "Kept installed"))
+            output.append(("Availability", active == "yes" ? "Selected for new Agent tasks" : "Kept installed"))
         }
         if let purgeData = values["purgeData"]?.displayText {
             output.append(("Local data", purgeData == "yes" ? "Removed" : "Preserved"))

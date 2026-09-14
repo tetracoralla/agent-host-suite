@@ -6,9 +6,22 @@ installed versions, machine state, or release acceptance.
 
 ## User and task
 
-The intended user is an individual desktop Agent user who wants a small set of
-deterministic tools plus reliable local execution without cloning and
-configuring many repositories by hand.
+The intended **external user** is an individual desktop Agent user who wants a
+small set of deterministic tools plus reliable local execution without cloning
+and configuring many repositories by hand. That path requires a bound
+compatibility release. This source checkout is not that release: it has no
+public GitHub Release, notarized DMG, or tool marketplace.
+
+**tools-dev dogfood** is a separate audience. Developers with authorized source
+checkouts use [`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md) so installed execution
+matches a stranger's package bytes while they still edit those repositories.
+`local-dogfood` remains a local feedback profile, not a store.
+
+A featured catalog, if used, is an owner-selected subset of independently
+released tools installed through the existing setup, profile, `tools set`, and
+private-import APIs. See [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md). Host
+working-set selection is not current-session discovery; see
+[`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md).
 
 The user chooses an installed profile and a smaller active tool set, reviews
 the requested Agent-app and background-service changes, installs one Agent
@@ -125,9 +138,12 @@ Exact versions and fields belong to
    and uninstall preflight the complete target before mutation and share the
    Host lifecycle boundary. They preserve user-owned host entries and either
    commit the new state or disclose bounded partial effects.
-2. **Host connection.** Host adapters use only public marketplace, plugin, MCP,
-   Skill, or extension mechanisms. Conflicts fail closed; deliberate
-   replacement remains recoverable.
+2. **Host connection.** Host adapters use only each Agent app's public
+   marketplace, plugin, MCP, Skill, or extension APIs. That is not an Agent
+   Host store or public plugin marketplace. Conflicts fail closed; deliberate
+   replacement remains recoverable. A recorded Host working set or
+   `enabled: true` registration is not proof that an open session loaded the
+   current Skill path or MCP catalog.
 3. **Direct execution.** Direct Runtime runs already-selected typed work below
    the model and bounds Provider residency. It is not an Agent-visible router.
 4. **Health.** Local deep doctor reacquires installed package, service, live

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Distinguish Host working-set selection from Agent-app cache and session
+  discovery in status, tools status, and Manager copy. Recopy a vanished
+  Host-owned Codex plugin cache through the public installer without treating
+  it as a user conflict, but fail closed when another plugin still references
+  that marketplace. Treat a live plugin-list `installedPath` with a trailing
+  separator as that advertised location, not a fallback to an older receipt.
+  Document that this checkout has no public Release, notarized DMG, or
+  marketplace, and record featured-catalog v1 as an owner-selected list over
+  the existing install APIs. The earlier session Skill-path report remains an
+  unverified hypothesis from a wrong directory mapping, not a located root
+  cause.
+
 ## 0.2.0 — 2026-09-06
 
 - Recover interrupted environment changes through one journal for owned

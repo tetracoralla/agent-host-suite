@@ -6,7 +6,7 @@ struct ToolsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Tools", subtitle: "Available in connected Agent apps") {
+                PageHeader(title: "Tools", subtitle: "Selected for new Agent tasks") {
                     Button(L10n.text("Check All")) { Task { await store.runDoctor() } }
                         .disabled(store.isBusy)
                 }
@@ -81,7 +81,7 @@ private struct ToolRow: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .disabled(isBusy || (tool.active && !canDeactivate))
-                .accessibilityLabel(L10n.format("Make {tool} available in Agent apps", ["tool": tool.name]))
+                .accessibilityLabel(L10n.format("Include {tool} in new Agent tasks", ["tool": tool.name]))
             }
         }
         .padding(.vertical, 3)
