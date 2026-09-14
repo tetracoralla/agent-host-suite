@@ -119,9 +119,9 @@ const unpublished = JSON.parse(await readFile(join(root, 'catalog/preview-distri
 if (unpublished.publicReleasePublished !== false || unpublished.notarized !== false || unpublished.catalog !== null || unpublished.carriers.length !== 0) {
   throw new Error('tracked preview-distribution.json must remain an unpublished placeholder')
 }
-const releaseWorkflow = await readFile(join(root, '.github/workflows/release.yml'), 'utf8')
-if (releaseWorkflow.includes('notarytool') || releaseWorkflow.includes('APPLE_NOTARY')) {
-  throw new Error('release workflow must not require Apple notarization for unsigned preview')
+const draftWorkflow = await readFile(join(root, 'docs/unsigned-preview-release.yml'), 'utf8')
+if (draftWorkflow.includes('notarytool') || draftWorkflow.includes('APPLE_NOTARY')) {
+  throw new Error('unsigned preview workflow draft must not require Apple notarization')
 }
 if (!featuredDoc.includes('ADOPTION_ACCEPTANCE.md')) {
   throw new Error('featured catalog document must point at the unnamed adoption protocol')

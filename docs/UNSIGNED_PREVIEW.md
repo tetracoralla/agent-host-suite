@@ -145,13 +145,13 @@ so `github.com/.../releases/download/...` may land on
 
 ## Optional workflow draft
 
-`.github/workflows/release.yml` in this branch uploads an unsigned preview
-and does **not** require Apple notarization secrets. If a contributing token
-lacks the GitHub `workflow` scope, copy
-[`unsigned-preview-release.yml`](unsigned-preview-release.yml) into
-`.github/workflows/` with GitHub Desktop and commit from an account that can
-write workflows. The draft still fails closed when a bound catalog is missing;
-it does not invent artifacts.
+The tracked `.github/workflows/release.yml` still contains the older
+notarization job. This product does **not** use those Apple secrets. Copy
+[`unsigned-preview-release.yml`](unsigned-preview-release.yml) to
+`.github/workflows/unsigned-preview-release.yml` (or replace `release.yml`)
+with GitHub Desktop from an account that has the `workflow` scope. The draft
+uploads an unsigned prerelease, does not call `notarytool`, and fails closed
+when a bound catalog is missing; it does not invent artifacts.
 
 ## Non-goals
 
