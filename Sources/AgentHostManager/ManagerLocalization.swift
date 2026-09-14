@@ -495,7 +495,5 @@ enum L10n {
         ,"Checking catalog source": "正在检查目录来源"
         ,"Setting catalog source": "正在设置目录来源"
         ,"Clearing catalog source": "正在清除目录来源"
-        ,"not installed": "未安装"
-        ,"Unknown": "未知"
     ]
 }

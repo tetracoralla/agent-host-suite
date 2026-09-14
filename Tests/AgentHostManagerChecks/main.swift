@@ -284,12 +284,48 @@ do {
     )
     expect(
         ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: "/opt/current.json",
+            savedPath: "/tmp/current.json",
+            savedURL: "https://example.invalid/preview-distribution.json",
+            featuredCatalogURL: "https://example.invalid/featured.json"
+        ) == "/opt/current.json",
+        "an environment release manifest must take precedence over saved locators"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
             environmentManifest: nil,
             savedPath: "/tmp/current.json",
             savedURL: "https://example.invalid/preview-distribution.json",
             featuredCatalogURL: nil
         ) == "/tmp/current.json",
         "a saved local catalog must be usable without an env var"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: "",
+            savedPath: "",
+            savedURL: "https://example.invalid/preview-distribution.json",
+            featuredCatalogURL: "https://example.invalid/featured.json"
+        ) == "https://example.invalid/preview-distribution.json",
+        "empty catalog locators must flatten away and yield to the next source"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: nil,
+            savedPath: nil,
+            savedURL: nil,
+            featuredCatalogURL: "https://example.invalid/featured.json"
+        ) == "https://example.invalid/featured.json",
+        "the featured catalog URL remains a last-resort locator"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: "",
+            savedPath: nil,
+            savedURL: "",
+            featuredCatalogURL: nil
+        ) == nil,
+        "all-empty catalog locators must not invent a path"
     )
     expect(
         ManagerSourcePolicy.recoveryMessage(code: "PREVIEW_DOWNLOAD_DIGEST_MISMATCH").contains("digest"),
@@ -586,6 +622,8 @@ do {
     expect(L10n.locale.identifier.hasPrefix("zh"), "dates must follow the explicit Simplified Chinese Manager language")
     expect(L10n.text("Complete") == "完整" && L10n.text("Running") == "运行中", "dynamic health values must be localized")
     expect(L10n.text("Environment checks") == "环境检查", "unclassified health facets must provide Simplified Chinese copy")
+    expect(L10n.text("Unknown") == "未知", "unknown version copy must provide Simplified Chinese once")
+    expect(L10n.text("not installed") == "未安装", "absent environment copy must provide Simplified Chinese once")
     expect(L10n.relativeAge(since: now.addingTimeInterval(-120), now: now) == "2 分钟前", "relative time must follow the selected Manager language")
     expect(L10n.format("{count} live suite processes", ["count": "3"]) == "3 个活跃 Suite 进程", "runtime summaries must be localized")
     expect(ManagerLanguage.system.title == "跟随系统", "the language control must expose a system-default choice")
@@ -593,7 +631,7 @@ do {
     expect(L10n.text("Usage") == "Usage", "the Manager must allow an explicit English override")
     expect(L10n.locale.identifier.hasPrefix("en"), "dates must follow the explicit English Manager language")
 
-    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup")
+    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup, catalog locator flatten")
 } catch {
     FileHandle.standardError.write(Data("manager model check failed: \(error)\n".utf8))
     exit(1)

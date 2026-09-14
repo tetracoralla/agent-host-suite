@@ -240,11 +240,9 @@ enum ManagerSourcePolicy {
         savedURL: String?,
         featuredCatalogURL: String?
     ) -> String? {
-        let candidates = [environmentManifest, savedPath, savedURL, featuredCatalogURL]
-        return candidates.first { value in
-            guard let value else { return false }
-            return !value.isEmpty
-        }
+        return [environmentManifest, savedPath, savedURL, featuredCatalogURL]
+            .compactMap { $0 }
+            .first { !$0.isEmpty }
     }
 }
 
