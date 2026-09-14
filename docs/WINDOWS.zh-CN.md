@@ -8,8 +8,9 @@ Windows 分发物是面向当前用户的单个 ZIP，包含 Agent Host 管理�
 运行时、不可变工具与开发者 Kit 软件包、许可证和通知，以及逐文件大小与 SHA-256
 清单。使用它不需要源码、Git、npm、管理员权限或系统级服务。
 
-当前工程产物尚未签名。公开下载前仍需确定 Authenticode 签名策略，并在干净设备上
-验证 SmartScreen。Apple Developer 身份和 DMG 不影响 Windows 载体。
+当前工程产物尚未签名，公开预览下载也保持未签名。首次打开时 SmartScreen 可能警告；
+请先用 `SHA256SUMS` 核对 ZIP。此预览不要求 Authenticode。Apple Developer 身份和
+公证不影响 Windows 载体。见 [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md)。
 
 ## 安装
 

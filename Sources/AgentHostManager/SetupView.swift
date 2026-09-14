@@ -82,11 +82,14 @@ struct SetupView: View {
                         .textSelection(.enabled)
                 } else {
                     NoticeView(
-                        title: "Bound catalog required",
-                        message: "This checkout has no public GitHub Release. Featured and packaged setup need an owner-issued bound catalog (AGENT_HOST_RELEASE_MANIFEST). Unsigned macOS builds are not Apple-notarized. Control-click the app, choose Open, then confirm the Gatekeeper warning. This is expected until a Developer ID signed build exists.",
+                        title: "Public download is not configured",
+                        message: ManagerSetupPolicy.publicDownloadNotConfiguredNote,
                         systemImage: "info.circle",
                         color: .secondary
                     )
+                    Text(L10n.text(ManagerSetupPolicy.unsignedMacOSGatekeeperNote))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 HStack {

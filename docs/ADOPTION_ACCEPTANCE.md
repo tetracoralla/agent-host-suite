@@ -37,8 +37,10 @@ adoption. See [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md).
 On the machine that will run the Agent:
 
 1. Install a **bound** featured environment and select the featured working
-   set. There is no public GitHub Release in this checkout; use an
-   owner-issued bound catalog. See [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md).
+   set. There is no GitHub Release asset in this checkout; use an
+   owner-issued bound catalog or `AGENT_HOST_FEATURED_CATALOG_URL`. See
+   [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md) and
+   [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 
    ```text
    agent-host profiles list --json

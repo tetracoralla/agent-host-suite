@@ -24,7 +24,7 @@ try {
   await access(binaryShim)
   const installedEntry = join(installRoot, 'node_modules', '@openadam', 'agent-host-suite', 'bin', 'agent-host.mjs')
   const help = await execFileAsync(process.execPath, [installedEntry, '--help'])
-  if (!help.stdout.includes('agent-host setup') || !help.stdout.includes('agent-host profiles list') || !help.stdout.includes('agent-host service recover --recovery ID --manifest-sha256 SHA256')) {
+  if (!help.stdout.includes('agent-host setup') || !help.stdout.includes('agent-host profiles list') || !help.stdout.includes('agent-host profiles fetch') || !help.stdout.includes('agent-host service recover --recovery ID --manifest-sha256 SHA256')) {
     throw new Error('installed CLI help is unavailable')
   }
   const installedCliModule = join(installRoot, 'node_modules', '@openadam', 'agent-host-suite', 'src', 'cli.mjs')

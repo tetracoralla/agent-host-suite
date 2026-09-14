@@ -11,10 +11,11 @@ and a payload manifest with the exact size and SHA-256 of every installed file.
 It does not require a source checkout, Git, npm, administrator access, or a
 system service.
 
-The current engineering carrier is unsigned. A public download therefore
-needs an Authenticode signing decision and a clean-device SmartScreen run in
-addition to the lifecycle checks below. Apple Developer identity and DMG work
-do not affect this Windows carrier.
+The current engineering carrier is unsigned, and public preview download keeps
+it that way. SmartScreen may warn on first open; compare the ZIP to
+`SHA256SUMS` first. Authenticode signing is not required for this preview.
+Apple Developer identity and notarization do not affect this Windows carrier.
+See [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 
 ## Install
 

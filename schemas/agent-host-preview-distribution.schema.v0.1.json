@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-preview-distribution.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "notarized",
+    "marketplace",
+    "publicReleasePublished",
+    "githubReleasesUrl",
+    "selfHostedIndexUrl",
+    "gatekeeperNote",
+    "windowsSmartScreenNote",
+    "carriers",
+    "catalog"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-preview-distribution.v0.1" },
+    "status": { "enum": ["unpublished", "preview-unsigned"] },
+    "notarized": { "const": false },
+    "marketplace": { "const": false },
+    "publicReleasePublished": { "type": "boolean" },
+    "githubReleasesUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "selfHostedIndexUrl": { "type": ["string", "null"], "format": "uri", "pattern": "^https://" },
+    "gatekeeperNote": { "type": "string", "minLength": 1 },
+    "windowsSmartScreenNote": { "type": "string", "minLength": 1 },
+    "carriers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["platform", "kind", "filename", "url", "sha256", "bytes"],
+        "properties": {
+          "platform": { "enum": ["darwin-arm64", "darwin-x86_64", "win32-x64", "win32-arm64"] },
+          "kind": { "enum": ["dmg", "zip"] },
+          "filename": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+          "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "bytes": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "catalog": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["url", "sha256", "bytes", "provenanceUrl", "provenanceSha256"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "provenanceUrl": { "type": ["string", "null"], "format": "uri", "pattern": "^https://" },
+        "provenanceSha256": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

@@ -10,7 +10,8 @@ The intended **external user** is an individual desktop Agent user who wants a
 small set of deterministic tools plus reliable local execution without cloning
 and configuring many repositories by hand. That path requires a bound
 compatibility release. This source checkout is not that release: it has no
-public GitHub Release, notarized DMG, or tool marketplace.
+GitHub Release assets in-tree, no Apple-notarized DMG, and no tool marketplace.
+Unsigned preview download is documented in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 
 **tools-dev dogfood** is a separate audience. Developers with authorized source
 checkouts use [`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md) so installed execution

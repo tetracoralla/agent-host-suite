@@ -8,9 +8,13 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
 本仓库是 **Agent Host Suite** 的分发单元；npm 包、CLI、schema 等稳定技术标识继续使用
 这个名称。
 
-当前源码树是开发者预览：不包含公开 GitHub Release、经过 Apple 公证的 macOS DMG，也
-没有公开工具市场。Host 工作集里的「已选中」不能证明正在打开的 Agent 会话已经载入这些
-工具。
+当前源码树是开发者预览：**无公证**、无 Developer ID 签名、也不是 App Store 或插件
+市场。陌生人应从 GitHub Release 或已配置的 HTTPS 地址下载 macOS DMG / Windows
+安装包（所有者发布资产之后）；在此之前 Host 会明确说「尚未配置公开下载」。macOS
+需按住 Control 点击 → 打开。设置 `AGENT_HOST_FEATURED_CATALOG_URL` 后，Host 可拉取
+绑定 catalog 并安装工具。见
+[未公证预览下载](docs/UNSIGNED_PREVIEW.md)。Host 工作集里的「已选中」不能证明正在
+打开的 Agent 会话已经载入这些工具。
 
 ## 范围与事实来源
 
@@ -65,15 +69,19 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
 
 ## 外部精选路径
 
-本 checkout 没有公开 GitHub Release。若已有所有者发放的绑定 catalog（预览/内部
-分发）：
+本 checkout 没有 GitHub Release 资产。所有者发布 Release 或 HTTPS 清单之后（见
+[未公证预览下载](docs/UNSIGNED_PREVIEW.md)）：
 
 ```text
+export AGENT_HOST_FEATURED_CATALOG_URL=https://github.com/tetracoralla/agent-host-suite/releases/latest/download/preview-distribution.json
 agent-host profiles list --json
-agent-host setup --profile featured --host zcode --release-manifest /absolute/current.json
+agent-host profiles fetch --json
+agent-host setup --profile featured --host zcode
 agent-host tools set --profile featured
 agent-host doctor --deep --json
 ```
+
+也可继续用 `--release-manifest /absolute/current.json` 指向本地绑定 catalog。
 
 跟踪的 `draft-unbound` catalog 上 setup 会失败。`--development-root` 是
 tools-dev 路径，不是 featured。详见
@@ -124,15 +132,17 @@ Agent Host 默认保留用户拥有的应用配置与数据。本机监测需要
 
 ## 分发边界
 
-本仓库是 Apache-2.0 开发者预览。源码树本身不声称已有公开下载、GitHub Release、公证
-DMG 或工具市场。
+本仓库是 Apache-2.0 开发者预览。**无公证。** 公开预览安装包保持未签名，打算放在
+[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)
+或自建 HTTPS 站点。本 checkout 不声称那些资产已经存在。
 
 - 不存在公开的 Agent Host 市场或第三方插件商店。
-- 若将来发布 macOS 公共 DMG，仍需要 Developer ID 签名、Apple 公证、stapling、
-  Gatekeeper 检查与干净设备验收。这些是发布活动事实，不是本 checkout 提供的产物。
-  本机或内部 ad-hoc 签名构建只是验证产物，不是公共下载。
-- Windows 打包与干净设备要求见 [`docs/WINDOWS.zh-CN.md`](docs/WINDOWS.zh-CN.md)。
-  满足这些要求并不表示已经发布公开安装包。
+- macOS 预览 DMG 未经 Developer ID 签名、未经 Apple 公证。Gatekeeper 需要按住
+  Control 点击 → 打开。这就是受支持的预览路径，不是「等以后上架」的权宜之计。
+- Windows 预览 ZIP 未做 Authenticode 签名。SmartScreen 可能警告；先核对 SHA-256。
+  详见 [`docs/WINDOWS.zh-CN.md`](docs/WINDOWS.zh-CN.md)。
+- 设置 `AGENT_HOST_FEATURED_CATALOG_URL` 后，Host 可下载绑定 catalog 并安装精选
+  工具。见 [未公证预览下载](docs/UNSIGNED_PREVIEW.md)。
 
 完整产品模型、架构、集成 schema、发布流程与复核契约以英文文档为准。这些维护者文档不随
 npm 包分发；请从源码仓库阅读
@@ -142,5 +152,6 @@ npm 包分发；请从源码仓库阅读
 [`RELEASE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/RELEASE.md)、
 [`REVIEW_CONTRACT.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md)、
 [`DISCOVERY_PROJECTION.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md)、
-[`FEATURED_CATALOG.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) 与
+[`FEATURED_CATALOG.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md)、
+[`UNSIGNED_PREVIEW.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/UNSIGNED_PREVIEW.md) 与
 [`ADOPTION_ACCEPTANCE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md)。

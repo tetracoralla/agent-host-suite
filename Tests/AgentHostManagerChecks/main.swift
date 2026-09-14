@@ -201,6 +201,14 @@ do {
     expect(ManagerSetupPolicy.profiles.contains("featured"), "Manager setup must admit the featured catalog")
     expect(ManagerSetupPolicy.defaultProfile == "featured", "external setup should offer featured rather than only standard")
     expect(
+        !ManagerSetupPolicy.unsignedMacOSGatekeeperNote.contains("until a Developer ID signed build exists"),
+        "unsigned preview copy must not promise a future notarized build"
+    )
+    expect(
+        ManagerSetupPolicy.publicDownloadNotConfiguredNote.contains("AGENT_HOST_FEATURED_CATALOG_URL"),
+        "unconfigured download copy must name the HTTPS catalog hook"
+    )
+    expect(
         ManagerSetupPolicy.featuredToolIDs == ["math-anchor", "migratory-time", "armorial"],
         "featured setup must show Armorial with the standard tools"
     )

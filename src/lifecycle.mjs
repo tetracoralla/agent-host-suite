@@ -21,6 +21,7 @@ import { cleanupMaterializedRelease, discardMaterializedDownloads, materializeRe
 import { COMPONENT_WARMUP_POLICY_VERSION, warmInstalledAgentComponents } from './component-warmup.mjs'
 import { preflightManagedCatalog } from './context-exporter.mjs'
 import { compareSuiteVersions, loadReleaseManifest, materializeComponentIdsForUpdate, OBSERVABILITY_RELEASE_COMPONENTS, selectedReleaseComponents } from './release-manifest.mjs'
+import { FEATURED_CATALOG_DOWNLOAD_ENV, resolveReleaseManifestPath } from './preview-download.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { FEATURED_PROFILE_ID, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
 import { inspectOperationsSkill, installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
@@ -663,7 +664,9 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   const previous = await loadState(paths)
   if (previous === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   const profile = await loadProfile(options.profile ?? previous.profile)
-  if (profile.id === FEATURED_PROFILE_ID && options.releaseManifest === undefined && previous.channel !== 'release') {
+  const env = dependencies.env ?? process.env
+  const previewConfigured = typeof env[FEATURED_CATALOG_DOWNLOAD_ENV] === 'string' && env[FEATURED_CATALOG_DOWNLOAD_ENV].trim() !== ''
+  if (profile.id === FEATURED_PROFILE_ID && options.releaseManifest === undefined && previous.channel !== 'release' && !previewConfigured) {
     throw new AgentHostError('FEATURED_PROFILE_RELEASE_REQUIRED', 'The featured profile requires a bound compatibility release; it cannot be selected from a development source root')
   }
   const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
@@ -679,8 +682,11 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   let releasePreparation = null
   let releaseSourceProvenance = null
   let manifest
-  if (options.releaseManifest !== undefined || previous.channel === 'release') {
-    const release = await (dependencies.releaseManifestLoader ?? loadReleaseManifest)(options.releaseManifest)
+  if (options.releaseManifest !== undefined || previous.channel === 'release' || (profile.id === FEATURED_PROFILE_ID && previewConfigured)) {
+    const manifestPath = options.releaseManifest !== undefined || previewConfigured
+      ? await resolveReleaseManifestPath(options, { ...dependencies, paths, env })
+      : options.releaseManifest
+    const release = await (dependencies.releaseManifestLoader ?? loadReleaseManifest)(manifestPath)
     if (release.manifest.status === 'draft-unbound') throw new AgentHostError('RELEASE_UNBOUND', 'No verified compatibility release is bound in this build')
     if (previous.channel === 'release' && compareSuiteVersions(release.manifest.suiteVersion, previous.suiteVersion) < 0) {
       throw new AgentHostError('RELEASE_DOWNGRADE_UNSUPPORTED', 'Tool updates cannot install an older compatibility release; use the retained rollback action instead', {
@@ -702,7 +708,12 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
         throw new AgentHostError('OBSERVABILITY_RELEASE_COMPONENTS_MISSING', 'The selected release cannot preserve local monitoring', { components: missing })
       }
     }
-    releasePreparation = await materializeRelease(release, paths, { runner: dependencies.artifactRunner ?? runFile, componentIds })
+    releasePreparation = await materializeRelease(release, paths, {
+      runner: dependencies.artifactRunner ?? runFile,
+      componentIds,
+      fetch: dependencies.fetch,
+      signal: dependencies.signal,
+    })
     manifest = releasePreparation.manifest
   } else if (previous.channel === 'development') {
     manifest = await buildDevelopmentManifest(previous.developmentRoot)

@@ -16,6 +16,7 @@ import { enableObservability } from './observability.mjs'
 import { recordActivity } from './activity.mjs'
 import { cleanupMaterializedRelease, discardMaterializedDownloads, materializeRelease } from './release-artifacts.mjs'
 import { loadReleaseManifest } from './release-manifest.mjs'
+import { resolveReleaseManifestPath } from './preview-download.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { OBSERVABILITY_RELEASE_COMPONENTS } from './release-manifest.mjs'
 import { agentFacingManifest, FEATURED_PROFILE_ID, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
@@ -196,7 +197,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
   if (options.developmentRoot !== undefined) {
     manifest = await buildDevelopmentManifest(options.developmentRoot)
   } else {
-    const release = await loadReleaseManifest(options.releaseManifest)
+    const release = await loadReleaseManifest(await resolveReleaseManifestPath(options, { ...dependencies, paths }))
     if (release.manifest.status === 'draft-unbound') throw new AgentHostError('RELEASE_UNBOUND', 'No verified compatibility release is bound in this build')
     const provenance = await loadReleaseProvenance(release)
     releaseSourceProvenance = {
@@ -206,7 +207,12 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     }
     paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
     if (await loadState(paths) !== null) throw new AgentHostError('ALREADY_INSTALLED', 'An Agent environment is already installed; use update')
-    releasePreparation = await materializeRelease(release, paths, { runner: dependencies.artifactRunner ?? runFile, componentIds: profile.components })
+    releasePreparation = await materializeRelease(release, paths, {
+      runner: dependencies.artifactRunner ?? runFile,
+      componentIds: profile.components,
+      fetch: dependencies.fetch,
+      signal: dependencies.signal,
+    })
     manifest = releasePreparation.manifest
     if (profile.requiresConsent) {
       const missing = OBSERVABILITY_RELEASE_COMPONENTS.filter((id) => manifest.components[id] === undefined)

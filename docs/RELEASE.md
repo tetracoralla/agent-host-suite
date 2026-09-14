@@ -2,11 +2,13 @@
 
 ## Distribution intent
 
-Windows is the primary next external distribution target. The macOS app remains
-the local dogfood carrier, but Apple Developer ID signing, notarization, and a
-polished public DMG are deferred and do not block Windows engineering.
-This intent does not establish that either carrier has passed its release
-requirements; only a named candidate and current rerun results can do that.
+Public preview distribution is **unsigned**: GitHub Releases or a self-hosted
+HTTPS index provide a macOS DMG and a Windows ZIP. Apple Developer ID signing
+and notarization are **not** part of this product and are not a remaining
+blocker. Gatekeeper (Control-click → Open) and Windows SmartScreen warnings are
+the honest first-run steps. See [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
+This intent does not establish that either carrier has been published; this
+checkout still has no Release assets until an owner attaches them.
 
 ## Local dogfood release
 
@@ -244,22 +246,21 @@ Suite version as the source package rather than a static development placeholder
 
 ## macOS binary release
 
-The app and every nested executable require hardened-runtime signing with a
-Developer ID Application identity, notarization, stapling, Gatekeeper
-assessment, and detached checksums. The release artifacts must be regenerated
-after signing so their immutable digests describe the shipped bytes. The
-presence or absence of credentials on one development machine is a current
-release-campaign fact and must not be inferred from this document.
+Public preview builds are ad-hoc signed at most. They are not Developer ID
+signed, not notarized, and not stapled. Detached SHA-256 checksums still bind
+the DMG bytes. Gatekeeper on a stranger's Mac requires Control-click → Open;
+that is expected and documented in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
+Do not describe this preview as notarized.
 
-A public candidate must pass:
+An internal validation candidate can still use:
 
 ```text
-scripts/check-macos-distribution.sh public /path/to/Agent-Host.dmg /path/to/distribution.json
+scripts/check-macos-distribution.sh internal-beta /path/to/Agent-Host.dmg /path/to/distribution.json
 ```
 
-The final acceptance run must occur on a separate Mac with no source checkouts
-and no pre-existing Agent Host service. It must exercise the App UI, standard
-tool installation, a fresh Codex session using both tools, diagnosis and
+A published preview should additionally be opened on a separate Mac with no
+source checkouts using the Gatekeeper steps above, then exercise the App UI,
+standard or featured tool installation, a fresh Agent session, diagnosis and
 repair, update, rollback, keep-history uninstall, and full data removal.
 
 ## Windows binary release
@@ -280,14 +281,14 @@ result.
 The Windows packager requires `remote-tagged` provenance by default and binds
 its digest into both payload and distribution manifests. The local-source
 override exists only for the deterministic CI carrier fixture and is explicit
-in that workflow. An unsigned candidate records `codeSigning: unsigned`. A
-public download needs
-an explicit Authenticode signing decision plus a clean Windows device run that
-checks SmartScreen, install, ZCode/Codex/Claude binding as applicable, Standard,
-monitoring and Developer Kit setup, named-pipe execution, scheduled collection,
-update, both rollback layers, both uninstall choices, reboot/login recovery,
-and residual files/processes. Cross-platform source tests and CI cannot replace
-that runtime and experience acceptance.
+in that workflow. An unsigned candidate records `codeSigning: unsigned`. Public
+preview download uses that unsigned ZIP; Authenticode is not required for this
+product. A published preview still needs a clean Windows device run that checks
+SmartScreen (expected warning), install, ZCode/Codex/Claude binding as
+applicable, Standard, monitoring and Developer Kit setup, named-pipe execution,
+scheduled collection, update, both rollback layers, both uninstall choices,
+reboot/login recovery, and residual files/processes. Cross-platform source
+tests and CI cannot replace that runtime and experience acceptance.
 
 ## Linux
 
