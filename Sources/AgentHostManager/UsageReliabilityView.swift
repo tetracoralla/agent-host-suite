@@ -10,7 +10,7 @@ struct UsageReliabilityView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Usage & Reliability", subtitle: subtitle) {
+                PageHeader(title: "Usage", subtitle: subtitle) {
                     if let usage = store.usage, usage.enabled {
                         Label(freshnessLabel(usage), systemImage: freshnessIcon(usage))
                             .font(.caption.weight(.medium))

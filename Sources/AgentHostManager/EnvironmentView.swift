@@ -6,7 +6,7 @@ struct EnvironmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Agent environment", subtitle: L10n.format("{toolSet} on this Mac", ["toolSet": toolSetName])) {
+                PageHeader(title: "Overview", subtitle: L10n.format("{toolSet} on this Mac", ["toolSet": toolSetName])) {
                     HealthPill(health: store.health)
                 }
 

@@ -7,7 +7,7 @@ struct AgentAppsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Agent Apps", subtitle: nil) {
+                PageHeader(title: "Agents", subtitle: nil) {
                     EmptyView()
                 }
 

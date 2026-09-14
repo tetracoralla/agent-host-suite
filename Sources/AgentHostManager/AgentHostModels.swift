@@ -982,28 +982,31 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     case overview
     case tools
     case agentApps
-    case usage
     case activity
+    case usage
 
     var id: String { rawValue }
 
+    /// Primary sidebar: install → tools → connect → history. Usage is advanced.
+    static var primaryCases: [ManagerSection] { [.overview, .tools, .agentApps, .activity] }
+
     var title: String {
         switch self {
-        case .overview: "Environment"
+        case .overview: "Overview"
         case .tools: "Tools"
-        case .agentApps: "Agent Apps"
-        case .usage: "Usage & Reliability"
-        case .activity: "Activity"
+        case .agentApps: "Agents"
+        case .activity: "History"
+        case .usage: "Usage"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .overview: "square.stack.3d.up"
+        case .overview: "house"
         case .tools: "wrench.and.screwdriver"
-        case .agentApps: "bubble.left.and.bubble.right"
+        case .agentApps: "link"
+        case .activity: "clock"
         case .usage: "chart.bar.xaxis"
-        case .activity: "clock.arrow.circlepath"
         }
     }
 }
