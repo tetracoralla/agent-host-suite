@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Admit ordinary Agent working-set catalogs without a 64 KiB false ceiling.
+  Resource protection follows the Context Surface Analyzer snapshot contract
+  the Host actually exports (384 KiB canonical tools, 128 tools, 64 KiB largest
+  tool). 64 KiB remains a small-working-set preference, not an admission gate
+  and not a model-token cost. The selected working set is exposed directly
+  because public Agent extension points cannot defer schemas. A six-tool
+  combination matching five tools plus Migratory Time is admitted; runaway
+  catalogs still fail closed.
 - Isolate featured catalog and readiness CLI subprocesses behind a test-owned
   state root and Host home. Tests pass `--state-root` themselves and do not
   depend on exporting `AGENT_HOST_STATE_ROOT`. A regression covers both a

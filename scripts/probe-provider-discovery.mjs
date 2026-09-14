@@ -262,7 +262,8 @@ try {
   )))
   assert.equal(baselineCatalog.status, 'within')
   assert.equal(expandedCatalog.status, 'within')
-  assert.equal(fullInventoryCatalog.status, 'exceeded')
+  assert.equal(fullInventoryCatalog.status, 'within')
+  assert.equal(fullInventoryCatalog.preference.status, 'over')
 
   process.stdout.write(`${JSON.stringify({
     status: 'ok',

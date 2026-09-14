@@ -4,12 +4,28 @@ import { canonicalJson, sha256 } from './json.mjs'
 import { ManagedMcpStdioTransport } from './managed-mcp-stdio-transport.mjs'
 import { closeMcpProbeTransport } from './mcp-probe-cleanup.mjs'
 
-// Resource admission for the selected managed catalog. These limits do not
+// Context Surface Analyzer snapshot contract the Host actually writes and
+// analyzes (`packages/context-surface-analyzer/src/constants.js`): 512 KiB
+// snapshot parse, 128 tools, 64 KiB strings/schemas. Catalog admission uses
+// these Host export/analysis limits, not a model context window.
+const CONTEXT_SURFACE_MAX_TOOLS = 128
+const CONTEXT_SURFACE_MAX_STRING_BYTES = 64 * 1024
+// Pretty-printed snapshot JSON (`writePrivateJson`) is larger than canonical
+// tools bytes. 384 KiB leaves headroom under the 512 KiB snapshot parse cap.
+const MANAGED_CATALOG_MAX_UTF8_BYTES = 384 * 1024
+
+// Small-working-set product preference. Not an admission gate and not a token
+// measurement. Profiles keep a small default; users enlarge the working set.
+export const MANAGED_CATALOG_PREFERENCES = Object.freeze({
+  preferredCatalogUtf8Bytes: 65_536,
+})
+
+// Resource protection for the selected managed catalog. These limits do not
 // measure a host's assembled prompt, deferred tools, or model token usage.
 export const MANAGED_CATALOG_BUDGETS = Object.freeze({
-  maxCatalogUtf8Bytes: 65_536,
-  maxToolCount: 64,
-  maxLargestToolUtf8Bytes: 40_000,
+  maxCatalogUtf8Bytes: MANAGED_CATALOG_MAX_UTF8_BYTES,
+  maxToolCount: CONTEXT_SURFACE_MAX_TOOLS,
+  maxLargestToolUtf8Bytes: CONTEXT_SURFACE_MAX_STRING_BYTES,
   maxResultUtf8Bytes: 65_536,
 })
 
@@ -25,7 +41,7 @@ async function listProviderToolsOnce(id, component) {
   try {
     await client.connect(transport, { timeout: 45_000, maxTotalTimeout: 45_000 })
     const result = await client.listTools(undefined, { timeout: 45_000, maxTotalTimeout: 45_000 })
-    if (!Array.isArray(result.tools) || result.tools.length > 128) {
+    if (!Array.isArray(result.tools) || result.tools.length > MANAGED_CATALOG_BUDGETS.maxToolCount) {
       throw new AgentHostError('CATALOG_EXPORT_LIMIT', `${id} returned an invalid or oversized tool catalog`)
     }
     return result.tools.map((tool) => {
@@ -122,25 +138,47 @@ export async function exportManagedCatalog(components) {
   return (await exportManagedCatalogInventory(components)).snapshot
 }
 
+function limitBreaches(rows) {
+  return rows.filter(([, actual, limit]) => actual > limit).map(([metric, actual, limit]) => ({ metric, actual, limit }))
+}
+
 export function assessManagedCatalog(snapshot) {
+  const budgets = snapshot.budgets ?? MANAGED_CATALOG_BUDGETS
+  const preferences = MANAGED_CATALOG_PREFERENCES
   const toolBytes = snapshot.tools.map((tool) => Buffer.byteLength(canonicalJson(tool), 'utf8'))
   const summary = {
     canonicalUtf8Bytes: Buffer.byteLength(canonicalJson(snapshot.tools), 'utf8'),
     largestToolUtf8Bytes: Math.max(0, ...toolBytes),
     toolCount: snapshot.tools.length,
-    budgets: snapshot.budgets,
+    budgets,
+    preferences,
   }
   const headroom = {
-    catalogUtf8Bytes: snapshot.budgets.maxCatalogUtf8Bytes - summary.canonicalUtf8Bytes,
-    largestToolUtf8Bytes: snapshot.budgets.maxLargestToolUtf8Bytes - summary.largestToolUtf8Bytes,
-    toolCount: snapshot.budgets.maxToolCount - summary.toolCount,
+    catalogUtf8Bytes: budgets.maxCatalogUtf8Bytes - summary.canonicalUtf8Bytes,
+    largestToolUtf8Bytes: budgets.maxLargestToolUtf8Bytes - summary.largestToolUtf8Bytes,
+    toolCount: budgets.maxToolCount - summary.toolCount,
   }
-  const exceeded = [
-    ['catalog.canonicalUtf8Bytes', summary.canonicalUtf8Bytes, snapshot.budgets.maxCatalogUtf8Bytes],
-    ['catalog.largestToolUtf8Bytes', summary.largestToolUtf8Bytes, snapshot.budgets.maxLargestToolUtf8Bytes],
-    ['counts.tools', summary.toolCount, snapshot.budgets.maxToolCount],
-  ].filter(([, actual, limit]) => actual > limit).map(([metric, actual, limit]) => ({ metric, actual, limit }))
-  return { ...summary, headroom, status: exceeded.length === 0 ? 'within' : 'exceeded', exceeded }
+  const exceeded = limitBreaches([
+    ['catalog.canonicalUtf8Bytes', summary.canonicalUtf8Bytes, budgets.maxCatalogUtf8Bytes],
+    ['catalog.largestToolUtf8Bytes', summary.largestToolUtf8Bytes, budgets.maxLargestToolUtf8Bytes],
+    ['counts.tools', summary.toolCount, budgets.maxToolCount],
+  ])
+  const preferenceOver = limitBreaches([
+    ['catalog.canonicalUtf8Bytes', summary.canonicalUtf8Bytes, preferences.preferredCatalogUtf8Bytes],
+  ])
+  return {
+    ...summary,
+    headroom,
+    status: exceeded.length === 0 ? 'within' : 'exceeded',
+    exceeded,
+    preference: {
+      status: preferenceOver.length === 0 ? 'within' : 'over',
+      over: preferenceOver,
+      headroom: {
+        catalogUtf8Bytes: preferences.preferredCatalogUtf8Bytes - summary.canonicalUtf8Bytes,
+      },
+    },
+  }
 }
 
 export async function preflightManagedCatalog(components) {
@@ -154,7 +192,7 @@ export async function preflightManagedCatalog(components) {
   if (assessment.status === 'exceeded') {
     throw new AgentHostError(
       'AGENT_TOOL_CATALOG_BUDGET_EXCEEDED',
-      'The proposed Agent tool catalog exceeds its declared resource limits; activate a smaller working set',
+      'The proposed Agent tool catalog exceeds Host resource-protection limits; activate a smaller working set',
       { components: expected, ...assessment },
     )
   }
