@@ -63,9 +63,11 @@ does not silently claim a public installable release.
 
 A [featured catalog v1](docs/FEATURED_CATALOG.md) is the named `featured`
 profile: an owner-selected subset of independently released tools installed
-through those same APIs. It is not a marketplace. How Codex projections relate
-to session Skill/MCP paths is in
-[Discovery and projection](docs/DISCOVERY_PROJECTION.md).
+through those same APIs. Browser and native Managers can choose `featured` at
+setup or Get featured tools (including Armorial) after a Standard install.
+`tools set --profile` only enables the working set of already-installed tools.
+It is not a marketplace. How Codex projections relate to session Skill/MCP
+paths is in [Discovery and projection](docs/DISCOVERY_PROJECTION.md).
 
 ## Profiles
 

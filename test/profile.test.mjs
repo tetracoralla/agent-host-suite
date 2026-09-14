@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { defaultToolsForProfile, featuredCatalog, FEATURED_PROFILE_ID, listProfiles, loadProfile, LOCAL_DOGFOOD_PROFILE_ID, selectAgentComponents, selectProfileManifest, validateProfile } from '../src/profile.mjs'
+import { defaultToolsForProfile, featuredCatalog, featuredCatalogDownload, FEATURED_CATALOG_DOWNLOAD_ENV, FEATURED_PROFILE_ID, listProfiles, loadProfile, LOCAL_DOGFOOD_PROFILE_ID, selectAgentComponents, selectProfileManifest, UNSIGNED_MACOS_GATEKEEPER_NOTE, validateProfile } from '../src/profile.mjs'
 
 test('profiles retain the small standard catalog, a distinct featured set, and the local dogfood set', async () => {
   const standard = await loadProfile('standard')
@@ -65,6 +65,15 @@ test('the featured catalog lists profile membership without becoming a marketpla
   assert.equal(dogfood.id, LOCAL_DOGFOOD_PROFILE_ID)
   assert.deepEqual((await listProfiles()).map((profile) => profile.id).sort(), catalog.profiles.map((profile) => profile.id).sort())
   assert.deepEqual(await defaultToolsForProfile(FEATURED_PROFILE_ID), featured.defaultAgentComponents)
+  assert.equal(catalog.download.publicReleasePublished, false)
+  assert.equal(catalog.download.configured, false)
+  assert.equal(catalog.download.url, null)
+  assert.match(catalog.workingSetNote, /does not install missing inventory/u)
+  assert.equal(catalog.download.gatekeeperNote, UNSIGNED_MACOS_GATEKEEPER_NOTE)
+  const configured = featuredCatalogDownload({ [FEATURED_CATALOG_DOWNLOAD_ENV]: ' https://example.invalid/featured.dmg ' })
+  assert.equal(configured.configured, true)
+  assert.equal(configured.url, 'https://example.invalid/featured.dmg')
+  assert.equal(configured.publicReleasePublished, false)
 })
 
 test('featured membership matches the catalog document and fails closed without armorial bytes', async () => {

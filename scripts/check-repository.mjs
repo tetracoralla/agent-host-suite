@@ -83,6 +83,12 @@ if (!featuredDoc.includes('--profile featured') || !featuredDoc.includes('profil
 if (!featuredDoc.includes('not a public marketplace') || !featuredDoc.includes('--development-root')) {
   throw new Error('featured catalog document must remain a non-marketplace admission list with a bound-release path')
 }
+if (!featuredDoc.includes('--no-host') || !featuredDoc.includes('Get featured tools') || !featuredDoc.includes('working set')) {
+  throw new Error('featured catalog document must distinguish inventory install from working-set selection and allow setup without an Agent app')
+}
+if (!featuredDoc.includes('Gatekeeper') || !featuredDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL')) {
+  throw new Error('featured catalog document must keep unsigned macOS Gatekeeper copy and an honest download hook')
+}
 if (!featuredDoc.includes('ADOPTION_ACCEPTANCE.md')) {
   throw new Error('featured catalog document must point at the unnamed adoption protocol')
 }

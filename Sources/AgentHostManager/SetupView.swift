@@ -6,16 +6,33 @@ struct SetupView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Set up your Agent environment", subtitle: "Install one verified local environment for your Agent app.") {
+                PageHeader(title: "Set up your Agent environment", subtitle: "Install one verified local environment. Connecting an Agent app can wait.") {
                     HealthPill(health: store.health)
                 }
 
                 Panel {
-                    Label(L10n.text("Standard tools"), systemImage: "shippingbox.fill")
+                    Text(L10n.text("Tool set")).font(.headline)
+                    Text(L10n.text("Featured is the owner-selected catalog, including Armorial. It is not a marketplace."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(ManagerSetupPolicy.profiles.enumerated()), id: \.element) { index, profile in
+                        if index > 0 { Divider() }
+                        ProfileChoiceRow(
+                            id: profile,
+                            name: ManagerSetupPolicy.displayName(for: profile),
+                            selected: store.selectedSetupProfile == profile,
+                            select: { store.selectedSetupProfile = profile }
+                        )
+                    }
+                }
+
+                Panel {
+                    Label(L10n.text(store.selectedSetupProfileName), systemImage: "shippingbox.fill")
                         .font(.headline)
-                    SetupItem(name: "Math Anchor", detail: "Exact and scientific calculation", image: "function")
-                    Divider()
-                    SetupItem(name: "Migratory Time", detail: "Reliable worldwide time conversion", image: "globe.americas")
+                    ForEach(Array(ManagerSetupPolicy.tools(for: store.selectedSetupProfile).enumerated()), id: \.element.id) { index, tool in
+                        if index > 0 { Divider() }
+                        SetupItem(name: tool.name, detail: tool.summary, image: tool.systemImage)
+                    }
                 }
 
                 Panel {
@@ -25,7 +42,22 @@ struct SetupView: View {
                 }
 
                 Panel {
-                    Text(L10n.text("Agent app")).font(.headline)
+                    HStack {
+                        Text(L10n.text("Agent app")).font(.headline)
+                        Spacer()
+                        Button(L10n.text("Check again")) {
+                            Task { await store.redetectAgentApps() }
+                        }
+                        .disabled(store.isBusy)
+                    }
+                    if !store.hasDetectedSetupHost {
+                        NoticeView(
+                            title: "No supported Agent app was found",
+                            message: "You can install Agent Host now and connect an Agent app later from Agent Apps.",
+                            systemImage: "info.circle.fill",
+                            color: .blue
+                        )
+                    }
                     ForEach(Array(ManagerAgentApp.all.enumerated()), id: \.element.id) { index, app in
                         if index > 0 { Divider() }
                         AgentAppChoiceRow(
@@ -37,15 +69,37 @@ struct SetupView: View {
                     }
                 }
 
+                if let url = store.featuredCatalogDownloadURL {
+                    NoticeView(
+                        title: "Featured catalog download",
+                        message: ManagerSetupPolicy.unsignedMacOSGatekeeperNote,
+                        systemImage: "arrow.down.circle",
+                        color: .orange
+                    )
+                    Text(url)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                } else {
+                    NoticeView(
+                        title: "Bound catalog required",
+                        message: "This checkout has no public GitHub Release. Featured and packaged setup need an owner-issued bound catalog (AGENT_HOST_RELEASE_MANIFEST). Unsigned macOS builds are not Apple-notarized. Control-click the app, choose Open, then confirm the Gatekeeper warning. This is expected until a Developer ID signed build exists.",
+                        systemImage: "info.circle",
+                        color: .secondary
+                    )
+                }
+
                 HStack {
                     Button(L10n.text("Review Setup")) {
                         Task { await store.prepareSetup() }
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(store.isBusy || store.hostStatuses[store.selectedSetupHost]?.appInstalled != true)
+                    .disabled(store.isBusy)
 
-                    Text(L10n.text("Local monitoring stays off until you turn it on."))
+                    Text(L10n.text(store.connectsAgentDuringSetup
+                        ? "Local monitoring stays off until you turn it on."
+                        : "Agent Host will be installed without connecting an Agent app. Connect one later from Agent Apps."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -66,35 +120,51 @@ struct SetupPlanView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(L10n.text("Install Agent Environment"))
                     .font(.title2.weight(.semibold))
-                Text(L10n.format("Agent Host will install the Standard tools, connect them to {app}, and start local execution.", ["app": store.selectedSetupHostName]))
+                Text(planSummary)
                     .foregroundStyle(.secondary)
             }
 
             Panel {
-                PlanRow(name: "Math Anchor", version: plan.components["math-anchor"]?.version)
-                Divider()
-                PlanRow(name: "Migratory Time", version: plan.components["migratory-time"]?.version)
-                Divider()
-                PlanRow(name: "Local service", version: plan.components["direct-execution-runtime"]?.version)
+                ForEach(Array(ManagerSetupPolicy.tools(for: plan.profile).enumerated()), id: \.element.id) { index, tool in
+                    if index > 0 { Divider() }
+                    PlanRow(name: tool.name, version: plan.components[tool.id]?.version)
+                }
+                if plan.components["direct-execution-runtime"] != nil {
+                    Divider()
+                    PlanRow(name: "Local service", version: plan.components["direct-execution-runtime"]?.version)
+                }
             }
 
             Panel {
-                LabeledContent(L10n.text("Tool set"), value: L10n.text(plan.profileDisplayName ?? "Standard"))
-                LabeledContent(L10n.format("{app} entries", ["app": store.selectedSetupHostName]), value: (plan.hosts?[store.selectedSetupHost]?.entries?.count ?? 0).formatted())
+                LabeledContent(L10n.text("Tool set"), value: L10n.text(plan.profileDisplayName ?? store.selectedSetupProfileName))
+                if store.connectsAgentDuringSetup {
+                    LabeledContent(L10n.format("{app} entries", ["app": store.selectedSetupHostName]), value: (plan.hosts?[store.selectedSetupHost]?.entries?.count ?? 0).formatted())
+                } else {
+                    LabeledContent(L10n.text("Agent app"), value: L10n.text("Connect later"))
+                }
                 LabeledContent(L10n.text("Background service"), value: L10n.text(plan.service?.supported == true ? "Will be installed" : "Unavailable"))
             }
 
-            NoticeView(
-                title: L10n.format("A new {app} task will be required", ["app": store.selectedSetupHostName]),
-                message: L10n.format("Open a fresh task after setup so {app} can load the installed tools.", ["app": store.selectedSetupHostName]),
-                systemImage: "arrow.clockwise.circle.fill",
-                color: .blue
-            )
+            if store.connectsAgentDuringSetup {
+                NoticeView(
+                    title: L10n.format("A new {app} task will be required", ["app": store.selectedSetupHostName]),
+                    message: L10n.format("Open a fresh task after setup so {app} can load the installed tools.", ["app": store.selectedSetupHostName]),
+                    systemImage: "arrow.clockwise.circle.fill",
+                    color: .blue
+                )
+            } else {
+                NoticeView(
+                    title: L10n.text("Connect an Agent app when it is installed"),
+                    message: L10n.text("Host inventory can be installed first. After a supported Agent app is detected, connect it from Agent Apps and start a fresh task."),
+                    systemImage: "arrow.clockwise.circle.fill",
+                    color: .blue
+                )
+            }
 
             HStack {
                 Button(L10n.text("Cancel"), role: .cancel) { dismiss() }
                 Spacer()
-                Button(L10n.text("Install")) { Task { await store.installStandard() } }
+                Button(L10n.text("Install")) { Task { await store.installSelectedProfile() } }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
             }
@@ -102,6 +172,43 @@ struct SetupPlanView: View {
         .padding(24)
         .frame(width: 520)
         .accessibilityElement(children: .contain)
+    }
+
+    private var planSummary: String {
+        if store.connectsAgentDuringSetup {
+            return L10n.format(
+                "Agent Host will install the {toolSet}, connect them to {app}, and start local execution.",
+                ["toolSet": L10n.text(plan.profileDisplayName ?? store.selectedSetupProfileName), "app": store.selectedSetupHostName]
+            )
+        }
+        return L10n.format(
+            "Agent Host will install the {toolSet} and start local execution. No Agent app will be connected yet.",
+            ["toolSet": L10n.text(plan.profileDisplayName ?? store.selectedSetupProfileName)]
+        )
+    }
+}
+
+private struct ProfileChoiceRow: View {
+    let id: String
+    let name: String
+    let selected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 12) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(selected ? .blue : .secondary)
+                    .frame(width: 24)
+                Text(L10n.text(name)).foregroundStyle(.primary)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.format("Use {toolSet} for setup", ["toolSet": L10n.text(name)]))
+        .accessibilityValue(L10n.text(selected ? "Selected" : "Available"))
+        .accessibilityIdentifier(id)
     }
 }
 
@@ -119,7 +226,7 @@ private struct AgentAppChoiceRow: View {
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(app.name).foregroundStyle(.primary)
-                    Text(L10n.text(installed ? "Detected on this Mac" : "Not installed"))
+                    Text(L10n.text(installed ? "Detected on this Mac" : "Not installed · connect after setup"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -130,7 +237,6 @@ private struct AgentAppChoiceRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!installed)
         .accessibilityLabel(L10n.format("Use {app} for setup", ["app": app.name]))
         .accessibilityValue(L10n.text(selected ? "Selected" : installed ? "Available" : "Not installed"))
     }

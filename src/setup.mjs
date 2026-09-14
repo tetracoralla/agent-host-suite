@@ -47,7 +47,8 @@ const DOWNLOAD_CLEANUP_WARNING = Object.freeze({
   message: 'The Agent Host installation succeeded, but one or more materialized release downloads could not be removed.',
 })
 
-function selectedHosts(hosts) {
+function selectedHosts(hosts, options = {}) {
+  if (options.noHost === true) return []
   const values = hosts.length === 0 ? ['codex'] : hosts.flatMap((value) => value.split(',')).filter(Boolean)
   for (const host of values) if (!HOSTS.has(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported host: ${host}`)
   return [...new Set(values)]
@@ -215,7 +216,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
       }
     }
   }
-  const hosts = selectedHosts(options.hosts)
+  const hosts = selectedHosts(options.hosts, options)
   const activeAgentComponents = selectAgentComponents(
     profile.agentComponents,
     options.tools ?? profile.defaultAgentComponents,
@@ -319,7 +320,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     await (dependencies.saveState ?? saveState)(paths, state)
     const warnings = []
     try {
-      await (dependencies.recordActivity ?? recordActivity)(paths, 'environment.installed', 'Standard tools installed', {
+      await (dependencies.recordActivity ?? recordActivity)(paths, 'environment.installed', `${profile.displayName} installed`, {
         profile: state.profile,
         hosts: Object.keys(installedHosts),
         suiteVersion: state.suiteVersion,

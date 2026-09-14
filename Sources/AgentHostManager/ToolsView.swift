@@ -6,7 +6,7 @@ struct ToolsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Tools", subtitle: "Selected for new Agent tasks") {
+                PageHeader(title: "Tools", subtitle: "Get catalog inventory, then enable a working set for new Agent tasks") {
                     Button(L10n.text("Check All")) { Task { await store.runDoctor() } }
                         .disabled(store.isBusy)
                 }
@@ -28,6 +28,46 @@ struct ToolsView: View {
                 }
 
                 Panel {
+                    Text(L10n.text("Featured catalog")).font(.headline)
+                    Text(L10n.text("Owner-selected tools, including Armorial. Not a marketplace, store, ranking, or payment catalog."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(L10n.text(ManagerSetupPolicy.workingSetNote))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(store.featuredCatalogTools.enumerated()), id: \.element.id) { index, tool in
+                        if index > 0 { Divider() }
+                        FeaturedCatalogRow(
+                            tool: tool,
+                            installed: store.isFeaturedToolInstalled(tool.id)
+                        )
+                    }
+                    if store.needsFeaturedInventory {
+                        Button(L10n.text("Get featured tools")) {
+                            Task { await store.prepareFeaturedAcquire() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(store.isBusy)
+                        Text(L10n.text("Get runs update --profile featured against the same bound catalog as CLI setup. It installs inventory; switches below only change the working set."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let url = store.featuredCatalogDownloadURL {
+                        Text(L10n.text("Featured catalog download"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(url)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text(L10n.text(ManagerSetupPolicy.unsignedMacOSGatekeeperNote))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Panel {
+                    Text(L10n.text("Working set for new tasks")).font(.headline)
                     ForEach(Array(store.managedTools.enumerated()), id: \.element.id) { index, tool in
                         ToolRow(
                             tool: tool,
@@ -42,6 +82,29 @@ struct ToolsView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .padding(32)
         }
+    }
+}
+
+private struct FeaturedCatalogRow: View {
+    let tool: ManagerSetupTool
+    let installed: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: tool.systemImage)
+                .font(.title3)
+                .foregroundStyle(.blue)
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(L10n.text(tool.name)).font(.headline)
+                Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 20)
+            Text(L10n.text(installed ? "Installed" : "Not installed in this environment"))
+                .font(.caption)
+                .foregroundStyle(installed ? Color.secondary : Color.orange)
+        }
+        .padding(.vertical, 3)
     }
 }
 

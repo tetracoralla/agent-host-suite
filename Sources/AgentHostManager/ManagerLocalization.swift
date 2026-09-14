@@ -233,6 +233,7 @@ enum L10n {
         "Local metadata only": "仅本地元数据",
         "Set up your Agent environment": "设置 Agent 环境",
         "Install one verified local environment for your Agent app.": "为 Agent 应用安装一套经过验证的本地环境。",
+        "Install one verified local environment. Connecting an Agent app can wait.": "安装一套经过验证的本地环境。连接 Agent 应用可以稍后进行。",
         "Standard tools": "标准工具",
         "Reliable calculation and time conversion": "可靠计算与时区转换",
         "Local service": "本地服务",
@@ -317,6 +318,36 @@ enum L10n {
         ,"{count} live suite processes": "{count} 个活跃 Suite 进程"
         ,"{size} resident": "常驻内存 {size}"
         ,"Workspace access": "工作区访问"
+        ,"Featured is the owner-selected catalog, including Armorial. It is not a marketplace.": "精选是所有者选定的目录，包含 Armorial；不是应用市场。"
+        ,"Check again": "重新检测"
+        ,"No supported Agent app was found": "未找到受支持的 Agent 应用"
+        ,"You can install Agent Host now and connect an Agent app later from Agent Apps.": "可以先安装 Agent Host，稍后再从“Agent 应用”连接。"
+        ,"Featured catalog download": "精选目录下载"
+        ,"Bound catalog required": "需要绑定目录"
+        ,"This checkout has no public GitHub Release. Featured and packaged setup need an owner-issued bound catalog (AGENT_HOST_RELEASE_MANIFEST). Unsigned macOS builds are not Apple-notarized. Control-click the app, choose Open, then confirm the Gatekeeper warning. This is expected until a Developer ID signed build exists.": "此 checkout 没有公开 GitHub Release。精选与打包安装需要所有者提供的绑定目录（AGENT_HOST_RELEASE_MANIFEST）。未签名的 macOS 安装包未经 Apple 公证：按住 Control 点击应用，选择“打开”，再确认 Gatekeeper 提示。在提供 Developer ID 签名版本之前，这是预期步骤。"
+        ,"Unsigned macOS builds are not Apple-notarized. Control-click the app, choose Open, then confirm the Gatekeeper warning. This is expected until a Developer ID signed build exists.": "未签名的 macOS 安装包未经 Apple 公证。请按住 Control 点击应用，选择“打开”，再确认 Gatekeeper 提示。在提供 Developer ID 签名版本之前，这是预期步骤。"
+        ,"Agent Host will be installed without connecting an Agent app. Connect one later from Agent Apps.": "将安装 Agent Host 且暂不连接 Agent 应用；稍后可从“Agent 应用”连接。"
+        ,"Connect later": "稍后连接"
+        ,"Connect an Agent app when it is installed": "安装 Agent 应用后再连接"
+        ,"Host inventory can be installed first. After a supported Agent app is detected, connect it from Agent Apps and start a fresh task.": "可以先安装 Host 库存。检测到受支持的 Agent 应用后，从“Agent 应用”连接并启动新任务。"
+        ,"Agent Host will install the {toolSet}, connect them to {app}, and start local execution.": "Agent Host 将安装{toolSet}、连接到 {app} 并启动本地执行。"
+        ,"Agent Host will install the {toolSet} and start local execution. No Agent app will be connected yet.": "Agent Host 将安装{toolSet}并启动本地执行，暂不连接 Agent 应用。"
+        ,"Use {toolSet} for setup": "使用 {toolSet} 进行设置"
+        ,"Not installed · connect after setup": "未安装 · 设置后再连接"
+        ,"Get catalog inventory, then enable a working set for new Agent tasks": "先获取目录库存，再为新的 Agent 任务启用工作集"
+        ,"Featured catalog": "精选目录"
+        ,"Owner-selected tools, including Armorial. Not a marketplace, store, ranking, or payment catalog.": "所有者精选的工具（含 Armorial）。不是应用市场、商店、排行或付费目录。"
+        ,"Switches enable the working set of already-installed tools. They do not install missing inventory. tools set --profile is the same working-set action, not an installer.": "开关只启用已经安装的工具工作集，不会安装尚未入库的工具。tools set --profile 同样只选择工作集，不是安装器。"
+        ,"Get featured tools": "获取精选工具"
+        ,"Get runs update --profile featured against the same bound catalog as CLI setup. It installs inventory; switches below only change the working set.": "“获取”会按与 CLI 相同的绑定目录执行 update --profile featured，用于安装库存；下方开关只改变工作集。"
+        ,"Working set for new tasks": "新任务的工作集"
+        ,"Not installed in this environment": "此环境尚未安装"
+        ,"Featured tools installed": "已安装精选工具"
+        ,"Agent environment installed": "已安装 Agent 环境"
+        ,"Installing tools": "正在安装工具"
+        ,"Skill-only kit; this profile adds no Agent MCP tools": "仅 Skill；此配置不添加 Agent MCP 工具"
+        ,"Developer Kit": "开发者 Kit"
+        ,"Armorial": "Armorial"
         ,"just now": "刚刚"
         ,"last run {status}": "上次运行状态：{status}"
         ,"no refresh time recorded": "未记录刷新时间"

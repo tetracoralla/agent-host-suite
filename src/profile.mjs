@@ -9,6 +9,22 @@ const PROFILE_DIRECTORY = new URL('../catalog/profiles/', import.meta.url)
 export const FEATURED_PROFILE_ID = 'featured'
 export const LOCAL_DOGFOOD_PROFILE_ID = 'local-dogfood'
 export const FEATURED_CATALOG_SCHEMA = 'openadam.agent-host-profile-catalog.v0.1'
+export const FEATURED_CATALOG_DOWNLOAD_ENV = 'AGENT_HOST_FEATURED_CATALOG_URL'
+export const UNSIGNED_MACOS_GATEKEEPER_NOTE = 'Unsigned macOS builds are not Apple-notarized. Control-click the app, choose Open, then confirm the Gatekeeper warning. This is expected until a Developer ID signed build exists.'
+export const WORKING_SET_NOTE = 'tools set --profile selects the working set of already-installed tools. It does not install missing inventory.'
+
+export function featuredCatalogDownload(env = process.env) {
+  const raw = env[FEATURED_CATALOG_DOWNLOAD_ENV]
+  const url = typeof raw === 'string' ? raw.trim() : ''
+  return {
+    env: FEATURED_CATALOG_DOWNLOAD_ENV,
+    configured: url.length > 0,
+    url: url.length > 0 ? url : null,
+    publicReleasePublished: false,
+    unsignedMacOS: true,
+    gatekeeperNote: UNSIGNED_MACOS_GATEKEEPER_NOTE,
+  }
+}
 
 function fail(message, details) {
   throw new AgentHostError('PROFILE_INVALID', message, details)
@@ -105,7 +121,7 @@ export async function defaultToolsForProfile(id) {
   return [...profile.defaultAgentComponents]
 }
 
-export async function featuredCatalog() {
+export async function featuredCatalog(env = process.env) {
   const profiles = await listProfiles()
   return {
     schemaVersion: FEATURED_CATALOG_SCHEMA,
@@ -114,6 +130,8 @@ export async function featuredCatalog() {
     boundReleaseRequired: true,
     featuredProfile: FEATURED_PROFILE_ID,
     profiles,
+    download: featuredCatalogDownload(env),
+    workingSetNote: WORKING_SET_NOTE,
   }
 }
 
