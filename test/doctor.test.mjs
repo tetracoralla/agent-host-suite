@@ -35,6 +35,7 @@ test('deep doctor reports per-tool direct checks while the service is not runnin
 
   const deep = await doctor(state, { deep: true, codexConfiguration: fake.configuration, runner: serviceDownRunner(fake.runner) })
   const statuses = Object.fromEntries(deep.checks.map((item) => [item.id, item.status]))
+  assert.equal(statuses['profile.catalog'], 'ok')
   assert.equal(statuses['runtime.service'], 'error')
   assert.equal(statuses['tool.math-anchor.direct'], 'error')
   assert.equal(statuses['tool.migratory-time.direct'], 'error')

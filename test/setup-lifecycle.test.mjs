@@ -291,6 +291,29 @@ test('public setup fails closed while the release catalog is unbound', async () 
   )
 })
 
+test('setup --no-host installs inventory without connecting an Agent app', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-no-host-workspace-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-no-host-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  const preview = await setup({
+    profile: 'standard', hosts: [], noHost: true, developmentRoot: root, stateRoot,
+    noService: true, dryRun: true, enableObservability: false,
+  }, lifecycleDependencies(fake, stateRoot))
+  assert.equal(preview.status, 'ready')
+  assert.deepEqual(preview.hosts, {})
+  const installed = await setup({
+    profile: 'standard', hosts: [], noHost: true, developmentRoot: root, stateRoot,
+    noService: true, dryRun: false, enableObservability: false,
+  }, lifecycleDependencies(fake, stateRoot))
+  assert.equal(installed.status, 'installed')
+  assert.deepEqual(installed.hosts, [])
+  const state = await loadState(await prepareStatePaths(stateRoot))
+  assert.deepEqual(state.hosts, {})
+  assert.deepEqual(state.availableAgentComponents, ['math-anchor', 'migratory-time'])
+})
+
 test('developer profile refuses a mutable development-root CLI', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-developer-source-root-'))
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-developer-source-state-'))

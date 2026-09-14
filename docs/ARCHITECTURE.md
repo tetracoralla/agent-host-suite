@@ -251,8 +251,9 @@ evaluation for newly created ad-hoc internal builds, and simultaneous heavy
 Python bundles amplify rather than hide that work. A persisted policy marker
 ensures an Agent Host upgrade also covers previously materialized packages once.
 This internal installation
-step does not replace Developer ID signing, notarization, or clean-machine
-distribution verification for a public binary.
+step does not replace unsigned-preview Gatekeeper or SmartScreen acceptance, or
+clean-machine verification, for a public binary. Apple notarization is not part
+of this product; see [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 
 Package inventory and Agent-visible working set are separate. Every transition
 that can change the working set measures the proposed live catalogs and blocks

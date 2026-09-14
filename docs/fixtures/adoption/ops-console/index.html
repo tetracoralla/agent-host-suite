@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>North Pier — night desk</title>
+  <style>
+    :root {
+      --paper: #f3eee4;
+      --ink: #1b2430;
+      --muted: #5c6570;
+      --line: #d4cbbd;
+      --sea: #1f5c4d;
+      --warn: #8a4b12;
+      --slot: #b7a99a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.45 "Avenir Next", "Segoe UI", sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .mark {
+      font-family: Palatino, "Palatino Linotype", serif;
+      font-size: 1.15rem;
+      letter-spacing: 0.04em;
+    }
+    .chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .chip, .nav a, button, .empty {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.2rem 0.65rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .layout { display: grid; grid-template-columns: 13rem 1fr; min-height: calc(100vh - 4rem); }
+    nav { border-right: 1px solid var(--line); padding: 1rem 0.75rem; }
+    nav a {
+      display: flex;
+      padding: 0.55rem 0.65rem;
+      color: inherit;
+      text-decoration: none;
+      border-radius: 0.4rem;
+    }
+    nav a[aria-current="page"] { background: #e7efe9; color: var(--sea); }
+    main { padding: 1.25rem; }
+    .toolbar { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    button {
+      background: var(--sea);
+      color: #f7f3ea;
+      border: 0;
+      border-radius: 0.4rem;
+      padding: 0.45rem 0.8rem;
+      font: inherit;
+    }
+    button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    .empty {
+      flex-direction: column;
+      justify-content: center;
+      min-height: 18rem;
+      border: 1px solid var(--line);
+      border-radius: 0.75rem;
+      background: #faf7f0;
+      color: var(--muted);
+      text-align: center;
+      padding: 2rem;
+    }
+    .empty strong { color: var(--ink); font-weight: 600; }
+    .icon-slot {
+      display: inline-block;
+      width: 1.15rem;
+      height: 1.15rem;
+      border: 1px dashed var(--slot);
+      border-radius: 0.28rem;
+      background: repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(27, 36, 48, 0.06) 3px, rgba(27, 36, 48, 0.06) 6px);
+      flex: 0 0 1.15rem;
+    }
+    .icon-slot.hero { width: 3rem; height: 3rem; border-radius: 0.7rem; }
+    @media (max-width: 720px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { border-right: 0; border-bottom: 1px solid var(--line); display: flex; gap: 0.25rem; overflow: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="mark">North Pier</div>
+    <div class="chips" aria-label="Harbor status">
+      <span class="chip"><span class="icon-slot" aria-hidden="true"></span>Flood tide</span>
+      <span class="chip"><span class="icon-slot" aria-hidden="true"></span>Gate 2 open</span>
+      <span class="chip"><span class="icon-slot" aria-hidden="true"></span>Fog advisory</span>
+    </div>
+  </header>
+  <div class="layout">
+    <nav aria-label="Desk">
+      <a href="#board" aria-current="page"><span class="icon-slot" aria-hidden="true"></span>Board</a>
+      <a href="#berths"><span class="icon-slot" aria-hidden="true"></span>Berths</a>
+      <a href="#arrivals"><span class="icon-slot" aria-hidden="true"></span>Arrivals</a>
+      <a href="#fuel"><span class="icon-slot" aria-hidden="true"></span>Fuel dock</a>
+      <a href="#log"><span class="icon-slot" aria-hidden="true"></span>Night log</a>
+    </nav>
+    <main>
+      <div class="toolbar">
+        <button type="button"><span class="icon-slot" aria-hidden="true"></span>New arrival</button>
+        <button type="button" class="ghost"><span class="icon-slot" aria-hidden="true"></span>Hold slip</button>
+        <button type="button" class="ghost"><span class="icon-slot" aria-hidden="true"></span>Radio desk</button>
+        <button type="button" class="ghost"><span class="icon-slot" aria-hidden="true"></span>Print sheet</button>
+      </div>
+      <section class="empty" id="board">
+        <span class="icon-slot hero" aria-hidden="true"></span>
+        <p><strong>No vessels on the board this watch.</strong><br>New arrivals will land here. Keep the night log nearby.</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

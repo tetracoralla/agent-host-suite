@@ -7,7 +7,7 @@ struct AgentAppsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Agent Apps", subtitle: "Where your tools are available") {
+                PageHeader(title: "Agents", subtitle: nil) {
                     EmptyView()
                 }
 
@@ -30,7 +30,7 @@ struct AgentAppsView: View {
 
                 NoticeView(
                     title: "Start a fresh task after changes",
-                    message: "Agent apps load installed tool catalogs when a new task starts.",
+                    message: "New tasks pick up tool changes.",
                     systemImage: "arrow.clockwise.circle",
                     color: .blue
                 )

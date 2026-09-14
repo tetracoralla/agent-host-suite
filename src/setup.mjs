@@ -16,9 +16,10 @@ import { enableObservability } from './observability.mjs'
 import { recordActivity } from './activity.mjs'
 import { cleanupMaterializedRelease, discardMaterializedDownloads, materializeRelease } from './release-artifacts.mjs'
 import { loadReleaseManifest } from './release-manifest.mjs'
+import { resolveReleaseManifestPath } from './preview-download.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { OBSERVABILITY_RELEASE_COMPONENTS } from './release-manifest.mjs'
-import { agentFacingManifest, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
+import { agentFacingManifest, FEATURED_PROFILE_ID, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
 import { installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
 import {
   installDeveloperKitSkill,
@@ -47,7 +48,8 @@ const DOWNLOAD_CLEANUP_WARNING = Object.freeze({
   message: 'The Agent Host installation succeeded, but one or more materialized release downloads could not be removed.',
 })
 
-function selectedHosts(hosts) {
+function selectedHosts(hosts, options = {}) {
+  if (options.noHost === true) return []
   const values = hosts.length === 0 ? ['codex'] : hosts.flatMap((value) => value.split(',')).filter(Boolean)
   for (const host of values) if (!HOSTS.has(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported host: ${host}`)
   return [...new Set(values)]
@@ -179,6 +181,9 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
   if (profile.id === 'developer' && options.developmentRoot !== undefined) {
     throw new AgentHostError('DEVELOPER_PROFILE_RELEASE_REQUIRED', 'The developer profile requires one version-bound release; it cannot expose a mutable source-root CLI')
   }
+  if (profile.id === FEATURED_PROFILE_ID && options.developmentRoot !== undefined) {
+    throw new AgentHostError('FEATURED_PROFILE_RELEASE_REQUIRED', 'The featured profile requires a bound compatibility release; it cannot use a development source root')
+  }
   let paths = preparedPaths ?? await prepareStatePaths(resolveStateRoot(options.stateRoot))
   // Reject an existing installation before entering cleanup for a new one.
   // Otherwise an ordinary ALREADY_INSTALLED error could remove its state and
@@ -192,7 +197,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
   if (options.developmentRoot !== undefined) {
     manifest = await buildDevelopmentManifest(options.developmentRoot)
   } else {
-    const release = await loadReleaseManifest(options.releaseManifest)
+    const release = await loadReleaseManifest(await resolveReleaseManifestPath(options, { ...dependencies, paths }))
     if (release.manifest.status === 'draft-unbound') throw new AgentHostError('RELEASE_UNBOUND', 'No verified compatibility release is bound in this build')
     const provenance = await loadReleaseProvenance(release)
     releaseSourceProvenance = {
@@ -202,7 +207,12 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     }
     paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
     if (await loadState(paths) !== null) throw new AgentHostError('ALREADY_INSTALLED', 'An Agent environment is already installed; use update')
-    releasePreparation = await materializeRelease(release, paths, { runner: dependencies.artifactRunner ?? runFile, componentIds: profile.components })
+    releasePreparation = await materializeRelease(release, paths, {
+      runner: dependencies.artifactRunner ?? runFile,
+      componentIds: profile.components,
+      fetch: dependencies.fetch,
+      signal: dependencies.signal,
+    })
     manifest = releasePreparation.manifest
     if (profile.requiresConsent) {
       const missing = OBSERVABILITY_RELEASE_COMPONENTS.filter((id) => manifest.components[id] === undefined)
@@ -212,7 +222,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
       }
     }
   }
-  const hosts = selectedHosts(options.hosts)
+  const hosts = selectedHosts(options.hosts, options)
   const activeAgentComponents = selectAgentComponents(
     profile.agentComponents,
     options.tools ?? profile.defaultAgentComponents,
@@ -316,7 +326,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     await (dependencies.saveState ?? saveState)(paths, state)
     const warnings = []
     try {
-      await (dependencies.recordActivity ?? recordActivity)(paths, 'environment.installed', 'Standard tools installed', {
+      await (dependencies.recordActivity ?? recordActivity)(paths, 'environment.installed', `${profile.displayName} installed`, {
         profile: state.profile,
         hosts: Object.keys(installedHosts),
         suiteVersion: state.suiteVersion,

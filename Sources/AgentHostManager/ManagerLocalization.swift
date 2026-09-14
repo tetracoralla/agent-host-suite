@@ -231,12 +231,12 @@ enum L10n {
         "Cached": "缓存结果",
         "Freshness unknown": "新鲜度未知",
         "Local metadata only": "仅本地元数据",
-        "Set up your Agent environment": "设置 Agent 环境",
-        "Install one verified local environment for your Agent app.": "为 Agent 应用安装一套经过验证的本地环境。",
+        "Set up your Agent environment": "设置",
+        "Install one verified local environment for your Agent app.": "安装本地环境。",
         "Standard tools": "标准工具",
         "Reliable calculation and time conversion": "可靠计算与时区转换",
         "Local service": "本地服务",
-        "Keeps installed tools ready on this Mac": "让已安装工具在这台 Mac 上保持就绪",
+        "Keeps installed tools ready on this Mac": "保持本机工具可用",
         "Agent app": "Agent 应用",
         "Review Setup": "查看设置方案",
         "Local monitoring stays off until you turn it on.": "本地监控会保持关闭，直到你主动开启。",
@@ -248,6 +248,19 @@ enum L10n {
         "Install": "安装",
         "Selected": "已选择",
         "Standard": "标准",
+        "Featured tools": "精选工具",
+        "Overview": "总览",
+        "Agents": "连接 Agent",
+        "History": "记录",
+        "Advanced": "高级",
+        "Usage": "使用情况",
+        "Set up": "设置",
+        "New tasks pick up tool changes.": "新任务会用上工具变更。",
+        "Run Full Check to verify bindings.": "运行完整检查以核对绑定。",
+        "Open tasks keep their old tools.": "已打开的任务仍用旧工具。",
+        "Unmeasured calls are not counted as success.": "未计量的调用不计为成功。",
+        "Unsigned build: Control-click the app, then Open.": "未签名：按住 Control 点开应用。",
+        "Public download is not configured.": "尚未配置公开下载。",
         "Standard + Monitoring": "标准 + 监控",
         "Standard + Local tools": "标准 + 本地工具",
         "Monitoring": "监控",
@@ -284,6 +297,7 @@ enum L10n {
         ,"Connected apps are configured · Run Full Check to verify bindings": "已配置连接的应用 · 运行完整检查以验证绑定"
         ,"Connected apps have current bindings": "已连接应用的绑定为当前版本"
         ,"Direct execution": "直接执行"
+        ,"Environment checks": "环境检查"
         ,"Install {name} before connecting it": "请先安装 {name}，再进行连接"
         ,"Installed tool runtimes are ready": "已安装的工具运行时已就绪"
         ,"Installed Agent tool": "已安装的 Agent 工具"
@@ -315,6 +329,28 @@ enum L10n {
         ,"{count} live suite processes": "{count} 个活跃 Suite 进程"
         ,"{size} resident": "常驻内存 {size}"
         ,"Workspace access": "工作区访问"
+        ,"Check again": "重新检测"
+        ,"No supported Agent app was found": "未找到受支持的 Agent 应用"
+        ,"Install now; connect an Agent later.": "先安装，稍后再连 Agent。"
+        ,"Public download is not configured": "尚未配置公开下载"
+        ,"Install without an Agent for now.": "先不连 Agent，直接安装。"
+        ,"Connect later": "稍后连接"
+        ,"Connect an Agent app when it is installed": "安装 Agent 应用后再连接"
+        ,"Connect an Agent afterward, then start a new task.": "装好后再连接 Agent，并新开任务。"
+        ,"Agent Host will install the {toolSet}, connect them to {app}, and start local execution.": "Agent Host 将安装{toolSet}、连接到 {app} 并启动本地执行。"
+        ,"Agent Host will install the {toolSet} and start local execution. No Agent app will be connected yet.": "Agent Host 将安装{toolSet}并启动本地执行，暂不连接 Agent 应用。"
+        ,"Use {toolSet} for setup": "使用 {toolSet} 进行设置"
+        ,"Not installed · connect after setup": "未安装 · 设置后再连接"
+        ,"Featured": "精选"
+        ,"Get": "获取"
+        ,"For new tasks": "用于新任务"
+        ,"Missing": "未安装"
+        ,"Featured tools installed": "已安装精选工具"
+        ,"Agent environment installed": "已安装 Agent 环境"
+        ,"Installing tools": "正在安装工具"
+        ,"Skill-only kit; this profile adds no Agent MCP tools": "仅 Skill；此配置不添加 Agent MCP 工具"
+        ,"Developer Kit": "开发者 Kit"
+        ,"Armorial": "Armorial"
         ,"just now": "刚刚"
         ,"last run {status}": "上次运行状态：{status}"
         ,"no refresh time recorded": "未记录刷新时间"

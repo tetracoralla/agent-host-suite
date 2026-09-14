@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { loadProfile, selectAgentComponents, validateProfile } from '../src/profile.mjs'
+import { defaultToolsForProfile, featuredCatalog, featuredCatalogDownload, FEATURED_CATALOG_DOWNLOAD_ENV, FEATURED_PROFILE_ID, listProfiles, loadProfile, LOCAL_DOGFOOD_PROFILE_ID, selectAgentComponents, selectProfileManifest, UNSIGNED_MACOS_GATEKEEPER_NOTE, validateProfile } from '../src/profile.mjs'
 
-test('profiles retain the small standard catalog and compose the current local dogfood set', async () => {
+test('profiles retain the small standard catalog, a distinct featured set, and the local dogfood set', async () => {
   const standard = await loadProfile('standard')
   assert.deepEqual(standard.components, ['node-runtime', 'direct-execution-runtime', 'math-anchor', 'migratory-time'])
   assert.equal(standard.displayName, 'Standard tools')
@@ -33,6 +34,73 @@ test('profiles retain the small standard catalog and compose the current local d
   assert.equal(local.agentComponents.includes('agent-tool-development-kit'), false)
   assert.deepEqual(local.defaultAgentComponents, ['math-anchor'])
   assert.equal(new Set(local.components).size, local.components.length)
+
+  const featured = await loadProfile(FEATURED_PROFILE_ID)
+  assert.equal(featured.displayName, 'Featured tools')
+  assert.equal(featured.requiresConsent, false)
+  assert.equal(featured.components.includes('armorial'), true)
+  assert.equal(featured.agentComponents.includes('armorial'), true)
+  assert.equal(featured.components.includes('math-anchor'), true)
+  assert.deepEqual(featured.defaultAgentComponents, ['math-anchor', 'migratory-time', 'armorial'])
+  assert.equal(featured.components.includes('data-transformer'), false)
+  assert.equal(featured.components.includes('laniakea'), false)
+  assert.equal(featured.components.includes('projective'), false)
+  assert.equal(featured.components.includes('equatorium'), false)
+  assert.equal(featured.components.includes('file-vitals'), false)
+  assert.equal(featured.components.includes('agent-tool-development-kit'), false)
+  assert.equal(featured.components.includes('agent-tool-observer'), false)
+  assert.equal(local.components.includes('armorial'), true)
+  assert.notEqual(featured.id, LOCAL_DOGFOOD_PROFILE_ID)
+})
+
+test('the featured catalog lists profile membership without becoming a marketplace', async () => {
+  const catalog = await featuredCatalog()
+  assert.equal(catalog.marketplace, false)
+  assert.equal(catalog.boundReleaseRequired, true)
+  assert.equal(catalog.featuredProfile, FEATURED_PROFILE_ID)
+  const featured = catalog.profiles.find((profile) => profile.featured === true)
+  const dogfood = catalog.profiles.find((profile) => profile.dogfood === true)
+  assert.equal(featured.id, FEATURED_PROFILE_ID)
+  assert.deepEqual(featured.defaultAgentComponents, ['math-anchor', 'migratory-time', 'armorial'])
+  assert.equal(dogfood.id, LOCAL_DOGFOOD_PROFILE_ID)
+  assert.deepEqual((await listProfiles()).map((profile) => profile.id).sort(), catalog.profiles.map((profile) => profile.id).sort())
+  assert.deepEqual(await defaultToolsForProfile(FEATURED_PROFILE_ID), featured.defaultAgentComponents)
+  assert.equal(catalog.download.publicReleasePublished, false)
+  assert.equal(catalog.download.configured, false)
+  assert.equal(catalog.download.url, null)
+  assert.equal(catalog.download.notarized, false)
+  assert.equal(catalog.download.marketplace, false)
+  assert.match(catalog.workingSetNote, /does not install missing inventory/u)
+  assert.equal(catalog.download.gatekeeperNote, UNSIGNED_MACOS_GATEKEEPER_NOTE)
+  assert.match(catalog.download.message, /Public download is not configured/u)
+  assert.doesNotMatch(catalog.download.gatekeeperNote, /until a Developer ID signed build exists/u)
+  const configured = featuredCatalogDownload({ [FEATURED_CATALOG_DOWNLOAD_ENV]: ' https://example.invalid/preview-distribution.json ' })
+  assert.equal(configured.configured, true)
+  assert.equal(configured.url, 'https://example.invalid/preview-distribution.json')
+  assert.equal(configured.publicReleasePublished, false)
+  assert.match(configured.message, /Host can fetch the bound catalog/u)
+})
+
+test('featured membership matches the catalog document and fails closed without armorial bytes', async () => {
+  const featured = await loadProfile(FEATURED_PROFILE_ID)
+  const catalogDoc = await readFile(new URL('../docs/FEATURED_CATALOG.md', import.meta.url), 'utf8')
+  assert.match(catalogDoc, /--profile featured/u)
+  assert.match(catalogDoc, /profiles list/u)
+  assert.match(catalogDoc, /armorial/u)
+  assert.match(catalogDoc, /draft-unbound/u)
+  assert.match(catalogDoc, /--development-root/u)
+  assert.match(catalogDoc, /not a public marketplace/u)
+  assert.match(catalogDoc, /UNSIGNED_PREVIEW.md/u)
+  assert.match(catalogDoc, /profiles fetch/u)
+  assert.match(catalogDoc, /public download is not configured/u)
+  assert.doesNotMatch(catalogDoc, /until a Developer ID signed build exists/u)
+  const standardOnly = {
+    components: Object.fromEntries(['node-runtime', 'direct-execution-runtime', 'math-anchor', 'migratory-time'].map((id) => [id, {}])),
+  }
+  assert.throws(
+    () => selectProfileManifest(standardOnly, featured),
+    (error) => error.code === 'PROFILE_COMPONENTS_MISSING' && error.details.components.includes('armorial'),
+  )
 })
 
 test('an unknown profile fails closed', async () => {

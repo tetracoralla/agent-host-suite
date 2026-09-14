@@ -27,6 +27,7 @@ final class AgentHostStore: ObservableObject {
     @Published var isPresentingSetupPlan = false
     @Published var isPresentingEnvironmentChangePlan = false
     @Published var selectedSetupHost = "zcode"
+    @Published var selectedSetupProfile = ManagerSetupPolicy.defaultProfile
 
     private let cli: AgentHostCLI
     private let environment: [String: String]
@@ -40,100 +41,31 @@ final class AgentHostStore: ObservableObject {
     }
 
     var health: ManagerHealth {
-        if isBusy && suite == nil { return .loading }
-        guard let suite, suite.configured else { return .unavailable }
-        guard doctor != nil else { return isBusy ? .loading : .attention(L10n.text("Run a health check")) }
-        let unhealthy = healthFacets.filter { !$0.isHealthy }
-        if unhealthy.isEmpty { return .ready }
-        let labels = attentionLabels
-        if labels.count == 1, let label = labels.first { return .attention(L10n.format("{item} needs attention", ["item": L10n.text(label)])) }
-        if unhealthy.count == 1 { return .attention(L10n.format("{item} needs attention", ["item": L10n.text(unhealthy[0].name)])) }
-        return .attention(L10n.format("{count} items need attention", ["count": unhealthy.count.formatted()]))
+        ManagerHealthPolicy.overall(
+            isBusy: isBusy,
+            suite: suite,
+            doctor: doctor,
+            facets: healthFacets
+        )
     }
 
     // Independent health surfaces. No single "Ready" may hide an unhealthy
-    // facet: host bindings, installed tools, direct execution, monitoring
-    // completeness/freshness, and the context-catalog budget each report here.
+    // facet: host bindings, installed tools, profile catalog membership,
+    // direct execution, monitoring completeness/freshness, context-catalog
+    // budget, and any otherwise unclassified doctor error.
     var healthFacets: [ManagerHealthFacet] {
         guard let doctor else { return [] }
-        var facets: [ManagerHealthFacet] = []
-
-        let managedHostIDs = Set((suite?.hosts ?? [:]).filter(\.value.installed).map(\.key))
-        let fullHostChecks = managedHostIDs.compactMap { doctor.check("host.\($0)") }
-        let hostProblems = fullHostChecks.filter { $0.status == "error" }
-        let missingApps = managedHostIDs.filter { hostStatuses[$0]?.appInstalled == false }
-        let agentAppsVerified = managedHostIDs.isEmpty || fullHostChecks.count == managedHostIDs.count
-        facets.append(ManagerHealthFacet(
-            id: "agent-apps",
-            name: L10n.text("Agent apps"),
-            isHealthy: hostProblems.isEmpty && missingApps.isEmpty,
-            detail: !hostProblems.isEmpty
-                ? hostProblems[0].message
-                : !missingApps.isEmpty
-                    ? L10n.text("A connected Agent app is no longer installed")
-                    : agentAppsVerified
-                        ? L10n.text("Connected apps have current bindings")
-                        : L10n.text("Connected apps are configured · Run Full Check to verify bindings")
-        ))
-
-        let toolProblems = doctor.checks.filter {
-            ($0.id.hasPrefix("component.") || ($0.id.hasPrefix("tool.") && $0.id.hasSuffix(".installed"))) && $0.status == "error"
-        }
-        facets.append(ManagerHealthFacet(
-            id: "tools",
-            name: L10n.text("Tools"),
-            isHealthy: toolProblems.isEmpty,
-            detail: toolProblems.isEmpty ? L10n.text("Installed tool runtimes are ready") : toolProblems[0].message
-        ))
-
-        let runtimeProblems = doctor.checks.filter {
-            ($0.id.hasPrefix("runtime.") || ($0.id.hasPrefix("tool.") && $0.id.hasSuffix(".direct"))) && $0.status == "error"
-        }
-        facets.append(ManagerHealthFacet(
-            id: "direct-execution",
-            name: L10n.text("Direct execution"),
-            isHealthy: runtimeProblems.isEmpty,
-            detail: runtimeProblems.isEmpty ? L10n.text("The local execution service and direct probes are ready") : runtimeProblems[0].message
-        ))
-
-        facets.append(monitoringFacet)
-        facets.append(catalogFacet)
-        return facets
+        return ManagerHealthPolicy.facets(
+            doctor: doctor,
+            suite: suite,
+            hostStatuses: hostStatuses,
+            observations: observations,
+            snapshot: snapshot
+        )
     }
 
     private var monitoringFacet: ManagerHealthFacet {
-        guard let observations else {
-            return ManagerHealthFacet(id: "monitoring", name: L10n.text("Monitoring"), isHealthy: true, detail: L10n.text("Not configured"))
-        }
-        guard observations.enabled else {
-            return ManagerHealthFacet(id: "monitoring", name: L10n.text("Monitoring"), isHealthy: true, detail: L10n.text("Off"))
-        }
-        guard let collection = snapshot?.observability?.collection else {
-            return ManagerHealthFacet(id: "monitoring", name: L10n.text("Monitoring"), isHealthy: false, detail: L10n.text("On, but no collection result has been recorded"))
-        }
-        return MonitoringHealthEvaluator.evaluate(
-            collection: collection,
-            refreshedAt: snapshot?.observability?.refreshedAt ?? observations.latest?.refreshedAt,
-            maintenanceIntervalSeconds: observations.maintenance?.intervalSeconds
-        )
-    }
-
-    private var catalogFacet: ManagerHealthFacet {
-        let catalog = snapshot?.observability?.catalog
-        guard let catalog, catalog.canonicalUtf8Bytes != nil else {
-            return ManagerHealthFacet(id: "catalog", name: L10n.text("Tool catalog"), isHealthy: true, detail: L10n.text("No measurement (monitoring off or not refreshed)"))
-        }
-        let exceeded = (catalog.budgetChecks ?? []).filter(\.exceeded)
-        guard !exceeded.isEmpty else {
-            return ManagerHealthFacet(id: "catalog", name: L10n.text("Tool catalog"), isHealthy: true, detail: L10n.text("Within declared budgets"))
-        }
-        let names = exceeded.map { budgetName($0.metric) }.joined(separator: ", ")
-        return ManagerHealthFacet(
-            id: "catalog",
-            name: L10n.text("Tool catalog"),
-            isHealthy: false,
-            detail: L10n.format("Over budget: {items}", ["items": names])
-        )
+        ManagerHealthPolicy.monitoringFacet(observations: observations, snapshot: snapshot)
     }
 
     var catalogBudgetSummary: String? {
@@ -196,6 +128,43 @@ final class AgentHostStore: ObservableObject {
 
     var selectedSetupHostName: String {
         ManagerAgentApp.named(selectedSetupHost).name
+    }
+
+    var selectedSetupProfileName: String {
+        ManagerSetupPolicy.displayName(for: selectedSetupProfile)
+    }
+
+    var connectsAgentDuringSetup: Bool {
+        ManagerSetupPolicy.connectsHost(hostStatuses[selectedSetupHost]?.appInstalled)
+    }
+
+    var hasDetectedSetupHost: Bool {
+        ManagerAgentApp.all.contains { hostStatuses[$0.id]?.appInstalled == true }
+    }
+
+    var featuredCatalogTools: [ManagerSetupTool] {
+        ManagerSetupPolicy.tools(for: "featured")
+    }
+
+    var needsFeaturedInventory: Bool {
+        guard suite?.configured == true else { return false }
+        return ManagerSetupPolicy.featuredToolIDs.contains { suite?.components?[$0] == nil }
+    }
+
+    func isFeaturedToolInstalled(_ id: String) -> Bool {
+        suite?.components?[id] != nil
+    }
+
+    private var releaseManifestPath: String? {
+        let value = environment["AGENT_HOST_RELEASE_MANIFEST"]
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    var featuredCatalogDownloadURL: String? {
+        let value = environment["AGENT_HOST_FEATURED_CATALOG_URL"]
+        guard let value, !value.isEmpty else { return nil }
+        return value
     }
 
     var localExecutionStatus: String {
@@ -271,12 +240,20 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
-    func installStandard() async {
+    func installSelectedProfile() async {
         isPresentingSetupPlan = false
-        await work("Installing standard tools") {
+        await work("Installing tools") {
             _ = try await self.cli.run(self.setupArguments(dryRun: false), as: GenericResult.self)
             try await self.reloadAll()
         }
+    }
+
+    func prepareFeaturedAcquire() async {
+        await prepareUpdate(profile: "featured")
+    }
+
+    func redetectAgentApps() async {
+        await refresh()
     }
 
     func runDoctor(deep: Bool = true) async {
@@ -291,10 +268,12 @@ final class AgentHostStore: ObservableObject {
     }
 
     func prepareUpdate(profile: String? = nil, replacingHostConflicts: Bool = false) async {
-        var arguments = ["update"]
-        if let profile { arguments += ["--profile", profile] }
-        if replacingHostConflicts { arguments.append("--replace-host-conflicts") }
-        arguments.append("--dry-run")
+        let arguments = ManagerSetupPolicy.updateArguments(
+            profile: profile,
+            releaseManifest: releaseManifestPath,
+            replaceHostConflicts: replacingHostConflicts,
+            dryRun: true
+        )
         await work(health.needsRepair ? "Preparing repair" : "Preparing update") {
             do {
                 let plan = try await self.cli.run(arguments, as: UpdatePlan.self)
@@ -328,9 +307,12 @@ final class AgentHostStore: ObservableObject {
         environmentChangePlan = nil
         switch plan {
         case let .update(_, profile, replaceHostConflicts):
-            var arguments = ["update"]
-            if let profile { arguments += ["--profile", profile] }
-            if replaceHostConflicts { arguments.append("--replace-host-conflicts") }
+            let arguments = ManagerSetupPolicy.updateArguments(
+                profile: profile,
+                releaseManifest: releaseManifestPath,
+                replaceHostConflicts: replaceHostConflicts,
+                dryRun: false
+            )
             await action(arguments, label: health.needsRepair ? "Repairing environment" : "Updating environment", conflictRecovery: true)
         case .rollback:
             await action(["rollback"], label: "Restoring previous version")
@@ -415,12 +397,12 @@ final class AgentHostStore: ObservableObject {
     }
 
     private func setupArguments(dryRun: Bool) -> [String] {
-        var arguments = ["setup", "--profile", "standard", "--host", selectedSetupHost]
-        if let manifest = environment["AGENT_HOST_RELEASE_MANIFEST"], !manifest.isEmpty {
-            arguments += ["--release-manifest", manifest]
-        }
-        if dryRun { arguments.append("--dry-run") }
-        return arguments
+        ManagerSetupPolicy.setupArguments(
+            profile: selectedSetupProfile,
+            host: connectsAgentDuringSetup ? selectedSetupHost : nil,
+            releaseManifest: releaseManifestPath,
+            dryRun: dryRun
+        )
     }
 
     private func action(_ arguments: [String], label: String, conflictRecovery: Bool = false) async {
@@ -563,31 +545,6 @@ final class AgentHostStore: ObservableObject {
 
     private func displayName(for host: String) -> String {
         ManagerAgentApp.named(host).name
-    }
-
-    private var attentionLabels: [String] {
-        var labels = Set<String>()
-        if let doctor {
-            let errors = doctor.checks.filter { $0.status == "error" }
-            if errors.contains(where: { $0.id.contains("math-anchor") }) { labels.insert("Math Anchor") }
-            if errors.contains(where: { $0.id.contains("migratory-time") }) { labels.insert("Migratory Time") }
-            if errors.contains(where: { $0.id == "runtime.service" }) { labels.insert("Local execution") }
-            if errors.contains(where: { $0.id == "host.codex" }) && !errors.contains(where: { $0.id.hasPrefix("host.codex.") }) { labels.insert("Codex") }
-            if errors.contains(where: { $0.id == "host.claude" }) && !errors.contains(where: { $0.id.hasPrefix("host.claude.") }) { labels.insert("Claude Code") }
-            if errors.contains(where: { $0.id == "host.zcode" }) && !errors.contains(where: { $0.id.hasPrefix("host.zcode.") }) { labels.insert("ZCode") }
-        }
-        if !monitoringFacet.isHealthy { labels.insert("Monitoring") }
-        if !catalogFacet.isHealthy { labels.insert("Tool catalog") }
-        return labels.sorted()
-    }
-
-    private func budgetName(_ metric: String) -> String {
-        switch metric {
-        case "catalog.canonicalUtf8Bytes": "total catalog bytes"
-        case "counts.tools": "tool count"
-        case "catalog.largestToolUtf8Bytes": "largest tool bytes"
-        default: metric
-        }
     }
 
     private static func isHostConflict(_ code: String) -> Bool {

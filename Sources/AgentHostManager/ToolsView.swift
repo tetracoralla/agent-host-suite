@@ -6,7 +6,7 @@ struct ToolsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Tools", subtitle: "Selected for new Agent tasks") {
+                PageHeader(title: "Tools", subtitle: nil) {
                     Button(L10n.text("Check All")) { Task { await store.runDoctor() } }
                         .disabled(store.isBusy)
                 }
@@ -14,7 +14,7 @@ struct ToolsView: View {
                 if store.toolSetNeedsFreshTask {
                     NoticeView(
                         title: "Start a fresh Agent task",
-                        message: "New tasks load this tool selection. Tasks already open keep the tools they started with.",
+                        message: "Open tasks keep their old tools.",
                         systemImage: "arrow.clockwise.circle",
                         color: .blue
                     )
@@ -28,6 +28,28 @@ struct ToolsView: View {
                 }
 
                 Panel {
+                    HStack {
+                        Text(L10n.text("Featured")).font(.headline)
+                        Spacer()
+                        if store.needsFeaturedInventory {
+                            Button(L10n.text("Get")) {
+                                Task { await store.prepareFeaturedAcquire() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(store.isBusy)
+                        }
+                    }
+                    ForEach(Array(store.featuredCatalogTools.enumerated()), id: \.element.id) { index, tool in
+                        if index > 0 { Divider() }
+                        FeaturedCatalogRow(
+                            tool: tool,
+                            installed: store.isFeaturedToolInstalled(tool.id)
+                        )
+                    }
+                }
+
+                Panel {
+                    Text(L10n.text("For new tasks")).font(.headline)
                     ForEach(Array(store.managedTools.enumerated()), id: \.element.id) { index, tool in
                         ToolRow(
                             tool: tool,
@@ -42,6 +64,29 @@ struct ToolsView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .padding(32)
         }
+    }
+}
+
+private struct FeaturedCatalogRow: View {
+    let tool: ManagerSetupTool
+    let installed: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: tool.systemImage)
+                .font(.title3)
+                .foregroundStyle(.blue)
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(L10n.text(tool.name)).font(.headline)
+                Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 20)
+            Text(L10n.text(installed ? "Installed" : "Missing"))
+                .font(.caption)
+                .foregroundStyle(installed ? Color.secondary : Color.orange)
+        }
+        .padding(.vertical, 3)
     }
 }
 
@@ -68,8 +113,6 @@ private struct ToolRow: View {
                     }
                 }
                 Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
-                Text(L10n.text(tool.availability)).font(.caption).foregroundStyle(.secondary)
-                Text(L10n.text(tool.ownership)).font(.caption).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 20)
             VStack(alignment: .trailing, spacing: 8) {

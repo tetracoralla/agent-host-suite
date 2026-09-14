@@ -70,9 +70,18 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: $selection) {
-            ForEach(store.suite?.configured == true ? ManagerSection.allCases : [.overview]) { section in
-                Label(L10n.text(section.title), systemImage: section.systemImage)
-                    .tag(section)
+            if store.suite?.configured == true {
+                ForEach(ManagerSection.primaryCases) { section in
+                    Label(L10n.text(section.title), systemImage: section.systemImage)
+                        .tag(section)
+                }
+                Section(L10n.text("Advanced")) {
+                    Label(L10n.text(ManagerSection.usage.title), systemImage: ManagerSection.usage.systemImage)
+                        .tag(ManagerSection.usage)
+                }
+            } else {
+                Label(L10n.text(ManagerSection.overview.title), systemImage: ManagerSection.overview.systemImage)
+                    .tag(ManagerSection.overview)
             }
         }
         .listStyle(.sidebar)

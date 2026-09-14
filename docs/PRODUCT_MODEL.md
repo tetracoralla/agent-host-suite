@@ -10,17 +10,22 @@ The intended **external user** is an individual desktop Agent user who wants a
 small set of deterministic tools plus reliable local execution without cloning
 and configuring many repositories by hand. That path requires a bound
 compatibility release. This source checkout is not that release: it has no
-public GitHub Release, notarized DMG, or tool marketplace.
+GitHub Release assets in-tree, no Apple-notarized DMG, and no tool marketplace.
+Unsigned preview download is documented in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 
 **tools-dev dogfood** is a separate audience. Developers with authorized source
 checkouts use [`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md) so installed execution
 matches a stranger's package bytes while they still edit those repositories.
 `local-dogfood` remains a local feedback profile, not a store.
 
-A featured catalog, if used, is an owner-selected subset of independently
-released tools installed through the existing setup, profile, `tools set`, and
-private-import APIs. See [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md). Host
-working-set selection is not current-session discovery; see
+The `featured` profile is the external-user admission list: an owner-selected
+subset of independently released tools installed through the existing setup,
+`profiles list`, `update --profile featured`, and private-import APIs. Browser
+and native Managers use those same APIs to choose featured at setup and to Get
+uninstalled featured tools. `tools set --profile` only enables the working set
+of already-installed tools. It is not `local-dogfood` and not a store. See
+[`FEATURED_CATALOG.md`](FEATURED_CATALOG.md).
+Host working-set selection is not current-session discovery; see
 [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md).
 
 The user chooses an installed profile and a smaller active tool set, reviews
@@ -99,6 +104,10 @@ bound release. This document defines profile behavior, not a copied inventory:
 
 - `standard` is the deliberately small default Agent-visible set plus the
   required Host runtime.
+- `featured` extends standard with the independently released tools admitted
+  for external users (currently Armorial). Membership is the profile file, not
+  `local-dogfood`. It requires a bound compatibility release and rejects
+  development-root installation.
 - `observability` extends standard with opt-in local observation and analysis.
   Those components remain backstage and add no tools or MCP processes to an
   ordinary Agent session. Consent remains off until the user selects the
@@ -223,6 +232,8 @@ task and keep these kinds of evidence distinct when they affect the claim:
 
 These categories are not a mandatory reporting template or work queue. The
 local installed route and its fresh-session adoption limit are defined in
-[`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md). Select affected risks and evidence using
+[`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md). Unnamed page-task scoring, when a
+machine has Host plus Agent, is [`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md);
+Host status is not that score. Select affected risks and evidence using
 [`REVIEW_CONTRACT.md`](REVIEW_CONTRACT.md). CI or cross-compilation cannot
 establish physical-device runtime or owner acceptance.

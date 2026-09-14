@@ -70,6 +70,106 @@ enum ManagerCheckPolicy {
     }
 }
 
+struct ManagerSetupTool: Equatable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let summary: String
+    let systemImage: String
+}
+
+enum ManagerSetupPolicy {
+    static let profiles = ["featured", "standard", "developer", "observability"]
+    static let defaultProfile = "featured"
+    static let featuredToolIDs = ["math-anchor", "migratory-time", "armorial"]
+    static let unsignedMacOSGatekeeperNote = "Unsigned build: Control-click the app, then Open."
+    static let publicDownloadNotConfiguredNote = "Public download is not configured."
+    static let workingSetNote = ""
+
+    static func isSetupProfile(_ id: String) -> Bool {
+        profiles.contains(id)
+    }
+
+    static func displayName(for profile: String) -> String {
+        switch profile {
+        case "featured": "Featured tools"
+        case "developer": "Developer Kit"
+        case "observability": "Standard + Monitoring"
+        case "local-dogfood": "Standard + Local tools"
+        default: "Standard tools"
+        }
+    }
+
+    static func tools(for profile: String) -> [ManagerSetupTool] {
+        switch profile {
+        case "featured":
+            [
+                ManagerSetupTool(id: "math-anchor", name: "Math Anchor", summary: "Exact and scientific calculation", systemImage: "function"),
+                ManagerSetupTool(id: "migratory-time", name: "Migratory Time", summary: "Reliable worldwide time conversion", systemImage: "globe.americas"),
+                ManagerSetupTool(id: "armorial", name: "Armorial", summary: "Choose project-aware icons without redrawing them", systemImage: "shield.lefthalf.filled"),
+            ]
+        case "developer":
+            [
+                ManagerSetupTool(id: "agent-tool-development-kit", name: "Developer Kit", summary: "Skill-only kit; this profile adds no Agent MCP tools", systemImage: "hammer.fill"),
+            ]
+        default:
+            [
+                ManagerSetupTool(id: "math-anchor", name: "Math Anchor", summary: "Exact and scientific calculation", systemImage: "function"),
+                ManagerSetupTool(id: "migratory-time", name: "Migratory Time", summary: "Reliable worldwide time conversion", systemImage: "globe.americas"),
+            ]
+        }
+    }
+
+    static func connectsHost(_ appInstalled: Bool?) -> Bool {
+        appInstalled == true
+    }
+
+    static func setupArguments(
+        profile: String,
+        host: String?,
+        releaseManifest: String?,
+        dryRun: Bool
+    ) -> [String] {
+        var arguments = ["setup", "--profile", profile]
+        if let host, !host.isEmpty {
+            arguments += ["--host", host]
+        } else {
+            arguments.append("--no-host")
+        }
+        if profile == "observability" {
+            arguments.append("--enable-observability")
+        }
+        if let releaseManifest, !releaseManifest.isEmpty {
+            arguments += ["--release-manifest", releaseManifest]
+        }
+        if dryRun {
+            arguments.append("--dry-run")
+        }
+        return arguments
+    }
+
+    static func updateArguments(
+        profile: String?,
+        releaseManifest: String?,
+        replaceHostConflicts: Bool,
+        dryRun: Bool
+    ) -> [String] {
+        var arguments = ["update"]
+        if let profile, !profile.isEmpty {
+            arguments += ["--profile", profile]
+        }
+        if let releaseManifest, !releaseManifest.isEmpty {
+            arguments += ["--release-manifest", releaseManifest]
+        }
+        if replaceHostConflicts {
+            arguments.append("--replace-host-conflicts")
+        }
+        if dryRun {
+            arguments.append("--dry-run")
+        }
+        return arguments
+    }
+}
+
 struct ManagerAgentApp: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
@@ -198,7 +298,8 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
         case "monitoring.enabled": L10n.text("Local monitoring turned on")
         case "monitoring.disabled": L10n.text("Local monitoring turned off")
         case "environment.maintained": L10n.text("Local observation and package storage maintained")
-        case "environment.installed": L10n.text("Standard tools installed")
+        case "environment.installed":
+            L10n.text(detail?["profile"]?.displayText == "featured" ? "Featured tools installed" : "Agent environment installed")
         case "environment.updated": L10n.text(summary == "Environment checked for updates" ? "Environment checked for updates" : "Environment updated")
         case "environment.rolled-back": L10n.text("Previous environment restored")
         case "tool-set.changed": L10n.text("Agent tool availability changed")
@@ -881,28 +982,31 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     case overview
     case tools
     case agentApps
-    case usage
     case activity
+    case usage
 
     var id: String { rawValue }
 
+    /// Primary sidebar: install → tools → connect → history. Usage is advanced.
+    static var primaryCases: [ManagerSection] { [.overview, .tools, .agentApps, .activity] }
+
     var title: String {
         switch self {
-        case .overview: "Environment"
+        case .overview: "Overview"
         case .tools: "Tools"
-        case .agentApps: "Agent Apps"
-        case .usage: "Usage & Reliability"
-        case .activity: "Activity"
+        case .agentApps: "Agents"
+        case .activity: "History"
+        case .usage: "Usage"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .overview: "square.stack.3d.up"
+        case .overview: "house"
         case .tools: "wrench.and.screwdriver"
-        case .agentApps: "bubble.left.and.bubble.right"
+        case .agentApps: "link"
+        case .activity: "clock"
         case .usage: "chart.bar.xaxis"
-        case .activity: "clock.arrow.circlepath"
         }
     }
 }

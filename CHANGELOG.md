@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- Land unsigned preview download without Apple notarization: GitHub Releases or
+  a configured HTTPS `preview-distribution.json` / bound `current.json`.
+  `AGENT_HOST_FEATURED_CATALOG_URL` is a working fetch hook (`profiles fetch`,
+  setup, and featured update) that reuses artifact download with optional
+  `Content-Length`, SHA-256, and HTTPS redirects. Unconfigured Host copy says
+  public download is not configured rather than implying a store. README and
+  Manager Gatekeeper copy no longer promise a future Developer ID build.
+- Wire browser and native Managers to the featured catalog over the existing
+  setup/update/tools APIs. Setup can select `featured` (including Armorial)
+  instead of hard-coding Standard; Tools can Get uninstalled featured inventory
+  via `update --profile featured`. `tools set --profile` remains working-set
+  selection, not an installer. Setup `--no-host` and Manager “connect later”
+  allow installing Host before a supported Agent app is detected. Unsigned
+  macOS copy names Gatekeeper; `AGENT_HOST_FEATURED_CATALOG_URL` is an optional
+  honest download hook and does not claim a public GitHub Release.
+- Treat a missing HTTPS `Content-Length` as unknown, not zero, when
+  acquiring a bound release artifact. Compare the header only when it is
+  present and a non-negative integer; count streamed bytes, stop past the
+  bound size, then verify the on-disk length and SHA-256. Timeouts, stalls,
+  and caller cancellation fail closed and remove the temporary file.
+- Roll every blocking `doctor` error into native Manager health, including
+  `profile.catalog`. An unmapped error id cannot report Ready.
+- Keep consented local monitoring when `update --profile featured` is given
+  a bound release that still contains the monitoring components. A release
+  that omits them still fails with `OBSERVABILITY_RELEASE_COMPONENTS_MISSING`
+  and does not write the featured working set or turn monitoring off. This
+  is not a GUI featured-install path and does not make a public Release.
+- Add an unnamed Armorial adoption protocol: copy-out page fixtures, a
+  fresh-session scorecard, and `doctor --featured-readiness` for featured
+  working-set plus projection receipts only. Claude and ZCode readiness
+  reuse doctor Skill inspectors, so a missing Armorial Skill projection
+  is not `ok`. Host status and call counts remain not adoption; this
+  checkout does not record a completed live run.
+- Wire featured-catalog v1 to the existing install APIs: named `featured`
+  profile (standard plus Armorial, not `local-dogfood`), `profiles list`, and
+  `tools set --profile`. Doctor checks catalog membership; draft-unbound and
+  development-root setup still fail closed. This is not a marketplace or
+  public Release.
 - Distinguish Host working-set selection from Agent-app cache and session
   discovery in status, tools status, and Manager copy. Recopy a vanished
   Host-owned Codex plugin cache through the public installer without treating

@@ -14,7 +14,7 @@ work or model runs merely because a case appears here.
 
 ## Release and artifact authority
 
-Start with [local-artifact-safety.test.mjs](local-artifact-safety.test.mjs), [bundled-release.test.mjs](bundled-release.test.mjs), [release-source-provenance.test.mjs](release-source-provenance.test.mjs), [component-warmup.test.mjs](component-warmup.test.mjs), [mcp-catalog.test.mjs](mcp-catalog.test.mjs).
+Start with [local-artifact-safety.test.mjs](local-artifact-safety.test.mjs), [bundled-release.test.mjs](bundled-release.test.mjs), [release-source-provenance.test.mjs](release-source-provenance.test.mjs), [component-warmup.test.mjs](component-warmup.test.mjs), [mcp-catalog.test.mjs](mcp-catalog.test.mjs), [release-artifact-download.test.mjs](release-artifact-download.test.mjs).
 
 Every component is admitted by exact archive bytes and digest, descriptor identity,
 version, platform, SPDX expression, complete inventory, and current typed
@@ -42,6 +42,11 @@ also completes a sequential first-and-repeat live MCP health start from its
 final immutable path before host activation, with full catalog fingerprint
 and serialized-byte stability. Later updates select changed fingerprints;
 already covered unchanged packages are not restarted.
+HTTPS artifact download treats a missing `Content-Length` as unknown, not
+zero. Early size comparison runs only when the header is present and a
+non-negative integer; the stream counts bytes and stops past the bound size;
+the finished file still has to match the bound length and SHA-256. Timeout,
+stall, and caller cancellation fail closed and delete the temporary file.
 Setup, update, rollback, private-component activation, and working-set
 changes must also measure the exact proposed live catalogs and fail before
 host or state mutation when canonical catalog bytes, largest-tool bytes, or
@@ -183,7 +188,20 @@ are preserved.
 
 ## Profile and tool truth
 
-Start with [profile.test.mjs](profile.test.mjs), [mcp-catalog.test.mjs](mcp-catalog.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs).
+Start with [profile.test.mjs](profile.test.mjs), [featured-catalog.test.mjs](featured-catalog.test.mjs), [mcp-catalog.test.mjs](mcp-catalog.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs).
+The `featured` profile is the external admission list, including Armorial,
+and is not `local-dogfood`. `profiles list`, `setup --profile featured`, and
+`update --profile featured` select that JSON membership through the existing
+setup/tools APIs. Manager setup and Tools Get featured tools use the same
+commands. `tools set --profile` only selects the working set of already
+installed tools. A tracked `draft-unbound` catalog and `--development-root`
+setup still fail closed. Setup `--no-host` installs inventory without
+connecting an Agent app.
+An update onto `featured` while local monitoring is already enabled must
+materialize the consented monitoring components together with the featured
+tool set when the bound release contains them. A release that omits those
+components fails with `OBSERVABILITY_RELEASE_COMPONENTS_MISSING` before
+writing and does not turn monitoring off.
 
 Installed components, Agent-visible components,
 and the smaller active tool set remain distinct. Backstage observation
@@ -304,7 +322,7 @@ Start with [operations-snapshot.test.mjs](operations-snapshot.test.mjs), [storag
 
 ## Update and uninstall safety
 
-Start with [release-lifecycle.test.mjs](release-lifecycle.test.mjs), [local-components.test.mjs](local-components.test.mjs), [observability.test.mjs](observability.test.mjs).
+Start with [release-lifecycle.test.mjs](release-lifecycle.test.mjs), [local-components.test.mjs](local-components.test.mjs), [observability.test.mjs](observability.test.mjs), [featured-catalog.test.mjs](featured-catalog.test.mjs).
 
 A compatibility update cannot silently add
  a private component to a release profile. Uninstall preserves pre-existing
@@ -456,9 +474,11 @@ live configuration changes, content export or publication.
 
 When a binary or installer release is in scope, install on a clean supported
 machine from the declared artifacts rather than sibling source. Verify detached
-digests, nested licenses/notices, SBOM, signature, notarization, Gatekeeper, and
-each claimed platform separately. Record intentionally absent signed or
-cross-platform artifacts rather than treating silence as parity.
+digests, nested licenses/notices, SBOM, the recorded signing state (unsigned
+preview is expected), Gatekeeper Control-click → Open or SmartScreen, and
+each claimed platform separately. Do not treat notarization as a required
+preview fact. Record intentionally absent signed or cross-platform artifacts
+rather than treating silence as parity.
 For Windows, additionally verify the payload manifest before and after copy,
 current-user PATH and shortcut ownership, named-pipe execution, scheduled-task
 recovery after login/reboot, application rollback, SmartScreen/signing state,

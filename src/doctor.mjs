@@ -7,7 +7,7 @@ import { inspectService } from './service.mjs'
 import { inspectDirectProviders } from './provider-diagnostics.mjs'
 import { verifyReleaseComponent } from './release-artifacts.mjs'
 import { probeMcpTools } from './mcp-health.mjs'
-import { hostFacingManifest } from './profile.mjs'
+import { hostFacingManifest, loadProfile } from './profile.mjs'
 import { inspectOperationsSkill } from './host-operations-skill.mjs'
 import { inspectDeveloperKitSkill, inspectProductSkills, inspectProviderSkills } from './developer-kit-skill.mjs'
 import { inspectMaintenance } from './maintenance-service.mjs'
@@ -35,6 +35,22 @@ export async function doctor(state, {
   codexConfiguration,
 } = {}) {
   const checks = []
+  if (typeof state.profile === 'string' && state.profile.length > 0) {
+    try {
+      const profile = await loadProfile(state.profile)
+      const missing = profile.agentComponents.filter((id) => state.components[id] === undefined)
+      checks.push(check(
+        'profile.catalog',
+        missing.length === 0 ? 'ok' : 'error',
+        missing.length === 0
+          ? `${profile.displayName} Agent tools are installed`
+          : `${profile.displayName} Agent tools are missing from the installed environment`,
+        { profile: profile.id, missing, defaultAgentComponents: profile.defaultAgentComponents },
+      ))
+    } catch (error) {
+      checks.push(check('profile.catalog', 'error', 'The installed profile catalog could not be loaded', error.message))
+    }
+  }
   const agentManifest = hostFacingManifest({ components: state.components }, state.agentComponents ?? Object.keys(state.components))
   for (const [id, component] of Object.entries(state.components)) {
     try {

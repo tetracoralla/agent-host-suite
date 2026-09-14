@@ -9,7 +9,9 @@ const required = [
   'Package.swift', 'macos/Info.plist', 'macos/AgentHostIcon.svg', 'macos/AgentHostMenuBar.svg', 'scripts/build-app-icon.sh',
   'windows/Install Agent Host.cmd', 'windows/Install-AgentHost.ps1', 'windows/Uninstall-AgentHost.ps1', 'scripts/package-windows.mjs',
   'docs/PRODUCT_MODEL.md', 'docs/ARCHITECTURE.md', 'docs/TERMINOLOGY.md', 'docs/TOOL_INTEGRATION.md', 'docs/BRAND.md', 'docs/RELEASE.md', 'docs/REVIEW_CONTRACT.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md',
-  'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md',
+  'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md', 'docs/ADOPTION_ACCEPTANCE.md', 'docs/UNSIGNED_PREVIEW.md',
+  'docs/unsigned-preview-release.yml', 'scripts/write-preview-distribution.mjs',
+  'schemas/agent-host-preview-distribution.schema.v0.1.json', 'catalog/preview-distribution.json',
   'scripts/check-manager-models.sh', 'scripts/write-internal-beta-distribution.mjs', 'scripts/check-macos-distribution.sh', 'Tests/AgentHostManagerChecks/main.swift',
   'scripts/release-source-provenance.mjs', 'scripts/check-release-source-provenance.mjs', 'scripts/provider-source-build.mjs', 'src/release-provenance.mjs',
   'schemas/agent-host-activity.schema.v0.1.json', 'schemas/agent-host-usage.schema.v0.1.json',
@@ -63,6 +65,91 @@ for (const relativePath of [
 }
 const release = JSON.parse(await readFile(join(root, 'catalog/releases/draft-unbound.v0.1.json'), 'utf8'))
 if (release.status !== 'draft-unbound' || release.components.length !== 0) throw new Error('unbound release catalog must fail closed')
+const featured = JSON.parse(await readFile(join(root, 'catalog/profiles/featured.json'), 'utf8'))
+if (featured.id !== 'featured' || featured.extends !== 'standard' || !featured.components.includes('armorial') || !featured.agentComponents.includes('armorial')) {
+  throw new Error('featured catalog must admit armorial on top of standard')
+}
+const featuredDefaults = featured.defaultAgentComponents ?? []
+if (!['math-anchor', 'migratory-time', 'armorial'].every((id) => featuredDefaults.includes(id))) {
+  throw new Error('featured default working set must include math-anchor, migratory-time, and armorial')
+}
+const dogfood = JSON.parse(await readFile(join(root, 'catalog/profiles/local-dogfood.json'), 'utf8'))
+const dogfoodOnly = dogfood.components.filter((id) => id !== 'armorial')
+if (dogfoodOnly.some((id) => featured.components.includes(id))) {
+  throw new Error('featured catalog must not include local-dogfood-only tools')
+}
+const featuredDoc = await readFile(join(root, 'docs/FEATURED_CATALOG.md'), 'utf8')
+if (!featuredDoc.includes('--profile featured') || !featuredDoc.includes('profiles list') || !featuredDoc.includes('draft-unbound')) {
+  throw new Error('featured catalog document must name the CLI path and unbound fail-closed')
+}
+if (!featuredDoc.includes('not a public marketplace') || !featuredDoc.includes('--development-root')) {
+  throw new Error('featured catalog document must remain a non-marketplace admission list with a bound-release path')
+}
+if (!featuredDoc.includes('--no-host') || !featuredDoc.includes('Get featured tools') || !featuredDoc.includes('working set')) {
+  throw new Error('featured catalog document must distinguish inventory install from working-set selection and allow setup without an Agent app')
+}
+if (!featuredDoc.includes('Gatekeeper') || !featuredDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL')) {
+  throw new Error('featured catalog document must keep unsigned macOS Gatekeeper copy and an honest download hook')
+}
+if (!featuredDoc.includes('UNSIGNED_PREVIEW.md') || featuredDoc.includes('until a Developer ID signed build exists')) {
+  throw new Error('featured catalog document must point at unsigned preview download and must not promise a future notarized build')
+}
+if (!featuredDoc.includes('profiles fetch') || !featuredDoc.includes('public download is not configured')) {
+  throw new Error('featured catalog document must name profiles fetch and the unconfigured download state')
+}
+const previewDoc = await readFile(join(root, 'docs/UNSIGNED_PREVIEW.md'), 'utf8')
+if (!previewDoc.includes('Control-click') || !previewDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !previewDoc.includes('preview-distribution.json')) {
+  throw new Error('unsigned preview document must name Gatekeeper, the catalog URL hook, and the index asset')
+}
+if (previewDoc.includes('notarytool') || previewDoc.includes('APPLE_NOTARY')) {
+  throw new Error('unsigned preview document must not instruct Apple notarization')
+}
+const readme = await readFile(join(root, 'README.md'), 'utf8')
+if (!readme.includes('not Apple-notarized') && !readme.includes('No notarization')) {
+  throw new Error('README must state that preview distribution is not notarized')
+}
+if (!readme.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !readme.includes('UNSIGNED_PREVIEW.md')) {
+  throw new Error('README must name the catalog download hook and unsigned preview document')
+}
+const readmeZh = await readFile(join(root, 'README.zh-CN.md'), 'utf8')
+if (!readmeZh.includes('无公证') || !readmeZh.includes('AGENT_HOST_FEATURED_CATALOG_URL')) {
+  throw new Error('Chinese README must state 无公证 and the catalog download hook')
+}
+const unpublished = JSON.parse(await readFile(join(root, 'catalog/preview-distribution.json'), 'utf8'))
+if (unpublished.publicReleasePublished !== false || unpublished.notarized !== false || unpublished.catalog !== null || unpublished.carriers.length !== 0) {
+  throw new Error('tracked preview-distribution.json must remain an unpublished placeholder')
+}
+const draftWorkflow = await readFile(join(root, 'docs/unsigned-preview-release.yml'), 'utf8')
+if (draftWorkflow.includes('notarytool') || draftWorkflow.includes('APPLE_NOTARY')) {
+  throw new Error('unsigned preview workflow draft must not require Apple notarization')
+}
+if (!featuredDoc.includes('ADOPTION_ACCEPTANCE.md')) {
+  throw new Error('featured catalog document must point at the unnamed adoption protocol')
+}
+const adoptionDoc = await readFile(join(root, 'docs/ADOPTION_ACCEPTANCE.md'), 'utf8')
+if (!adoptionDoc.includes('fresh Agent task') || !adoptionDoc.includes('not adoption evidence') || !adoptionDoc.includes('doctor --featured-readiness')) {
+  throw new Error('adoption protocol must require a fresh Agent task and refuse Host status as evidence')
+}
+if (!adoptionDoc.includes('docs/fixtures/adoption')) {
+  throw new Error('adoption protocol must ship unnamed fixtures')
+}
+const adoptionFixtureRoot = join(root, 'docs/fixtures/adoption')
+const steered = /\barmorial\b|\blucide\b|\biconpark\b|请使用/iu
+async function adoptionFixtures(directory) {
+  const output = []
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) output.push(...await adoptionFixtures(path))
+    else output.push(path)
+  }
+  return output
+}
+const adoptionFiles = await adoptionFixtures(adoptionFixtureRoot)
+if (adoptionFiles.length === 0) throw new Error('adoption fixtures are missing')
+for (const path of adoptionFiles) {
+  const text = await readFile(path, 'utf8')
+  if (steered.test(text)) throw new Error(`${relative(root, path)} names a steered icon product`)
+}
 const infoPlist = await readFile(join(root, 'macos/Info.plist'), 'utf8')
 if (!infoPlist.includes('<key>CFBundleIconFile</key><string>AgentHost</string>')) throw new Error('macOS app icon is not bound in Info.plist')
 const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))

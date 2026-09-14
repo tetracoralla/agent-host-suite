@@ -10,10 +10,15 @@ the Agent apps themselves.
 This repository contains the **Agent Host Suite** distribution unit. The npm
 package, CLI, schemas, and other stable technical identifiers retain that name.
 
-This checkout is source and a developer preview. It does not include a public
-GitHub Release, a notarized macOS DMG, or a public tool marketplace. A Host
-working-set selection is not proof that an open Agent session loaded those
-tools.
+This checkout is source and a developer preview. It does **not** ship Apple
+Developer ID signed or notarized builds, and it is **not** an App Store or
+plugin marketplace. Strangers install from a GitHub Release or a configured
+HTTPS URL (macOS DMG / Windows ZIP) once an owner publishes those assets;
+until then Host says public download is not configured. macOS Gatekeeper
+requires Control-click → Open. Host can fetch a bound catalog and install
+tools when `AGENT_HOST_FEATURED_CATALOG_URL` is set. See
+[Unsigned preview download](docs/UNSIGNED_PREVIEW.md). A Host working-set
+selection is not proof that an open Agent session loaded those tools.
 
 ## Scope
 
@@ -61,14 +66,20 @@ does not silently claim a public installable release.
   inputs, not runtime paths, and `local-dogfood` is a local feedback profile,
   not a store.
 
-A [featured catalog v1](docs/FEATURED_CATALOG.md) is an owner-selected subset
-of independently released tools installed through those same APIs. It is not a
-marketplace. How Codex projections relate to session Skill/MCP paths is in
-[Discovery and projection](docs/DISCOVERY_PROJECTION.md).
+A [featured catalog v1](docs/FEATURED_CATALOG.md) is the named `featured`
+profile: an owner-selected subset of independently released tools installed
+through those same APIs. Browser and native Managers can choose `featured` at
+setup or Get featured tools (including Armorial) after a Standard install.
+`tools set --profile` only enables the working set of already-installed tools.
+It is not a marketplace. How Codex projections relate to session Skill/MCP
+paths is in [Discovery and projection](docs/DISCOVERY_PROJECTION.md).
 
 ## Profiles
 
 - `standard` is the small default Agent-visible tool set.
+- `featured` is the external-user admission list. It extends `standard` and
+  admits Armorial. List it with `agent-host profiles list`. It is not
+  `local-dogfood`.
 - `observability` adds explicitly consented local monitoring without adding
   monitoring tools to the ordinary Agent catalog.
 - `local-dogfood` adds the wider development inventory while retaining a
@@ -83,6 +94,44 @@ Exact membership must be read from the profile files and the selected bound
 release, not copied from prose. Installed inventory and active Agent-visible
 tools are separate; after a binding change, start a fresh Agent task before
 assessing discovery or natural tool selection.
+
+## External featured path
+
+There is no public GitHub Release asset in this checkout. After an owner
+publishes a Release or HTTPS index (see
+[Unsigned preview download](docs/UNSIGNED_PREVIEW.md)):
+
+```text
+export AGENT_HOST_FEATURED_CATALOG_URL=https://github.com/tetracoralla/agent-host-suite/releases/latest/download/preview-distribution.json
+agent-host profiles list --json
+agent-host profiles fetch --json
+agent-host setup --profile featured --host zcode
+agent-host tools set --profile featured
+agent-host doctor --deep --json
+```
+
+Or pass a local bound catalog with `--release-manifest /absolute/current.json`.
+
+Tracked `draft-unbound` setup fails closed. `--development-root` is the
+tools-dev path, not featured. Details:
+[Featured catalog v1](docs/FEATURED_CATALOG.md).
+
+## Unnamed adoption acceptance
+
+This checkout does not record a completed live adoption. A Linux construction
+box without Host GUI or a full Agent session cannot score it. On a machine
+that already has Agent Host and a supported Agent app, follow
+[Unnamed adoption acceptance](docs/ADOPTION_ACCEPTANCE.md): copy the page
+fixtures out of this repository, start a **fresh Agent task**, and judge
+whether icons entered the work without naming Armorial.
+
+```text
+agent-host doctor --featured-readiness --json
+```
+
+That command only checks that the featured working set is selected and that
+connected projection receipts are healthy. It always reports
+`adoptionEvidence: false`. Host status and call counts are not adoption.
 
 ## Typical operator flow
 
@@ -118,18 +167,21 @@ built-in catalog is already bound.
 
 ## Distribution boundary
 
-The repository is an Apache-2.0 developer preview. This source tree does not
-claim a public download, GitHub Release, notarized DMG, or tool marketplace.
+The repository is an Apache-2.0 developer preview. **No notarization.** Public
+preview installers are unsigned and are meant to be published on
+[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)
+or a self-hosted HTTPS index. This checkout does not claim those assets exist
+today.
 
 - There is no public Agent Host marketplace and no third-party plugin store.
-- A public macOS DMG, if one is ever shipped, still requires Developer ID
-  signing, notarization, stapling, Gatekeeper assessment, and clean-device
-  acceptance. Those steps are release-campaign facts; they are not provided by
-  this checkout. Local or internal ad-hoc-signed builds are validation
-  artifacts, not public downloads.
-- Windows packaging and clean-device requirements are in
-  [Windows distribution](docs/WINDOWS.md). They do not establish that a public
-  Windows installer is published.
+- macOS preview DMGs are not Developer ID signed and not Apple-notarized.
+  Gatekeeper requires Control-click → Open. That is the supported preview path,
+  not a temporary stand-in for the App Store.
+- Windows preview ZIPs are unsigned. SmartScreen may warn; compare SHA-256
+  first. Details: [Windows distribution](docs/WINDOWS.md).
+- Host can download a bound catalog and install featured tools when
+  `AGENT_HOST_FEATURED_CATALOG_URL` is set. See
+  [Unsigned preview download](docs/UNSIGNED_PREVIEW.md).
 
 Repository maintainers can read the
 [release boundary](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/RELEASE.md)
@@ -152,8 +204,11 @@ to the source repository:
   runtime verification method for tools-dev machines.
 - [Discovery and projection](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md) — Host working set vs Agent-app
   cache and session Skill/MCP paths.
+- [Unsigned preview download](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/UNSIGNED_PREVIEW.md) — GitHub Releases / HTTPS DMG and ZIP, Gatekeeper, Host catalog fetch; not notarized.
 - [Featured catalog v1](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) — owner-selected tools through existing
   install APIs, not a marketplace.
+- [Unnamed adoption acceptance](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md) — page tasks and a Host-only
+  readiness probe; not a live-adoption claim from this checkout.
 - [Review contract](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md) — minimum high-risk review seams,
   not a completion claim.
 - [Terminology](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TERMINOLOGY.md) — canonical product language and stable
