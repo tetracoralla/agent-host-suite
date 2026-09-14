@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { readFile, readdir } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
@@ -150,7 +150,7 @@ test('adoption fixtures never name an icon product and the protocol remains hone
   }
   const fixtureFiles = await files(adoptionRoot)
   assert.deepEqual(
-    fixtureFiles.map((path) => relative(adoptionRoot, path)).sort(),
+    fixtureFiles.map((path) => relative(adoptionRoot, path).split(sep).join('/')).sort(),
     [
       'library/brief.md',
       'library/index.html',
