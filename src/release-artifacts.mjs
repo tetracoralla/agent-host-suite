@@ -5,7 +5,7 @@ import { constants } from 'node:fs'
 import { platform, tmpdir } from 'node:os'
 import { basename, dirname, posix, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { materializeToolComponent } from './tool-component.mjs'
 import { AgentHostError } from './errors.mjs'
@@ -38,6 +38,7 @@ const MAX_COMPONENT_DESCRIPTOR_BYTES = 1024 * 1024
 const MIN_ARCHIVE_COMMAND_TIMEOUT_MS = 60_000
 const MAX_ARCHIVE_COMMAND_TIMEOUT_MS = 10 * 60_000
 const ARCHIVE_TIMEOUT_MS_PER_MIB = 2_000
+const DEFAULT_DOWNLOAD_STALL_TIMEOUT_MS = 30_000
 const observedLocalArtifacts = new WeakSet()
 
 function tarCommand() {
@@ -76,7 +77,109 @@ async function verifyArchive(path, component) {
   return await digestFile(path) === component.artifact.sha256
 }
 
-async function acquireArtifact(component, manifestPath, paths) {
+function parseContentLengthHeader(headers) {
+  const raw = headers.get('content-length')
+  if (raw === null || raw === undefined) return null
+  const trimmed = String(raw).trim()
+  if (trimmed === '' || !/^[0-9]+$/u.test(trimmed)) return null
+  const length = Number(trimmed)
+  if (!Number.isSafeInteger(length) || length < 0) return null
+  return length
+}
+
+function asDownloadAbortError(error, controller) {
+  if (error instanceof AgentHostError) return error
+  if (error?.cause instanceof AgentHostError) return error.cause
+  const reason = controller.signal.reason
+  if (reason instanceof AgentHostError) return reason
+  if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
+    return new AgentHostError('RELEASE_DOWNLOAD_CANCELLED', 'Release artifact download was cancelled')
+  }
+  return new AgentHostError(
+    'RELEASE_DOWNLOAD_FAILED',
+    `Failed to download artifact${error instanceof Error ? `: ${error.message}` : ''}`,
+    { cause: error instanceof Error ? error.message : String(error) },
+  )
+}
+
+async function downloadHttpsArtifact(component, url, temporary, options) {
+  const controller = new AbortController()
+  const cancelled = new AgentHostError('RELEASE_DOWNLOAD_CANCELLED', `${component.id} download was cancelled`)
+  const timedOut = new AgentHostError('RELEASE_DOWNLOAD_TIMEOUT', `${component.id} download exceeded the allowed time`)
+  const stalled = new AgentHostError('RELEASE_DOWNLOAD_STALLED', `${component.id} download stopped receiving data`)
+  const onUserAbort = () => controller.abort(cancelled)
+  options.signal?.addEventListener('abort', onUserAbort, { once: true })
+  if (options.signal?.aborted === true) controller.abort(cancelled)
+  const timeout = options.timeoutMs > 0 ? setTimeout(() => controller.abort(timedOut), options.timeoutMs) : null
+  let stallTimer = null
+  const clearStall = () => {
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer)
+      stallTimer = null
+    }
+  }
+  const armStall = () => {
+    clearStall()
+    if (!(options.stallTimeoutMs > 0)) return
+    stallTimer = setTimeout(() => controller.abort(stalled), options.stallTimeoutMs)
+  }
+  try {
+    const response = await options.fetch(url, { redirect: 'error', signal: controller.signal })
+    if (!response.ok || response.body === null) {
+      fail('RELEASE_DOWNLOAD_FAILED', `Failed to download ${component.id}`, { status: response.status })
+    }
+    const declaredLength = parseContentLengthHeader(response.headers)
+    if (declaredLength !== null && declaredLength !== component.artifact.bytes) {
+      await response.body.cancel().catch(() => {})
+      fail('RELEASE_ARTIFACT_SIZE_MISMATCH', `${component.id} download size differs from the release manifest`, {
+        expectedBytes: component.artifact.bytes,
+        contentLength: declaredLength,
+      })
+    }
+    let received = 0
+    const hash = createHash('sha256')
+    const limiter = new Transform({
+      transform(chunk, _encoding, callback) {
+        armStall()
+        received += chunk.length
+        if (received > component.artifact.bytes) {
+          callback(new AgentHostError(
+            'RELEASE_ARTIFACT_SIZE_MISMATCH',
+            `${component.id} download exceeded the bound artifact size`,
+            { expectedBytes: component.artifact.bytes, receivedBytes: received },
+          ))
+          return
+        }
+        hash.update(chunk)
+        callback(null, chunk)
+      },
+    })
+    armStall()
+    await pipeline(
+      Readable.fromWeb(response.body),
+      limiter,
+      createWriteStream(temporary, { mode: 0o600, flags: 'wx' }),
+      { signal: controller.signal },
+    )
+    if (received !== component.artifact.bytes) {
+      fail('RELEASE_ARTIFACT_SIZE_MISMATCH', `${component.id} download size differs from the release manifest`, {
+        expectedBytes: component.artifact.bytes,
+        receivedBytes: received,
+      })
+    }
+    if (`sha256:${hash.digest('hex')}` !== component.artifact.sha256) {
+      fail('RELEASE_ARTIFACT_DIGEST_MISMATCH', `${component.id} archive does not match its bound SHA-256`)
+    }
+  } catch (error) {
+    throw asDownloadAbortError(error, controller)
+  } finally {
+    if (timeout !== null) clearTimeout(timeout)
+    clearStall()
+    options.signal?.removeEventListener('abort', onUserAbort)
+  }
+}
+
+export async function acquireArtifact(component, manifestPath, paths, options = {}) {
   const destination = join(paths.downloads, archiveName(component))
   if (await verifyArchive(destination, component)) return { path: destination, created: false }
   await rm(destination, { force: true })
@@ -86,15 +189,28 @@ async function acquireArtifact(component, manifestPath, paths) {
     if (url.protocol === 'file:') {
       await copyFile(fileURLToPath(url), temporary)
     } else if (url.protocol === 'https:') {
-      const response = await fetch(url, { redirect: 'error' })
-      if (!response.ok || response.body === null) fail('RELEASE_DOWNLOAD_FAILED', `Failed to download ${component.id}`, { status: response.status })
-      const length = Number(response.headers.get('content-length'))
-      if (Number.isFinite(length) && length !== component.artifact.bytes) fail('RELEASE_ARTIFACT_SIZE_MISMATCH', `${component.id} download size differs from the release manifest`)
-      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary, { mode: 0o600, flags: 'wx' }))
+      await downloadHttpsArtifact(component, url, temporary, {
+        fetch: options.fetch ?? globalThis.fetch,
+        signal: options.signal,
+        timeoutMs: options.timeoutMs ?? archiveCommandTimeoutMs(component.artifact.bytes),
+        stallTimeoutMs: options.stallTimeoutMs ?? DEFAULT_DOWNLOAD_STALL_TIMEOUT_MS,
+      })
     } else {
       fail('RELEASE_DOWNLOAD_FAILED', `Unsupported artifact protocol: ${url.protocol}`)
     }
-    if (!(await verifyArchive(temporary, component))) fail('RELEASE_ARTIFACT_DIGEST_MISMATCH', `${component.id} archive does not match its bound size and SHA-256`)
+    const info = await stat(temporary).catch((error) => {
+      if (error.code === 'ENOENT') return null
+      throw error
+    })
+    if (info === null || !info.isFile() || info.size !== component.artifact.bytes) {
+      fail('RELEASE_ARTIFACT_SIZE_MISMATCH', `${component.id} archive does not match its bound size`, {
+        expectedBytes: component.artifact.bytes,
+        actualBytes: info?.size ?? 0,
+      })
+    }
+    if (await digestFile(temporary) !== component.artifact.sha256) {
+      fail('RELEASE_ARTIFACT_DIGEST_MISMATCH', `${component.id} archive does not match its bound size and SHA-256`)
+    }
     await rename(temporary, destination)
     return { path: destination, created: true }
   } catch (error) {

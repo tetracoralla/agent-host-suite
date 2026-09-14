@@ -57,6 +57,12 @@ not featured.
 | Featured working set + projection receipts (not adoption) | `doctor --featured-readiness` |
 | Observe session discovery | a **new** Agent task after `restartRequired` |
 
+If local monitoring is already enabled, `update --profile featured` keeps the
+consented monitoring components when the bound release contains them. A bound
+release that omits those components fails closed before writing and does not
+turn monitoring off. Tool selection and monitoring remain separate; this is
+not a GUI install path.
+
 tools-dev dogfood is a different audience: `docs/LOCAL_DOGFOOD.md`, profile
 `local-dogfood`, and sibling checkouts as **build inputs**. Those paths are
 not the external-user install and must not be described as a store.

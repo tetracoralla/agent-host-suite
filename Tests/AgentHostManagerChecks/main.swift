@@ -321,11 +321,81 @@ do {
         "an explicit full check must retain Agent-app binding inspection"
     )
 
+    let configuredSuite = try JSONDecoder().decode(SuiteStatus.self, from: Data(#"""
+    {
+      "configured": true,
+      "profile": "featured",
+      "hosts": {},
+      "components": {}
+    }
+    """#.utf8))
+    let healthyDoctor = try JSONDecoder().decode(DoctorResult.self, from: Data(#"""
+    {
+      "status": "ok",
+      "checks": [
+        {"id": "runtime.service", "status": "ok", "message": "Local execution is ready"}
+      ]
+    }
+    """#.utf8))
+    let healthyFacets = ManagerHealthPolicy.facets(doctor: healthyDoctor, suite: configuredSuite)
+    expect(
+        ManagerHealthPolicy.overall(isBusy: false, suite: configuredSuite, doctor: healthyDoctor, facets: healthyFacets) == .ready,
+        "a configured suite with no doctor errors may be Ready"
+    )
+
+    let catalogDoctor = try JSONDecoder().decode(DoctorResult.self, from: Data(#"""
+    {
+      "status": "error",
+      "checks": [
+        {"id": "profile.catalog", "status": "error", "message": "Featured Agent tools are missing from the installed environment"}
+      ]
+    }
+    """#.utf8))
+    let catalogFacets = ManagerHealthPolicy.facets(doctor: catalogDoctor, suite: configuredSuite)
+    let catalogHealth = ManagerHealthPolicy.overall(
+        isBusy: false,
+        suite: configuredSuite,
+        doctor: catalogDoctor,
+        facets: catalogFacets
+    )
+    expect(catalogHealth != .ready, "a lone profile.catalog error must not report Ready")
+    expect(
+        catalogFacets.contains(where: { $0.id == "tools" && $0.isHealthy == false }),
+        "profile.catalog errors must pull down the tools health facet"
+    )
+    if case let .attention(message) = catalogHealth {
+        expect(message.contains("Tools"), "profile.catalog attention must name the tools surface")
+    } else {
+        expect(false, "profile.catalog must produce an attention state, not Ready")
+    }
+
+    let unknownDoctor = try JSONDecoder().decode(DoctorResult.self, from: Data(#"""
+    {
+      "status": "error",
+      "checks": [
+        {"id": "future.unclassified", "status": "error", "message": "A newly added blocking doctor check failed"}
+      ]
+    }
+    """#.utf8))
+    let unknownFacets = ManagerHealthPolicy.facets(doctor: unknownDoctor, suite: configuredSuite)
+    let unknownHealth = ManagerHealthPolicy.overall(
+        isBusy: false,
+        suite: configuredSuite,
+        doctor: unknownDoctor,
+        facets: unknownFacets
+    )
+    expect(unknownHealth != .ready, "an unknown doctor error category must not default to Ready")
+    expect(
+        unknownFacets.contains(where: { $0.id == "unclassified-checks" && $0.isHealthy == false }),
+        "unmapped doctor errors must appear as an unhealthy environment-check facet"
+    )
+
     UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)
     expect(L10n.text("Usage & Reliability") == "使用情况与可靠性", "the Manager must provide Simplified Chinese product copy")
     expect(L10n.text("Retained trace sessions") == "保留的轨迹会话", "retained trace controls must provide Simplified Chinese copy")
     expect(L10n.locale.identifier.hasPrefix("zh"), "dates must follow the explicit Simplified Chinese Manager language")
     expect(L10n.text("Complete") == "完整" && L10n.text("Running") == "运行中", "dynamic health values must be localized")
+    expect(L10n.text("Environment checks") == "环境检查", "unclassified health facets must provide Simplified Chinese copy")
     expect(L10n.relativeAge(since: now.addingTimeInterval(-120), now: now) == "2 分钟前", "relative time must follow the selected Manager language")
     expect(L10n.format("{count} live suite processes", ["count": "3"]) == "3 个活跃 Suite 进程", "runtime summaries must be localized")
     expect(ManagerLanguage.system.title == "跟随系统", "the language control must expose a system-default choice")
@@ -333,7 +403,7 @@ do {
     expect(L10n.text("Usage & Reliability") == "Usage & Reliability", "the Manager must allow an explicit English override")
     expect(L10n.locale.identifier.hasPrefix("en"), "dates must follow the explicit English Manager language")
 
-    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility")
+    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup")
 } catch {
     FileHandle.standardError.write(Data("manager model check failed: \(error)\n".utf8))
     exit(1)
