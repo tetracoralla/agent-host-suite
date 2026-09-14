@@ -18,6 +18,7 @@ const STATE_ALLOWED_KEYS = new Set([
   ...STATE_REQUIRED_KEYS,
   'releaseActivatedAt', 'bindingsActivatedAt', 'developmentRoot', 'workspaceRoot',
   'releaseId', 'releaseManifest', 'availableAgentComponents', 'agentComponents',
+  'agentToolsPaused', 'resumeAgentComponents',
   'releaseSourceProvenance', 'privateComponents', 'rolledBackFrom', 'componentWarmupVersion',
 ])
 
@@ -68,6 +69,11 @@ export function validateState(state) {
     else available = new Set(state.availableAgentComponents)
   }
   if (state.agentComponents !== undefined && (!stringArray(state.agentComponents) || state.agentComponents.some((id) => !available.has(id)))) invalid.push('agentComponents')
+  if (state.agentToolsPaused !== undefined && typeof state.agentToolsPaused !== 'boolean') invalid.push('agentToolsPaused')
+  if (state.resumeAgentComponents !== undefined) {
+    if (!stringArray(state.resumeAgentComponents) || state.resumeAgentComponents.some((id) => !available.has(id))) invalid.push('resumeAgentComponents')
+  }
+  if (state.agentToolsPaused === true && state.resumeAgentComponents === undefined) invalid.push('resumeAgentComponents')
   if (invalid.length > 0) {
     throw new AgentHostError('STATE_SCHEMA_INVALID', 'The saved Agent Host state does not match the supported shape', { fields: [...new Set(invalid)].sort() })
   }

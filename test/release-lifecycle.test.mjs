@@ -140,12 +140,12 @@ test('a standard release can opt into bundled local monitoring in one atomic upd
   }))
 
   assert.equal(enabled.status, 'enabled')
-  assert.equal(enabled.profile, 'observability')
+  assert.equal(enabled.profile, 'standard')
   assert.equal(enabled.observability.enabled, true)
   assert.equal(activatedStates.length, 1)
-  assert.equal(activatedStates[0].profile, 'observability')
+  assert.equal(activatedStates[0].profile, 'standard')
   const after = await loadState(paths)
-  assert.equal(after.profile, 'observability')
+  assert.equal(after.profile, 'standard')
   assert.equal(after.observability.enabled, true)
   assert.equal(after.components['agent-tool-observer'].root.includes(join(paths.packages, 'agent-tool-observer')), true)
   assert.equal(after.components['context-surface-analyzer'].root.includes(join(paths.packages, 'context-surface-analyzer')), true)
@@ -775,7 +775,7 @@ test('development to release migration refuses to drop enabled local monitoring'
   assert.equal((await loadState(paths)).channel, 'development')
 })
 
-test('an update cannot select a consent-bearing profile before local monitoring is enabled', async (t) => {
+test('an update can select a consent-bearing profile without turning monitoring on', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-release-consent-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const manifest = await createReleaseFixture(join(root, 'release'), {
@@ -788,11 +788,15 @@ test('an update cannot select a consent-bearing profile before local monitoring 
   const fake = createCodexRunner({ mathPresent: false, timePresent: false, mathVersion: '0.4.0' })
   await setup({ profile: 'standard', hosts: [], releaseManifest: manifest, stateRoot, noService: true, dryRun: false, enableObservability: false }, releaseDependencies(fake, { hostSkillHome: join(root, 'host-home') }))
 
-  await assert.rejects(
-    updateInstallation({ stateRoot, releaseManifest: manifest, profile: 'observability', dryRun: true }, { runner: fake.runner, codexConfiguration: fake.configuration }),
-    (error) => error.code === 'OBSERVABILITY_CONSENT_REQUIRED',
+  const preview = await updateInstallation(
+    { stateRoot, releaseManifest: manifest, profile: 'observability', dryRun: true },
+    releaseDependencies(fake),
   )
-  assert.equal((await loadState(await prepareStatePaths(stateRoot))).profile, 'standard')
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.profile, 'observability')
+  const current = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(current.profile, 'standard')
+  assert.equal(current.observability.enabled, false)
 })
 
 test('development to release migration restores the development environment when monitoring rebind fails', async (t) => {

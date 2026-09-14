@@ -538,14 +538,14 @@ async function enableObservabilityUnlocked(options, dependencies = {}, preparedP
       const { updateInstallation } = await import('./lifecycle.mjs')
       const result = await updateInstallation({
         stateRoot: paths.root,
-        profile: 'observability',
+        profile: current.profile,
         enableObservability: true,
         observabilityExpansionOnly: true,
         dryRun: false,
       }, dependencies)
       return {
         status: 'enabled',
-        profile: 'observability',
+        profile: result.profile ?? current.profile,
         observability: result.observability,
         restartRequired: result.restartRequired,
         ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
@@ -558,7 +558,6 @@ async function enableObservabilityUnlocked(options, dependencies = {}, preparedP
   try {
     candidate = await (dependencies.activateObservability ?? activateObservabilityState)({
       ...current,
-      profile: current.profile === 'standard' ? 'observability' : current.profile,
       components: { ...current.components, ...components },
     }, paths, runner, dependencies)
     await (dependencies.saveState ?? saveState)(paths, candidate, { retainCurrent: true })
@@ -718,23 +717,20 @@ async function disableObservabilityUnlocked(options, dependencies = {}, prepared
   const state = await loadState(paths)
   if (state === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   if (state.observability?.enabled !== true) return { status: 'disabled', changed: false }
-  if (state.profile === 'local-dogfood') {
-    throw new AgentHostError('OBSERVABILITY_PROFILE_REQUIRES_ENABLED', 'Switch to the Standard + local monitoring tool set before turning local monitoring off')
-  }
   let results = null
   let mutationStarted = false
   let next = null
   try {
     mutationStarted = true
     results = await (dependencies.teardownObservability ?? teardownObservability)(state, paths, runner)
-    const components = { ...state.components }
-    delete components['agent-tool-observer']
-    delete components['context-surface-analyzer']
     next = {
       ...state,
-      components,
-      profile: state.profile === 'observability' ? 'standard' : state.profile,
-      observability: { enabled: false, disabledAt: new Date().toISOString(), dataPreserved: true },
+      observability: {
+        enabled: false,
+        disabledAt: new Date().toISOString(),
+        dataPreserved: true,
+        ...(state.observability.consentedAt === undefined ? {} : { consentedAt: state.observability.consentedAt }),
+      },
       updatedAt: new Date().toISOString(),
     }
     await (dependencies.saveState ?? saveState)(paths, next, { retainCurrent: true })

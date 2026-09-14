@@ -126,9 +126,20 @@ merely because they exercise typed boundaries.
 
 Installed inventory and active Agent-visible tools are separate. An inactive
 Provider may retain an immutable Skill and direct launcher without contributing
-MCP schemas to the current Agent catalog. Working-set changes retain rollback
-bytes and displaced user entries and require a fresh Agent task before current
-discovery can be assessed.
+MCP schemas to the current Agent catalog (`on-demand`). `tools pause` fully
+pauses ordinary tools: new tasks get neither MCP nor those Skills, while a
+Developer Kit Skill, if installed, remains. `tools resume` restores the
+previous working set. Pause, host connect/disconnect, monitoring consent, and
+failed working-set recovery do not overwrite each other.
+
+Monitoring consent is independent of profile inventory. Turning local
+monitoring off keeps installed tools, versions, Agent connections, documents,
+and history; turning it back on does not require switching profile or
+reinstalling unrelated tools. A profile is the initial recipe, not a permanent
+constraint on those dimensions.
+
+Working-set changes retain rollback bytes and displaced user entries and
+require a fresh Agent task before current discovery can be assessed.
 
 An environment may also carry a small owner-selected set of private Agent tools
 outside the release profile. This is a local overlay, not another profile,

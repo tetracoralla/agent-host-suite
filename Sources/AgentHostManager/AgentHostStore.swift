@@ -414,15 +414,46 @@ final class AgentHostStore: ObservableObject {
     }
 
     func setTool(_ id: String, active: Bool) async {
+        if suite?.agentToolsPaused == true {
+            guard active else { return }
+            await work("Making tool available") {
+                let result = try await self.cli.run(["tools", "set", "--tool", id], as: ToolSetChangeResult.self)
+                self.toolSetNeedsFreshTask = result.restartRequired
+                self.doctor = nil
+                try await self.reloadAll()
+            }
+            return
+        }
         let current = suite?.agentComponents ?? []
+        if !active && current.count == 1 && current.contains(id) {
+            await pauseAllTools()
+            return
+        }
         let next = active ? Array(Set(current + [id])).sorted(by: toolOrderIndex) : current.filter { $0 != id }
-        guard !next.isEmpty else { return }
         await work(active ? "Making tool available" : "Removing tool from Agent apps") {
             var arguments = ["tools", "set"]
             for component in ManagerToolPolicy.orderedToolIDs(next, preferredOrder: Self.toolOrder) {
                 arguments += ["--tool", component]
             }
             let result = try await self.cli.run(arguments, as: ToolSetChangeResult.self)
+            self.toolSetNeedsFreshTask = result.restartRequired
+            self.doctor = nil
+            try await self.reloadAll()
+        }
+    }
+
+    func pauseAllTools() async {
+        await work("Pausing tools") {
+            let result = try await self.cli.run(ManagerToolPolicy.pauseArguments, as: ToolSetChangeResult.self)
+            self.toolSetNeedsFreshTask = result.restartRequired
+            self.doctor = nil
+            try await self.reloadAll()
+        }
+    }
+
+    func resumeTools() async {
+        await work("Resuming tools") {
+            let result = try await self.cli.run(ManagerToolPolicy.resumeArguments, as: ToolSetChangeResult.self)
             self.toolSetNeedsFreshTask = result.restartRequired
             self.doctor = nil
             try await self.reloadAll()

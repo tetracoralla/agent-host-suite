@@ -7,7 +7,7 @@ import { inspectService } from './service.mjs'
 import { inspectDirectProviders } from './provider-diagnostics.mjs'
 import { verifyReleaseComponent } from './release-artifacts.mjs'
 import { probeMcpTools } from './mcp-health.mjs'
-import { hostFacingManifest, loadProfile } from './profile.mjs'
+import { hostFacingManifest, isAgentToolsPaused, loadProfile } from './profile.mjs'
 import { inspectOperationsSkill } from './host-operations-skill.mjs'
 import { inspectDeveloperKitSkill, inspectProductSkills, inspectProviderSkills } from './developer-kit-skill.mjs'
 import { inspectMaintenance } from './maintenance-service.mjs'
@@ -51,7 +51,11 @@ export async function doctor(state, {
       checks.push(check('profile.catalog', 'error', 'The installed profile catalog could not be loaded', error.message))
     }
   }
-  const agentManifest = hostFacingManifest({ components: state.components }, state.agentComponents ?? Object.keys(state.components))
+  const agentManifest = hostFacingManifest(
+    { components: state.components },
+    state.agentComponents ?? Object.keys(state.components),
+    { paused: isAgentToolsPaused(state) },
+  )
   for (const [id, component] of Object.entries(state.components)) {
     try {
       if (state.channel === 'release') await verifyReleaseComponent(component)

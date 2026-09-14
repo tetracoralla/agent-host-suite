@@ -24,7 +24,7 @@ import { preflightManagedCatalog } from './context-exporter.mjs'
 import { compareSuiteVersions, loadReleaseManifest, materializeComponentIdsForUpdate, OBSERVABILITY_RELEASE_COMPONENTS, selectedReleaseComponents } from './release-manifest.mjs'
 import { FEATURED_CATALOG_DOWNLOAD_ENV, resolveReleaseManifestPath } from './preview-download.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
-import { FEATURED_PROFILE_ID, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
+import { FEATURED_PROFILE_ID, hostFacingManifest, isAgentToolsPaused, loadProfile, selectAgentComponents, toolExposure } from './profile.mjs'
 import { inspectOperationsSkill, installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
 import { checkApplicationState } from './state-migration.mjs'
 import { validateComponentPathGrants } from './component-environment.mjs'
@@ -47,7 +47,11 @@ import {
 } from './developer-kit-skill.mjs'
 
 function stateManifest(state) {
-  return hostFacingManifest({ components: state.components }, state.agentComponents ?? Object.keys(state.components))
+  return hostFacingManifest(
+    { components: state.components },
+    state.agentComponents ?? Object.keys(state.components),
+    { paused: isAgentToolsPaused(state) },
+  )
 }
 
 function availableAgentComponents(state) {
@@ -91,6 +95,8 @@ function updatedInstallationState({
     releaseManifest: _releaseManifest,
     releaseSourceProvenance: _releaseSourceProvenance,
     workspaceRoot: _workspaceRoot,
+    agentToolsPaused: _agentToolsPaused,
+    resumeAgentComponents: _resumeAgentComponents,
     ...previousBase
   } = previous
   return {
@@ -114,11 +120,30 @@ function updatedInstallationState({
       releaseManifest: releasePreparation.release,
       releaseSourceProvenance,
     }),
+    ...(isAgentToolsPaused(manifest) ? {
+      agentToolsPaused: true,
+      resumeAgentComponents: [...(manifest.resumeAgentComponents ?? previous.resumeAgentComponents ?? [])],
+    } : {}),
   }
 }
 
+function omitPauseFields(state) {
+  const { agentToolsPaused: _paused, resumeAgentComponents: _resume, ...rest } = state
+  return rest
+}
+
+function pausedManifestFields(paused, resumeAgentComponents) {
+  return paused === true
+    ? { agentToolsPaused: true, resumeAgentComponents: [...resumeAgentComponents] }
+    : {}
+}
+
 function activeManifest(manifest) {
-  return hostFacingManifest(manifest, manifest.agentComponents ?? Object.keys(manifest.components))
+  return hostFacingManifest(
+    manifest,
+    manifest.agentComponents ?? Object.keys(manifest.components),
+    { paused: isAgentToolsPaused(manifest) },
+  )
 }
 
 function canonicalJson(value) {
@@ -812,15 +837,7 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
     throw new AgentHostError('FEATURED_PROFILE_RELEASE_REQUIRED', 'The featured profile requires a bound compatibility release; it cannot be selected from a development source root')
   }
   const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
-  const enablingObservability = profile.requiresConsent
-    && previous.observability?.enabled !== true
-    && options.enableObservability === true
-  if (options.enableObservability === true && !profile.requiresConsent) {
-    throw new AgentHostError('OBSERVABILITY_PROFILE_REQUIRED', 'Enabling local monitoring requires a monitoring profile')
-  }
-  if (profile.requiresConsent && previous.observability?.enabled !== true && !enablingObservability) {
-    throw new AgentHostError('OBSERVABILITY_CONSENT_REQUIRED', `Enable local monitoring before selecting the ${profile.displayName} tool set`)
-  }
+  const enablingObservability = previous.observability?.enabled !== true && options.enableObservability === true
   let releasePreparation = null
   let releaseSourceProvenance = null
   let manifest
@@ -836,7 +853,7 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
         requestedVersion: release.manifest.suiteVersion,
       })
     }
-    const preserveObservability = previous.observability?.enabled === true
+    const preserveObservability = previous.observability?.enabled === true || enablingObservability
     const componentIds = materializeComponentIdsForUpdate(profile.components, { preserveObservability })
     const selectedVersions = Object.fromEntries(
       Object.entries(versionMap(release.manifest.components)).filter(([id]) => componentIds.includes(id)),
@@ -851,7 +868,13 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
     if (preserveObservability) {
       const missing = OBSERVABILITY_RELEASE_COMPONENTS.filter((id) => !selectedReleaseComponents(release.manifest).has(id))
       if (missing.length > 0) {
-        throw new AgentHostError('OBSERVABILITY_RELEASE_COMPONENTS_MISSING', 'The selected release cannot preserve local monitoring', { components: missing })
+        throw new AgentHostError(
+          'OBSERVABILITY_RELEASE_COMPONENTS_MISSING',
+          previous.observability?.enabled === true
+            ? 'The selected release cannot preserve local monitoring'
+            : 'The selected release does not include local monitoring components',
+          { components: missing },
+        )
       }
     }
     releasePreparation = await materializeRelease(release, paths, {
@@ -863,17 +886,23 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
     manifest = releasePreparation.manifest
   } else if (previous.channel === 'development') {
     manifest = await buildDevelopmentManifest(previous.developmentRoot)
-    if (previous.observability?.enabled === true) {
+    if (previous.observability?.enabled === true || enablingObservability) {
       manifest.components = { ...manifest.components, ...await buildDevelopmentObservabilityManifest(previous.developmentRoot) }
     }
   } else {
     throw new AgentHostError('UPDATE_CHANNEL_UNSUPPORTED', `Unsupported update channel: ${previous.channel}`)
   }
-  if (previous.observability?.enabled === true) {
+  if (previous.observability?.enabled === true || enablingObservability) {
     const missing = OBSERVABILITY_RELEASE_COMPONENTS.filter((id) => manifest.components[id] === undefined)
     if (missing.length > 0) {
       await cleanupMaterializedRelease(releasePreparation)
-      throw new AgentHostError('OBSERVABILITY_RELEASE_COMPONENTS_MISSING', 'The selected release cannot preserve local monitoring', { components: missing })
+      throw new AgentHostError(
+        'OBSERVABILITY_RELEASE_COMPONENTS_MISSING',
+        previous.observability?.enabled === true
+          ? 'The selected release cannot preserve local monitoring'
+          : 'The selected release does not include local monitoring components',
+        { components: missing },
+      )
     }
   }
   const privateComponents = Object.entries(previous.privateComponents ?? {})
@@ -887,12 +916,16 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   }
   const availableAgentComponents = [...new Set([...profile.agentComponents, ...privateComponents.map(([id]) => id)])]
   const activePrivateComponents = (previous.agentComponents ?? []).filter((id) => privateComponents.some(([privateId]) => privateId === id))
+  const keepPause = isAgentToolsPaused(previous)
+    && options.tools === undefined
+    && (options.profile === undefined || options.profile === previous.profile)
   const activeAgentComponents = options.tools !== undefined
     ? selectAgentComponents(availableAgentComponents, options.tools)
     : options.profile !== undefined && options.profile !== previous.profile
       ? [...profile.defaultAgentComponents, ...activePrivateComponents]
       : selectAgentComponents(availableAgentComponents, (previous.agentComponents ?? availableAgentComponents).filter((id) => availableAgentComponents.includes(id)))
   manifest.agentComponents = activeAgentComponents
+  Object.assign(manifest, pausedManifestFields(keepPause, previous.resumeAgentComponents ?? []))
   try {
     await validateActiveComponentPathGrants(manifest)
     assertNoComponentDowngrade(previous.components, manifest.components)
@@ -1086,6 +1119,7 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   return {
     status: 'updated',
     channel: next.channel,
+    profile: next.profile,
     releaseId: next.releaseId ?? null,
     changed,
     componentWarmup,
@@ -1237,6 +1271,7 @@ export async function toolSetStatus(options = {}) {
   if (state === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   const available = availableAgentComponents(state)
   const active = state.agentComponents ?? available
+  const paused = isAgentToolsPaused(state)
   const profile = await loadProfile(state.profile)
   const defaults = profile.defaultAgentComponents.filter((id) => available.includes(id))
   return {
@@ -1247,6 +1282,9 @@ export async function toolSetStatus(options = {}) {
     defaultAgentComponents: defaults,
     activeAgentComponents: active,
     inactiveAgentComponents: available.filter((id) => !active.includes(id)),
+    paused,
+    exposure: paused ? 'paused' : 'working-set',
+    resumeAgentComponents: paused ? [...(state.resumeAgentComponents ?? [])] : undefined,
     tools: available.map((id) => ({
       id,
       version: state.components[id]?.version ?? null,
@@ -1254,12 +1292,13 @@ export async function toolSetStatus(options = {}) {
       summary: state.components[id]?.summary ?? null,
       private: state.privateComponents?.[id]?.current?.component !== undefined,
       active: active.includes(id),
+      exposure: toolExposure(active.includes(id), paused),
     })),
     freshSession: {
       requiredAfterChange: true,
       currentSessionUptake: 'not-observed',
     },
-    assessmentBoundary: 'active is the Host working set for new Agent tasks. It is not Agent-app cache verification, a current-session Skill path, MCP presence in an open task, or adoption.',
+    assessmentBoundary: 'active is MCP plus Skill for new Agent tasks. Inactive tools may stay on-demand Skill-only. paused withholds ordinary MCP and Skill projections; it is not Agent-app cache verification, a current-session Skill path, or adoption.',
   }
 }
 
@@ -1269,14 +1308,41 @@ async function setActiveToolsUnlocked(options, dependencies = {}, preparedPaths 
   const previous = await loadState(paths)
   if (previous === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
   const available = availableAgentComponents(previous)
-  const profile = options.resetTools === true ? await loadProfile(previous.profile) : null
-  const requested = options.resetTools === true
-    ? profile.defaultAgentComponents.filter((id) => available.includes(id))
-    : options.tools
-  const active = selectAgentComponents(available, requested)
   const current = previous.agentComponents ?? available
-  const changed = JSON.stringify(current) !== JSON.stringify(active)
-  const manifest = { components: previous.components, agentComponents: active }
+  const currentlyPaused = isAgentToolsPaused(previous)
+  let active
+  let paused
+  let resumeAgentComponents
+  if (options.resumeTools === true) {
+    if (!currentlyPaused) {
+      active = [...current]
+      paused = false
+      resumeAgentComponents = []
+    } else {
+      const remembered = (previous.resumeAgentComponents ?? []).filter((id) => available.includes(id))
+      active = selectAgentComponents(available, remembered)
+      paused = false
+      resumeAgentComponents = []
+    }
+  } else if (options.pauseTools === true) {
+    active = []
+    paused = true
+    resumeAgentComponents = currentlyPaused ? [...(previous.resumeAgentComponents ?? current)] : [...current]
+  } else {
+    const profile = options.resetTools === true ? await loadProfile(previous.profile) : null
+    const requested = options.resetTools === true
+      ? profile.defaultAgentComponents.filter((id) => available.includes(id))
+      : options.tools
+    active = selectAgentComponents(available, requested)
+    paused = false
+    resumeAgentComponents = []
+  }
+  const changed = JSON.stringify(current) !== JSON.stringify(active) || currentlyPaused !== paused
+  const manifest = {
+    components: previous.components,
+    agentComponents: active,
+    ...pausedManifestFields(paused, resumeAgentComponents),
+  }
   const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
   await validateActiveComponentPathGrants(manifest)
   if (!changed) {
@@ -1288,7 +1354,11 @@ async function setActiveToolsUnlocked(options, dependencies = {}, preparedPaths 
     return {
       schemaVersion: 'openadam.agent-host-tool-set.v0.1', status: 'ready', dryRun: true,
       changed: true, activeAgentComponents: active,
-      inactiveAgentComponents: available.filter((id) => !active.includes(id)), activation, catalogPreflight,
+      inactiveAgentComponents: available.filter((id) => !active.includes(id)),
+      paused,
+      exposure: paused ? 'paused' : 'working-set',
+      ...(paused ? { resumeAgentComponents } : {}),
+      activation, catalogPreflight,
       restartRequired: Object.keys(previous.hosts).length > 0,
     }
   }
@@ -1298,9 +1368,10 @@ async function setActiveToolsUnlocked(options, dependencies = {}, preparedPaths 
     activated = await activateState(paths, previous, manifest, runner, options, workspaceRoot, dependencies)
     const activatedAt = new Date().toISOString()
     const next = {
-      ...previous,
+      ...omitPauseFields(previous),
       availableAgentComponents: available,
       agentComponents: active,
+      ...pausedManifestFields(paused, resumeAgentComponents),
       hosts: activated.hosts,
       runtime: activated.runtime,
       updatedAt: activatedAt,
@@ -1346,9 +1417,12 @@ async function setActiveToolsUnlocked(options, dependencies = {}, preparedPaths 
     warnings,
     'ACTIVITY_LOG_WRITE_FAILED',
     'The Agent tool set changed, but its activity entry could not be recorded.',
-    () => (dependencies.recordActivity ?? recordActivity)(paths, 'tool-set.changed', 'Agent tool availability changed', {
+    () => (dependencies.recordActivity ?? recordActivity)(paths, 'tool-set.changed', paused ? 'Agent tools paused' : 'Agent tool availability changed', {
       activeAgentComponents: active,
       inactiveAgentComponents: available.filter((id) => !active.includes(id)),
+      paused,
+      exposure: paused ? 'paused' : 'working-set',
+      ...(paused ? { resumeAgentComponents } : {}),
     }),
   )
   return {
@@ -1548,7 +1622,11 @@ async function repairInstallationUnlocked(options, dependencies = {}, preparedPa
   const profile = await loadProfile(previous.profile)
   const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
   const active = previous.agentComponents ?? availableAgentComponents(previous)
-  const manifest = { components: previous.components, agentComponents: active }
+  const manifest = {
+    components: previous.components,
+    agentComponents: active,
+    ...pausedManifestFields(isAgentToolsPaused(previous), previous.resumeAgentComponents ?? []),
+  }
   await validateActiveComponentPathGrants(manifest)
   const plan = repairPlanIdentity(previous)
   const repairs = {

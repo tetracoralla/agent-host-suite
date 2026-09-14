@@ -13,6 +13,15 @@
   versions even when `suiteVersion` is unchanged; rollback remains the explicit
   revert. Confirm binds the reviewed plan identity so a changed remote catalog
   requires a new preview.
+- Let local monitoring turn off without leaving `local-dogfood` or dropping
+  installed tools, versions, Agent connections, documents, or history. Turning
+  it back on does not switch profile or reinstall unrelated tools. Profile
+  remains the initial recipe; monitoring consent, inventory, working set,
+  connections, and workspace grants can change independently.
+- Allow an empty Agent working set. `tools pause` / `tools resume` fully pause
+  ordinary MCP and on-demand Skill projection, then restore the previous set.
+  Inactive tools stay on-demand Skill-only until pause. Pause, host
+  reconnect, and failed working-set recovery do not overwrite each other.
 - Land unsigned preview download without Apple notarization: GitHub Releases or
   a configured HTTPS `preview-distribution.json` / bound `current.json`.
   `AGENT_HOST_FEATURED_CATALOG_URL` is a working fetch hook (`profiles fetch`,

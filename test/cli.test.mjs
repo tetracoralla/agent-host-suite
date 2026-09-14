@@ -37,6 +37,8 @@ test('CLI rejects known options that do not belong to the selected operation', (
     [['profiles', 'list', '--url', 'https://example.invalid/preview-distribution.json'], 'profiles list does not accept --url'],
     [['tools', 'set', '--tool', 'math-anchor', '--profile', 'featured'], 'tools set requires --tool or --profile, not both'],
     [['tools', 'set'], 'tools set requires --tool or --profile, not both'],
+    [['tools', 'pause', '--tool', 'math-anchor'], 'tools pause does not accept --tool'],
+    [['tools', 'resume', '--profile', 'standard'], 'tools resume does not accept --profile'],
     [['setup', '--no-host', '--host', 'zcode'], 'setup --no-host cannot be combined with --host'],
     [['profiles'], 'profiles requires an action'],
     [['status', '--deep'], 'status does not accept --deep'],
@@ -192,6 +194,8 @@ test('profiles list names the featured admission set without a store', async () 
   assert.match(help.stdout, /agent-host profiles list/u)
   assert.match(help.stdout, /agent-host profiles fetch/u)
   assert.match(help.stdout, /agent-host repair/u)
+  assert.match(help.stdout, /agent-host tools pause/u)
+  assert.match(help.stdout, /agent-host tools resume/u)
   assert.match(help.stdout, /--plan-id SHA256/u)
   assert.match(help.stdout, /--no-host/u)
   assert.match(help.stdout, /doctor \[--deep \| --featured-readiness\]/u)
@@ -220,6 +224,15 @@ test('human tool-set status reports Host selection rather than Agent-app enablem
     freshSession: { requiredAfterChange: true, currentSessionUptake: 'not-observed' },
   })
   assert.equal(output, 'Agent tools · 1 of 2 selected for new tasks')
+  const paused = human({
+    schemaVersion: 'openadam.agent-host-tool-set.v0.1',
+    status: 'ok',
+    paused: true,
+    activeAgentComponents: [],
+    availableAgentComponents: ['math-anchor', 'migratory-time'],
+    inactiveAgentComponents: ['math-anchor', 'migratory-time'],
+  })
+  assert.equal(paused, 'Agent tools · paused · 0 of 2 projected for new tasks')
 })
 
 test('human private component result surfaces a post-commit activity warning without reporting failure', () => {

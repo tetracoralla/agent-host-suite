@@ -290,9 +290,14 @@ cannot activate a component it does not also install.
 
 Local setup binds the profile's declared `defaultAgentComponents`; the profile
 file, rather than this document, owns that exact list. After installation,
-`agent-host tools set` may select any explicit non-empty subset from the
-immutable inventory and `agent-host tools reset` restores the declared profile
-default. Inactive packages remain available for fast reactivation and rollback.
+`agent-host tools set` may select any explicit subset from the immutable
+inventory, including none. `agent-host tools pause` remembers the current
+working set and fully pauses ordinary MCP and on-demand Skill projection;
+`agent-host tools resume` restores that set. `agent-host tools reset` restores
+the declared profile default and clears pause. Inactive packages remain
+available for fast reactivation and rollback. An inactive tool may still
+project an on-demand Skill; pause withholds that Skill as well.
+
 Agent Host suspends its managed host bindings without restoring a displaced
 source-checkout plugin; only profile removal, host disconnect, or uninstall
 restores the preserved user-owned entry.

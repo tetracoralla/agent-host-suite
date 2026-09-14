@@ -6,6 +6,16 @@ import test from 'node:test'
 import { MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
 import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 
+test('local Manager pause and empty tool set are distinct from on-demand Skills', async (t) => {
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  assert.match(page, /Pause all tools/u)
+  assert.match(page, /Resume tools/u)
+  assert.match(page, /Fully paused: no MCP and no on-demand Skill/u)
+  assert.match(page, /On-demand Skill only/u)
+  assert.match(page, /pause:true/u)
+  assert.match(page, /resume:true/u)
+})
+
 test('local Manager requires its one-session cookie and same-origin action requests', async (t) => {
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-manager-'))
   t.after(() => rm(stateRoot, { recursive: true, force: true }))

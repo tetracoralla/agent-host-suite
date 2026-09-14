@@ -43,6 +43,7 @@ test('saved state validation rejects structural corruption before lifecycle work
   const cases = [
     [{ ...valid, components: [] }, ['components', 'availableAgentComponents']],
     [{ ...valid, agentComponents: ['foreign-tool'] }, ['agentComponents']],
+    [{ ...valid, agentToolsPaused: true }, ['resumeAgentComponents']],
     [{ ...valid, updatedAt: 'not-a-date' }, ['updatedAt']],
     [{ ...valid, unexpected: true }, ['unexpected']],
   ]

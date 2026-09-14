@@ -130,6 +130,14 @@ export async function featuredCatalog(env = process.env) {
   }
 }
 
+export const TOOL_EXPOSURE_ACTIVE = 'active'
+export const TOOL_EXPOSURE_ON_DEMAND = 'on-demand'
+export const TOOL_EXPOSURE_PAUSED = 'paused'
+
+export function isAgentToolsPaused(value) {
+  return value?.agentToolsPaused === true
+}
+
 export function agentFacingManifest(manifest, agentComponents) {
   const selected = new Set(agentComponents ?? Object.keys(manifest.components))
   const missing = [...selected].filter((id) => manifest.components[id] === undefined)
@@ -137,14 +145,16 @@ export function agentFacingManifest(manifest, agentComponents) {
   return { ...manifest, components: Object.fromEntries(Object.entries(manifest.components).filter(([id]) => selected.has(id))) }
 }
 
-export function hostFacingManifest(manifest, agentComponents) {
+export function hostFacingManifest(manifest, agentComponents, options = {}) {
   const agents = agentFacingManifest(manifest, agentComponents)
   const selected = new Set(Object.keys(agents.components))
+  const paused = options.paused === true || isAgentToolsPaused(manifest) || isAgentToolsPaused(options)
   const components = { ...agents.components }
   for (const [id, component] of Object.entries(manifest.components)) {
     if (component.developerKitIntegrationSchema !== undefined) components[id] = component
     if (component.providerSkill !== undefined) {
-      components[id] = selected.has(id) ? { ...component, skillOnly: false } : { ...component, skillOnly: true }
+      if (selected.has(id)) components[id] = { ...component, skillOnly: false }
+      else if (!paused) components[id] = { ...component, skillOnly: true }
     }
   }
   return { ...manifest, components }
@@ -153,9 +163,6 @@ export function hostFacingManifest(manifest, agentComponents) {
 export function selectAgentComponents(availableComponents, requestedComponents) {
   const available = [...availableComponents]
   const requested = requestedComponents === undefined ? available : [...new Set(requestedComponents)]
-  if (requested.length === 0 && available.length > 0) {
-    throw new AgentHostError('TOOL_SET_EMPTY', 'Keep at least one installed Agent tool active')
-  }
   const unavailable = requested.filter((id) => !available.includes(id))
   if (unavailable.length > 0) {
     throw new AgentHostError('TOOL_SET_COMPONENT_UNAVAILABLE', 'The requested Agent tool is not installed by the selected profile', {
@@ -164,6 +171,11 @@ export function selectAgentComponents(availableComponents, requestedComponents) 
     })
   }
   return available.filter((id) => requested.includes(id))
+}
+
+export function toolExposure(active, paused) {
+  if (paused === true) return TOOL_EXPOSURE_PAUSED
+  return active === true ? TOOL_EXPOSURE_ACTIVE : TOOL_EXPOSURE_ON_DEMAND
 }
 
 export function selectProfileManifest(manifest, profile) {
