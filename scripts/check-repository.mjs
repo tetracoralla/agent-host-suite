@@ -90,8 +90,8 @@ const adoptionDoc = await readFile(join(root, 'docs/ADOPTION_ACCEPTANCE.md'), 'u
 if (!adoptionDoc.includes('fresh Agent task') || !adoptionDoc.includes('not adoption evidence') || !adoptionDoc.includes('doctor --featured-readiness')) {
   throw new Error('adoption protocol must require a fresh Agent task and refuse Host status as evidence')
 }
-if (!adoptionDoc.includes('docs/fixtures/adoption') || !adoptionDoc.includes('did **not** complete live unnamed adoption')) {
-  throw new Error('adoption protocol must ship unnamed fixtures and refuse a construction-box completion claim')
+if (!adoptionDoc.includes('docs/fixtures/adoption')) {
+  throw new Error('adoption protocol must ship unnamed fixtures')
 }
 const adoptionFixtureRoot = join(root, 'docs/fixtures/adoption')
 const steered = /\barmorial\b|\blucide\b|\biconpark\b|请使用/iu

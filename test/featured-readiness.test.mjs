@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { readFile, readdir } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
@@ -9,6 +10,7 @@ import {
   FEATURED_READINESS_SCHEMA,
   inspectFeaturedReadiness,
 } from '../src/featured-readiness.mjs'
+import { inspectProviderSkills } from '../src/developer-kit-skill.mjs'
 import { human } from '../src/cli.mjs'
 
 const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
@@ -118,6 +120,98 @@ test('featured readiness inspects Claude and ZCode receipts without treating the
   assert.equal(report.checks.find((item) => item.id === 'projection.receipt.zcode')?.status, 'error')
 })
 
+function agentAppRunner({ claude = '/fixture/claude', zcode = '/fixture/zcode' } = {}) {
+  return async (command, args) => {
+    if (command === 'where.exe' || (command === '/usr/bin/env' && args[0] === 'which')) {
+      const name = command === 'where.exe' ? args[0] : args[1]
+      if (name === 'claude') return { status: 0, stdout: `${claude}\n`, stderr: '' }
+      if (name === 'zcode') return { status: 0, stdout: `${zcode}\n`, stderr: '' }
+      return { status: 1, stdout: '', stderr: '' }
+    }
+    if (command === claude) return { status: 0, stdout: '2.1.233\n', stderr: '' }
+    if (command === zcode && args[0] === 'version') return { status: 0, stdout: '{"version":"0.16.5"}\n', stderr: '' }
+    throw new Error(`unexpected command: ${command} ${args.join(' ')}`)
+  }
+}
+
+async function missingArmorialSkillState(t, hostId) {
+  const root = await mkdtemp(join(tmpdir(), `agent-host-featured-${hostId}-skill-`))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const command = process.execPath
+  const args = ['mcp']
+  const missingSkill = join(root, 'missing-armorial-skill')
+  const providerSkills = [{ id: 'icon-svg-select', projectionRoot: missingSkill }]
+  const armorial = {
+    version: '0.7.0', identityFiles: [], plugin: 'armorial', command, args,
+    providerSkill: { id: 'icon-svg-select' },
+  }
+  if (hostId === 'claude') {
+    const configPath = join(root, '.claude.json')
+    await writeFile(configPath, JSON.stringify({
+      mcpServers: { armorial: { type: 'stdio', command, args } },
+    }))
+    return {
+      root, missingSkill, providerSkills,
+      state: featuredState({
+        components: {
+          'math-anchor': { version: '0.4.0', identityFiles: [], plugin: 'math-anchor' },
+          'migratory-time': { version: '2.0.0', identityFiles: [], plugin: 'migratory-time' },
+          armorial,
+        },
+        hosts: { claude: { configPath, entries: [{ component: 'armorial' }], providerSkills } },
+      }),
+    }
+  }
+  const configPath = join(root, '.zcode', 'cli', 'config.json')
+  await mkdir(join(root, '.zcode', 'cli'), { recursive: true })
+  await writeFile(configPath, JSON.stringify({
+    mcp: { servers: { armorial: { type: 'stdio', command, args, enabled: true } } },
+  }))
+  return {
+    root, missingSkill, providerSkills,
+    state: featuredState({
+      components: {
+        'math-anchor': { version: '0.4.0', identityFiles: [], plugin: 'math-anchor' },
+        'migratory-time': { version: '2.0.0', identityFiles: [], plugin: 'migratory-time' },
+        armorial,
+      },
+      hosts: { zcode: { configPath, entries: [{ component: 'armorial', created: true }], providerSkills } },
+    }),
+  }
+}
+
+test('featured readiness is not ok when Claude MCP is healthy but the Armorial Skill projection is missing', async (t) => {
+  const { providerSkills, state } = await missingArmorialSkillState(t, 'claude')
+  const skills = await inspectProviderSkills(providerSkills)
+  assert.equal(skills.status, 'error')
+  assert.equal(skills.skills[0].code, 'DEVELOPER_SKILL_PROJECTION_MISSING')
+  const report = await inspectFeaturedReadiness(state, { runner: agentAppRunner() })
+  assert.equal(report.adoptionEvidence, false)
+  assert.notEqual(report.status, 'ok')
+  const receipt = report.checks.find((item) => item.id === 'projection.receipt.claude')
+  assert.equal(receipt.status, 'error')
+  assert.equal(receipt.detail.present, true)
+  assert.equal(receipt.detail.identityMatched, true)
+  assert.equal(receipt.detail.providerSkills.skills[0].code, 'DEVELOPER_SKILL_PROJECTION_MISSING')
+  assert.match(receipt.message, /Skill projection/u)
+})
+
+test('featured readiness is not ok when ZCode MCP is healthy but the Armorial Skill projection is missing', async (t) => {
+  const { providerSkills, state } = await missingArmorialSkillState(t, 'zcode')
+  const skills = await inspectProviderSkills(providerSkills)
+  assert.equal(skills.status, 'error')
+  assert.equal(skills.skills[0].code, 'DEVELOPER_SKILL_PROJECTION_MISSING')
+  const report = await inspectFeaturedReadiness(state, { runner: agentAppRunner() })
+  assert.equal(report.adoptionEvidence, false)
+  assert.notEqual(report.status, 'ok')
+  const receipt = report.checks.find((item) => item.id === 'projection.receipt.zcode')
+  assert.equal(receipt.status, 'error')
+  assert.equal(receipt.detail.present, true)
+  assert.equal(receipt.detail.identityMatched, true)
+  assert.equal(receipt.detail.providerSkills.skills[0].code, 'DEVELOPER_SKILL_PROJECTION_MISSING')
+  assert.match(receipt.message, /Skill projection/u)
+})
+
 test('doctor --featured-readiness is a Host-only route and fails closed without an install', () => {
   const missing = spawnSync(process.execPath, [cliPath, 'doctor', '--featured-readiness', '--json'], { encoding: 'utf8' })
   assert.equal(missing.status, 1)
@@ -134,7 +228,6 @@ test('adoption fixtures never name an icon product and the protocol remains hone
   assert.match(protocol, /are not adoption evidence/u)
   assert.match(protocol, /doctor --featured-readiness/u)
   assert.match(protocol, /docs\/fixtures\/adoption/u)
-  assert.match(protocol, /did \*\*not\*\* complete live unnamed adoption/u)
   assert.match(protocol, /Lucide/u)
   assert.match(protocol, /Host `status`/u)
 

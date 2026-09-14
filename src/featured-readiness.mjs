@@ -1,6 +1,7 @@
 import { inspectClaude } from './hosts/claude.mjs'
 import { inspectCodex } from './hosts/codex.mjs'
 import { inspectZcode } from './hosts/zcode.mjs'
+import { inspectProductSkills, inspectProviderSkills } from './developer-kit-skill.mjs'
 import { runFile } from './process.mjs'
 import { FEATURED_PROFILE_ID, hostFacingManifest, loadProfile } from './profile.mjs'
 
@@ -30,27 +31,59 @@ function receiptHealthy(hostId, entry) {
   return entry.present === true && entry.identityMatched === true
 }
 
-function receiptDetail(hostId, entry) {
-  if (entry == null) return { component: FEATURED_READINESS_TOOL, host: hostId, present: false }
-  if (hostId === 'codex') {
-    return {
-      component: FEATURED_READINESS_TOOL,
-      host: hostId,
-      present: entry.pluginPresent === true,
-      enabled: entry.pluginEnabled === true,
-      identityMatched: entry.installedIdentityMatched === true,
-      cacheStatus: entry.cacheStatus ?? null,
-      liveCacheObserved: entry.liveCacheObserved === true,
-      installedVersion: entry.installedVersion ?? null,
-      requestedVersion: entry.requestedVersion ?? null,
-    }
-  }
+function expectedProviderSkillCount(manifest) {
+  return Object.values(manifest.components ?? {}).filter((component) => component.providerSkill !== undefined).length
+}
+
+function expectedProductSkillCount(manifest) {
+  const providerSkillIds = new Set(Object.values(manifest.components ?? {}).flatMap((component) => component.providerSkill?.id ?? []))
+  return Object.values(manifest.components ?? {})
+    .filter((component) => component.skillOnly !== true)
+    .flatMap((component) => component.productSkills ?? [])
+    .filter((skill) => !providerSkillIds.has(skill.id)).length
+}
+
+async function inspectLinkedSkills(hostId, hostState, agentManifest, {
+  runner,
+  inspectProviderSkillRecords,
+  inspectProductSkillRecords,
+}) {
+  if (hostId === 'codex') return { healthy: true, providerSkills: null, productSkills: null }
+  const providerSkills = await inspectProviderSkillRecords(hostState?.providerSkills, runner)
+  const productSkills = await inspectProductSkillRecords(hostState?.productSkills, runner)
   return {
-    component: FEATURED_READINESS_TOOL,
-    host: hostId,
-    present: entry.present === true,
-    identityMatched: entry.identityMatched === true,
+    healthy: providerSkills.status === 'ok'
+      && providerSkills.skills.length === expectedProviderSkillCount(agentManifest)
+      && productSkills.status === 'ok'
+      && productSkills.skills.length === expectedProductSkillCount(agentManifest),
+    providerSkills,
+    productSkills,
   }
+}
+
+function receiptDetail(hostId, entry, skills = undefined) {
+  const base = entry == null
+    ? { component: FEATURED_READINESS_TOOL, host: hostId, present: false }
+    : hostId === 'codex'
+      ? {
+        component: FEATURED_READINESS_TOOL,
+        host: hostId,
+        present: entry.pluginPresent === true,
+        enabled: entry.pluginEnabled === true,
+        identityMatched: entry.installedIdentityMatched === true,
+        cacheStatus: entry.cacheStatus ?? null,
+        liveCacheObserved: entry.liveCacheObserved === true,
+        installedVersion: entry.installedVersion ?? null,
+        requestedVersion: entry.requestedVersion ?? null,
+      }
+      : {
+        component: FEATURED_READINESS_TOOL,
+        host: hostId,
+        present: entry.present === true,
+        identityMatched: entry.identityMatched === true,
+      }
+  if (skills == null || hostId === 'codex') return base
+  return { ...base, providerSkills: skills.providerSkills, productSkills: skills.productSkills }
 }
 
 function report(checks) {
@@ -98,6 +131,8 @@ export async function inspectFeaturedReadiness(state, {
   inspectCodexHost = inspectCodex,
   inspectClaudeHost = inspectClaude,
   inspectZcodeHost = inspectZcode,
+  inspectProviderSkillRecords = inspectProviderSkills,
+  inspectProductSkillRecords = inspectProductSkills,
   loadInstalledProfile = loadProfile,
   featuredToolId = FEATURED_READINESS_TOOL,
   codexConfiguration,
@@ -189,6 +224,8 @@ export async function inspectFeaturedReadiness(state, {
     inspectCodexHost,
     inspectClaudeHost,
     inspectZcodeHost,
+    inspectProviderSkillRecords,
+    inspectProductSkillRecords,
     codexConfiguration,
   }
   for (const hostId of hosts) {
@@ -204,14 +241,18 @@ export async function inspectFeaturedReadiness(state, {
         continue
       }
       const entry = inspection.entries?.find((item) => item.component === featuredToolId)
-      const healthy = receiptHealthy(hostId, entry)
+      const mcpHealthy = receiptHealthy(hostId, entry)
+      const skills = await inspectLinkedSkills(hostId, state.hosts[hostId], agentManifest, inspectOptions)
+      const healthy = mcpHealthy && skills.healthy
       checks.push(check(
         `projection.receipt.${hostId}`,
         healthy ? 'ok' : 'error',
         healthy
           ? `${hostId} projection receipt for ${featuredToolId} is healthy`
-          : `${hostId} projection receipt for ${featuredToolId} is not healthy`,
-        receiptDetail(hostId, entry),
+          : mcpHealthy && !skills.healthy
+            ? `${hostId} Skill projection for ${featuredToolId} is not healthy`
+            : `${hostId} projection receipt for ${featuredToolId} is not healthy`,
+        receiptDetail(hostId, entry, skills),
       ))
     } catch (error) {
       checks.push(check(
