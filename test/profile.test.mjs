@@ -68,12 +68,17 @@ test('the featured catalog lists profile membership without becoming a marketpla
   assert.equal(catalog.download.publicReleasePublished, false)
   assert.equal(catalog.download.configured, false)
   assert.equal(catalog.download.url, null)
+  assert.equal(catalog.download.notarized, false)
+  assert.equal(catalog.download.marketplace, false)
   assert.match(catalog.workingSetNote, /does not install missing inventory/u)
   assert.equal(catalog.download.gatekeeperNote, UNSIGNED_MACOS_GATEKEEPER_NOTE)
-  const configured = featuredCatalogDownload({ [FEATURED_CATALOG_DOWNLOAD_ENV]: ' https://example.invalid/featured.dmg ' })
+  assert.match(catalog.download.message, /Public download is not configured/u)
+  assert.doesNotMatch(catalog.download.gatekeeperNote, /until a Developer ID signed build exists/u)
+  const configured = featuredCatalogDownload({ [FEATURED_CATALOG_DOWNLOAD_ENV]: ' https://example.invalid/preview-distribution.json ' })
   assert.equal(configured.configured, true)
-  assert.equal(configured.url, 'https://example.invalid/featured.dmg')
+  assert.equal(configured.url, 'https://example.invalid/preview-distribution.json')
   assert.equal(configured.publicReleasePublished, false)
+  assert.match(configured.message, /Host can fetch the bound catalog/u)
 })
 
 test('featured membership matches the catalog document and fails closed without armorial bytes', async () => {
@@ -85,7 +90,10 @@ test('featured membership matches the catalog document and fails closed without 
   assert.match(catalogDoc, /draft-unbound/u)
   assert.match(catalogDoc, /--development-root/u)
   assert.match(catalogDoc, /not a public marketplace/u)
-  assert.match(catalogDoc, /Publishing a notarized DMG, GitHub Release, or public marketplace/u)
+  assert.match(catalogDoc, /UNSIGNED_PREVIEW.md/u)
+  assert.match(catalogDoc, /profiles fetch/u)
+  assert.match(catalogDoc, /public download is not configured/u)
+  assert.doesNotMatch(catalogDoc, /until a Developer ID signed build exists/u)
   const standardOnly = {
     components: Object.fromEntries(['node-runtime', 'direct-execution-runtime', 'math-anchor', 'migratory-time'].map((id) => [id, {}])),
   }

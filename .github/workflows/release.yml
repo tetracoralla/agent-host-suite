@@ -1,3 +1,7 @@
+# Unsigned preview GitHub Release. Apple Developer ID / notarization are not
+# used. See docs/UNSIGNED_PREVIEW.md. If this file cannot be updated from a
+# contributing token, enable docs/unsigned-preview-release.yml via GitHub Desktop.
+
 name: Release
 
 on:
@@ -18,61 +22,44 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - run: AGENT_HOST_PUBLIC_DISTRIBUTION=1 ./scripts/package-macos-app.sh release
-      - name: Record runner architecture
-        run: echo "APP_ARCH=$(uname -m)" >> "$GITHUB_ENV"
-      - name: Require signing and notarization credentials
-        env:
-          CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERT_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-          SIGNING_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_NAME }}
-          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
-          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      - name: Require a bound catalog
         run: |
-          test -n "$CERTIFICATE"
-          test -n "$CERTIFICATE_PASSWORD"
-          test -n "$SIGNING_IDENTITY"
-          test -n "$NOTARY_KEY"
-          test -n "$NOTARY_KEY_ID"
-          test -n "$NOTARY_ISSUER"
-      - name: Sign, notarize, and verify
-        env:
-          CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERT_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-          SIGNING_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_NAME }}
-          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
-          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          if [[ ! -f .build/internal-beta/release-catalog/current.json ]]; then
+            echo "::error::Bound catalog missing. Follow docs/UNSIGNED_PREVIEW.md. This job does not notarize and does not invent Release assets."
+            exit 1
+          fi
+      - run: ./scripts/package-macos-app.sh release
+      - name: Wrap an unsigned DMG
         run: |
-          keychain="$RUNNER_TEMP/agent-host-signing.keychain-db"
-          certificate="$RUNNER_TEMP/developer-id.p12"
-          notary_key="$RUNNER_TEMP/AuthKey.p8"
-          password="$(openssl rand -hex 24)"
-          echo "$CERTIFICATE" | base64 --decode > "$certificate"
-          echo "$NOTARY_KEY" | base64 --decode > "$notary_key"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
-          security list-keychains -d user -s "$keychain"
-          codesign --force --deep --options runtime --timestamp --sign "$SIGNING_IDENTITY" ".build/Agent Host.app"
-          archive=".build/Agent-Host-macos-${APP_ARCH}.zip"
-          ditto -c -k --keepParent ".build/Agent Host.app" "$archive"
-          xcrun notarytool submit "$archive" --key "$notary_key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait
-          xcrun stapler staple ".build/Agent Host.app"
-          codesign --verify --deep --strict --verbose=2 ".build/Agent Host.app"
-          spctl --assess --type execute --verbose=4 ".build/Agent Host.app"
-          ditto -c -k --keepParent ".build/Agent Host.app" "$archive"
-          (cd .build && shasum -a 256 "$(basename "$archive")" > SHA256SUMS)
-      - run: npm pack --pack-destination .build
-      - name: Create GitHub release
+          version="$(node -e 'const pkg=require("./package.json"); process.stdout.write(pkg.version)')"
+          arch="$(uname -m)"
+          if [[ "$arch" != "x86_64" ]]; then arch="arm64"; fi
+          dmg=".build/Agent-Host-${version}-darwin-${arch}.dmg"
+          staging=".build/dmg-root-$$"
+          mkdir -p "$staging"
+          cp -R ".build/Agent Host.app" "$staging/Agent Host.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname "Agent Host Preview" -srcfolder "$staging" -ov -format UDZO "$dmg"
+          rm -rf "$staging"
+          echo "DMG_PATH=$dmg" >> "$GITHUB_ENV"
+          echo "SUITE_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Write preview index and SHA256SUMS
+        run: |
+          node scripts/write-preview-distribution.mjs \
+            --output .build/preview-distribution.json \
+            --catalog "$PWD/.build/internal-beta/release-catalog/current.json" \
+            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
+            --dmg "$DMG_PATH"
+          (cd .build && shasum -a 256 "$(basename "$DMG_PATH")" preview-distribution.json > SHA256SUMS)
+      - name: Create unsigned GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nSee docs/UNSIGNED_PREVIEW.md.'
           gh release create "$GITHUB_REF_NAME" \
-            ".build/Agent-Host-macos-${APP_ARCH}.zip" \
-            ".build/SHA256SUMS" \
-            .build/openadam-agent-host-suite-*.tgz \
-            --verify-tag --generate-notes
+            "$DMG_PATH" \
+            .build/preview-distribution.json \
+            .build/SHA256SUMS \
+            .build/internal-beta/release-catalog/current.json \
+            .build/internal-beta/release-catalog/build-provenance.json \
+            --prerelease --verify-tag --title "Agent Host ${SUITE_VERSION} unsigned preview" --notes "$notes"

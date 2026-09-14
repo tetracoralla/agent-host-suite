@@ -11,8 +11,8 @@ boundary being changed:
 - `docs/PRIVACY.md` and `docs/TRACE_PLANE.md` for observation, collection, or
   trace export behavior;
 - `docs/TOOL_INTEGRATION.md` for Provider admission and integration records;
-- `docs/RELEASE.md`, `docs/LOCAL_DOGFOOD.md`, or the platform guide for build,
-  installation, packaging, or release work;
+- `docs/RELEASE.md`, `docs/UNSIGNED_PREVIEW.md`, `docs/LOCAL_DOGFOOD.md`, or the platform guide for build,
+  installation, packaging, or unsigned preview download work;
 - `docs/TERMINOLOGY.md` for product copy, naming, or stable identifiers; and
 - the relevant sections of `docs/REVIEW_CONTRACT.md` for review scope,
   evidence selection and affected high-risk seams.
@@ -58,5 +58,5 @@ warrant it. Documentation-only changes need semantic, link and relevant
 consumer checks. Run the app build and affected setup/status/recovery flows
 when that surface changes. The review contract selects evidence from the
 intended outcome; it does not require unrelated checks before proposing an
-improvement or authorize extra reviewers. Do not commit, push, tag, publish,
-sign, or notarize without explicit owner authority.
+improvement or authorize extra reviewers. Do not commit, push, tag, or publish
+without explicit owner authority. This product does not notarize.

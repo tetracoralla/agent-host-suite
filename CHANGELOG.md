@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Land unsigned preview download without Apple notarization: GitHub Releases or
+  a configured HTTPS `preview-distribution.json` / bound `current.json`.
+  `AGENT_HOST_FEATURED_CATALOG_URL` is a working fetch hook (`profiles fetch`,
+  setup, and featured update) that reuses artifact download with optional
+  `Content-Length`, SHA-256, and HTTPS redirects. Unconfigured Host copy says
+  public download is not configured rather than implying a store. README and
+  Manager Gatekeeper copy no longer promise a future Developer ID build.
 - Wire browser and native Managers to the featured catalog over the existing
   setup/update/tools APIs. Setup can select `featured` (including Armorial)
   instead of hard-coding Standard; Tools can Get uninstalled featured inventory

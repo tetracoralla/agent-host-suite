@@ -10,10 +10,15 @@ the Agent apps themselves.
 This repository contains the **Agent Host Suite** distribution unit. The npm
 package, CLI, schemas, and other stable technical identifiers retain that name.
 
-This checkout is source and a developer preview. It does not include a public
-GitHub Release, a notarized macOS DMG, or a public tool marketplace. A Host
-working-set selection is not proof that an open Agent session loaded those
-tools.
+This checkout is source and a developer preview. It does **not** ship Apple
+Developer ID signed or notarized builds, and it is **not** an App Store or
+plugin marketplace. Strangers install from a GitHub Release or a configured
+HTTPS URL (macOS DMG / Windows ZIP) once an owner publishes those assets;
+until then Host says public download is not configured. macOS Gatekeeper
+requires Control-click → Open. Host can fetch a bound catalog and install
+tools when `AGENT_HOST_FEATURED_CATALOG_URL` is set. See
+[Unsigned preview download](docs/UNSIGNED_PREVIEW.md). A Host working-set
+selection is not proof that an open Agent session loaded those tools.
 
 ## Scope
 
@@ -92,15 +97,20 @@ assessing discovery or natural tool selection.
 
 ## External featured path
 
-There is no public GitHub Release in this checkout. With a bound catalog from
-an owner-issued preview distribution:
+There is no public GitHub Release asset in this checkout. After an owner
+publishes a Release or HTTPS index (see
+[Unsigned preview download](docs/UNSIGNED_PREVIEW.md)):
 
 ```text
+export AGENT_HOST_FEATURED_CATALOG_URL=https://github.com/tetracoralla/agent-host-suite/releases/latest/download/preview-distribution.json
 agent-host profiles list --json
-agent-host setup --profile featured --host zcode --release-manifest /absolute/current.json
+agent-host profiles fetch --json
+agent-host setup --profile featured --host zcode
 agent-host tools set --profile featured
 agent-host doctor --deep --json
 ```
+
+Or pass a local bound catalog with `--release-manifest /absolute/current.json`.
 
 Tracked `draft-unbound` setup fails closed. `--development-root` is the
 tools-dev path, not featured. Details:
@@ -157,18 +167,21 @@ built-in catalog is already bound.
 
 ## Distribution boundary
 
-The repository is an Apache-2.0 developer preview. This source tree does not
-claim a public download, GitHub Release, notarized DMG, or tool marketplace.
+The repository is an Apache-2.0 developer preview. **No notarization.** Public
+preview installers are unsigned and are meant to be published on
+[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)
+or a self-hosted HTTPS index. This checkout does not claim those assets exist
+today.
 
 - There is no public Agent Host marketplace and no third-party plugin store.
-- A public macOS DMG, if one is ever shipped, still requires Developer ID
-  signing, notarization, stapling, Gatekeeper assessment, and clean-device
-  acceptance. Those steps are release-campaign facts; they are not provided by
-  this checkout. Local or internal ad-hoc-signed builds are validation
-  artifacts, not public downloads.
-- Windows packaging and clean-device requirements are in
-  [Windows distribution](docs/WINDOWS.md). They do not establish that a public
-  Windows installer is published.
+- macOS preview DMGs are not Developer ID signed and not Apple-notarized.
+  Gatekeeper requires Control-click → Open. That is the supported preview path,
+  not a temporary stand-in for the App Store.
+- Windows preview ZIPs are unsigned. SmartScreen may warn; compare SHA-256
+  first. Details: [Windows distribution](docs/WINDOWS.md).
+- Host can download a bound catalog and install featured tools when
+  `AGENT_HOST_FEATURED_CATALOG_URL` is set. See
+  [Unsigned preview download](docs/UNSIGNED_PREVIEW.md).
 
 Repository maintainers can read the
 [release boundary](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/RELEASE.md)
@@ -191,6 +204,7 @@ to the source repository:
   runtime verification method for tools-dev machines.
 - [Discovery and projection](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md) — Host working set vs Agent-app
   cache and session Skill/MCP paths.
+- [Unsigned preview download](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/UNSIGNED_PREVIEW.md) — GitHub Releases / HTTPS DMG and ZIP, Gatekeeper, Host catalog fetch; not notarized.
 - [Featured catalog v1](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) — owner-selected tools through existing
   install APIs, not a marketplace.
 - [Unnamed adoption acceptance](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md) — page tasks and a Host-only

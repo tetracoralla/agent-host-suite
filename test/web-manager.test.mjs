@@ -41,6 +41,9 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.equal(value.catalog.featuredProfile, 'featured')
   assert.equal(value.catalog.marketplace, false)
   assert.equal(value.catalog.boundReleaseRequired, true)
+  assert.equal(value.catalog.download.configured, false)
+  assert.equal(value.catalog.download.notarized, false)
+  assert.match(value.catalog.download.message, /Public download is not configured/u)
   assert.equal(value.catalog.profiles.some((profile) => profile.id === 'featured' && profile.agentComponents.includes('armorial')), true)
   assert.equal(MANAGER_SETUP_PROFILES.includes('featured'), true)
 

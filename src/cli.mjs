@@ -4,7 +4,7 @@ import { addHost, hostStatus, recoverServiceInstallation, removeHost, rollbackIn
 import { disableObservability, enableObservability, exportObservabilityTrace, maintenance, observabilityAdapterPlan, observabilityAdapters, observabilityStatus, observabilitySummary, observabilityTraceSources, refreshObservability } from './observability.mjs'
 import { readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
-import { loadState, readStatePaths } from './state.mjs'
+import { loadState, prepareStatePaths, readStatePaths } from './state.mjs'
 import { setup } from './setup.mjs'
 import { listActivity } from './activity.mjs'
 import { cleanupStorage, storageStatus } from './storage.mjs'
@@ -14,6 +14,7 @@ import { exportSkillLinkCatalog } from './skill-link-catalog.mjs'
 import { usageSummary } from './usage-summary.mjs'
 import { startWebManager } from './web-manager.mjs'
 import { defaultToolsForProfile, featuredCatalog, FEATURED_CATALOG_SCHEMA } from './profile.mjs'
+import { fetchPreviewRelease, PREVIEW_FETCH_SCHEMA } from './preview-download.mjs'
 import { FEATURED_READINESS_SCHEMA, inspectFeaturedReadiness } from './featured-readiness.mjs'
 import { isAbsolute, join, resolve } from 'node:path'
 
@@ -26,6 +27,7 @@ const USAGE = `Usage:
   agent-host snapshot [--state-root PATH] [--json]
   agent-host catalog [--state-root PATH] [--json]
   agent-host profiles list [--json]
+  agent-host profiles fetch [--url URL] [--carrier] [--state-root PATH] [--json]
   agent-host activity [--state-root PATH] [--json]
   agent-host usage [--state-root PATH] [--json]
   agent-host manager [--no-open] [--state-root PATH]
@@ -61,6 +63,7 @@ const ROUTE_ARGUMENTS = Object.freeze({
   snapshot: ['--state-root', '--json'],
   catalog: ['--state-root', '--json'],
   'profiles list': ['--json'],
+  'profiles fetch': ['--url', '--carrier', '--state-root', '--json'],
   activity: ['--state-root', '--json'],
   usage: ['--state-root', '--json'],
   manager: ['--state-root', '--no-open'],
@@ -127,10 +130,11 @@ function parseArgs(argv) {
     noOpen: false,
     includeSelectedContent: false,
     confirmSensitiveContent: false,
+    carrier: false,
     adapter: undefined,
   }
   if (options.command === 'component' && ['status', 'remove', 'rollback'].includes(options.action) && argv[2] !== undefined && !argv[2].startsWith('--')) options.target = argv[2]
-  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--adapter', '--recovery', '--manifest-sha256'])
+  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--adapter', '--recovery', '--manifest-sha256', '--url'])
   const booleans = new Map([
     ['--json', 'json'], ['--deep', 'deep'], ['--dry-run', 'dryRun'], ['--no-service', 'noService'], ['--no-host', 'noHost'],
     ['--enable-observability', 'enableObservability'], ['--purge-data', 'purgeData'],
@@ -139,6 +143,7 @@ function parseArgs(argv) {
     ['--skip-agent-apps', 'skipAgentApps'], ['--featured-readiness', 'featuredReadiness'],
     ['--quick', 'quick'], ['--standalone', 'standalone'], ['--no-open', 'noOpen'],
     ['--include-selected-content', 'includeSelectedContent'], ['--confirm-sensitive-content', 'confirmSensitiveContent'],
+    ['--carrier', 'carrier'],
   ])
   const start = options.command === 'host' ? 3 : options.command === 'component' && options.target !== undefined ? 3 : ACTION_COMMANDS.has(options.command) ? 2 : 1
   if (ACTION_COMMANDS.has(options.command) && options.action === undefined) throw new AgentHostError('CLI_USAGE', `${options.command} requires an action`)
@@ -165,6 +170,7 @@ function parseArgs(argv) {
       else if (arg === '--development-root') options.developmentRoot = value
       else if (arg === '--release-manifest') options.releaseManifest = value
       else if (arg === '--state-root') options.stateRoot = value
+      else if (arg === '--url') options.url = value
       else if (arg === '--artifact') options.artifact = value
       else if (arg === '--binding') options.bindingPath = value
       else if (arg === '--license-spdx') options.licenseSpdx = value
@@ -289,7 +295,7 @@ export function human(result) {
       result.workingSetNote ?? 'tools set --profile selects the working set of already-installed tools. It does not install missing inventory.',
       result.download?.configured === true && typeof result.download.url === 'string'
         ? `download ${result.download.url}`
-        : 'no public download URL configured',
+        : 'public download is not configured',
       ...result.profiles.map((profile) => {
         const role = profile.featured === true ? 'featured' : profile.dogfood === true ? 'dogfood' : 'profile'
         const tools = profile.defaultAgentComponents.length === 0 ? 'no Agent tools' : profile.defaultAgentComponents.join(', ')
@@ -340,6 +346,15 @@ export function human(result) {
   if (result.schemaVersion === 'openadam.agent-host-service-recovery-result.v0.1') {
     const service = result.service
     return `Service restored · ${service.running === true ? 'running' : service.loaded === true ? 'loaded' : 'configured'} · ${service.ready === true ? 'ready' : 'not ready'}`
+  }
+  if (result.schemaVersion === PREVIEW_FETCH_SCHEMA) {
+    return [
+      'Unsigned preview · not notarized · not a store',
+      result.message,
+      `catalog ${result.catalogPath}`,
+      result.carrierPath === null ? 'carrier not downloaded' : `carrier ${result.carrierPath}`,
+      result.gatekeeperNote,
+    ].join('\n')
   }
   if (result.schemaVersion === FEATURED_READINESS_SCHEMA) {
     const mark = (status) => (status === 'ok' ? '✓' : status === 'warning' ? '!' : '✗')
@@ -406,12 +421,16 @@ async function status(options) {
 
 async function run(options, dependencies = {}) {
   if (options.command === 'help') return { help: USAGE }
-  if (options.command === 'setup') return setup(options)
+  if (options.command === 'setup') return setup(options, dependencies)
   if (options.command === 'status') return status(options)
   if (options.command === 'snapshot') return operationsSnapshot(options)
   if (options.command === 'catalog') return exportSkillLinkCatalog(options)
   if (options.command === 'profiles') {
     if (options.action === 'list') return featuredCatalog()
+    if (options.action === 'fetch') {
+      const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+      return fetchPreviewRelease(options, { ...dependencies, paths })
+    }
     throw new AgentHostError('CLI_USAGE', `Unknown profiles action: ${options.action}`)
   }
   if (options.command === 'activity') {
@@ -465,7 +484,7 @@ async function run(options, dependencies = {}) {
     if (options.action === 'reset') return setActiveTools({ ...options, resetTools: true })
     throw new AgentHostError('CLI_USAGE', `Unknown tools action: ${options.action}`)
   }
-  if (options.command === 'update') return updateInstallation(options)
+  if (options.command === 'update') return updateInstallation(options, dependencies)
   if (options.command === 'rollback') return rollbackInstallation(options)
   if (options.command === 'observability') {
     if (options.action === 'enable') return enableObservability(options)

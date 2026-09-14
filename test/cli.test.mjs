@@ -34,6 +34,7 @@ test('manager --no-open prints a usable local entry before the server closes', {
 test('CLI rejects known options that do not belong to the selected operation', () => {
   const cases = [
     [['profiles', 'list', '--state-root', '/tmp/state'], 'profiles list does not accept --state-root'],
+    [['profiles', 'list', '--url', 'https://example.invalid/preview-distribution.json'], 'profiles list does not accept --url'],
     [['tools', 'set', '--tool', 'math-anchor', '--profile', 'featured'], 'tools set requires --tool or --profile, not both'],
     [['tools', 'set'], 'tools set requires --tool or --profile, not both'],
     [['setup', '--no-host', '--host', 'zcode'], 'setup --no-host cannot be combined with --host'],
@@ -187,12 +188,20 @@ test('profiles list names the featured admission set without a store', async () 
   const help = spawnSync(process.execPath, [cliPath, '--help'], { encoding: 'utf8' })
   assert.equal(help.status, 0, help.stderr)
   assert.match(help.stdout, /agent-host profiles list/u)
+  assert.match(help.stdout, /agent-host profiles fetch/u)
   assert.match(help.stdout, /--no-host/u)
   assert.match(help.stdout, /doctor \[--deep \| --featured-readiness\]/u)
   assert.match(help.stdout, /--profile standard\|featured\|developer\|observability\|local-dogfood/u)
   for (const id of await listProfileIds()) assert.match(help.stdout, new RegExp(`\\b${id}\\b`, 'u'))
   const humanOutput = human(catalog)
   assert.match(humanOutput, /Featured catalog · not a marketplace · bound release required/u)
+  assert.match(humanOutput, /public download is not configured/u)
+  const fetchMissing = spawnSync(process.execPath, [cliPath, 'profiles', 'fetch', '--json'], {
+    encoding: 'utf8',
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'AGENT_HOST_FEATURED_CATALOG_URL')),
+  })
+  assert.equal(fetchMissing.status, 1)
+  assert.equal(JSON.parse(fetchMissing.stderr).error.code, 'PREVIEW_DOWNLOAD_NOT_CONFIGURED')
   assert.match(humanOutput, /featured · Featured tools · featured · math-anchor, migratory-time, armorial/u)
   assert.match(humanOutput, /local-dogfood · Standard \+ local tools · dogfood/u)
 })

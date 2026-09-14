@@ -1,0 +1,103 @@
+# Draft workflow. A contributing bot may lack the GitHub `workflow` scope, so
+# this copy lives under docs/. Enable it with GitHub Desktop:
+# copy to .github/workflows/unsigned-preview-release.yml and commit from an
+# account that can write workflows.
+#
+# This is an unsigned preview. It must not request Apple Developer ID or
+# notary secrets. Gatekeeper (Control-click → Open) remains required.
+
+name: Unsigned preview release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Require a bound catalog
+        run: |
+          if [[ ! -f .build/internal-beta/release-catalog/current.json ]]; then
+            echo "::error::Bound catalog missing. Follow docs/UNSIGNED_PREVIEW.md (build the catalog, package, attach assets). This workflow does not invent GitHub Release bytes."
+            exit 1
+          fi
+      - run: ./scripts/package-macos-app.sh release
+      - name: Record runner architecture and wrap an unsigned DMG
+        run: |
+          echo "APP_ARCH=$(uname -m)" >> "$GITHUB_ENV"
+          version="$(node -e 'const pkg=require("./package.json"); process.stdout.write(pkg.version)')"
+          arch="$(uname -m)"
+          if [[ "$arch" == "x86_64" ]]; then arch="x86_64"; else arch="arm64"; fi
+          dmg=".build/Agent-Host-${version}-darwin-${arch}.dmg"
+          staging=".build/dmg-root-$$"
+          mkdir -p "$staging" .build
+          cp -R ".build/Agent Host.app" "$staging/Agent Host.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname "Agent Host Preview" -srcfolder "$staging" -ov -format UDZO "$dmg"
+          rm -rf "$staging"
+          echo "DMG_PATH=$dmg" >> "$GITHUB_ENV"
+          echo "SUITE_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Write preview index and SHA256SUMS
+        run: |
+          node scripts/write-preview-distribution.mjs \
+            --output .build/preview-distribution.json \
+            --catalog "$PWD/.build/internal-beta/release-catalog/current.json" \
+            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
+            --dmg "$DMG_PATH"
+          (cd .build && shasum -a 256 "$(basename "$DMG_PATH")" preview-distribution.json > SHA256SUMS)
+      - name: Create unsigned GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows assets are attached when the Windows job succeeds.\nSee docs/UNSIGNED_PREVIEW.md.'
+          gh release create "$GITHUB_REF_NAME" \
+            "$DMG_PATH" \
+            .build/preview-distribution.json \
+            .build/SHA256SUMS \
+            .build/internal-beta/release-catalog/current.json \
+            .build/internal-beta/release-catalog/build-provenance.json \
+            --prerelease --verify-tag --title "Agent Host ${SUITE_VERSION} unsigned preview" --notes "$notes"
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - name: Require a bound catalog
+        shell: bash
+        run: |
+          if [[ ! -f .build/internal-beta/release-catalog/current.json ]]; then
+            echo "::error::Bound catalog missing. Follow docs/UNSIGNED_PREVIEW.md."
+            exit 1
+          fi
+      - name: Package unsigned Windows ZIP
+        shell: pwsh
+        env:
+          AGENT_HOST_RELEASE_CATALOG: ${{ github.workspace }}\.build\internal-beta\release-catalog
+          AGENT_HOST_ALLOW_LOCAL_SOURCE_DISTRIBUTION: "1"
+        run: npm run package:windows
+      - name: Attach Windows ZIP to the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          archive="$(ls .build/windows/distribution/Agent-Host-*.zip | head -n 1)"
+          test -n "$archive"
+          gh release upload "$GITHUB_REF_NAME" "$archive" --clobber

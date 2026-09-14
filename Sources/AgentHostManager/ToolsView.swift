@@ -60,7 +60,14 @@ struct ToolsView: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                        Text(L10n.text("Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Text(L10n.text(ManagerSetupPolicy.unsignedMacOSGatekeeperNote))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(L10n.text(ManagerSetupPolicy.publicDownloadNotConfiguredNote))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

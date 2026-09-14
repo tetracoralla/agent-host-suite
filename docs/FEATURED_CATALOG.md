@@ -30,14 +30,24 @@ tool is loaded in an already open session.
 
 ## External path without a public Release
 
-This checkout has no public GitHub Release and no notarized DMG. Obtain a
-**bound** compatibility catalog (manifest, artifacts, and
-`build-provenance.json`) from an owner-issued internal or preview distribution.
-Point setup at that catalog. A featured list in prose cannot substitute for
+This checkout has no GitHub Release assets and no Apple-notarized DMG. Apple
+Developer ID signing is not part of this product. Strangers download an
+**unsigned** macOS DMG or Windows ZIP from a published GitHub Release or a
+self-hosted HTTPS URL, then open it with Gatekeeper / SmartScreen as documented
+in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md). Until an owner publishes those
+assets, Host reports **public download is not configured** instead of pretending
+there is a store.
+
+Obtain a **bound** compatibility catalog (manifest, artifacts, and
+`build-provenance.json`) from that Release index or another owner-issued
+preview. Point setup at that catalog, or set `AGENT_HOST_FEATURED_CATALOG_URL`
+so Manager and CLI can fetch it. A featured list in prose cannot substitute for
 those bytes.
 
 ```text
 agent-host profiles list --json
+export AGENT_HOST_FEATURED_CATALOG_URL=https://example.invalid/preview-distribution.json
+agent-host profiles fetch --json
 agent-host setup --profile featured --host zcode --release-manifest /absolute/current.json
 agent-host setup --profile featured --no-host --release-manifest /absolute/current.json
 agent-host update --profile featured --release-manifest /absolute/current.json
@@ -46,11 +56,12 @@ agent-host tools set --tool math-anchor --tool armorial
 agent-host doctor --deep --json
 ```
 
-Unsigned macOS downloads are not Apple-notarized. Control-click the app, choose
-Open, then confirm the Gatekeeper warning. This is expected until a Developer ID
-signed build exists. A Host-internal download URL may be supplied with
-`AGENT_HOST_FEATURED_CATALOG_URL`; this checkout does not publish a GitHub
-Release or claim that URL is live.
+Unsigned macOS downloads are not Apple-notarized, and this product does not
+ship Developer ID signed or App Store builds. Control-click the app, choose
+Open, then confirm the Gatekeeper warning. That warning is expected for this
+preview. Configure Host with `AGENT_HOST_FEATURED_CATALOG_URL` pointing at
+`preview-distribution.json` or a bound `current.json`; this checkout does not
+claim that URL is live.
 
 `setup` against this repository's tracked `catalog/releases/draft-unbound`
 fails closed. `--development-root` is the tools-dev path (`local-dogfood`),
@@ -60,7 +71,7 @@ not featured.
 | --- | --- |
 | List admitted profiles and the featured set | `agent-host profiles list` (`catalog/profiles/*.json`) |
 | Choose the admitted inventory | `setup --profile featured` / `update --profile featured` |
-| Bind exact bytes | bound release catalog + `build-provenance.json`; `setup` / `update --release-manifest` |
+| Bind exact bytes | bound release catalog + `build-provenance.json`; `setup` / `update --release-manifest`; or `profiles fetch` / `AGENT_HOST_FEATURED_CATALOG_URL` |
 | Select the working set after install | `agent-host tools set --profile featured` or `tools set --tool …` / Manager working-set toggles. This is not inventory install. |
 | Get uninstalled featured tools in Manager | native and browser Tools **Get featured tools** call `update --profile featured` |
 | Install Host first, connect Agent later | `setup --no-host`, then `host add` after a supported app is detected |
@@ -106,8 +117,9 @@ adoption.
 
 - Host-owned generic `invoke provider` tool.
 - Patching Codex, Claude Code, ZCode, or another Agent app.
-- Publishing a notarized DMG, GitHub Release, or public marketplace from this
-  document.
+- Claiming Apple notarization, Developer ID signing, or an App Store listing.
+- Treating GitHub Releases as already populated when this checkout has no assets.
+- Publishing a third-party plugin marketplace from this document.
 - Treating `local-dogfood` membership as an external featured set.
 - A Manager marketplace UI, ranking, reviews, or payments. Featured browse/get
   in Manager is the owner-selected admission list, not a store.

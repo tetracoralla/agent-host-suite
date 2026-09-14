@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { acquireArtifact } from '../src/release-artifacts.mjs'
+import { acquireArtifact, acquireHttpsFile } from '../src/release-artifacts.mjs'
 
 const payload = Buffer.from('valid-bound-artifact-fixture\n')
 const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`
@@ -162,6 +162,62 @@ test('a truncated body fails the final size check', async () => {
         && error.details.receivedBytes === payload.length - 1,
     )
     assert.deepEqual(await leftoverTemporaryFiles(paths.downloads), [])
+  })
+})
+
+test('HTTPS redirects are followed so GitHub Release assets can land on the CDN', async () => {
+  const component = fixtureComponent()
+  await withDownloads(async (paths) => {
+    const result = await acquireArtifact(component, '/unused/current.json', paths, {
+      fetch: async (url) => {
+        const href = String(url)
+        if (href === 'https://fixture.invalid/archive.tar.gz') {
+          return new Response(null, {
+            status: 302,
+            headers: { location: 'https://objects.githubusercontent.invalid/archive.tar.gz' },
+          })
+        }
+        if (href === 'https://objects.githubusercontent.invalid/archive.tar.gz') {
+          return responseFrom(payload, { 'content-length': String(payload.length) })
+        }
+        throw new Error(`unexpected URL ${href}`)
+      },
+    })
+    assert.equal(result.created, true)
+    assert.deepEqual(await readFile(result.path), payload)
+  })
+})
+
+test('an HTTP redirect is rejected', async () => {
+  const component = fixtureComponent()
+  await withDownloads(async (paths) => {
+    await assert.rejects(
+      acquireArtifact(component, '/unused/current.json', paths, {
+        fetch: async () => new Response(null, {
+          status: 302,
+          headers: { location: 'http://fixture.invalid/archive.tar.gz' },
+        }),
+      }),
+      (error) => error.code === 'RELEASE_DOWNLOAD_FAILED' && /HTTPS/u.test(error.message),
+    )
+    assert.deepEqual(await leftoverTemporaryFiles(paths.downloads), [])
+  })
+})
+
+test('acquireHttpsFile verifies SHA-256 when Content-Length is absent', async () => {
+  await withDownloads(async (paths) => {
+    const destination = join(paths.downloads, 'index.json')
+    const body = Buffer.from('{"ok":true}\n')
+    const result = await acquireHttpsFile({
+      url: 'https://fixture.invalid/index.json',
+      destination,
+      expectedBytes: body.length,
+      expectedSha256: sha256(body),
+      fetch: async () => responseFrom(body, {}),
+      label: 'index.json',
+    })
+    assert.equal(result.created, true)
+    assert.deepEqual(await readFile(result.path), body)
   })
 })
 
