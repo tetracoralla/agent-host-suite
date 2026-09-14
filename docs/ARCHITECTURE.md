@@ -115,11 +115,16 @@ Strict state validation is retained rather than silently ignoring unknown
 fields. Observer maintenance resolves a durable installed application carrier;
 it never persists the Node executable or CLI path of the process that happened
 to request the update. Ordinary update rejects a target semantic Suite version
-older than the installed environment; rollback remains the only reversion path.
+older than the installed environment, and also rejects older component versions
+even when the Suite version is unchanged. Rollback remains the only reversion
+path. Repair reconnects Agent apps, the local service, and monitoring using the
+currently installed tool versions; it does not materialize a catalog or change
+tool versions. Confirming a Manager update or repair binds the reviewed plan
+identity, so a changed remote catalog requires a new preview.
 
 Every mutation of one Agent Host state root shares one durable exclusive
 lifecycle lock, including setup, Agent-app connection changes, compatibility
-update/rollback, working-set and private-component transitions, monitoring,
+update/repair/rollback, working-set and private-component transitions, monitoring,
 storage cleanup, and uninstall. The lock is published atomically with a process
 ID plus process-start identity. A dead owner may be reclaimed; a live owner is
 reclaimed for PID reuse only where its start identity is current and

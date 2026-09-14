@@ -240,6 +240,72 @@ do {
         "acquiring featured inventory must reuse update --profile featured"
     )
     expect(
+        ManagerSetupPolicy.updateArguments(
+            profile: nil,
+            releaseManifest: nil,
+            replaceHostConflicts: false,
+            dryRun: false,
+            planId: "sha256:\(String(repeating: "a", count: 64))"
+        ) == ["update", "--plan-id", "sha256:\(String(repeating: "a", count: 64))"],
+        "applying an update must bind the reviewed plan identity"
+    )
+    expect(
+        ManagerSetupPolicy.repairArguments(replaceHostConflicts: false, dryRun: true)
+            == ["repair", "--dry-run"],
+        "monitoring and connection repair must not invoke update"
+    )
+    expect(
+        ManagerSetupPolicy.repairArguments(
+            replaceHostConflicts: true,
+            dryRun: false,
+            planId: "sha256:\(String(repeating: "b", count: 64))"
+        ) == ["repair", "--replace-host-conflicts", "--plan-id", "sha256:\(String(repeating: "b", count: 64))"],
+        "applying a repair must bind the reviewed plan identity without a catalog profile"
+    )
+    let updatePlan = try JSONDecoder().decode(UpdatePlan.self, from: Data(#"""
+    {
+      "status": "ready",
+      "dryRun": true,
+      "fromChannel": "release",
+      "toChannel": "release",
+      "fromVersion": "0.2.0",
+      "toVersion": "0.2.0",
+      "releaseId": "fixture",
+      "source": {"kind": "bundled-catalog", "releaseId": "fixture", "provenanceSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+      "profile": "featured",
+      "profileDisplayName": "Featured tools",
+      "changed": ["agent-tool-observer"],
+      "componentChanges": [
+        {"id": "agent-tool-observer", "action": "downgrade", "currentVersion": "0.6.4", "targetVersion": "0.6.0"}
+      ],
+      "enabledAgentComponents": [],
+      "removedAgentComponents": [],
+      "planId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "activation": {"hosts": {}, "service": {"supported": true}}
+    }
+    """#.utf8))
+    expect(updatePlan.fromVersion == "0.2.0" && updatePlan.toVersion == "0.2.0", "update preview must name current and target suite versions")
+    expect(updatePlan.source.kind == "bundled-catalog", "update preview must name the catalog source")
+    expect(updatePlan.componentChanges.first?.currentVersion == "0.6.4", "update preview must show the installed component version")
+    expect(updatePlan.componentChanges.first?.targetVersion == "0.6.0", "update preview must show the target component version")
+    let repairPlan = try JSONDecoder().decode(RepairPlan.self, from: Data(#"""
+    {
+      "status": "ready",
+      "dryRun": true,
+      "kind": "repair",
+      "suiteVersion": "0.2.0",
+      "releaseId": "fixture",
+      "profile": "featured",
+      "changed": [],
+      "componentChanges": [],
+      "repairs": {"hosts": ["codex"], "service": true, "monitoring": true},
+      "planId": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "activation": {"hosts": {}, "service": {"supported": true}}
+    }
+    """#.utf8))
+    expect(repairPlan.changed.isEmpty && repairPlan.componentChanges.isEmpty, "repair preview must not propose tool version changes")
+    expect(repairPlan.repairs.monitoring && repairPlan.repairs.hosts == ["codex"], "repair preview must name connection and monitoring recovery")
+    expect(
         ManagerSection.primaryCases.map(\.rawValue) == ["overview", "tools", "agentApps", "activity"],
         "primary Manager destinations follow Overview → Tools → Agents → History"
     )

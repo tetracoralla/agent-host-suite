@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { doctor } from '../src/doctor.mjs'
 import { setActiveTools, toolSetStatus, updateInstallation } from '../src/lifecycle.mjs'
@@ -11,10 +9,10 @@ import { defaultToolsForProfile, loadProfile } from '../src/profile.mjs'
 import { materializeComponentIdsForUpdate, OBSERVABILITY_RELEASE_COMPONENTS } from '../src/release-manifest.mjs'
 import { setup } from '../src/setup.mjs'
 import { loadState, prepareStatePaths } from '../src/state.mjs'
+import { createIsolatedCli, runIsolatedCli } from './cli-isolation.mjs'
 import { compatibleApplicationState, createCodexRunner, createDevelopmentWorkspace, healthyCatalogPreflight } from './helpers.mjs'
 import { createReleaseFixture } from './release-helpers.mjs'
 
-const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
 const supportedReleasePlatform = ['darwin', 'win32'].includes(process.platform)
 
 async function healthyComponentWarmup({ manifest, componentIds }) {
@@ -34,15 +32,19 @@ function releaseDependencies(fake, values = {}) {
   }
 }
 
-test('featured setup fails closed against the tracked unbound catalog', async () => {
+test('featured setup fails closed against the tracked unbound catalog', async (t) => {
+  const isolated = await createIsolatedCli(t)
   await assert.rejects(
-    setup({ profile: 'featured', hosts: [], noService: true, dryRun: true, enableObservability: false }),
+    setup({
+      profile: 'featured', hosts: [], noService: true, dryRun: true, enableObservability: false,
+      stateRoot: isolated.stateRoot,
+    }),
     (error) => error.code === 'RELEASE_UNBOUND',
   )
-  const cli = spawnSync(process.execPath, [cliPath, 'setup', '--profile', 'featured', '--no-service', '--dry-run', '--json'], { encoding: 'utf8' })
+  const cli = runIsolatedCli(['setup', '--profile', 'featured', '--no-service', '--dry-run', '--json'], isolated)
   assert.equal(cli.status, 1)
   assert.equal(JSON.parse(cli.stderr).error.code, 'RELEASE_UNBOUND')
-  const unknownProfile = spawnSync(process.execPath, [cliPath, 'tools', 'set', '--profile', 'not-a-catalog', '--json'], { encoding: 'utf8' })
+  const unknownProfile = runIsolatedCli(['tools', 'set', '--profile', 'not-a-catalog', '--json'], isolated)
   assert.equal(unknownProfile.status, 1)
   assert.equal(JSON.parse(unknownProfile.stderr).error.code, 'PROFILE_UNKNOWN')
 })
@@ -59,10 +61,11 @@ test('featured setup cannot use a development root as a substitute for a bound c
     }),
     (error) => error.code === 'FEATURED_PROFILE_RELEASE_REQUIRED',
   )
-  const cli = spawnSync(process.execPath, [
-    cliPath, 'setup', '--profile', 'featured', '--development-root', root,
+  const isolated = await createIsolatedCli(t)
+  const cli = runIsolatedCli([
+    'setup', '--profile', 'featured', '--development-root', root,
     '--no-service', '--dry-run', '--json',
-  ], { encoding: 'utf8' })
+  ], isolated)
   assert.equal(cli.status, 1)
   assert.equal(JSON.parse(cli.stderr).error.code, 'FEATURED_PROFILE_RELEASE_REQUIRED')
 })
@@ -119,7 +122,8 @@ test('a bound featured profile is selectable through setup, profiles list, and t
   assert.deepEqual(state.availableAgentComponents, ['math-anchor', 'migratory-time', 'armorial'])
   assert.deepEqual(state.agentComponents, ['math-anchor', 'migratory-time', 'armorial'])
 
-  const listed = spawnSync(process.execPath, [cliPath, 'profiles', 'list', '--json'], { encoding: 'utf8' })
+  const isolated = await createIsolatedCli(t)
+  const listed = runIsolatedCli(['profiles', 'list', '--json'], isolated)
   assert.equal(listed.status, 0, listed.stderr)
   assert.equal(JSON.parse(listed.stdout).profiles.find((profile) => profile.id === 'featured').agentComponents.includes('armorial'), true)
 
@@ -131,7 +135,10 @@ test('a bound featured profile is selectable through setup, profiles list, and t
   )
   assert.deepEqual(restored.activeAgentComponents, ['math-anchor', 'migratory-time', 'armorial'])
   assert.deepEqual((await toolSetStatus({ stateRoot })).activeAgentComponents, ['math-anchor', 'migratory-time', 'armorial'])
-  const missingState = spawnSync(process.execPath, [cliPath, 'tools', 'set', '--profile', 'featured', '--json'], { encoding: 'utf8' })
+  const missingState = runIsolatedCli(
+    ['tools', 'set', '--profile', 'featured', '--json'],
+    { ...isolated, stateRoot: isolated.unusedStateRoot },
+  )
   assert.equal(missingState.status, 1)
   assert.equal(JSON.parse(missingState.stderr).error.code, 'NOT_INSTALLED')
 

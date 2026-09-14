@@ -19,7 +19,7 @@ struct EnvironmentView: View {
                             color: .orange
                         )
                         HStack {
-                            Button(L10n.text("Review Repair")) { Task { await store.prepareUpdate() } }
+                            Button(L10n.text("Review Repair")) { Task { await store.prepareRepair() } }
                                 .buttonStyle(.borderedProminent)
                             Button(L10n.text("Run Full Check")) { Task { await store.runDoctor() } }
                         }
