@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>North Pier — berth settings</title>
+  <style>
+    :root {
+      --paper: #f3eee4;
+      --ink: #1b2430;
+      --muted: #5c6570;
+      --line: #d4cbbd;
+      --sea: #1f5c4d;
+      --danger: #8f2d2d;
+      --slot: #b7a99a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.5 "Avenir Next", "Segoe UI", sans-serif;
+    }
+    main { max-width: 40rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+    h1 {
+      font-family: Palatino, "Palatino Linotype", serif;
+      font-weight: 500;
+      font-size: 1.8rem;
+      margin: 0 0 0.35rem;
+    }
+    .lede { color: var(--muted); margin-bottom: 1.5rem; }
+    section {
+      border: 1px solid var(--line);
+      border-radius: 0.7rem;
+      padding: 1rem 1rem 0.85rem;
+      margin-bottom: 0.9rem;
+      background: #faf7f0;
+    }
+    h2 {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 1rem;
+      margin: 0 0 0.75rem;
+    }
+    p { margin: 0 0 0.75rem; color: var(--muted); }
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font: inherit;
+      border-radius: 0.4rem;
+      padding: 0.4rem 0.75rem;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+    }
+    button.primary { background: var(--sea); color: #f7f3ea; border-color: var(--sea); }
+    button.danger { color: var(--danger); border-color: #e3c4c4; }
+    .icon-slot {
+      display: inline-block;
+      width: 1.15rem;
+      height: 1.15rem;
+      border: 1px dashed var(--slot);
+      border-radius: 0.28rem;
+      background: repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(27, 36, 48, 0.06) 3px, rgba(27, 36, 48, 0.06) 6px);
+      flex: 0 0 1.15rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Berth C-14</h1>
+    <p class="lede">Harbor account for the wooden sloop <em>Mallow</em>. Icons are still missing on every section and action.</p>
+
+    <section>
+      <h2><span class="icon-slot" aria-hidden="true"></span>Billing</h2>
+      <p>Monthly slip, electricity, and the winter cover add-on. Next draft: 3 October.</p>
+      <div class="row">
+        <button type="button" class="primary"><span class="icon-slot" aria-hidden="true"></span>Download invoice</button>
+        <button type="button"><span class="icon-slot" aria-hidden="true"></span>Rotate key</button>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="icon-slot" aria-hidden="true"></span>Members</h2>
+      <p>Skipper plus one named crew. Guests need a day pass from the office.</p>
+      <div class="row">
+        <button type="button" class="primary"><span class="icon-slot" aria-hidden="true"></span>Invite member</button>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="icon-slot" aria-hidden="true"></span>Notices</h2>
+      <p>Storm, ice, and fuel-dock closures. Quiet hours start at 21:00.</p>
+      <div class="row">
+        <button type="button"><span class="icon-slot" aria-hidden="true"></span>Mute storm alerts</button>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="icon-slot" aria-hidden="true"></span>Shore power</h2>
+      <p>30A pedestal on the finger pier. Unplug before leaving the harbor.</p>
+      <div class="row">
+        <button type="button" class="danger"><span class="icon-slot" aria-hidden="true"></span>Remove berth</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

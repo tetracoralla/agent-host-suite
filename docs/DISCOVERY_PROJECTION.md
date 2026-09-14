@@ -127,10 +127,14 @@ agent-host tools status --json
 agent-host status --json
 agent-host host status codex --json
 agent-host doctor --deep --json
+agent-host doctor --featured-readiness --json
 ```
 
 Treat `active` as working-set intent. Treat `installedIdentityMatched` and
-per-plugin doctor checks as current **binding** evidence. Treat a real new
-Agent task as the only current **discovery** evidence. Do not read a CLI
-success against a Host projection or a second cache path as proof that a
-session Skill path existed or failed.
+per-plugin doctor checks as current **binding** evidence. Treat
+`doctor --featured-readiness` as the featured working set plus projection
+receipts only; it always reports `adoptionEvidence: false`. Treat a real new
+Agent task as the only current **discovery** evidence. Unnamed adoption
+scoring is a separate protocol in [`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md).
+Do not read a CLI success against a Host projection or a second cache path as
+proof that a session Skill path existed or failed.

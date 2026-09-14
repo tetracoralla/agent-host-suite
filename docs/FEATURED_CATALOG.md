@@ -54,6 +54,7 @@ not featured.
 | Add one extra owner-selected archive | `component preview` then `component import` (inactive until `--activate` or `tools set`) |
 | Connect an Agent app | `host add` / setup `--host`, public marketplace/plugin/MCP/Skill extension points only |
 | Verify projection vs live binding | `doctor --deep` without `--skip-agent-apps`; `host status` without `--quick` |
+| Featured working set + projection receipts (not adoption) | `doctor --featured-readiness` |
 | Observe session discovery | a **new** Agent task after `restartRequired` |
 
 tools-dev dogfood is a different audience: `docs/LOCAL_DOGFOOD.md`, profile
@@ -73,7 +74,11 @@ in the working set:
    establish adoption.
 
 See [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md) for the Codex cache
-generations and the Host vs session honesty boundary.
+generations and the Host vs session honesty boundary. Unnamed page tasks,
+copy-out fixtures, and a Host-only readiness probe are in
+[`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md). That protocol is for a
+machine with Host plus Agent; this checkout does not record a completed live
+adoption.
 
 ## Non-goals for v1
 

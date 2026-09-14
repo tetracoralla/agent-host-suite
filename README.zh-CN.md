@@ -77,6 +77,20 @@ agent-host doctor --deep --json
 tools-dev 路径，不是 featured。详见
 [精选目录 v1](docs/FEATURED_CATALOG.md)。
 
+## 不点名采用验收
+
+本 checkout **没有**记录一次已完成的真人采用。没有 Host GUI / 完整 Agent 会话的
+Linux 施工环境也不能替它打分。在已经装好 Agent Host 并连接 Agent 应用的机器上，按
+[不点名采用验收](docs/ADOPTION_ACCEPTANCE.md) 把页面夹具拷出仓库、开**新会话**、
+看图标是否进入作品，且提示里不出现 Armorial。
+
+```text
+agent-host doctor --featured-readiness --json
+```
+
+该命令只检查 featured 工作集已选、以及已连接应用的投影 receipt 是否健康，并且
+`adoptionEvidence` 恒为 `false`。Host status 与调用次数不能当采用证据。
+
 ## 常用流程
 
 ```text
@@ -125,5 +139,6 @@ npm 包分发；请从源码仓库阅读
 [`TOOL_INTEGRATION.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TOOL_INTEGRATION.md)、
 [`RELEASE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/RELEASE.md)、
 [`REVIEW_CONTRACT.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md)、
-[`DISCOVERY_PROJECTION.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md) 与
-[`FEATURED_CATALOG.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md)。
+[`DISCOVERY_PROJECTION.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md)、
+[`FEATURED_CATALOG.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) 与
+[`ADOPTION_ACCEPTANCE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md)。

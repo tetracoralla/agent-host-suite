@@ -40,6 +40,7 @@ test('CLI rejects known options that do not belong to the selected operation', (
     [['status', '--deep'], 'status does not accept --deep'],
     [['status', '--quick'], 'status does not accept --quick'],
     [['doctor', '--quick'], 'doctor does not accept --quick'],
+    [['doctor', '--featured-readiness', '--deep'], 'doctor --featured-readiness does not accept --deep'],
     [['host', 'status', 'codex', '--skip-agent-apps'], 'host status does not accept --skip-agent-apps'],
     [['component', 'list', '--artifact', '/tmp/private.tar.gz'], 'component list does not accept --artifact'],
     [['component', 'remove', 'private-fixture', '--activate'], 'component remove does not accept --activate'],
@@ -185,6 +186,7 @@ test('profiles list names the featured admission set without a store', async () 
   const help = spawnSync(process.execPath, [cliPath, '--help'], { encoding: 'utf8' })
   assert.equal(help.status, 0, help.stderr)
   assert.match(help.stdout, /agent-host profiles list/u)
+  assert.match(help.stdout, /doctor \[--deep \| --featured-readiness\]/u)
   assert.match(help.stdout, /--profile standard\|featured\|developer\|observability\|local-dogfood/u)
   for (const id of await listProfileIds()) assert.match(help.stdout, new RegExp(`\\b${id}\\b`, 'u'))
   const humanOutput = human(catalog)
