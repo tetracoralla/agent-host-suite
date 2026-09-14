@@ -102,7 +102,7 @@ private struct FeaturedCatalogRow: View {
             Spacer(minLength: 20)
             Text(L10n.text(installed ? "Installed" : "Not installed in this environment"))
                 .font(.caption)
-                .foregroundStyle(installed ? .secondary : .orange)
+                .foregroundStyle(installed ? Color.secondary : Color.orange)
         }
         .padding(.vertical, 3)
     }
