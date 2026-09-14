@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Wire browser and native Managers to the featured catalog over the existing
+  setup/update/tools APIs. Setup can select `featured` (including Armorial)
+  instead of hard-coding Standard; Tools can Get uninstalled featured inventory
+  via `update --profile featured`. `tools set --profile` remains working-set
+  selection, not an installer. Setup `--no-host` and Manager “connect later”
+  allow installing Host before a supported Agent app is detected. Unsigned
+  macOS copy names Gatekeeper; `AGENT_HOST_FEATURED_CATALOG_URL` is an optional
+  honest download hook and does not claim a public GitHub Release.
 - Treat a missing HTTPS `Content-Length` as unknown, not zero, when
   acquiring a bound release artifact. Compare the header only when it is
   present and a non-negative integer; count streamed bytes, stop past the

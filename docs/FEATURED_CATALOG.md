@@ -7,7 +7,10 @@ store, ranking, review, payment, or third-party plugin index.
 
 This source checkout does not operate a catalog service and does not ship a
 browseable store. v1 is the named `featured` profile plus `profiles list` /
-`tools set --profile` over the installation APIs that already exist.
+`setup --profile featured` / `update --profile featured` over the installation
+APIs that already exist. Browser and native Managers use those same APIs.
+`tools set --profile` only selects the working set of **already installed**
+tools; it does not fetch Armorial or other missing inventory.
 
 ## What v1 is
 
@@ -36,10 +39,18 @@ those bytes.
 ```text
 agent-host profiles list --json
 agent-host setup --profile featured --host zcode --release-manifest /absolute/current.json
+agent-host setup --profile featured --no-host --release-manifest /absolute/current.json
+agent-host update --profile featured --release-manifest /absolute/current.json
 agent-host tools set --profile featured
 agent-host tools set --tool math-anchor --tool armorial
 agent-host doctor --deep --json
 ```
+
+Unsigned macOS downloads are not Apple-notarized. Control-click the app, choose
+Open, then confirm the Gatekeeper warning. This is expected until a Developer ID
+signed build exists. A Host-internal download URL may be supplied with
+`AGENT_HOST_FEATURED_CATALOG_URL`; this checkout does not publish a GitHub
+Release or claim that URL is live.
 
 `setup` against this repository's tracked `catalog/releases/draft-unbound`
 fails closed. `--development-root` is the tools-dev path (`local-dogfood`),
@@ -50,7 +61,9 @@ not featured.
 | List admitted profiles and the featured set | `agent-host profiles list` (`catalog/profiles/*.json`) |
 | Choose the admitted inventory | `setup --profile featured` / `update --profile featured` |
 | Bind exact bytes | bound release catalog + `build-provenance.json`; `setup` / `update --release-manifest` |
-| Select the working set after install | `agent-host tools set --profile featured` or `tools set --tool …` / Manager tool toggles |
+| Select the working set after install | `agent-host tools set --profile featured` or `tools set --tool …` / Manager working-set toggles. This is not inventory install. |
+| Get uninstalled featured tools in Manager | native and browser Tools **Get featured tools** call `update --profile featured` |
+| Install Host first, connect Agent later | `setup --no-host`, then `host add` after a supported app is detected |
 | Add one extra owner-selected archive | `component preview` then `component import` (inactive until `--activate` or `tools set`) |
 | Connect an Agent app | `host add` / setup `--host`, public marketplace/plugin/MCP/Skill extension points only |
 | Verify projection vs live binding | `doctor --deep` without `--skip-agent-apps`; `host status` without `--quick` |
@@ -60,8 +73,11 @@ not featured.
 If local monitoring is already enabled, `update --profile featured` keeps the
 consented monitoring components when the bound release contains them. A bound
 release that omits those components fails closed before writing and does not
-turn monitoring off. Tool selection and monitoring remain separate; this is
-not a GUI install path.
+turn monitoring off. Tool selection and monitoring remain separate.
+
+Managers present the same featured admission list: choose `featured` at setup,
+or Get featured tools after a Standard install. They do not add a third-party
+plugin market, ranking, or payment flow.
 
 tools-dev dogfood is a different audience: `docs/LOCAL_DOGFOOD.md`, profile
 `local-dogfood`, and sibling checkouts as **build inputs**. Those paths are
@@ -93,4 +109,5 @@ adoption.
 - Publishing a notarized DMG, GitHub Release, or public marketplace from this
   document.
 - Treating `local-dogfood` membership as an external featured set.
-- A Manager marketplace UI.
+- A Manager marketplace UI, ranking, reviews, or payments. Featured browse/get
+  in Manager is the owner-selected admission list, not a store.

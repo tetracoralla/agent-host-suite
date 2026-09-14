@@ -198,6 +198,39 @@ do {
         ManagerCheckPolicy.quickHostStatusArguments("claude") == ["host", "status", "claude", "--quick"],
         "foreground Agent-app detection must not inspect project-scoped bindings"
     )
+    expect(ManagerSetupPolicy.profiles.contains("featured"), "Manager setup must admit the featured catalog")
+    expect(ManagerSetupPolicy.defaultProfile == "featured", "external setup should offer featured rather than only standard")
+    expect(
+        ManagerSetupPolicy.featuredToolIDs == ["math-anchor", "migratory-time", "armorial"],
+        "featured setup must show Armorial with the standard tools"
+    )
+    expect(
+        ManagerSetupPolicy.tools(for: "featured").map(\.id).contains("armorial"),
+        "featured setup preview must include Armorial"
+    )
+    expect(!ManagerSetupPolicy.connectsHost(false), "an undetected Agent app must not block host-later setup")
+    expect(!ManagerSetupPolicy.connectsHost(nil), "unknown Agent-app detection must not require a host")
+    expect(ManagerSetupPolicy.connectsHost(true), "a detected Agent app may be connected during setup")
+    expect(
+        ManagerSetupPolicy.setupArguments(profile: "featured", host: "zcode", releaseManifest: nil, dryRun: true)
+            == ["setup", "--profile", "featured", "--host", "zcode", "--dry-run"],
+        "setupArguments must not hard-code --profile standard"
+    )
+    expect(
+        ManagerSetupPolicy.setupArguments(profile: "standard", host: nil, releaseManifest: "/tmp/current.json", dryRun: false)
+            == ["setup", "--profile", "standard", "--no-host", "--release-manifest", "/tmp/current.json"],
+        "setup without a detected Agent app must use --no-host"
+    )
+    expect(
+        ManagerSetupPolicy.setupArguments(profile: "observability", host: "codex", releaseManifest: nil, dryRun: true)
+            == ["setup", "--profile", "observability", "--host", "codex", "--enable-observability", "--dry-run"],
+        "observability setup must pass explicit monitoring consent"
+    )
+    expect(
+        ManagerSetupPolicy.updateArguments(profile: "featured", releaseManifest: "/tmp/current.json", replaceHostConflicts: false, dryRun: true)
+            == ["update", "--profile", "featured", "--release-manifest", "/tmp/current.json", "--dry-run"],
+        "acquiring featured inventory must reuse update --profile featured"
+    )
     expect(
         ManagerSection.allCases.map(\.rawValue) == ["overview", "tools", "agentApps", "usage", "activity"],
         "usage and reliability must be a first-class Manager destination"
@@ -392,6 +425,9 @@ do {
 
     UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)
     expect(L10n.text("Usage & Reliability") == "使用情况与可靠性", "the Manager must provide Simplified Chinese product copy")
+    expect(L10n.text("Get featured tools") == "获取精选工具", "featured acquire must provide Simplified Chinese copy")
+    expect(L10n.text("Connect later") == "稍后连接", "host-later setup must provide Simplified Chinese copy")
+    expect(L10n.text("Working set for new tasks") == "新任务的工作集", "working-set copy must stay distinct from inventory install")
     expect(L10n.text("Retained trace sessions") == "保留的轨迹会话", "retained trace controls must provide Simplified Chinese copy")
     expect(L10n.locale.identifier.hasPrefix("zh"), "dates must follow the explicit Simplified Chinese Manager language")
     expect(L10n.text("Complete") == "完整" && L10n.text("Running") == "运行中", "dynamic health values must be localized")
@@ -403,7 +439,7 @@ do {
     expect(L10n.text("Usage & Reliability") == "Usage & Reliability", "the Manager must allow an explicit English override")
     expect(L10n.locale.identifier.hasPrefix("en"), "dates must follow the explicit English Manager language")
 
-    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup")
+    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup")
 } catch {
     FileHandle.standardError.write(Data("manager model check failed: \(error)\n".utf8))
     exit(1)

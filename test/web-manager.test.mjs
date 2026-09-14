@@ -3,7 +3,7 @@ import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { startWebManager } from '../src/web-manager.mjs'
+import { MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
 import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 
 test('local Manager requires its one-session cookie and same-origin action requests', async (t) => {
@@ -27,6 +27,9 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.equal(page.status, 200)
   const document = await page.text()
   assert.match(document, /Usage & Reliability/u)
+  assert.match(document, /featured/u)
+  assert.match(document, /Get featured tools/u)
+  assert.match(document, /Connect later/u)
   assert.equal(document.includes(url.split('/').at(-1)), false)
 
   const dashboard = await fetch(`${origin}/api/dashboard`, { headers: { cookie } })
@@ -35,6 +38,11 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.equal(value.snapshot.configured, false)
   assert.equal(value.usage.configured, false)
   assert.equal(value.preferences.language, 'system')
+  assert.equal(value.catalog.featuredProfile, 'featured')
+  assert.equal(value.catalog.marketplace, false)
+  assert.equal(value.catalog.boundReleaseRequired, true)
+  assert.equal(value.catalog.profiles.some((profile) => profile.id === 'featured' && profile.agentComponents.includes('armorial')), true)
+  assert.equal(MANAGER_SETUP_PROFILES.includes('featured'), true)
 
   const language = await fetch(`${origin}/api/action`, {
     method: 'POST',
@@ -284,6 +292,54 @@ test('local Manager cancels an abandoned trace export and removes its temporary 
     }
   }
   await assert.rejects(access(exportedPath))
+
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
+test('local Manager accepts featured setup and host-later setup without inventing a marketplace', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-featured-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({ stateRoot, open: false, idleTimeoutMs: 60_000, onReady: readyResolve })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+
+  const featured = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'setup', profile: 'featured' }),
+  })
+  assert.equal(featured.status, 400)
+  const featuredError = await featured.json()
+  assert.equal(featuredError.error.code, 'RELEASE_UNBOUND')
+
+  const withHost = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'setup', host: 'zcode', profile: 'featured' }),
+  })
+  assert.equal(withHost.status, 400)
+  assert.equal((await withHost.json()).error.code, 'RELEASE_UNBOUND')
+
+  const rejected = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'setup', host: 'zcode', profile: 'not-a-catalog' }),
+  })
+  assert.equal(rejected.status, 400)
+  assert.equal((await rejected.json()).error.code, 'MANAGER_REQUEST_INVALID')
+
+  const acquire = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'update', profile: 'featured' }),
+  })
+  assert.equal(acquire.status, 400)
+  assert.equal((await acquire.json()).error.code, 'NOT_INSTALLED')
 
   await new Promise((resolve) => server.close(resolve))
   await running

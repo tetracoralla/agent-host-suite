@@ -190,9 +190,13 @@ are preserved.
 
 Start with [profile.test.mjs](profile.test.mjs), [featured-catalog.test.mjs](featured-catalog.test.mjs), [mcp-catalog.test.mjs](mcp-catalog.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs).
 The `featured` profile is the external admission list, including Armorial,
-and is not `local-dogfood`. `profiles list` and `tools set --profile` select
-that JSON membership through the existing setup/tools APIs. A tracked
-`draft-unbound` catalog and `--development-root` setup still fail closed.
+and is not `local-dogfood`. `profiles list`, `setup --profile featured`, and
+`update --profile featured` select that JSON membership through the existing
+setup/tools APIs. Manager setup and Tools Get featured tools use the same
+commands. `tools set --profile` only selects the working set of already
+installed tools. A tracked `draft-unbound` catalog and `--development-root`
+setup still fail closed. Setup `--no-host` installs inventory without
+connecting an Agent app.
 An update onto `featured` while local monitoring is already enabled must
 materialize the consented monitoring components together with the featured
 tool set when the bound release contains them. A release that omits those

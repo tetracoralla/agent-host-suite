@@ -27,6 +27,7 @@ final class AgentHostStore: ObservableObject {
     @Published var isPresentingSetupPlan = false
     @Published var isPresentingEnvironmentChangePlan = false
     @Published var selectedSetupHost = "zcode"
+    @Published var selectedSetupProfile = ManagerSetupPolicy.defaultProfile
 
     private let cli: AgentHostCLI
     private let environment: [String: String]
@@ -129,6 +130,43 @@ final class AgentHostStore: ObservableObject {
         ManagerAgentApp.named(selectedSetupHost).name
     }
 
+    var selectedSetupProfileName: String {
+        ManagerSetupPolicy.displayName(for: selectedSetupProfile)
+    }
+
+    var connectsAgentDuringSetup: Bool {
+        ManagerSetupPolicy.connectsHost(hostStatuses[selectedSetupHost]?.appInstalled)
+    }
+
+    var hasDetectedSetupHost: Bool {
+        ManagerAgentApp.all.contains { hostStatuses[$0.id]?.appInstalled == true }
+    }
+
+    var featuredCatalogTools: [ManagerSetupTool] {
+        ManagerSetupPolicy.tools(for: "featured")
+    }
+
+    var needsFeaturedInventory: Bool {
+        guard suite?.configured == true else { return false }
+        return ManagerSetupPolicy.featuredToolIDs.contains { suite?.components?[$0] == nil }
+    }
+
+    func isFeaturedToolInstalled(_ id: String) -> Bool {
+        suite?.components?[id] != nil
+    }
+
+    private var releaseManifestPath: String? {
+        let value = environment["AGENT_HOST_RELEASE_MANIFEST"]
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    var featuredCatalogDownloadURL: String? {
+        let value = environment["AGENT_HOST_FEATURED_CATALOG_URL"]
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
     var localExecutionStatus: String {
         guard suite?.service != nil else { return L10n.text("Stopped") }
         guard let service = doctor?.check("runtime.service") else { return L10n.text("Checking") }
@@ -202,12 +240,20 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
-    func installStandard() async {
+    func installSelectedProfile() async {
         isPresentingSetupPlan = false
-        await work("Installing standard tools") {
+        await work("Installing tools") {
             _ = try await self.cli.run(self.setupArguments(dryRun: false), as: GenericResult.self)
             try await self.reloadAll()
         }
+    }
+
+    func prepareFeaturedAcquire() async {
+        await prepareUpdate(profile: "featured")
+    }
+
+    func redetectAgentApps() async {
+        await refresh()
     }
 
     func runDoctor(deep: Bool = true) async {
@@ -222,10 +268,12 @@ final class AgentHostStore: ObservableObject {
     }
 
     func prepareUpdate(profile: String? = nil, replacingHostConflicts: Bool = false) async {
-        var arguments = ["update"]
-        if let profile { arguments += ["--profile", profile] }
-        if replacingHostConflicts { arguments.append("--replace-host-conflicts") }
-        arguments.append("--dry-run")
+        let arguments = ManagerSetupPolicy.updateArguments(
+            profile: profile,
+            releaseManifest: releaseManifestPath,
+            replaceHostConflicts: replacingHostConflicts,
+            dryRun: true
+        )
         await work(health.needsRepair ? "Preparing repair" : "Preparing update") {
             do {
                 let plan = try await self.cli.run(arguments, as: UpdatePlan.self)
@@ -259,9 +307,12 @@ final class AgentHostStore: ObservableObject {
         environmentChangePlan = nil
         switch plan {
         case let .update(_, profile, replaceHostConflicts):
-            var arguments = ["update"]
-            if let profile { arguments += ["--profile", profile] }
-            if replaceHostConflicts { arguments.append("--replace-host-conflicts") }
+            let arguments = ManagerSetupPolicy.updateArguments(
+                profile: profile,
+                releaseManifest: releaseManifestPath,
+                replaceHostConflicts: replaceHostConflicts,
+                dryRun: false
+            )
             await action(arguments, label: health.needsRepair ? "Repairing environment" : "Updating environment", conflictRecovery: true)
         case .rollback:
             await action(["rollback"], label: "Restoring previous version")
@@ -346,12 +397,12 @@ final class AgentHostStore: ObservableObject {
     }
 
     private func setupArguments(dryRun: Bool) -> [String] {
-        var arguments = ["setup", "--profile", "standard", "--host", selectedSetupHost]
-        if let manifest = environment["AGENT_HOST_RELEASE_MANIFEST"], !manifest.isEmpty {
-            arguments += ["--release-manifest", manifest]
-        }
-        if dryRun { arguments.append("--dry-run") }
-        return arguments
+        ManagerSetupPolicy.setupArguments(
+            profile: selectedSetupProfile,
+            host: connectsAgentDuringSetup ? selectedSetupHost : nil,
+            releaseManifest: releaseManifestPath,
+            dryRun: dryRun
+        )
     }
 
     private func action(_ arguments: [String], label: String, conflictRecovery: Bool = false) async {

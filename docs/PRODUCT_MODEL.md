@@ -19,8 +19,11 @@ matches a stranger's package bytes while they still edit those repositories.
 
 The `featured` profile is the external-user admission list: an owner-selected
 subset of independently released tools installed through the existing setup,
-`profiles list`, `tools set`, and private-import APIs. It is not
-`local-dogfood` and not a store. See [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md).
+`profiles list`, `update --profile featured`, and private-import APIs. Browser
+and native Managers use those same APIs to choose featured at setup and to Get
+uninstalled featured tools. `tools set --profile` only enables the working set
+of already-installed tools. It is not `local-dogfood` and not a store. See
+[`FEATURED_CATALOG.md`](FEATURED_CATALOG.md).
 Host working-set selection is not current-session discovery; see
 [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md).
 

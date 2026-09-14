@@ -42,7 +42,9 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
   `local-dogfood` 是本机反馈 profile，不是商店。
 
 [精选目录 v1](docs/FEATURED_CATALOG.md) 是名为 `featured` 的 profile：通过上述同一套
-安装 API 选出的独立发布工具子集，不是市场。Codex 投影与会话 Skill/MCP 路径见
+安装 API 选出的独立发布工具子集。浏览器与原生 Manager 可在设置时选择精选，或在标准
+安装后“获取精选工具”（含 Armorial）。`tools set --profile` 只启用已安装工具的工作集，
+不会安装尚未入库的工具。它不是市场。Codex 投影与会话 Skill/MCP 路径见
 [发现与投影](docs/DISCOVERY_PROJECTION.md)。
 
 ## Profile

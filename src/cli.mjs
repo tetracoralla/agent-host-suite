@@ -21,7 +21,7 @@ const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 
 const PROFILE_CHOICES = 'standard|featured|developer|observability|local-dogfood'
 
 const USAGE = `Usage:
-  agent-host setup [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--host codex|claude|zcode] [--workspace-root PATH] [--release-manifest PATH | --development-root PATH] [--enable-observability] [--replace-host-conflicts] [--no-service] [--dry-run] [--state-root PATH] [--json]
+  agent-host setup [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--host codex|claude|zcode | --no-host] [--workspace-root PATH] [--release-manifest PATH | --development-root PATH] [--enable-observability] [--replace-host-conflicts] [--no-service] [--dry-run] [--state-root PATH] [--json]
   agent-host status [--state-root PATH] [--json]
   agent-host snapshot [--state-root PATH] [--json]
   agent-host catalog [--state-root PATH] [--json]
@@ -56,7 +56,7 @@ const USAGE = `Usage:
   agent-host uninstall [--purge-data] [--state-root PATH] [--json]`
 
 const ROUTE_ARGUMENTS = Object.freeze({
-  setup: ['--profile', '--host', '--tool', '--workspace-root', '--development-root', '--release-manifest', '--state-root', '--enable-observability', '--replace-host-conflicts', '--no-service', '--dry-run', '--json'],
+  setup: ['--profile', '--host', '--tool', '--workspace-root', '--development-root', '--release-manifest', '--state-root', '--enable-observability', '--replace-host-conflicts', '--no-service', '--no-host', '--dry-run', '--json'],
   status: ['--state-root', '--json'],
   snapshot: ['--state-root', '--json'],
   catalog: ['--state-root', '--json'],
@@ -114,6 +114,7 @@ function parseArgs(argv) {
     deep: false,
     dryRun: false,
     noService: false,
+    noHost: false,
     enableObservability: false,
     purgeData: false,
     replaceHostConflicts: false,
@@ -131,7 +132,7 @@ function parseArgs(argv) {
   if (options.command === 'component' && ['status', 'remove', 'rollback'].includes(options.action) && argv[2] !== undefined && !argv[2].startsWith('--')) options.target = argv[2]
   const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--adapter', '--recovery', '--manifest-sha256'])
   const booleans = new Map([
-    ['--json', 'json'], ['--deep', 'deep'], ['--dry-run', 'dryRun'], ['--no-service', 'noService'],
+    ['--json', 'json'], ['--deep', 'deep'], ['--dry-run', 'dryRun'], ['--no-service', 'noService'], ['--no-host', 'noHost'],
     ['--enable-observability', 'enableObservability'], ['--purge-data', 'purgeData'],
     ['--replace-host-conflicts', 'replaceHostConflicts'],
     ['--activate', 'activate'], ['--replace', 'replace'],
@@ -201,6 +202,9 @@ function parseArgs(argv) {
     throw new AgentHostError('CLI_USAGE', `Unknown argument: ${arg}`)
   }
   if (options.tools.length === 0) options.tools = undefined
+  if (route === 'setup' && options.noHost === true && options.hosts.length > 0) {
+    throw new AgentHostError('CLI_USAGE', 'setup --no-host cannot be combined with --host')
+  }
   if (route === 'tools set') {
     if ((options.tools === undefined) === (options.profile === undefined)) {
       throw new AgentHostError('CLI_USAGE', 'tools set requires --tool or --profile, not both')
@@ -282,6 +286,10 @@ export function human(result) {
   if (result.schemaVersion === FEATURED_CATALOG_SCHEMA) {
     return [
       'Featured catalog · not a marketplace · bound release required',
+      result.workingSetNote ?? 'tools set --profile selects the working set of already-installed tools. It does not install missing inventory.',
+      result.download?.configured === true && typeof result.download.url === 'string'
+        ? `download ${result.download.url}`
+        : 'no public download URL configured',
       ...result.profiles.map((profile) => {
         const role = profile.featured === true ? 'featured' : profile.dogfood === true ? 'dogfood' : 'profile'
         const tools = profile.defaultAgentComponents.length === 0 ? 'no Agent tools' : profile.defaultAgentComponents.join(', ')
