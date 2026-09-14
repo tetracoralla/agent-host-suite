@@ -150,8 +150,8 @@ notarization job. This product does **not** use those Apple secrets. Copy
 [`unsigned-preview-release.yml`](unsigned-preview-release.yml) to
 `.github/workflows/unsigned-preview-release.yml` (or replace `release.yml`)
 with GitHub Desktop from an account that has the `workflow` scope. The draft
-uploads an unsigned prerelease, does not call `notarytool`, and fails closed
-when a bound catalog is missing; it does not invent artifacts.
+uploads an unsigned prerelease, does not invoke Apple notarization tooling,
+and fails closed when a bound catalog is missing; it does not invent artifacts.
 
 ## Non-goals
 
