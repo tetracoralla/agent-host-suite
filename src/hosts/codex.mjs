@@ -17,9 +17,17 @@ const pluginKey = (selector) => ['plugins', selector]
 const enabledKey = (selector) => ['plugins', selector, 'enabled']
 const cellValue = (cell) => cell.present ? cell.value : null
 const legacyUnsafe = (entry) => entry?.restorePlugin === true || entry?.displacedMarketplace != null || (entry?.displacedPlugins ?? []).some((item) => item.before === undefined)
-const publicAbsolutePath = (value) => typeof value === 'string' && isAbsolute(value) && resolve(value) === value ? value : null
+const marketplaceHasOtherPlugins = (config, selector, marketplace) =>
+  Object.keys(config.plugins ?? {}).some((name) => name !== selector && name.endsWith('@' + marketplace))
 
-function identityErrorFor(cacheStatus, { managed, liveObserved }) {
+function advertisedPath(value) {
+  if (value == null) return { kind: 'absent' }
+  if (typeof value !== 'string' || value.length === 0 || !isAbsolute(value)) return { kind: 'invalid' }
+  return { kind: 'absolute', path: resolve(value) }
+}
+
+function identityErrorFor(cacheStatus, { managed, liveObserved, advertisedInvalid }) {
+  if (advertisedInvalid) return 'Codex reported a plugin cache path that is not a verifiable absolute location'
   if (managed === undefined) return 'No matching cached installation was verified from an installation receipt'
   if (cacheStatus === 'missing') {
     return liveObserved
@@ -27,6 +35,11 @@ function identityErrorFor(cacheStatus, { managed, liveObserved }) {
       : 'The Codex cache recorded at install time is gone'
   }
   if (cacheStatus === 'changed') return 'The Codex cache no longer matches the verified projection'
+  if (cacheStatus === 'unverifiable') {
+    return liveObserved
+      ? 'Codex reports a live plugin cache path that cannot be verified'
+      : 'The Codex cache recorded at install time cannot be verified'
+  }
   return 'No matching cached installation was verified from an installation receipt'
 }
 
@@ -79,8 +92,8 @@ async function cacheMatches(path, files, fingerprint) {
 }
 
 async function inspectCache(path, files, fingerprint) {
-  const target = publicAbsolutePath(path)
-  if (target === null) return 'missing'
+  if (typeof path !== 'string' || !isAbsolute(path)) return 'unverifiable'
+  const target = resolve(path)
   try {
     await lstat(target)
   } catch (failure) {
@@ -104,10 +117,17 @@ async function inspect(session, manifest, options) {
     const managed = previous.find((item) => item.component === component.plugin)
     const expected = options.useManagedBindings === true && managed !== undefined ? managed : component
     const target = managed === undefined ? null : listed.installed.find((item) => item.pluginId === managed.selector)
-    const liveInstalledPath = publicAbsolutePath(target?.installedPath)
-    const receiptPath = publicAbsolutePath(managed?.installedPath)
-    const identityPath = liveInstalledPath ?? receiptPath
-    const cacheStatus = await inspectCache(identityPath, expected.pluginIdentityRelativeFiles, expected.pluginIdentityFingerprint)
+    const advertised = advertisedPath(target?.installedPath)
+    const receipt = advertisedPath(managed?.installedPath)
+    const liveInstalledPath = advertised.kind === 'absolute' ? advertised.path : null
+    let cacheStatus
+    if (advertised.kind === 'invalid') cacheStatus = 'unverifiable'
+    else if (advertised.kind === 'absolute') {
+      cacheStatus = await inspectCache(advertised.path, expected.pluginIdentityRelativeFiles, expected.pluginIdentityFingerprint)
+    } else if (receipt.kind === 'absolute') {
+      cacheStatus = await inspectCache(receipt.path, expected.pluginIdentityRelativeFiles, expected.pluginIdentityFingerprint)
+    } else if (receipt.kind === 'invalid') cacheStatus = 'unverifiable'
+    else cacheStatus = 'missing'
     const installedIdentityMatched = target?.installed === true && cacheStatus === 'matched'
     const duplicates = listed.installed.filter((item) => item.name === component.plugin && item.installed === true && item.enabled === true && item.pluginId !== managed?.selector)
     const ownedSelectors = new Set(previous.filter((item) => item.pluginCreated === true).map((item) => item.selector))
@@ -137,7 +157,9 @@ async function inspect(session, manifest, options) {
       pluginPresent: target?.installed === true, pluginEnabled: target?.enabled === true,
       installedVersion: target?.version ?? null, requestedVersion: component.version,
       cacheStatus, liveCacheObserved: liveInstalledPath !== null,
-      installedIdentityMatched, installedIdentityError: installedIdentityMatched ? null : identityErrorFor(cacheStatus, { managed, liveObserved: liveInstalledPath !== null }),
+      installedIdentityMatched, installedIdentityError: installedIdentityMatched ? null : identityErrorFor(cacheStatus, {
+        managed, liveObserved: liveInstalledPath !== null, advertisedInvalid: advertised.kind === 'invalid',
+      }),
       managedTarget: managed?.pluginCreated === true, migratableDuplicates: duplicates.map((item) => ({ selector: item.pluginId, marketplace: item.marketplaceName })),
     })
   }
@@ -219,6 +241,18 @@ export async function installCodex(manifest, runner = runFile, options = {}) {
         const snapshot = await current.client.read()
         const priorCell = prior === undefined ? { present: false } : getCell(snapshot.config, pluginKey(prior.selector))
         const displacedPlugins = [...(prior?.displacedPlugins ?? [])]
+        const sameProjection = prior?.configurationVersion === 1 && prior.pluginRoot === component.pluginRoot
+          && prior.pluginIdentityFingerprint === component.pluginIdentityFingerprint
+        const reusing = sameProjection && observed.installedIdentityMatched
+        if (!reusing && prior !== undefined && prior.pluginCreated === true) {
+          if (marketplaceHasOtherPlugins(snapshot.config, prior.selector, prior.marketplace)) {
+            throw error('CODEX_MARKETPLACE_CHANGED', 'Another registration now depends on the Host marketplace; its supporting files must remain recorded')
+          }
+          if (prior.configurationVersion === 1 && priorCell.present && !equal(priorCell.value, prior.pluginBinding)
+            && !equal(priorCell.value, { ...prior.pluginBinding, enabled: false })) {
+            throw error('CODEX_PLUGIN_CHANGED', 'The previous managed Codex registration changed after installation')
+          }
+        }
         for (const duplicate of observed.migratableDuplicates) {
           const before = await current.client.read()
           const keys = enabledKey(duplicate.selector)
@@ -227,9 +261,7 @@ export async function installCodex(manifest, runner = runFile, options = {}) {
           }
           await change([{ keys, value: false }])
         }
-        const sameProjection = prior?.configurationVersion === 1 && prior.pluginRoot === component.pluginRoot
-          && prior.pluginIdentityFingerprint === component.pluginIdentityFingerprint
-        if (sameProjection && observed.installedIdentityMatched) {
+        if (reusing) {
           const expected = { ...(prior.pluginBinding ?? {}), enabled: observed.pluginEnabled }
           if (!equal(priorCell, { present: true, value: expected }) && options.replaceConflicts !== true) {
             throw error('CODEX_PLUGIN_CHANGED', 'The managed Codex registration changed after installation')
@@ -239,8 +271,9 @@ export async function installCodex(manifest, runner = runFile, options = {}) {
           continue
         }
         // A vanished Host-owned cache is not a user edit. Recopy through the
-        // public plugin installer with a fresh marketplace identity. Changed
-        // or unverifiable bytes still require explicit replacement.
+        // public plugin installer with a fresh marketplace identity when Host
+        // still exclusively owns that marketplace. Changed or unverifiable
+        // bytes still require explicit replacement.
         if (sameProjection && priorCell.present && observed.cacheStatus !== 'missing' && options.replaceConflicts !== true) {
           throw error('CODEX_PLUGIN_CHANGED', 'The cached Codex installation changed or cannot be verified; replacement requires a new Host binding')
         }
@@ -272,8 +305,10 @@ export async function installCodex(manifest, runner = runFile, options = {}) {
           await change([{ keys: pluginKey(prior.selector), value: null }])
           const previousMarketplace = prior.configurationVersion === 1 ? prior.marketplaceBinding
             : { source_type: 'local', source: prior.marketplaceRoot }
+          const remaining = await current.client.read()
           if (prior.marketplaceCreated === true
-            && equal(getCell((await current.client.read()).config, ['marketplaces', prior.marketplace]), { present: true, value: previousMarketplace })) {
+            && !marketplaceHasOtherPlugins(remaining.config, prior.selector, prior.marketplace)
+            && equal(getCell(remaining.config, ['marketplaces', prior.marketplace]), { present: true, value: previousMarketplace })) {
             await change([{ keys: ['marketplaces', prior.marketplace], value: null }])
           }
         } else if (prior !== undefined && priorCell.present) {
@@ -308,7 +343,7 @@ async function remove(hostState, runner, options, suspend) {
       const snapshot = await current.client.read()
       const actual = getCell(snapshot.config, pluginKey(entry.selector))
       const suspended = { ...entry.pluginBinding, enabled: false }
-      if (Object.keys(snapshot.config.plugins ?? {}).some((selector) => selector !== entry.selector && selector.endsWith('@' + entry.marketplace))) {
+      if (marketplaceHasOtherPlugins(snapshot.config, entry.selector, entry.marketplace)) {
         throw error('CODEX_MARKETPLACE_CHANGED', 'Another registration now depends on the Host marketplace; its supporting files must remain recorded')
       }
       if (actual.present && !equal(actual.value, entry.pluginBinding) && !equal(actual.value, suspended)) {

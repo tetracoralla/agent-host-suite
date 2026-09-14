@@ -5,13 +5,27 @@ status surfaces observe which facts, and where a Host-reported working set can
 diverge from a live session. It is not a marketplace spec and does not
 establish that a current session loaded the selected tools.
 
-## Observed failure
+## Session Skill-path reports (unverified)
 
-A Host environment can list Armorial as selected/enabled while a live Agent
-session receives a Skill path that does not exist and no MCP tools. A different
-cache or Host projection path can still run the Provider CLI. That combination
-is Host-state success plus session-path failure, not proof that the Provider
-package is missing.
+A previous write-up treated this combination as an **observed failure**: Host
+lists Armorial as selected/enabled; a live session is given a Skill path that
+does not exist and has no MCP tools; another cache or Host projection path
+still runs the Provider CLI.
+
+That specific session evidence is **not confirmed**. The checker joined the
+Skill root with the wrong plugin directory (Armorial’s files live under its
+own Host projection, not another plugin’s root). The files were present. That
+was a verification mapping error, not a located Host defect, and this change
+does not claim to have found or fixed that session’s root cause.
+
+A **separate**, reproducible robustness case remains: Codex registration can
+stay `enabled` after a Host-owned plugin cache directory is gone. Inspect
+records that as `cacheStatus: missing`, and install may recopy through public
+`plugin add` when Host still exclusively owns the marketplace. Cache recopy
+is not evidence that a particular Agent session resolved a Skill path.
+
+`plugin list` without `installedPath` only supports the registration fact. It
+does not prove that an open session loaded MCP tools.
 
 ## Codex path generations
 
@@ -60,10 +74,11 @@ These surfaces are different facts:
 `hostFacingManifest` sets `skillOnly: false` only for components in the active
 working set. Codex then materializes a new digest and, when the projection
 identity changed, a new marketplace and `plugin add`. Host state can show
-Armorial `active` immediately. An open session can still hold the previous
-Skill-only cache or a path into a pruned digest: Skill 404, no MCP, while the
-new cache or Host projection CLI still works. Binding changes set
-`restartRequired`; they do not reload open tasks.
+Armorial `active` immediately. An already-open session **might** still hold a
+previous Skill-only cache or a path into a pruned digest. That is a possible
+divergence (Host `active` vs session catalog), not a confirmed observation
+from a mis-joined Skill root. Binding changes set `restartRequired`; they do
+not reload open tasks.
 
 A second Host-visible case is Codex config `enabled: true` with a **missing**
 cache. `plugin list` can still report `installed`/`enabled` from registration.
@@ -78,12 +93,21 @@ Host-side, inspect now:
 
 - records `cacheStatus` (`matched` / `missing` / `changed` / `unverifiable`);
 - uses an absolute `installedPath` from public `plugin list` when Codex
-  reports one, otherwise the install receipt;
+  reports one (normalized, including a trailing separator), otherwise the
+  install receipt; a present but non-absolute or unverifiable field is
+  `unverifiable`, not an absent field and not a silent fallback to the
+  older receipt;
 - treats a missing Host-owned cache as recopiable through public `plugin add`
-  and a fresh marketplace identity, without conflict replacement.
+  and a fresh marketplace identity, without conflict replacement, only when
+  Host still exclusively owns that marketplace. Another plugin on the same
+  marketplace (including a disabled extra registration) fails closed before
+  writes, the same way `remove()` does, so recopy cannot delete a source
+  other registrations still reference.
 
 Changed or unverifiable cache bytes still require `--replace-host-conflicts`.
-Host still does not patch Codex private files.
+Host still does not patch Codex private files. This recopy is a robustness
+fix for a vanished Host-owned cache. It does not locate or resolve an
+unverified session Skill-path report.
 
 Out of this repository: Codex session Skill/MCP resolution is not a Host
 public API. If `plugin list --json` omits the live cache path the session
@@ -108,5 +132,5 @@ agent-host doctor --deep --json
 Treat `active` as working-set intent. Treat `installedIdentityMatched` and
 per-plugin doctor checks as current **binding** evidence. Treat a real new
 Agent task as the only current **discovery** evidence. Do not read a CLI
-success against a Host projection or a second cache path as proof that the
-failing session path exists.
+success against a Host projection or a second cache path as proof that a
+session Skill path existed or failed.
