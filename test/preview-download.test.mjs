@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
@@ -166,6 +166,25 @@ test('resolveReleaseManifestPath uses the default unbound catalog when nothing i
   assert.equal(
     await resolveReleaseManifestPath({}, { env: cleanEnv(), paths: { downloads: '/tmp' } }),
     defaultReleaseManifestPath(),
+  )
+})
+
+test('resolveReleaseManifestPath treats Windows drive-letter paths as local files', async () => {
+  const candidate = 'C:\\Users\\Fixture\\catalog\\current.json'
+  assert.equal(
+    await resolveReleaseManifestPath({ releaseManifest: candidate }, { env: cleanEnv() }),
+    resolve(candidate),
+  )
+})
+
+test('resolveReleaseManifestPath rejects non-HTTPS URL schemes', async () => {
+  await assert.rejects(
+    () => resolveReleaseManifestPath({ releaseManifest: 'http://example.invalid/current.json' }, { env: cleanEnv() }),
+    (error) => error.code === 'PREVIEW_DOWNLOAD_UNSUPPORTED',
+  )
+  await assert.rejects(
+    () => resolveReleaseManifestPath({ releaseManifest: 'file:///tmp/current.json' }, { env: cleanEnv() }),
+    (error) => error.code === 'PREVIEW_DOWNLOAD_UNSUPPORTED',
   )
 })
 

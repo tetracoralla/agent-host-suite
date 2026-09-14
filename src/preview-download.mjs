@@ -345,6 +345,12 @@ export async function fetchPreviewCarrier(index, downloads, options = {}) {
   return { ...acquired, carrier }
 }
 
+function isWindowsDrivePath(candidate) {
+  // Drive letters are filesystem paths, not URL schemes. The URL-scheme regex below
+  // would otherwise treat "C:\\..." as protocol "C:" on Windows runners.
+  return /^[A-Za-z]:[\\/]/u.test(candidate)
+}
+
 export async function resolveReleaseManifestPath(options = {}, dependencies = {}) {
   const env = dependencies.env ?? process.env
   const explicit = trimEnv(options.releaseManifest)
@@ -359,7 +365,7 @@ export async function resolveReleaseManifestPath(options = {}, dependencies = {}
     })
     return fetched.manifestPath
   }
-  if (/^[a-z][a-z0-9+.-]*:/iu.test(candidate)) {
+  if (!isWindowsDrivePath(candidate) && /^[a-z][a-z0-9+.-]*:/iu.test(candidate)) {
     fail('PREVIEW_DOWNLOAD_UNSUPPORTED', `Unsupported catalog URL protocol: ${candidate.split(':', 1)[0]}:`)
   }
   return resolve(candidate)
