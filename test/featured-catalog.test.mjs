@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { doctor } from '../src/doctor.mjs'
 import { setActiveTools, toolSetStatus, updateInstallation } from '../src/lifecycle.mjs'
-import { defaultToolsForProfile } from '../src/profile.mjs'
+import { defaultToolsForProfile, loadProfile } from '../src/profile.mjs'
+import { materializeComponentIdsForUpdate, OBSERVABILITY_RELEASE_COMPONENTS } from '../src/release-manifest.mjs'
 import { setup } from '../src/setup.mjs'
 import { loadState, prepareStatePaths } from '../src/state.mjs'
 import { compatibleApplicationState, createCodexRunner, createDevelopmentWorkspace, healthyCatalogPreflight } from './helpers.mjs'
@@ -139,6 +140,130 @@ test('a bound featured profile is selectable through setup, profiles list, and t
   assert.equal(membership?.status, 'ok')
   assert.equal(membership.detail.profile, 'featured')
   assert.deepEqual(membership.detail.defaultAgentComponents, ['math-anchor', 'migratory-time', 'armorial'])
+})
+
+test('featured materialization merges consented monitoring without making it a featured tool', async () => {
+  const featured = await loadProfile('featured')
+  assert.equal(featured.components.includes('armorial'), true)
+  assert.equal(featured.components.includes('agent-tool-observer'), false)
+  assert.deepEqual(
+    materializeComponentIdsForUpdate(featured.components, { preserveObservability: false }),
+    featured.components,
+  )
+  const merged = materializeComponentIdsForUpdate(featured.components, { preserveObservability: true })
+  assert.equal(merged.includes('armorial'), true)
+  for (const id of OBSERVABILITY_RELEASE_COMPONENTS) assert.equal(merged.includes(id), true)
+  assert.equal(featured.agentComponents.includes('agent-tool-observer'), false)
+})
+
+function monitoringActivation(root) {
+  return async (candidate) => ({
+    ...candidate,
+    observability: {
+      enabled: true,
+      consentedAt: '2026-09-14T00:00:00.000Z',
+      observer: { stateDir: join(root, 'observer') },
+      maintenance: null,
+      latest: null,
+    },
+  })
+}
+
+test('update to featured keeps consented monitoring when the bound release includes it', { skip: !supportedReleasePlatform }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-featured-observability-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const manifest = await createReleaseFixture(join(root, 'release'), {
+    suiteVersion: '0.1.0-beta.1',
+    releaseId: 'fixture-featured-observability',
+    marker: 'featured-observability',
+    includeArmorial: true,
+    includeObservability: true,
+  })
+  const stateRoot = join(root, 'private', 'state', 'root')
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false, mathVersion: '0.4.0', mathMarketplace: 'openadam' })
+  const installed = await setup({
+    profile: 'observability',
+    hosts: [],
+    releaseManifest: manifest,
+    stateRoot,
+    noService: true,
+    dryRun: false,
+    enableObservability: true,
+  }, releaseDependencies(fake, {
+    hostSkillHome: join(root, 'host-home'),
+    activateObservability: monitoringActivation(root),
+  }))
+  assert.equal(installed.status, 'installed')
+  const before = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(before.profile, 'observability')
+  assert.equal(before.observability.enabled, true)
+  assert.equal(before.components['agent-tool-observer'] !== undefined, true)
+  assert.equal(before.components.armorial, undefined)
+
+  const updated = await updateInstallation({
+    profile: 'featured',
+    stateRoot,
+    releaseManifest: manifest,
+    dryRun: false,
+  }, releaseDependencies(fake, { rebindObservability: async () => {} }))
+  assert.equal(updated.status, 'updated')
+  const after = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(after.profile, 'featured')
+  assert.equal(after.observability.enabled, true)
+  assert.equal(after.components.armorial.displayName, 'Armorial')
+  assert.equal(after.components['agent-tool-observer'] !== undefined, true)
+  assert.equal(after.components['context-surface-analyzer'] !== undefined, true)
+  assert.deepEqual(after.agentComponents, ['math-anchor', 'migratory-time', 'armorial'])
+})
+
+test('update to featured fails closed when a bound release omits monitoring components', { skip: !supportedReleasePlatform }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-featured-observability-missing-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const withMonitoring = await createReleaseFixture(join(root, 'release-with-monitoring'), {
+    suiteVersion: '0.1.0-beta.1',
+    releaseId: 'fixture-featured-observability-present',
+    marker: 'featured-observability-present',
+    includeArmorial: true,
+    includeObservability: true,
+  })
+  const withoutMonitoring = await createReleaseFixture(join(root, 'release-without-monitoring'), {
+    suiteVersion: '0.1.0-beta.2',
+    releaseId: 'fixture-featured-observability-missing',
+    marker: 'featured-observability-missing',
+    includeArmorial: true,
+  })
+  const stateRoot = join(root, 'private', 'state', 'root')
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false, mathVersion: '0.4.0', mathMarketplace: 'openadam' })
+  await setup({
+    profile: 'observability',
+    hosts: [],
+    releaseManifest: withMonitoring,
+    stateRoot,
+    noService: true,
+    dryRun: false,
+    enableObservability: true,
+  }, releaseDependencies(fake, {
+    hostSkillHome: join(root, 'host-home'),
+    activateObservability: monitoringActivation(root),
+  }))
+  const before = await loadState(await prepareStatePaths(stateRoot))
+  await assert.rejects(
+    updateInstallation({
+      profile: 'featured',
+      stateRoot,
+      releaseManifest: withoutMonitoring,
+      dryRun: true,
+    }, releaseDependencies(fake)),
+    (error) => error.code === 'OBSERVABILITY_RELEASE_COMPONENTS_MISSING'
+      && error.details.components.includes('agent-tool-observer')
+      && error.details.components.includes('context-surface-analyzer'),
+  )
+  const after = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(after.profile, 'observability')
+  assert.equal(after.observability.enabled, true)
+  assert.equal(after.releaseId, before.releaseId)
+  assert.equal(after.components.armorial, undefined)
+  assert.equal(after.components['agent-tool-observer'] !== undefined, true)
 })
 
 test('doctor reports missing featured Agent tools', async () => {

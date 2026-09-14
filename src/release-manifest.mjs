@@ -12,6 +12,11 @@ export const COMPONENT_SCHEMA = 'openadam.agent-host-component.v0.1'
 export const REQUIRED_RELEASE_COMPONENTS = ['node-runtime', 'direct-execution-runtime', 'math-anchor', 'migratory-time']
 export const OBSERVABILITY_RELEASE_COMPONENTS = ['agent-tool-observer', 'context-surface-analyzer']
 
+export function materializeComponentIdsForUpdate(profileComponents, { preserveObservability = false } = {}) {
+  if (preserveObservability !== true) return [...profileComponents]
+  return [...new Set([...profileComponents, ...OBSERVABILITY_RELEASE_COMPONENTS])]
+}
+
 const SUITE_VERSION_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?$/u
 
 const COMPONENT_KINDS = new Map([

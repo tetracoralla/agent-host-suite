@@ -20,7 +20,7 @@ import { recordActivity } from './activity.mjs'
 import { cleanupMaterializedRelease, discardMaterializedDownloads, materializeRelease, verifyReleaseComponent } from './release-artifacts.mjs'
 import { COMPONENT_WARMUP_POLICY_VERSION, warmInstalledAgentComponents } from './component-warmup.mjs'
 import { preflightManagedCatalog } from './context-exporter.mjs'
-import { compareSuiteVersions, loadReleaseManifest, OBSERVABILITY_RELEASE_COMPONENTS } from './release-manifest.mjs'
+import { compareSuiteVersions, loadReleaseManifest, materializeComponentIdsForUpdate, OBSERVABILITY_RELEASE_COMPONENTS, selectedReleaseComponents } from './release-manifest.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { FEATURED_PROFILE_ID, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
 import { inspectOperationsSkill, installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
@@ -694,7 +694,15 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
       recordSha256: provenance.sha256,
       remoteConfirmedAtBuildTime: provenance.record.policy === 'remote-tagged',
     }
-    releasePreparation = await materializeRelease(release, paths, { runner: dependencies.artifactRunner ?? runFile, componentIds: profile.components })
+    const preserveObservability = previous.observability?.enabled === true
+    const componentIds = materializeComponentIdsForUpdate(profile.components, { preserveObservability })
+    if (preserveObservability) {
+      const missing = OBSERVABILITY_RELEASE_COMPONENTS.filter((id) => !selectedReleaseComponents(release.manifest).has(id))
+      if (missing.length > 0) {
+        throw new AgentHostError('OBSERVABILITY_RELEASE_COMPONENTS_MISSING', 'The selected release cannot preserve local monitoring', { components: missing })
+      }
+    }
+    releasePreparation = await materializeRelease(release, paths, { runner: dependencies.artifactRunner ?? runFile, componentIds })
     manifest = releasePreparation.manifest
   } else if (previous.channel === 'development') {
     manifest = await buildDevelopmentManifest(previous.developmentRoot)

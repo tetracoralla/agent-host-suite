@@ -285,6 +285,7 @@ enum L10n {
         ,"Connected apps are configured · Run Full Check to verify bindings": "已配置连接的应用 · 运行完整检查以验证绑定"
         ,"Connected apps have current bindings": "已连接应用的绑定为当前版本"
         ,"Direct execution": "直接执行"
+        ,"Environment checks": "环境检查"
         ,"Install {name} before connecting it": "请先安装 {name}，再进行连接"
         ,"Installed tool runtimes are ready": "已安装的工具运行时已就绪"
         ,"Installed Agent tool": "已安装的 Agent 工具"

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Treat a missing HTTPS `Content-Length` as unknown, not zero, when
+  acquiring a bound release artifact. Compare the header only when it is
+  present and a non-negative integer; count streamed bytes, stop past the
+  bound size, then verify the on-disk length and SHA-256. Timeouts, stalls,
+  and caller cancellation fail closed and remove the temporary file.
+- Roll every blocking `doctor` error into native Manager health, including
+  `profile.catalog`. An unmapped error id cannot report Ready.
+- Keep consented local monitoring when `update --profile featured` is given
+  a bound release that still contains the monitoring components. A release
+  that omits them still fails with `OBSERVABILITY_RELEASE_COMPONENTS_MISSING`
+  and does not write the featured working set or turn monitoring off. This
+  is not a GUI featured-install path and does not make a public Release.
 - Add an unnamed Armorial adoption protocol: copy-out page fixtures, a
   fresh-session scorecard, and `doctor --featured-readiness` for featured
   working-set plus projection receipts only. Claude and ZCode readiness
