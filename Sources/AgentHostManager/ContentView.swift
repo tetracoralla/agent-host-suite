@@ -95,19 +95,30 @@ struct ContentView: View {
         .listStyle(.sidebar)
         .navigationTitle("Agent Host")
         .safeAreaInset(edge: .bottom) {
-            if let version = store.suite?.suiteVersion {
-                Text(version)
+            if let summary = versionSummary {
+                Text(summary)
                     .font(.caption)
                     .monospacedDigit()
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.8)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .accessibilityLabel("\(L10n.text("Version")) \(version)")
+                    .accessibilityLabel(summary)
             }
         }
+    }
+
+    private var versionSummary: String? {
+        let application = store.source?.application
+        let environment = store.source?.environment?.suiteVersion ?? store.suite?.suiteVersion
+        if application?.version == nil && environment == nil { return nil }
+        return ManagerSourcePolicy.versionSummary(
+            applicationVersion: application?.version,
+            applicationBuild: application?.build,
+            environmentVersion: environment
+        )
     }
 
     @ViewBuilder private var detail: some View {

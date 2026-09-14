@@ -8,6 +8,7 @@ enum RecoveryOption: Equatable {
 @MainActor
 final class AgentHostStore: ObservableObject {
     @Published private(set) var suite: SuiteStatus?
+    @Published private(set) var source: SourceStatus?
     @Published private(set) var observations: ObservabilityStatus?
     @Published private(set) var usage: UsageSummary?
     @Published private(set) var traceSourceCatalog: TraceSourceCatalog?
@@ -162,9 +163,12 @@ final class AgentHostStore: ObservableObject {
     }
 
     private var releaseManifestPath: String? {
-        let value = environment["AGENT_HOST_RELEASE_MANIFEST"]
-        guard let value, !value.isEmpty else { return nil }
-        return value
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: environment["AGENT_HOST_RELEASE_MANIFEST"],
+            savedPath: source?.source?.path,
+            savedURL: source?.source?.url,
+            featuredCatalogURL: environment["AGENT_HOST_FEATURED_CATALOG_URL"]
+        )
     }
 
     var featuredCatalogDownloadURL: String? {
@@ -464,6 +468,33 @@ final class AgentHostStore: ObservableObject {
         await action(purgeData ? ["uninstall", "--purge-data"] : ["uninstall"], label: "Removing Agent Host")
     }
 
+    func checkCatalogSource() async {
+        await work("Checking catalog source") {
+            self.source = try await self.cli.run(ManagerSourcePolicy.checkArguments(), as: SourceStatus.self)
+        }
+    }
+
+    func setCatalogURL(_ url: String) async {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await work("Setting catalog source") {
+            self.source = try await self.cli.run(ManagerSourcePolicy.setURLArguments(trimmed), as: SourceStatus.self)
+        }
+    }
+
+    func setCatalogManifest(_ path: String) async {
+        guard !path.isEmpty else { return }
+        await work("Setting catalog source") {
+            self.source = try await self.cli.run(ManagerSourcePolicy.setManifestArguments(path), as: SourceStatus.self)
+        }
+    }
+
+    func clearCatalogSource() async {
+        await work("Clearing catalog source") {
+            self.source = try await self.cli.run(ManagerSourcePolicy.clearArguments(), as: SourceStatus.self)
+        }
+    }
+
     func dismissError() {
         errorMessage = nil
         recovery = nil
@@ -495,6 +526,7 @@ final class AgentHostStore: ObservableObject {
 
     private func reloadAll(preserving checkedDoctor: DoctorResult? = nil) async throws {
         try await reloadStatus()
+        source = try? await cli.run(ManagerSourcePolicy.statusArguments(), as: SourceStatus.self)
         traceSourceCatalog = nil
         guard suite?.configured == true else {
             observations = nil

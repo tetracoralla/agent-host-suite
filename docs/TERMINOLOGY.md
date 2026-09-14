@@ -22,6 +22,8 @@ released tools, and their Agent-app integrations.
 | **Direct Execution Runtime** / **Direct Runtime** | **直接执行运行时** | The infrastructure component that runs already-selected structured work without another model relay. It is not a generic model-facing Agent tool. |
 | **compatibility set** | **兼容集** | The exact versions, artifacts, hashes, integrations, and local state intended to work together. An installed compatibility set is the device's Agent environment. |
 | **compatibility release** | **兼容版本** | An immutable, distributable compatibility set. It coordinates releases; it does not certify universal tool value or live health. |
+| **application build** | **应用 build** | The Manager / carrier application version and build number. It can share the product name **Agent Host** with the installed environment while carrying a different payload. |
+| **environment release** | **环境兼容版本** | The installed Agent environment `suiteVersion` / release identity. Do not display it as if it were the Manager application build. |
 | **local tool monitoring** | **本地工具监测** | The user-facing name for optional local operational metadata. Use **observability** for the technical profile, commands, schemas, and source identifiers. |
 
 Capability Contracts and Procedure Contracts remain independent semantic

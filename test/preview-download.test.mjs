@@ -162,6 +162,24 @@ test('fetchBoundCatalog downloads current.json and provenance through an index',
   assert.equal(JSON.parse(await readFile(fetched.provenancePath, 'utf8')).releaseId, 'preview-1')
 })
 
+test('resolveReleaseManifestPath uses a saved local catalog when env is unset', async () => {
+  const candidate = '/tmp/agent-host-saved-current.json'
+  assert.equal(
+    await resolveReleaseManifestPath({}, {
+      env: cleanEnv(),
+      savedCatalogSource: { kind: 'local', url: null, path: candidate },
+    }),
+    resolve(candidate),
+  )
+  assert.equal(
+    await resolveReleaseManifestPath({ releaseManifest: '/tmp/explicit-current.json' }, {
+      env: cleanEnv(),
+      savedCatalogSource: { kind: 'local', url: null, path: candidate },
+    }),
+    resolve('/tmp/explicit-current.json'),
+  )
+})
+
 test('resolveReleaseManifestPath uses the default unbound catalog when nothing is configured', async () => {
   assert.equal(
     await resolveReleaseManifestPath({}, { env: cleanEnv(), paths: { downloads: '/tmp' } }),

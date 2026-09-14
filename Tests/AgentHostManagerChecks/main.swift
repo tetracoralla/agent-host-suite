@@ -267,6 +267,63 @@ do {
             && ManagerToolPolicy.resumeArguments == ["tools", "resume"],
         "pause and resume must be dedicated tools actions, not a profile change"
     )
+    expect(
+        ManagerSourcePolicy.statusArguments() == ["source", "status"]
+            && ManagerSourcePolicy.checkArguments() == ["source", "check"]
+            && ManagerSourcePolicy.setURLArguments("https://example.invalid/preview-distribution.json")
+                == ["source", "set", "--url", "https://example.invalid/preview-distribution.json"]
+            && ManagerSourcePolicy.setManifestArguments("/tmp/current.json")
+                == ["source", "set", "--release-manifest", "/tmp/current.json"]
+            && ManagerSourcePolicy.clearArguments() == ["source", "clear"],
+        "Manager source actions must call the source CLI rather than env-only setup"
+    )
+    expect(
+        ManagerSourcePolicy.versionSummary(applicationVersion: "0.2.0", applicationBuild: "3", environmentVersion: "0.1.4")
+            == "App 0.2.0 · build 3 · Env 0.1.4",
+        "Manager must distinguish application build from environment release"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: nil,
+            savedPath: "/tmp/current.json",
+            savedURL: "https://example.invalid/preview-distribution.json",
+            featuredCatalogURL: nil
+        ) == "/tmp/current.json",
+        "a saved local catalog must be usable without an env var"
+    )
+    expect(
+        ManagerSourcePolicy.recoveryMessage(code: "PREVIEW_DOWNLOAD_DIGEST_MISMATCH").contains("digest"),
+        "digest errors must name a recovery path"
+    )
+    expect(
+        ManagerSourcePolicy.recoveryMessage(code: nil).contains("unpublished"),
+        "unconfigured source copy must stay unpublished rather than implying a store"
+    )
+    expect(ManagerSourcePolicy.notNotarizedNote.contains("Not Apple-notarized"), "source copy must not claim notarization")
+    let sourceStatus = try JSONDecoder().decode(SourceStatus.self, from: Data(#"""
+    {
+      "schemaVersion": "openadam.agent-host-source-status.v0.1",
+      "status": "unpublished",
+      "notarized": false,
+      "marketplace": false,
+      "publicReleasePublished": false,
+      "application": {"kind": "source-checkout", "productName": "Agent Host", "version": "0.2.0", "build": "3"},
+      "environment": {"configured": false, "suiteVersion": null},
+      "components": [],
+      "source": {
+        "kind": "unset",
+        "unpublished": true,
+        "message": "Catalog assets are unpublished. This checkout has no GitHub Release assets. This is not notarized and not a store.",
+        "lastCheck": {"status": "unpublished", "code": "PREVIEW_DOWNLOAD_UNPUBLISHED"}
+      }
+    }
+    """#.utf8))
+    expect(sourceStatus.notarized == false, "source status must not claim notarization")
+    expect(sourceStatus.publicReleasePublished == false, "source status must not claim a public Release")
+    expect(sourceStatus.application?.version == "0.2.0", "source status must name the application version")
+    expect(sourceStatus.application?.build == "3", "source status must name the application build")
+    expect(sourceStatus.environment?.configured == false, "source status must allow an absent environment")
+    expect(sourceStatus.source?.unpublished == true, "source status must report unpublished assets")
     let pausedStatus = try JSONDecoder().decode(SuiteStatus.self, from: Data(#"""
     {
       "status": "ok",

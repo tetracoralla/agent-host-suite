@@ -17,6 +17,7 @@ import { recordActivity } from './activity.mjs'
 import { cleanupMaterializedRelease, discardMaterializedDownloads, materializeRelease } from './release-artifacts.mjs'
 import { loadReleaseManifest } from './release-manifest.mjs'
 import { resolveReleaseManifestPath } from './preview-download.mjs'
+import { readCatalogSource } from './source-status.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { OBSERVABILITY_RELEASE_COMPONENTS } from './release-manifest.mjs'
 import { agentFacingManifest, FEATURED_PROFILE_ID, hostFacingManifest, loadProfile, selectAgentComponents } from './profile.mjs'
@@ -197,7 +198,8 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
   if (options.developmentRoot !== undefined) {
     manifest = await buildDevelopmentManifest(options.developmentRoot)
   } else {
-    const release = await loadReleaseManifest(await resolveReleaseManifestPath(options, { ...dependencies, paths }))
+    const savedCatalogSource = dependencies.savedCatalogSource ?? await readCatalogSource(paths.root)
+    const release = await loadReleaseManifest(await resolveReleaseManifestPath(options, { ...dependencies, paths, savedCatalogSource }))
     if (release.manifest.status === 'draft-unbound') throw new AgentHostError('RELEASE_UNBOUND', 'No verified compatibility release is bound in this build')
     const provenance = await loadReleaseProvenance(release)
     releaseSourceProvenance = {

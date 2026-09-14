@@ -98,14 +98,16 @@ Linux 施工环境也不能替它打分。在已经装好 Agent Host 并连接 A
 agent-host doctor --featured-readiness --json
 ```
 
-该命令只检查 featured 工作集已选、以及已连接应用的投影 receipt 是否健康，并且
-`adoptionEvidence` 恒为 `false`。Host status 与调用次数不能当采用证据。
+该命令报告用户级就绪（所需工具、连接、投影），与 `recipe.consistency` 配方检查分开，
+并且 `adoptionEvidence` 恒为 `false`。仅因 profile 名为 `local-dogfood` 不会让用户级
+诊断失败。Host status 与调用次数不能当采用证据。
 
 ## 常用流程
 
 ```text
 agent-host setup --profile standard --host zcode --release-manifest /absolute/current.json
 agent-host snapshot --json
+agent-host source status --json
 agent-host usage --json
 agent-host doctor --deep --skip-agent-apps --json
 agent-host tools status

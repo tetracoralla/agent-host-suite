@@ -10,8 +10,16 @@ export const FEATURED_READINESS_TOOL = 'armorial'
 
 export const FEATURED_READINESS_BOUNDARY = 'This report is a Host precondition. It does not establish that a live Agent session loaded the tools, chose them, or put their results into a work product. Host status, doctor, projection receipts, and observation counts are not adoption evidence.'
 
+const RECIPE_CHECK_PREFIX = 'recipe.'
+
 function check(id, status, message, detail = undefined) {
   return { id, status, message, ...(detail === undefined ? {} : { detail }) }
+}
+
+function rollup(checks) {
+  if (checks.some((item) => item.status === 'error')) return 'error'
+  if (checks.some((item) => item.status === 'warning')) return 'warning'
+  return 'ok'
 }
 
 function connectedHosts(state) {
@@ -86,14 +94,30 @@ function receiptDetail(hostId, entry, skills = undefined) {
   return { ...base, providerSkills: skills.providerSkills, productSkills: skills.productSkills }
 }
 
+function nextStepsFor(checks) {
+  const tools = checks.find((item) => item.id === 'user.tools')
+  const connection = checks.find((item) => item.id === 'user.connection')
+  return {
+    startFreshTask: 'Open a fresh Agent task in a connected app after the current bindings. Already-open tasks keep the tools they started with.',
+    missingTools: tools?.status === 'error' ? tools.message : null,
+    connectAgent: connection?.status === 'error' ? connection.message : null,
+    completedWork: 'Completed work is the Agent putting results into the work product on an unnamed task. doctor --featured-readiness is a Host precondition and is not adoption evidence. See docs/ADOPTION_ACCEPTANCE.md.',
+  }
+}
+
 function report(checks) {
-  const errors = checks.filter((item) => item.status === 'error').length
-  const warnings = checks.filter((item) => item.status === 'warning').length
+  const userChecks = checks.filter((item) => !item.id.startsWith(RECIPE_CHECK_PREFIX))
+  const recipeChecks = checks.filter((item) => item.id.startsWith(RECIPE_CHECK_PREFIX))
+  const userStatus = rollup(userChecks)
+  const recipeStatus = recipeChecks.length === 0 ? 'ok' : rollup(recipeChecks)
   return {
     schemaVersion: FEATURED_READINESS_SCHEMA,
-    status: errors > 0 ? 'error' : warnings > 0 ? 'warning' : 'ok',
+    status: userStatus,
+    userStatus,
+    recipeStatus,
     adoptionEvidence: false,
     assessmentBoundary: FEATURED_READINESS_BOUNDARY,
+    nextSteps: nextStepsFor(checks),
     checks,
   }
 }
@@ -125,6 +149,11 @@ async function inspectHostReceipt(hostId, state, agentManifest, {
   return null
 }
 
+function activeWorkingSet(state) {
+  if (isAgentToolsPaused(state)) return []
+  return [...(state.agentComponents ?? [])]
+}
+
 export async function inspectFeaturedReadiness(state, {
   inspectAgentApps = true,
   runner = runFile,
@@ -139,54 +168,115 @@ export async function inspectFeaturedReadiness(state, {
 } = {}) {
   const checks = []
   if (state == null || typeof state.profile !== 'string' || state.profile.length === 0) {
-    return report([check('featured.working-set', 'error', 'No Agent environment profile is installed')])
+    return report([check('user.tools', 'error', 'No Agent environment profile is installed')])
   }
 
   let profile
   try {
     profile = await loadInstalledProfile(state.profile)
   } catch (error) {
-    return report([check('featured.working-set', 'error', 'The installed profile catalog could not be loaded', error.message)])
+    return report([check('user.tools', 'error', 'The installed profile catalog could not be loaded', error.message)])
   }
 
-  const active = [...(state.agentComponents ?? [])]
-  const expected = [...(profile.defaultAgentComponents ?? [])]
-  const missing = expected.filter((id) => !active.includes(id))
-  const workingSetDetail = {
+  let featuredProfile
+  try {
+    featuredProfile = await loadInstalledProfile(FEATURED_PROFILE_ID)
+  } catch (error) {
+    return report([check('user.tools', 'error', 'The featured profile catalog could not be loaded', error.message)])
+  }
+
+  const active = activeWorkingSet(state)
+  const installed = Object.keys(state.components ?? {})
+  const featuredDefaults = [...(featuredProfile.defaultAgentComponents ?? [])]
+  const recipeMissing = featuredDefaults.filter((id) => !active.includes(id))
+  const recipeMatches = profile.id === FEATURED_PROFILE_ID && recipeMissing.length === 0
+  const featuredToolInstalled = installed.includes(featuredToolId)
+  const featuredToolActive = active.includes(featuredToolId)
+  const paused = isAgentToolsPaused(state)
+
+  const recipeDetail = {
     profile: profile.id,
     expectedProfile: FEATURED_PROFILE_ID,
-    expected,
+    expected: featuredDefaults,
     active,
-    missing,
+    missing: recipeMissing,
     featuredTool: featuredToolId,
-    featuredToolActive: active.includes(featuredToolId),
+    featuredToolActive,
+    userLevelUsesProfileName: false,
   }
+  checks.push(check(
+    'recipe.consistency',
+    recipeMatches ? 'ok' : 'warning',
+    recipeMatches
+      ? 'Installed recipe matches the featured working set'
+      : `Installed recipe is ${profile.id}, not ${FEATURED_PROFILE_ID}. User-level readiness does not use this name.`,
+    recipeDetail,
+  ))
 
-  if (profile.id !== FEATURED_PROFILE_ID) {
+  if (!featuredToolInstalled) {
     checks.push(check(
-      'featured.working-set',
+      'user.tools',
       'error',
-      `Featured working set is not selected (profile is ${profile.id})`,
-      workingSetDetail,
+      `${featuredToolId} is not installed. Get featured tools with update --profile featured, or import a bound catalog.`,
+      { featuredTool: featuredToolId, installed: false, active: false, paused },
     ))
-  } else if (missing.length > 0 || !active.includes(featuredToolId)) {
-    const absent = missing.length > 0 ? missing.join(', ') : featuredToolId
+  } else if (paused) {
     checks.push(check(
-      'featured.working-set',
+      'user.tools',
       'error',
-      `Featured working set is missing ${absent}`,
-      workingSetDetail,
+      'Agent tools are paused. Resume the working set, then start a fresh Agent task.',
+      { featuredTool: featuredToolId, installed: true, active: false, paused: true },
+    ))
+  } else if (!featuredToolActive) {
+    checks.push(check(
+      'user.tools',
+      'error',
+      `${featuredToolId} is installed but not selected for new tasks. Use tools set --tool ${featuredToolId}, then start a fresh Agent task.`,
+      { featuredTool: featuredToolId, installed: true, active: false, paused: false },
     ))
   } else {
     checks.push(check(
-      'featured.working-set',
+      'user.tools',
       'ok',
-      'Featured working set is selected',
-      workingSetDetail,
+      `${featuredToolId} is installed and selected for new tasks`,
+      { featuredTool: featuredToolId, installed: true, active: true, paused: false },
     ))
   }
 
+  const workspaceGranted = typeof state.workspaceRoot === 'string' && state.workspaceRoot.length > 0
+  checks.push(check(
+    'user.permissions',
+    'ok',
+    workspaceGranted
+      ? 'A workspace path is granted'
+      : 'No workspace path is granted. Tools that need a project folder will not see one until you grant it.',
+    { workspaceGranted, requiredForFeaturedTool: false },
+  ))
+
   const hosts = connectedHosts(state)
+  if (hosts.length === 0) {
+    checks.push(check(
+      'user.connection',
+      'error',
+      'No Agent app is connected. Connect one in Agent apps, then start a fresh Agent task.',
+      { hosts: [] },
+    ))
+  } else {
+    checks.push(check(
+      'user.connection',
+      'ok',
+      `Connected Agent apps: ${hosts.join(', ')}`,
+      { hosts },
+    ))
+  }
+
+  checks.push(check(
+    'user.task',
+    'ok',
+    'Host can project tools for a project-aware icon task. Projection health is not natural model choice, and this report is not adoption evidence.',
+    { featuredTool: featuredToolId, adoptionEvidence: false },
+  ))
+
   if (!inspectAgentApps) {
     checks.push(check(
       'projection.receipt',
@@ -196,22 +286,14 @@ export async function inspectFeaturedReadiness(state, {
     ))
     return report(checks)
   }
-  if (hosts.length === 0) {
-    checks.push(check(
-      'projection.receipt',
-      'error',
-      'No Agent app is connected, so projection receipts cannot be inspected',
-      { hosts: [] },
-    ))
-    return report(checks)
-  }
+  if (hosts.length === 0) return report(checks)
 
   let agentManifest
   try {
     agentManifest = hostFacingManifest(
       { components: state.components ?? {} },
       active,
-      { paused: isAgentToolsPaused(state) },
+      { paused },
     )
   } catch (error) {
     checks.push(check(

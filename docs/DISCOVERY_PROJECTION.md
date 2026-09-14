@@ -135,8 +135,12 @@ agent-host doctor --featured-readiness --json
 
 Treat `active` as working-set intent. Treat `installedIdentityMatched` and
 per-plugin doctor checks as current **binding** evidence. Treat
-`doctor --featured-readiness` as the featured working set plus projection
-receipts only; it always reports `adoptionEvidence: false`. Treat a real new
+`doctor --featured-readiness` `status` / `userStatus` as user-level Host
+readiness (required tools, connection, projection receipts) and
+`recipe.consistency` as whether the featured recipe is selected. A
+`local-dogfood` profile with a healthy Armorial projection is not a
+user-level failure. The report always sets `adoptionEvidence: false` and
+does not treat projection health as natural model choice. Treat a real new
 Agent task as the only current **discovery** evidence. Unnamed adoption
 scoring is a separate protocol in [`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md).
 Do not read a CLI success against a Host projection or a second cache path as

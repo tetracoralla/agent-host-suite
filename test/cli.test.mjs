@@ -45,6 +45,10 @@ test('CLI rejects known options that do not belong to the selected operation', (
     [['status', '--quick'], 'status does not accept --quick'],
     [['doctor', '--quick'], 'doctor does not accept --quick'],
     [['doctor', '--featured-readiness', '--deep'], 'doctor --featured-readiness does not accept --deep'],
+    [['source', 'status', '--url', 'https://example.invalid/preview-distribution.json'], 'source status does not accept --url'],
+    [['source', 'clear', '--url', 'https://example.invalid/preview-distribution.json'], 'source clear does not accept --url'],
+    [['source', 'check', '--url', 'https://example.invalid/preview-distribution.json', '--release-manifest', '/tmp/current.json'], 'source check accepts --url or --release-manifest, not both'],
+    [['source', 'set'], 'source set requires --url or --release-manifest, not both'],
     [['host', 'status', 'codex', '--skip-agent-apps'], 'host status does not accept --skip-agent-apps'],
     [['component', 'list', '--artifact', '/tmp/private.tar.gz'], 'component list does not accept --artifact'],
     [['component', 'remove', 'private-fixture', '--activate'], 'component remove does not accept --activate'],
@@ -199,6 +203,8 @@ test('profiles list names the featured admission set without a store', async () 
   assert.match(help.stdout, /--plan-id SHA256/u)
   assert.match(help.stdout, /--no-host/u)
   assert.match(help.stdout, /doctor \[--deep \| --featured-readiness\]/u)
+  assert.match(help.stdout, /agent-host source status/u)
+  assert.match(help.stdout, /agent-host source set/u)
   assert.match(help.stdout, /--profile standard\|featured\|developer\|observability\|local-dogfood/u)
   for (const id of await listProfileIds()) assert.match(help.stdout, new RegExp(`\\b${id}\\b`, 'u'))
   const humanOutput = human(catalog)

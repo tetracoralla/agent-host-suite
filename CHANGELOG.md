@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Show application build, environment release, and tool versions as separate
+  planes, plus catalog source and last check. Manager Settings and
+  `agent-host source status|check|set|clear` can choose a local bound catalog
+  or an HTTPS preview index. When GitHub Release assets are unpublished the
+  UI says so and keeps retry / local / last-downloaded recovery for
+  interrupted, offline, and digest errors. This does not publish a Release
+  or claim Apple notarization.
+- Split `doctor --featured-readiness` into user-level readiness (required
+  tools, permissions, connection, projection) and a separate
+  `recipe.consistency` check. A `local-dogfood` install with a healthy
+  Armorial projection is not a user-level failure. Projection health is not
+  natural model choice; next steps name a fresh Agent task, missing-tool
+  install, and the unnamed adoption protocol for completed work.
 - Admit ordinary Agent working-set catalogs without a 64 KiB false ceiling.
   Resource protection follows the Context Surface Analyzer snapshot contract
   the Host actually exports (384 KiB canonical tools, 128 tools, 64 KiB largest

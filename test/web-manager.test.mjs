@@ -54,6 +54,24 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.equal(value.catalog.download.configured, false)
   assert.equal(value.catalog.download.notarized, false)
   assert.match(value.catalog.download.message, /Public download is not configured/u)
+  assert.equal(value.source.notarized, false)
+  assert.equal(value.source.publicReleasePublished, false)
+  assert.equal(value.source.status, 'unpublished')
+  assert.match(value.source.source.message, /unpublished/u)
+  assert.match(document, /Check source/u)
+  assert.match(document, /Catalog assets are unpublished/u)
+
+  const checked = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'source', check: true }),
+  })
+  assert.equal(checked.status, 200)
+  const checkedBody = await checked.json()
+  assert.equal(checkedBody.result.status, 'unpublished')
+  assert.equal(checkedBody.result.notarized, false)
+  assert.equal(checkedBody.dashboard.source.source.lastCheck.status, 'unpublished')
+  assert.match(checkedBody.dashboard.source.source.recovery.message, /local bound catalog/u)
   assert.equal(value.catalog.profiles.some((profile) => profile.id === 'featured' && profile.agentComponents.includes('armorial')), true)
   assert.equal(MANAGER_SETUP_PROFILES.includes('featured'), true)
 
