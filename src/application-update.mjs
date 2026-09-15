@@ -181,9 +181,23 @@ export async function applyDirectorySwapUpdate({
   return { currentRoot, previousRoot: backup, kind: 'directory-swap' }
 }
 
+export async function resolveReplacedApplicationLaunch({ root, command, args = ['--version'] } = {}) {
+  if (typeof command === 'string' && command.length > 0) return { command, args }
+  const cli = join(root, 'app', 'bin', 'agent-host.mjs')
+  const bundledNode = join(root, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node')
+  if (await pathExists(cli)) {
+    const node = await pathExists(bundledNode) ? bundledNode : process.execPath
+    return { command: node, args: [cli, ...args] }
+  }
+  return {
+    command: join(root, 'bin', process.platform === 'win32' ? 'agent-host.cmd' : 'agent-host'),
+    args,
+  }
+}
+
 export async function verifyReplacedApplication({ root, expectedVersion, runner = runFile, command, args = ['--version'] }) {
-  const executable = command ?? join(root, 'bin', process.platform === 'win32' ? 'agent-host.cmd' : 'agent-host')
-  const result = await runner(executable, args, {
+  const launch = await resolveReplacedApplicationLaunch({ root, command, args })
+  const result = await runner(launch.command, launch.args, {
     allowFailure: true,
     timeoutMs: 15_000,
     cwd: root,

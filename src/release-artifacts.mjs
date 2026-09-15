@@ -27,6 +27,7 @@ import { runFile } from './process.mjs'
 import { isDeveloperKitIntegrationSchema } from './developer-kit-integration.mjs'
 import { isToolIntegrationSchema } from './tool-integration.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
+import { archiveListingLines, isSafeArchiveMemberPath, posixArchiveMemberPath } from './archive-member-path.mjs'
 
 function fail(code, message, details) {
   throw new AgentHostError(code, message, details)
@@ -366,15 +367,11 @@ export async function acquireArtifact(component, manifestPath, paths, options = 
 }
 
 function safeArchiveEntry(raw) {
-  const value = raw.replace(/^\.\//u, '').replace(/\/$/u, '')
-  if (value === '') return true
-  if (/[\u0000-\u001f\u007f]/u.test(value) || value.includes('\\') || isAbsolute(value)) return false
-  const parts = value.split('/')
-  return !parts.includes('..') && !parts.includes('')
+  return isSafeArchiveMemberPath(raw, { allowEmpty: true })
 }
 
 function archiveEntryName(raw) {
-  return raw.replace(/^\.\//u, '').replace(/\/$/u, '')
+  return posixArchiveMemberPath(raw)
 }
 
 function expectedArchiveDirectories(files) {
@@ -393,11 +390,11 @@ async function inspectArchive(path, runner) {
   const archiveInfo = await stat(path)
   const timeoutMs = archiveCommandTimeoutMs(archiveInfo.size)
   const listing = await runner(tarCommand(), ['-tzf', path], { timeoutMs })
-  const entries = listing.stdout.split(/\r?\n/u).filter(Boolean)
-  if (entries.length === 0 || !entries.some((entry) => entry.replace(/^\.\//u, '') === 'component.json')) fail('RELEASE_ARCHIVE_INVALID', 'Release archive does not contain component.json')
+  const entries = archiveListingLines(listing.stdout)
+  if (entries.length === 0 || !entries.some((entry) => posixArchiveMemberPath(entry) === 'component.json')) fail('RELEASE_ARCHIVE_INVALID', 'Release archive does not contain component.json')
   for (const entry of entries) if (!safeArchiveEntry(entry)) fail('RELEASE_ARCHIVE_UNSAFE', `Release archive contains an unsafe path: ${entry}`)
   const verbose = await runner(tarCommand(), ['-tvzf', path], { timeoutMs })
-  const verboseLines = verbose.stdout.split(/\r?\n/u).filter(Boolean)
+  const verboseLines = archiveListingLines(verbose.stdout)
   for (const line of verboseLines) {
     if (!['-', 'd'].includes(line[0])) fail('RELEASE_ARCHIVE_UNSAFE', 'Release archives cannot contain links or special files')
   }

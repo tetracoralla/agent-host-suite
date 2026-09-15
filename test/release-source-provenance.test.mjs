@@ -513,6 +513,26 @@ test('Provider archive inspection closes path, type, count, expansion, compresse
   assert.equal(valid.expandedBytes, 12)
   assert.deepEqual(validCalls.map((args) => args[0]), ['-tzf', '-tvzf'])
 
+  const crlf = await inspectProviderPluginArchive({
+    archivePath,
+    expectedRoot: 'provider',
+    runner: runnerFor(
+      'provider/\r\nprovider/package.json\r\n',
+      'drwx------  0 root wheel 0 Jan  1 00:00 provider/\r\n-rw-------  0 root wheel 12 Jan  1 00:00 provider/package.json\r\n',
+    ),
+  })
+  assert.equal(crlf.fileCount, 1)
+  const windowsListed = await inspectProviderPluginArchive({
+    archivePath,
+    expectedRoot: 'provider',
+    runner: runnerFor(
+      'provider\\\r\nprovider\\package.json\r\n',
+      'drwx------  0 root wheel 0 Jan  1 00:00 provider\\\r\n-rw-------  0 root wheel 12 Jan  1 00:00 provider\\package.json\r\n',
+    ),
+  })
+  assert.equal(windowsListed.fileCount, 1)
+  assert.equal(windowsListed.entries.length, 2)
+
   const tooMany = Array.from({ length: 20_001 }, (_, index) => `provider/${index}`).join('\n') + '\n'
   const expandedEntries = Array.from({ length: 6 }, (_, index) => `provider/${index}`).join('\n') + '\n'
   const expandedVerbose = Array.from({ length: 6 }, (_, index) => `-rw-------  0 root wheel 209715200 Jan  1 00:00 provider/${index}`).join('\n') + '\n'
@@ -522,6 +542,11 @@ test('Provider archive inspection closes path, type, count, expansion, compresse
   const canonicalCollisionVerbose = '-rw-------  0 root wheel 1 Jan  1 00:00 provider/café.json\n-rw-------  0 root wheel 1 Jan  1 00:00 provider/café.json\n'
   const cases = [
     { listing: 'provider/../escape\n', pattern: /unsafe path/u },
+    { listing: 'provider\\..\\escape\n', pattern: /unsafe path/u },
+    { listing: 'C:\\provider\\package.json\n', pattern: /unsafe path/u },
+    { listing: '\\provider\\package.json\n', pattern: /unsafe path/u },
+    { listing: '/tmp/provider/package.json\n', pattern: /unsafe path/u },
+    { listing: '\\\\server\\share\\provider\\a\n', pattern: /unsafe path/u },
     { listing: tooMany, pattern: /entry count/u },
     { listing: validEntries, verbose: 'drwx------  0 root wheel 0 Jan  1 00:00 provider/\nlrwx------  0 root wheel 0 Jan  1 00:00 provider/package.json -> /tmp/outside\n', pattern: /linked or special archive member/u },
     { listing: validEntries, verbose: 'drwx------  0 root wheel 0 Jan  1 00:00 provider/\n-rw-------  0 root wheel 268435457 Jan  1 00:00 provider/package.json\n', pattern: /member outside the expanded-size limit/u },

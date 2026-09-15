@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { AgentHostError } from './errors.mjs'
+import { archiveListingLines } from './archive-member-path.mjs'
 import {
   extractVerifiedProviderPluginArchive,
   inspectProviderPluginArchive,
@@ -173,7 +174,7 @@ export async function wrapGitHubPluginArchive({
   outputPath,
 }) {
   const listing = await runner(tarCommand(), ['-tzf', archivePath], { timeoutMs: 15_000, maxBuffer: 4 * 1024 * 1024 })
-  const entries = listing.stdout.split('\n').filter(Boolean)
+  const entries = archiveListingLines(listing.stdout)
   const expectedRoot = inferArchiveRoot(entries)
   await inspectProviderPluginArchive({
     archivePath,

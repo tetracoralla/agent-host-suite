@@ -5,6 +5,11 @@ import { copyFile, lstat, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { platform } from 'node:os'
 import { pipeline } from 'node:stream/promises'
+import {
+  archiveListingLines,
+  isSafeArchiveMemberPath,
+  posixArchiveMemberPath,
+} from './archive-member-path.mjs'
 import { runFile } from './process.mjs'
 
 const ARCHIVE_LIMIT = 128 * 1024 * 1024
@@ -24,7 +29,7 @@ async function sha256(path) {
 }
 
 function normalizedArchiveEntry(value) {
-  return value.replace(/^\.\//u, '').replace(/\/$/u, '')
+  return posixArchiveMemberPath(value)
 }
 
 function archiveCollisionKey(value, targetFilesystem) {
@@ -38,14 +43,7 @@ function archiveCollisionKey(value, targetFilesystem) {
 }
 
 function safeArchiveEntry(value, expectedRoot) {
-  if (value.length === 0 || /[\u0000-\u001f\u007f]/u.test(value) || value.includes('\\') || value.startsWith('/')) return false
-  const normalized = normalizedArchiveEntry(value)
-  const parts = normalized.split('/')
-  return normalized !== ''
-    && !parts.includes('')
-    && !parts.includes('.')
-    && !parts.includes('..')
-    && (normalized === expectedRoot || normalized.startsWith(`${expectedRoot}/`))
+  return isSafeArchiveMemberPath(value, { expectedRoot })
 }
 
 function archiveFileSize(line, label) {
@@ -87,7 +85,7 @@ export async function inspectProviderPluginArchive({
     maxBuffer: 4 * 1024 * 1024,
   })
   remaining()
-  const entries = listing.stdout.split('\n').filter(Boolean)
+  const entries = archiveListingLines(listing.stdout)
   if (entries.length === 0 || entries.length > ARCHIVE_ENTRY_LIMIT) throw new Error(`${label} archive has an invalid entry count`)
   if (entries.some((entry) => !safeArchiveEntry(entry, expectedRoot))) throw new Error(`${label} archive contains an unsafe path`)
   if (!['portable-case-sensitive', 'macos-default'].includes(targetFilesystem)) {
@@ -109,7 +107,7 @@ export async function inspectProviderPluginArchive({
     maxBuffer: 8 * 1024 * 1024,
   })
   remaining()
-  const verboseLines = detailed.stdout.split('\n').filter(Boolean)
+  const verboseLines = archiveListingLines(detailed.stdout)
   if (verboseLines.length !== entries.length || verboseLines.length > ARCHIVE_ENTRY_LIMIT) {
     throw new Error(`${label} archive has inconsistent inventory views`)
   }

@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { admitGitHubRelease } from '../src/github-project.mjs'
+import { admitGitHubRelease, supportedReleasePlatform } from '../src/github-project.mjs'
+import { loadGitHubToolCatalog, loadGitHubToolRegistry, registeredToolAsset } from '../src/github-registry.mjs'
 import { acquireHttpsFile, observeLocalComponentArtifact } from '../src/release-artifacts.mjs'
 import { parseSha256File } from '../src/github-api.mjs'
 
@@ -12,7 +13,30 @@ const ARMORIAL_ASSET = 'https://github.com/tetracoralla/armorial/releases/downlo
 const ARMORIAL_SHA256 = 'sha256:db2cd4acb1b1e0ba96ece12d03f1d2d4d1fc8f5fabc1b1c6999ea3cb07b87fcd'
 const ARMORIAL_BYTES = 4997635
 
+test('Armorial 0.8.0 has no invented win32 GitHub asset', async () => {
+  const registry = await loadGitHubToolRegistry()
+  const catalog = await loadGitHubToolCatalog()
+  const armorial = registry.tools.find((tool) => tool.id === 'armorial')
+  const pinned = catalog.tools.find((tool) => tool.id === 'armorial')
+  assert.equal(armorial.platforms['win32-x64'], undefined)
+  assert.equal(armorial.platforms['win32-arm64'], undefined)
+  assert.equal(pinned.platforms['win32-x64'], undefined)
+  assert.equal(pinned.platforms['win32-arm64'], undefined)
+  assert.equal(catalog.incompletePlatforms.includes('win32-x64'), true)
+  assert.throws(
+    () => registeredToolAsset(armorial, '0.8.0', 'win32-x64'),
+    (error) => error.code === 'GITHUB_ASSET_UNAVAILABLE' && error.message.includes('win32-x64'),
+  )
+})
+
 test('public Armorial 0.8.0 downloads, verifies, wraps, and probes without a developer cache', async (t) => {
+  const catalog = await loadGitHubToolCatalog()
+  const platform = supportedReleasePlatform()
+  const asset = platform === null ? null : catalog.tools.find((tool) => tool.id === 'armorial')?.platforms?.[platform] ?? null
+  if (asset === null) {
+    t.skip(`Armorial 0.8.0 has no public GitHub asset for ${platform ?? `${process.platform}-${process.arch}`}`)
+    return
+  }
   const root = await mkdtemp(join(tmpdir(), 'agent-host-armorial-08-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const admitted = await admitGitHubRelease({

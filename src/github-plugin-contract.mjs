@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, posix, relative, sep } from 'node:path'
 import { AgentHostError } from './errors.mjs'
+import { isAbsoluteArchiveMemberPath, posixArchiveMemberPath } from './archive-member-path.mjs'
 import { presentationFromPackageMetadata } from './tool-presentation.mjs'
 import { integrationRelativePath } from './tool-integration.mjs'
 
@@ -208,11 +209,17 @@ export function buildToolIntegration(contract, { pluginRoot, marketplace, expect
 }
 
 export function inferArchiveRoot(entries) {
-  const names = entries.map((entry) => entry.replace(/^\.\//u, '').replace(/\/$/u, '')).filter(Boolean)
+  const names = entries.map((entry) => posixArchiveMemberPath(entry)).filter(Boolean)
   const roots = new Set(names.map((entry) => entry.split('/')[0]))
   if (roots.size !== 1) fail('GITHUB_PLUGIN_INVALID', 'Plugin archive must contain one top-level directory')
   const root = [...roots][0]
-  if (root === '.' || root === '..' || root.includes('\\')) fail('GITHUB_PLUGIN_INVALID', 'Plugin archive root is invalid')
+  if (
+    root === '' || root === '.' || root === '..'
+    || root.includes('\\') || root.includes('/') || root.includes(':')
+    || isAbsoluteArchiveMemberPath(root)
+  ) {
+    fail('GITHUB_PLUGIN_INVALID', 'Plugin archive root is invalid')
+  }
   return root
 }
 

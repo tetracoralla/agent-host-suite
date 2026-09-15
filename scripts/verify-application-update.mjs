@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { applyDirectorySwapUpdate, verifyReplacedApplication } from '../src/application-update.mjs'
 
 const fixture = process.argv.includes('--fixture')
@@ -22,19 +22,28 @@ Native replacement is not simulated here.
 const root = await mkdtemp(join(tmpdir(), 'agent-host-app-update-'))
 const current = join(root, 'current')
 const staged = join(root, 'staged')
-await mkdir(join(current, 'bin'), { recursive: true })
-await mkdir(join(staged, 'bin'), { recursive: true })
-const currentScript = '#!/bin/sh\necho 0.2.0\n'
-const stagedScript = '#!/bin/sh\necho 0.2.1\n'
-await writeFile(join(current, 'bin/agent-host'), currentScript, { mode: 0o755 })
-await writeFile(join(staged, 'bin/agent-host'), stagedScript, { mode: 0o755 })
-await chmod(join(current, 'bin/agent-host'), 0o755)
-await chmod(join(staged, 'bin/agent-host'), 0o755)
+
+async function writeVersionApp(appRoot, version) {
+  const cli = join(appRoot, 'app', 'bin', 'agent-host.mjs')
+  await mkdir(dirname(cli), { recursive: true })
+  await writeFile(cli, `process.stdout.write(${JSON.stringify(version)} + '\\n')\n`)
+  if (process.platform === 'win32') {
+    const cmd = join(appRoot, 'bin', 'agent-host.cmd')
+    await mkdir(dirname(cmd), { recursive: true })
+    await writeFile(cmd, `@echo off\r\n"${process.execPath}" "%~dp0..\\app\\bin\\agent-host.mjs" %*\r\n`)
+  } else {
+    const shim = join(appRoot, 'bin', 'agent-host')
+    await mkdir(dirname(shim), { recursive: true })
+    await writeFile(shim, `#!/bin/sh\nexec "${process.execPath}" "${cli}" "$@"\n`, { mode: 0o755 })
+    await chmod(shim, 0o755)
+  }
+}
+
+await writeVersionApp(current, '0.2.0')
+await writeVersionApp(staged, '0.2.1')
 const applied = await applyDirectorySwapUpdate({ currentRoot: current, stagedRoot: staged })
 const verified = await verifyReplacedApplication({
   root: applied.currentRoot,
   expectedVersion: '0.2.1',
-  command: join(applied.currentRoot, 'bin/agent-host'),
-  args: [],
 })
 process.stdout.write(`${JSON.stringify({ status: 'ok', applied, verified }, null, 2)}\n`)

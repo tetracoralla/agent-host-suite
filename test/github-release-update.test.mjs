@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import test from 'node:test'
 import { parseGitHubResource, parseSha256File } from '../src/github-api.mjs'
 import { sanitizeSvg, presentationFromPackageMetadata } from '../src/tool-presentation.mjs'
-import { inspectGitHubPluginRoot } from '../src/github-plugin-contract.mjs'
+import { inferArchiveRoot, inspectGitHubPluginRoot } from '../src/github-plugin-contract.mjs'
 import { wrapGitHubPluginArchive } from '../src/github-plugin-wrap.mjs'
 import { admitGitHubRelease, previewGitHubProject } from '../src/github-project.mjs'
 import { inspectToolUpdates, updateAvailability, updateGitHubTool } from '../src/tool-updates.mjs'
@@ -28,6 +28,16 @@ async function write(path, contents, mode = 0o600) {
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, contents, { mode })
   if (mode !== 0o600) await chmod(path, mode)
+}
+
+async function writeApplicationVersionFixture(root, version) {
+  const cli = join(root, 'app', 'bin', 'agent-host.mjs')
+  await write(cli, `process.stdout.write(${JSON.stringify(String(version))} + '\\n')\n`)
+  if (process.platform === 'win32') {
+    await write(join(root, 'bin', 'agent-host.cmd'), `@echo off\r\n"${process.execPath}" "%~dp0..\\app\\bin\\agent-host.mjs" %*\r\n`)
+  } else {
+    await write(join(root, 'bin', 'agent-host'), `#!/bin/sh\nexec "${process.execPath}" "${cli}" "$@"\n`, 0o755)
+  }
 }
 
 async function createPluginArchive(root, {
@@ -140,6 +150,13 @@ test('third-party rename and logo change keep the same GitHub origin identity', 
   assert.notEqual(wrappedFirst.descriptor.version, wrappedSecond.descriptor.version)
 })
 
+test('plugin archive roots accept Windows tar listing separators and still reject escapes', () => {
+  assert.equal(inferArchiveRoot(['glyphmark\\package.json\r', 'glyphmark\\dist\\mcp.js\r']), 'glyphmark')
+  assert.equal(inferArchiveRoot(['./glyphmark/package.json', 'glyphmark/dist/mcp.js/']), 'glyphmark')
+  assert.throws(() => inferArchiveRoot(['C:\\glyphmark\\package.json']), (error) => error.code === 'GITHUB_PLUGIN_INVALID')
+  assert.throws(() => inferArchiveRoot(['/glyphmark/package.json']), (error) => error.code === 'GITHUB_PLUGIN_INVALID')
+})
+
 test('GitHub plugin wrap preserves plugin bytes and records upstream plus wrapped digests', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-glyphmark-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -227,18 +244,15 @@ test('application directory swap replaces files and reads the new version', asyn
   t.after(() => rm(root, { recursive: true, force: true }))
   const current = join(root, 'current')
   const staged = join(root, 'staged')
-  await mkdir(join(current, 'bin'), { recursive: true })
-  await mkdir(join(staged, 'bin'), { recursive: true })
-  await write(join(current, 'bin/agent-host'), '#!/bin/sh\necho 0.2.0\n', 0o755)
-  await write(join(staged, 'bin/agent-host'), '#!/bin/sh\necho 0.2.1\n', 0o755)
+  await writeApplicationVersionFixture(current, '0.2.0')
+  await writeApplicationVersionFixture(staged, '0.2.1')
   const applied = await applyDirectorySwapUpdate({ currentRoot: current, stagedRoot: staged })
   const verified = await verifyReplacedApplication({
     root: applied.currentRoot,
     expectedVersion: '0.2.1',
-    command: join(applied.currentRoot, 'bin/agent-host'),
-    args: [],
   })
   assert.equal(verified.version, '0.2.1')
+  assert.match(verified.output, /0\.2\.1/u)
 })
 
 test('featured readiness records working set as an experimental variable, not a scoring gate', async () => {
@@ -531,12 +545,10 @@ test('failed replacement start restores the previous application and keeps the b
   const app = join(root, 'current')
   const staged = join(root, 'staged')
   const stateRoot = join(root, 'state')
-  await mkdir(join(app, 'bin'), { recursive: true })
-  await mkdir(join(staged, 'bin'), { recursive: true })
+  await writeApplicationVersionFixture(app, '0.2.0')
+  await writeApplicationVersionFixture(staged, '0.2.1')
   await write(join(app, 'marker'), 'working-old')
   await write(join(staged, 'marker'), 'broken-new')
-  await write(join(app, 'bin/agent-host'), '#!/bin/sh\necho 0.2.0\n', 0o755)
-  await write(join(staged, 'bin/agent-host'), '#!/bin/sh\necho broken\nexit 1\n', 0o755)
   let failure
   try {
     await updateApplication({
