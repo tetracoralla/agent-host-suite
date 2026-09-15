@@ -58,34 +58,61 @@ function healthyCodex(entry = {}) {
 test('featured readiness requires the featured working set and does not claim adoption', async () => {
   const ok = await inspectFeaturedReadiness(featuredState(), healthyCodex())
   assert.equal(ok.status, 'ok')
+  assert.equal(ok.userStatus, 'ok')
+  assert.equal(ok.recipeStatus, 'ok')
   assert.equal(ok.adoptionEvidence, false)
   assert.equal(ok.schemaVersion, FEATURED_READINESS_SCHEMA)
   assert.equal(ok.assessmentBoundary, FEATURED_READINESS_BOUNDARY)
-  assert.equal(ok.checks.find((item) => item.id === 'featured.working-set')?.status, 'ok')
+  assert.equal(ok.checks.find((item) => item.id === 'recipe.consistency')?.status, 'ok')
+  assert.equal(ok.checks.find((item) => item.id === 'user.tools')?.status, 'ok')
   assert.equal(ok.checks.find((item) => item.id === 'projection.receipt.codex')?.status, 'ok')
   assert.match(human(ok), /Host precondition only/u)
   assert.match(human(ok), /not adoption/u)
+  assert.match(human(ok), /User readiness: ok/u)
+  assert.match(ok.nextSteps.completedWork, /not adoption evidence/u)
 
   const standard = await inspectFeaturedReadiness(featuredState({ profile: 'standard' }), {
     inspectAgentApps: false,
   })
-  assert.equal(standard.status, 'error')
+  assert.equal(standard.status, 'warning')
+  assert.equal(standard.userStatus, 'warning')
+  assert.equal(standard.recipeStatus, 'warning')
   assert.equal(standard.adoptionEvidence, false)
-  assert.match(standard.checks[0].message, /profile is standard/u)
+  assert.equal(standard.checks.find((item) => item.id === 'user.tools')?.status, 'ok')
+  assert.match(standard.checks.find((item) => item.id === 'recipe.consistency').message, /profile is standard|recipe is standard/u)
 
   const inactive = await inspectFeaturedReadiness(
     featuredState({ agentComponents: ['math-anchor', 'migratory-time'] }),
     { inspectAgentApps: false },
   )
   assert.equal(inactive.status, 'error')
-  assert.deepEqual(inactive.checks[0].detail.missing, ['armorial'])
+  assert.equal(inactive.userStatus, 'error')
+  assert.equal(inactive.checks.find((item) => item.id === 'user.tools')?.status, 'error')
+  assert.match(inactive.nextSteps.missingTools, /armorial/u)
+})
+
+test('user-level readiness does not fail only because the profile is local-dogfood', async () => {
+  const report = await inspectFeaturedReadiness(featuredState({ profile: 'local-dogfood' }), healthyCodex())
+  assert.equal(report.adoptionEvidence, false)
+  assert.equal(report.userStatus, 'ok')
+  assert.equal(report.status, 'ok')
+  assert.notEqual(report.recipeStatus, 'ok')
+  assert.equal(report.checks.find((item) => item.id === 'recipe.consistency')?.status, 'warning')
+  assert.match(report.checks.find((item) => item.id === 'recipe.consistency').message, /local-dogfood/u)
+  assert.equal(report.checks.find((item) => item.id === 'recipe.consistency')?.detail.userLevelUsesProfileName, false)
+  assert.equal(report.checks.find((item) => item.id === 'user.tools')?.status, 'ok')
+  assert.equal(report.checks.find((item) => item.id === 'projection.receipt.codex')?.status, 'ok')
+  assert.equal(report.checks.some((item) => item.status === 'error'), false)
+  assert.match(human(report), /User readiness: ok/u)
+  assert.match(human(report), /fresh Agent task/u)
 })
 
 test('featured readiness treats missing hosts and skipped receipts as Host gaps, not adoption', async () => {
   const none = await inspectFeaturedReadiness(featuredState({ hosts: {} }))
   assert.equal(none.status, 'error')
   assert.equal(none.adoptionEvidence, false)
-  assert.equal(none.checks.find((item) => item.id === 'projection.receipt')?.status, 'error')
+  assert.equal(none.checks.find((item) => item.id === 'user.connection')?.status, 'error')
+  assert.equal(none.checks.some((item) => item.id === 'projection.receipt'), false)
 
   const skipped = await inspectFeaturedReadiness(featuredState(), { inspectAgentApps: false })
   assert.equal(skipped.status, 'warning')

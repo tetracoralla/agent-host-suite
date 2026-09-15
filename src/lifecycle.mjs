@@ -23,6 +23,7 @@ import { COMPONENT_WARMUP_POLICY_VERSION, warmInstalledAgentComponents } from '.
 import { preflightManagedCatalog } from './context-exporter.mjs'
 import { compareSuiteVersions, loadReleaseManifest, materializeComponentIdsForUpdate, OBSERVABILITY_RELEASE_COMPONENTS, selectedReleaseComponents } from './release-manifest.mjs'
 import { FEATURED_CATALOG_DOWNLOAD_ENV, resolveReleaseManifestPath } from './preview-download.mjs'
+import { catalogSourceConfigured, readCatalogSource } from './source-status.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { FEATURED_PROFILE_ID, hostFacingManifest, isAgentToolsPaused, loadProfile, selectAgentComponents, toolExposure } from './profile.mjs'
 import { inspectOperationsSkill, installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
@@ -833,7 +834,9 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   const profile = await loadProfile(options.profile ?? previous.profile)
   const env = dependencies.env ?? process.env
   const previewConfigured = typeof env[FEATURED_CATALOG_DOWNLOAD_ENV] === 'string' && env[FEATURED_CATALOG_DOWNLOAD_ENV].trim() !== ''
-  if (profile.id === FEATURED_PROFILE_ID && options.releaseManifest === undefined && previous.channel !== 'release' && !previewConfigured) {
+  const savedCatalogSource = dependencies.savedCatalogSource ?? await readCatalogSource(paths.root)
+  const savedConfigured = catalogSourceConfigured(savedCatalogSource)
+  if (profile.id === FEATURED_PROFILE_ID && options.releaseManifest === undefined && previous.channel !== 'release' && !previewConfigured && !savedConfigured) {
     throw new AgentHostError('FEATURED_PROFILE_RELEASE_REQUIRED', 'The featured profile requires a bound compatibility release; it cannot be selected from a development source root')
   }
   const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
@@ -841,9 +844,9 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   let releasePreparation = null
   let releaseSourceProvenance = null
   let manifest
-  if (options.releaseManifest !== undefined || previous.channel === 'release' || (profile.id === FEATURED_PROFILE_ID && previewConfigured)) {
-    const manifestPath = options.releaseManifest !== undefined || previewConfigured
-      ? await resolveReleaseManifestPath(options, { ...dependencies, paths, env })
+  if (options.releaseManifest !== undefined || previous.channel === 'release' || (profile.id === FEATURED_PROFILE_ID && (previewConfigured || savedConfigured))) {
+    const manifestPath = options.releaseManifest !== undefined || previewConfigured || savedConfigured
+      ? await resolveReleaseManifestPath(options, { ...dependencies, paths, env, savedCatalogSource })
       : options.releaseManifest
     const release = await (dependencies.releaseManifestLoader ?? loadReleaseManifest)(manifestPath)
     if (release.manifest.status === 'draft-unbound') throw new AgentHostError('RELEASE_UNBOUND', 'No verified compatibility release is bound in this build')

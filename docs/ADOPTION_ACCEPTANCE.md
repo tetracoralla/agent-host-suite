@@ -10,8 +10,8 @@ checklist below and records pass or fail.
 
 Host `status`, `tools status`, `doctor`, `doctor --featured-readiness`,
 Manager copy, and observation / usage counts are not adoption evidence.
-They can only show that the Host working set and projection receipts are
-ready. A **fresh Agent task** after the current bindings is required.
+They can only show Host user-level readiness (required tools, connection,
+projection receipts) and a separate recipe-consistency check. A **fresh Agent task** after the current bindings is required.
 
 Do not patch Codex, Claude Code, ZCode, or another Agent app. Do not attach
 this document, [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md), Armorial source,
@@ -57,9 +57,15 @@ On the machine that will run the Agent:
    agent-host doctor --featured-readiness --json
    ```
 
-   Protocol requires JSON `status` equal to `ok`. That report always sets
-   `adoptionEvidence` to `false`. `--skip-agent-apps` yields at most
-   `warning` and is **not** a protocol pass: receipts were not inspected.
+   User-level `status` / `userStatus` is tools, permissions, connection, and
+   projection for the target task. It does not fail only because `profile` is
+   `local-dogfood`. `recipe.consistency` is a separate check that the featured
+   working set is selected. This report always sets `adoptionEvidence` to
+   `false` and `userStatus` is not natural model choice.
+
+   Unnamed adoption scoring requires JSON `status` equal to `ok` **and**
+   `recipe.consistency` status equal to `ok`. `--skip-agent-apps` yields at
+   most `warning` and is **not** a protocol pass: receipts were not inspected.
    `--deep` is rejected; this route does not probe Direct Runtime or pretend
    to judge the Agent.
 
@@ -67,8 +73,10 @@ On the machine that will run the Agent:
    Agent task**. Do not reuse a thread that began before the current
    projection.
 
-If step 2 fails, stop. Unnamed adoption cannot be scored on a Host that has
-not selected the featured working set or whose projection receipt is unhealthy.
+If user-level `status` is not `ok`, stop: required tools, connection, or
+projection receipts are not ready. If `recipe.consistency` is not `ok`,
+unnamed adoption cannot be scored on that Host even when user-level readiness
+is `ok` (for example `local-dogfood` with a healthy Armorial projection).
 
 ## Workspace rule
 

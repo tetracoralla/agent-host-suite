@@ -197,6 +197,118 @@ enum ManagerSetupPolicy {
     }
 }
 
+enum ManagerSourcePolicy {
+    static let unpublishedNote = "Catalog assets are unpublished."
+    static let notNotarizedNote = "Not Apple-notarized. Not a store."
+    static let applicationPlane = "Application"
+    static let environmentPlane = "Environment"
+    static let componentsPlane = "Tools"
+    static let differentPayloadsNote = "The Manager application and the installed Agent environment can share this product name with different payloads."
+
+    static func statusArguments() -> [String] { ["source", "status"] }
+    static func checkArguments() -> [String] { ["source", "check"] }
+    static func setURLArguments(_ url: String) -> [String] { ["source", "set", "--url", url] }
+    static func setManifestArguments(_ path: String) -> [String] { ["source", "set", "--release-manifest", path] }
+    static func clearArguments() -> [String] { ["source", "clear"] }
+
+    static func versionSummary(applicationVersion: String?, applicationBuild: String?, environmentVersion: String?) -> String {
+        let app = [applicationVersion, applicationBuild.map { "build \($0)" }].compactMap { $0 }.joined(separator: " · ")
+        let env = environmentVersion ?? "not installed"
+        return "App \(app.isEmpty ? "unknown" : app) · Env \(env)"
+    }
+
+    static func recoveryMessage(code: String?) -> String {
+        switch code {
+        case "PREVIEW_DOWNLOAD_DIGEST_MISMATCH", "PREVIEW_DOWNLOAD_SIZE_MISMATCH":
+            "The file digest did not match. Discard it and retry, or choose another catalog."
+        case "PREVIEW_DOWNLOAD_TIMEOUT", "PREVIEW_DOWNLOAD_STALLED", "PREVIEW_DOWNLOAD_CANCELLED":
+            "The download was interrupted. Retry from the start, or use a local catalog."
+        case "PREVIEW_DOWNLOAD_FAILED":
+            "The catalog is unreachable. Retry, use the last downloaded catalog, or choose a local file."
+        case "RELEASE_UNBOUND":
+            "That catalog is unbound. Choose a bound current.json."
+        case "PREVIEW_DOWNLOAD_INVALID", "PREVIEW_DOWNLOAD_INVALID_URL", "PREVIEW_DOWNLOAD_UNSUPPORTED":
+            "Point at preview-distribution.json or a bound current.json."
+        default:
+            unpublishedNote + " Use a local bound catalog, or retry after an owner publishes a Release."
+        }
+    }
+
+    static func resolvedReleaseManifest(
+        environmentManifest: String?,
+        savedPath: String?,
+        savedURL: String?,
+        featuredCatalogURL: String?
+    ) -> String? {
+        return [environmentManifest, savedPath, savedURL, featuredCatalogURL]
+            .compactMap { $0 }
+            .first { !$0.isEmpty }
+    }
+}
+
+struct SourceApplication: Decodable, Equatable, Sendable {
+    let kind: String?
+    let productName: String?
+    let version: String?
+    let build: String?
+    let path: String?
+    let note: String?
+}
+
+struct SourceEnvironmentPlane: Decodable, Equatable, Sendable {
+    let configured: Bool?
+    let suiteVersion: String?
+    let releaseId: String?
+    let channel: String?
+    let profile: String?
+    let updatedAt: String?
+}
+
+struct SourceComponentVersion: Decodable, Equatable, Sendable {
+    let id: String
+    let version: String?
+    let displayName: String?
+}
+
+struct SourceRecovery: Decodable, Equatable, Sendable {
+    let action: String?
+    let retry: Bool?
+    let chooseLocal: Bool?
+    let chooseRemote: Bool?
+    let message: String?
+}
+
+struct SourceCheck: Decodable, Equatable, Sendable {
+    let at: String?
+    let status: String?
+    let code: String?
+    let message: String?
+    let recovery: SourceRecovery?
+}
+
+struct SourceLocator: Decodable, Equatable, Sendable {
+    let kind: String?
+    let url: String?
+    let path: String?
+    let unpublished: Bool?
+    let message: String?
+    let lastCheck: SourceCheck?
+    let lastDownloadedCatalog: String?
+    let recovery: SourceRecovery?
+}
+
+struct SourceStatus: Decodable, Equatable, Sendable {
+    let schemaVersion: String?
+    let status: String?
+    let notarized: Bool?
+    let marketplace: Bool?
+    let publicReleasePublished: Bool?
+    let application: SourceApplication?
+    let environment: SourceEnvironmentPlane?
+    let components: [SourceComponentVersion]?
+    let source: SourceLocator?
+}
+
 struct ManagerAgentApp: Identifiable, Equatable, Sendable {
     let id: String
     let name: String

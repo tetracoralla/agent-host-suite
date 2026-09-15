@@ -58,6 +58,12 @@ struct EnvironmentView: View {
 
                 Panel {
                     Text(L10n.text("Current environment")).font(.headline)
+                    LabeledContent(L10n.text("Application"), value: applicationVersion)
+                    LabeledContent(L10n.text("Environment"), value: environmentVersion)
+                    LabeledContent(L10n.text("Catalog source"), value: catalogSourceLabel)
+                    if let lastCheck = store.source?.source?.lastCheck {
+                        LabeledContent(L10n.text("Last check"), value: [lastCheck.status, lastCheck.code].compactMap { $0 }.joined(separator: " · "))
+                    }
                     LabeledContent(L10n.text("Tool set"), value: toolSetName)
                     LabeledContent(L10n.text("Tools"), value: store.managedTools.count.formatted())
                     LabeledContent(L10n.text("Agent apps"), value: store.connectedAgentAppCount.formatted())
@@ -102,5 +108,25 @@ struct EnvironmentView: View {
         case "observability": L10n.text("Standard + Monitoring")
         default: L10n.text("Standard")
         }
+    }
+
+    private var applicationVersion: String {
+        let application = store.source?.application
+        let version = application?.version ?? L10n.text("Unknown")
+        if let build = application?.build, !build.isEmpty {
+            return "\(version) (\(build))"
+        }
+        return version
+    }
+
+    private var environmentVersion: String {
+        store.source?.environment?.suiteVersion ?? store.suite?.suiteVersion ?? L10n.text("not installed")
+    }
+
+    private var catalogSourceLabel: String {
+        if store.source?.source?.unpublished == true {
+            return L10n.text(ManagerSourcePolicy.unpublishedNote)
+        }
+        return store.source?.source?.url ?? store.source?.source?.path ?? L10n.text(ManagerSourcePolicy.unpublishedNote)
     }
 }

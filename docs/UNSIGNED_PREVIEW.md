@@ -36,6 +36,11 @@ https://github.com/tetracoralla/agent-host-suite/releases/latest/download/previe
 That URL is a **naming convention**. This checkout does not claim the asset
 exists. Tracked `catalog/preview-distribution.json` is the unpublished
 placeholder (`publicReleasePublished: false`, empty `carriers`, `catalog: null`).
+`agent-host source status` / Manager Settings report that honestly as **catalog
+assets are unpublished**, and can retry a check or point at a local bound
+`current.json` / HTTPS index (`source set --release-manifest` or `source set --url`)
+without publishing a GitHub Release. Interrupted, offline, and digest errors
+keep a retry or local-catalog recovery.
 
 ## Open an unsigned macOS DMG (Gatekeeper)
 

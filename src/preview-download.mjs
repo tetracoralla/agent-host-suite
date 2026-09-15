@@ -355,7 +355,13 @@ export async function resolveReleaseManifestPath(options = {}, dependencies = {}
   const env = dependencies.env ?? process.env
   const explicit = trimEnv(options.releaseManifest)
   const preview = trimEnv(env[FEATURED_CATALOG_DOWNLOAD_ENV])
-  const candidate = explicit || preview
+  const saved = dependencies.savedCatalogSource
+  const savedCandidate = saved?.kind === 'https'
+    ? trimEnv(saved.url)
+    : saved?.kind === 'local'
+      ? trimEnv(saved.path)
+      : ''
+  const candidate = explicit || preview || savedCandidate
   if (candidate === '') return defaultReleaseManifestPath()
   if (/^https:\/\//iu.test(candidate)) {
     const fetched = await fetchBoundCatalog(candidate, {

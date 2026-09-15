@@ -267,6 +267,99 @@ do {
             && ManagerToolPolicy.resumeArguments == ["tools", "resume"],
         "pause and resume must be dedicated tools actions, not a profile change"
     )
+    expect(
+        ManagerSourcePolicy.statusArguments() == ["source", "status"]
+            && ManagerSourcePolicy.checkArguments() == ["source", "check"]
+            && ManagerSourcePolicy.setURLArguments("https://example.invalid/preview-distribution.json")
+                == ["source", "set", "--url", "https://example.invalid/preview-distribution.json"]
+            && ManagerSourcePolicy.setManifestArguments("/tmp/current.json")
+                == ["source", "set", "--release-manifest", "/tmp/current.json"]
+            && ManagerSourcePolicy.clearArguments() == ["source", "clear"],
+        "Manager source actions must call the source CLI rather than env-only setup"
+    )
+    expect(
+        ManagerSourcePolicy.versionSummary(applicationVersion: "0.2.0", applicationBuild: "3", environmentVersion: "0.1.4")
+            == "App 0.2.0 · build 3 · Env 0.1.4",
+        "Manager must distinguish application build from environment release"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: "/opt/current.json",
+            savedPath: "/tmp/current.json",
+            savedURL: "https://example.invalid/preview-distribution.json",
+            featuredCatalogURL: "https://example.invalid/featured.json"
+        ) == "/opt/current.json",
+        "an environment release manifest must take precedence over saved locators"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: nil,
+            savedPath: "/tmp/current.json",
+            savedURL: "https://example.invalid/preview-distribution.json",
+            featuredCatalogURL: nil
+        ) == "/tmp/current.json",
+        "a saved local catalog must be usable without an env var"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: "",
+            savedPath: "",
+            savedURL: "https://example.invalid/preview-distribution.json",
+            featuredCatalogURL: "https://example.invalid/featured.json"
+        ) == "https://example.invalid/preview-distribution.json",
+        "empty catalog locators must flatten away and yield to the next source"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: nil,
+            savedPath: nil,
+            savedURL: nil,
+            featuredCatalogURL: "https://example.invalid/featured.json"
+        ) == "https://example.invalid/featured.json",
+        "the featured catalog URL remains a last-resort locator"
+    )
+    expect(
+        ManagerSourcePolicy.resolvedReleaseManifest(
+            environmentManifest: "",
+            savedPath: nil,
+            savedURL: "",
+            featuredCatalogURL: nil
+        ) == nil,
+        "all-empty catalog locators must not invent a path"
+    )
+    expect(
+        ManagerSourcePolicy.recoveryMessage(code: "PREVIEW_DOWNLOAD_DIGEST_MISMATCH").contains("digest"),
+        "digest errors must name a recovery path"
+    )
+    expect(
+        ManagerSourcePolicy.recoveryMessage(code: nil).contains("unpublished"),
+        "unconfigured source copy must stay unpublished rather than implying a store"
+    )
+    expect(ManagerSourcePolicy.notNotarizedNote.contains("Not Apple-notarized"), "source copy must not claim notarization")
+    let sourceStatus = try JSONDecoder().decode(SourceStatus.self, from: Data(#"""
+    {
+      "schemaVersion": "openadam.agent-host-source-status.v0.1",
+      "status": "unpublished",
+      "notarized": false,
+      "marketplace": false,
+      "publicReleasePublished": false,
+      "application": {"kind": "source-checkout", "productName": "Agent Host", "version": "0.2.0", "build": "3"},
+      "environment": {"configured": false, "suiteVersion": null},
+      "components": [],
+      "source": {
+        "kind": "unset",
+        "unpublished": true,
+        "message": "Catalog assets are unpublished. This checkout has no GitHub Release assets. This is not notarized and not a store.",
+        "lastCheck": {"status": "unpublished", "code": "PREVIEW_DOWNLOAD_UNPUBLISHED"}
+      }
+    }
+    """#.utf8))
+    expect(sourceStatus.notarized == false, "source status must not claim notarization")
+    expect(sourceStatus.publicReleasePublished == false, "source status must not claim a public Release")
+    expect(sourceStatus.application?.version == "0.2.0", "source status must name the application version")
+    expect(sourceStatus.application?.build == "3", "source status must name the application build")
+    expect(sourceStatus.environment?.configured == false, "source status must allow an absent environment")
+    expect(sourceStatus.source?.unpublished == true, "source status must report unpublished assets")
     let pausedStatus = try JSONDecoder().decode(SuiteStatus.self, from: Data(#"""
     {
       "status": "ok",
@@ -529,6 +622,8 @@ do {
     expect(L10n.locale.identifier.hasPrefix("zh"), "dates must follow the explicit Simplified Chinese Manager language")
     expect(L10n.text("Complete") == "完整" && L10n.text("Running") == "运行中", "dynamic health values must be localized")
     expect(L10n.text("Environment checks") == "环境检查", "unclassified health facets must provide Simplified Chinese copy")
+    expect(L10n.text("Unknown") == "未知", "unknown version copy must provide Simplified Chinese once")
+    expect(L10n.text("not installed") == "未安装", "absent environment copy must provide Simplified Chinese once")
     expect(L10n.relativeAge(since: now.addingTimeInterval(-120), now: now) == "2 分钟前", "relative time must follow the selected Manager language")
     expect(L10n.format("{count} live suite processes", ["count": "3"]) == "3 个活跃 Suite 进程", "runtime summaries must be localized")
     expect(ManagerLanguage.system.title == "跟随系统", "the language control must expose a system-default choice")
@@ -536,7 +631,7 @@ do {
     expect(L10n.text("Usage") == "Usage", "the Manager must allow an explicit English override")
     expect(L10n.locale.identifier.hasPrefix("en"), "dates must follow the explicit English Manager language")
 
-    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup")
+    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup, catalog locator flatten")
 } catch {
     FileHandle.standardError.write(Data("manager model check failed: \(error)\n".utf8))
     exit(1)

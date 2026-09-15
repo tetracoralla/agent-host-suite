@@ -129,15 +129,17 @@ whether icons entered the work without naming Armorial.
 agent-host doctor --featured-readiness --json
 ```
 
-That command only checks that the featured working set is selected and that
-connected projection receipts are healthy. It always reports
-`adoptionEvidence: false`. Host status and call counts are not adoption.
+That command reports user-level Host readiness (required tools, connection,
+projection) separately from `recipe.consistency`. It always reports
+`adoptionEvidence: false`. A `local-dogfood` profile is not itself a
+user-level failure. Host status and call counts are not adoption.
 
 ## Typical operator flow
 
 ```text
 agent-host setup --profile standard --host zcode --release-manifest /absolute/current.json
 agent-host snapshot --json
+agent-host source status --json
 agent-host usage --json
 agent-host doctor --deep --skip-agent-apps --json
 agent-host tools status

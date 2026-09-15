@@ -16,9 +16,16 @@ import { startWebManager } from './web-manager.mjs'
 import { defaultToolsForProfile, featuredCatalog, FEATURED_CATALOG_SCHEMA } from './profile.mjs'
 import { fetchPreviewRelease, PREVIEW_FETCH_SCHEMA } from './preview-download.mjs'
 import { FEATURED_READINESS_SCHEMA, inspectFeaturedReadiness } from './featured-readiness.mjs'
+import {
+  SOURCE_STATUS_SCHEMA,
+  checkCatalogSource,
+  clearCatalogSource,
+  inspectSourceStatus,
+  setCatalogSource,
+} from './source-status.mjs'
 import { isAbsolute, join, resolve } from 'node:path'
 
-const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'service', 'profiles'])
+const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'service', 'profiles', 'source'])
 const PROFILE_CHOICES = 'standard|featured|developer|observability|local-dogfood'
 
 const USAGE = `Usage:
@@ -28,6 +35,10 @@ const USAGE = `Usage:
   agent-host catalog [--state-root PATH] [--json]
   agent-host profiles list [--json]
   agent-host profiles fetch [--url URL] [--carrier] [--state-root PATH] [--json]
+  agent-host source status [--state-root PATH] [--json]
+  agent-host source check [--url URL] [--release-manifest PATH] [--state-root PATH] [--json]
+  agent-host source set (--url URL | --release-manifest PATH) [--state-root PATH] [--json]
+  agent-host source clear [--state-root PATH] [--json]
   agent-host activity [--state-root PATH] [--json]
   agent-host usage [--state-root PATH] [--json]
   agent-host manager [--no-open] [--state-root PATH]
@@ -67,6 +78,10 @@ const ROUTE_ARGUMENTS = Object.freeze({
   catalog: ['--state-root', '--json'],
   'profiles list': ['--json'],
   'profiles fetch': ['--url', '--carrier', '--state-root', '--json'],
+  'source status': ['--state-root', '--json'],
+  'source check': ['--url', '--release-manifest', '--state-root', '--json'],
+  'source set': ['--url', '--release-manifest', '--state-root', '--json'],
+  'source clear': ['--state-root', '--json'],
   activity: ['--state-root', '--json'],
   usage: ['--state-root', '--json'],
   manager: ['--state-root', '--no-open'],
@@ -243,6 +258,12 @@ function parseArgs(argv) {
   if (route === 'doctor' && options.featuredReadiness === true && options.deep === true) {
     throw new AgentHostError('CLI_USAGE', 'doctor --featured-readiness does not accept --deep')
   }
+  if (route === 'source check' && options.url !== undefined && options.releaseManifest !== undefined) {
+    throw new AgentHostError('CLI_USAGE', 'source check accepts --url or --release-manifest, not both')
+  }
+  if (route === 'source set' && (options.url === undefined) === (options.releaseManifest === undefined)) {
+    throw new AgentHostError('CLI_USAGE', 'source set requires --url or --release-manifest, not both')
+  }
   if (route === 'service recover') {
     if (!/^service-recovery-v2-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(options.recovery ?? '')) {
       throw new AgentHostError('CLI_USAGE', 'service recover requires a valid --recovery identity')
@@ -282,6 +303,20 @@ function storageSummary(result) {
 }
 
 export function human(result) {
+  if (result.schemaVersion === SOURCE_STATUS_SCHEMA) {
+    const application = result.application
+    const environment = result.environment
+    const last = result.source?.lastCheck
+    const appBuild = application?.build == null ? application?.version : `${application.version} (build ${application.build})`
+    const envVersion = environment?.configured === true ? environment.suiteVersion : 'not installed'
+    return [
+      `Source · application ${appBuild} · environment ${envVersion} · not notarized`,
+      result.source?.message,
+      last == null ? 'Last check: none' : `Last check: ${last.status}${last.code == null ? '' : ` · ${last.code}`}`,
+      result.source?.recovery?.message,
+      result.assessmentBoundary,
+    ].filter((line) => typeof line === 'string' && line.length > 0).join('\n')
+  }
   if (Array.isArray(result.components) && result.components.every((item) => item.id !== undefined && item.installed !== undefined)) {
     if (result.components.length === 0) return 'No private Agent tools are imported.'
     return result.components.map((item) => `${item.id} ${item.version ?? 'removed'} · ${item.active ? 'active' : item.installed ? 'inactive' : 'removed'}`).join('\n')
@@ -371,9 +406,14 @@ export function human(result) {
     const mark = (status) => (status === 'ok' ? '✓' : status === 'warning' ? '!' : '✗')
     return [
       'Featured readiness · Host precondition only · not adoption',
+      `User readiness: ${result.userStatus ?? result.status}`,
+      `Recipe: ${result.recipeStatus ?? 'n/a'}`,
       ...result.checks.map((item) => `${mark(item.status)} ${item.message}`),
+      result.nextSteps?.startFreshTask,
+      result.nextSteps?.missingTools,
+      result.nextSteps?.completedWork,
       result.assessmentBoundary,
-    ].join('\n')
+    ].filter((line) => typeof line === 'string' && line.length > 0).join('\n')
   }
   if (result.status === 'ok' && Array.isArray(result.checks)) {
     return [`Doctor: ${result.status}`, ...result.checks.map((item) => `${item.status === 'ok' ? '✓' : '✗'} ${item.message}`)].join('\n')
@@ -465,6 +505,23 @@ async function run(options, dependencies = {}) {
       return fetchPreviewRelease(options, { ...dependencies, paths })
     }
     throw new AgentHostError('CLI_USAGE', `Unknown profiles action: ${options.action}`)
+  }
+  if (options.command === 'source') {
+    if (options.action === 'status') return inspectSourceStatus(options, dependencies)
+    if (options.action === 'check') {
+      if (options.url !== undefined && options.releaseManifest !== undefined) {
+        throw new AgentHostError('CLI_USAGE', 'source check accepts --url or --release-manifest, not both')
+      }
+      return checkCatalogSource(options, dependencies)
+    }
+    if (options.action === 'set') return setCatalogSource(options, dependencies)
+    if (options.action === 'clear') {
+      if (options.url !== undefined || options.releaseManifest !== undefined) {
+        throw new AgentHostError('CLI_USAGE', 'source clear does not accept --url')
+      }
+      return clearCatalogSource(options, dependencies)
+    }
+    throw new AgentHostError('CLI_USAGE', `Unknown source action: ${options.action}`)
   }
   if (options.command === 'activity') {
     const paths = await readStatePaths(resolveStateRoot(options.stateRoot))

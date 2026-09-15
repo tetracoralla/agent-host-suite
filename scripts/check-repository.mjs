@@ -97,6 +97,9 @@ if (!featuredDoc.includes('UNSIGNED_PREVIEW.md') || featuredDoc.includes('until 
 if (!featuredDoc.includes('profiles fetch') || !featuredDoc.includes('public download is not configured')) {
   throw new Error('featured catalog document must name profiles fetch and the unconfigured download state')
 }
+if (!featuredDoc.includes('source status') || !featuredDoc.includes('Catalog assets are unpublished')) {
+  throw new Error('featured catalog document must name source status and unpublished catalog assets')
+}
 const previewDoc = await readFile(join(root, 'docs/UNSIGNED_PREVIEW.md'), 'utf8')
 if (!previewDoc.includes('Control-click') || !previewDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !previewDoc.includes('preview-distribution.json')) {
   throw new Error('unsigned preview document must name Gatekeeper, the catalog URL hook, and the index asset')
@@ -129,6 +132,9 @@ if (!featuredDoc.includes('ADOPTION_ACCEPTANCE.md')) {
 const adoptionDoc = await readFile(join(root, 'docs/ADOPTION_ACCEPTANCE.md'), 'utf8')
 if (!adoptionDoc.includes('fresh Agent task') || !adoptionDoc.includes('not adoption evidence') || !adoptionDoc.includes('doctor --featured-readiness')) {
   throw new Error('adoption protocol must require a fresh Agent task and refuse Host status as evidence')
+}
+if (!adoptionDoc.includes('recipe.consistency') || !adoptionDoc.includes('userStatus') || !adoptionDoc.includes('local-dogfood')) {
+  throw new Error('adoption protocol must separate user-level readiness from recipe consistency')
 }
 if (!adoptionDoc.includes('docs/fixtures/adoption')) {
   throw new Error('adoption protocol must ship unnamed fixtures')
