@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-github-project-preview.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "origin", "downloadedPackage"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-github-project-preview.v0.1" },
+    "status": { "enum": ["ready", "unavailable"] },
+    "origin": { "type": "object" },
+    "presentation": { "type": "object" },
+    "release": { "type": "object" },
+    "compatibility": { "type": "object" },
+    "permissions": { "type": "object" },
+    "downloadedPackage": { "const": false }
+  }
+}

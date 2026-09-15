@@ -63,20 +63,22 @@ On the machine that will run the Agent:
    working set is selected. This report always sets `adoptionEvidence` to
    `false` and `userStatus` is not natural model choice.
 
-   Unnamed adoption scoring requires JSON `status` equal to `ok` **and**
-   `recipe.consistency` status equal to `ok`. `--skip-agent-apps` yields at
-   most `warning` and is **not** a protocol pass: receipts were not inspected.
-   `--deep` is rejected; this route does not probe Direct Runtime or pretend
-   to judge the Agent.
+   Unnamed adoption scoring requires JSON `status` / `userStatus` equal to
+   `ok`. `recipe.consistency` records the working set as an experimental variable
+   and is **not** a scoring gate. Extra installed tools, monitoring
+   off, and a `local-dogfood` profile name do not exclude a healthy Armorial
+   projection. `--skip-agent-apps` yields at most `warning` and is **not** a
+   protocol pass: receipts were not inspected. `--deep` is rejected; this
+   route does not probe Direct Runtime or pretend to judge the Agent.
 
 3. If bindings just changed, or `restartRequired` is set, start a **fresh
    Agent task**. Do not reuse a thread that began before the current
    projection.
 
 If user-level `status` is not `ok`, stop: required tools, connection, or
-projection receipts are not ready. If `recipe.consistency` is not `ok`,
-unnamed adoption cannot be scored on that Host even when user-level readiness
-is `ok` (for example `local-dogfood` with a healthy Armorial projection).
+projection receipts are not ready. Record `recipe.consistency` detail
+(profile name and working set) with the score; do not ask the operator to
+delete other healthy tools first.
 
 ## Workspace rule
 

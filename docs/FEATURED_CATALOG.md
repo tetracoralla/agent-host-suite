@@ -84,7 +84,7 @@ not featured.
 | Application build, environment release, tool versions, and catalog source | `agent-host source status` / Manager Settings. Distinguishes the Manager app from the installed environment. Catalog assets are unpublished until an owner publishes a Release or an HTTPS index. |
 | Choose a local or HTTPS catalog | `source set --release-manifest` / `source set --url`, or Manager Settings. Env `AGENT_HOST_FEATURED_CATALOG_URL` still works. Interrupted, offline, and digest errors keep a retry or local-catalog recovery. This does not publish a GitHub Release. |
 | User-level task readiness (tools, connection, projection; not adoption) | `doctor --featured-readiness` overall `status` / `userStatus`. Recipe name is a separate `recipe.consistency` check. `local-dogfood` plus a healthy Armorial projection is not a user-level failure. |
-| Featured recipe consistency | `recipe.consistency` on the same report. Unnamed adoption scoring still wants this `ok` plus user-level `ok`. |
+| Featured recipe consistency | `recipe.consistency` on the same report records the working set as an experimental variable. Unnamed adoption scoring uses user-level `ok` and does not require deleting other healthy tools. |
 | Observe session discovery | a **new** Agent task after `restartRequired` |
 
 If local monitoring is already enabled, `update --profile featured` keeps the

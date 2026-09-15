@@ -6,7 +6,6 @@ import { basename, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { runFile } from '../src/process.mjs'
 
-export const ARMORIAL_COMPATIBILITY_VERSION = '0.7.0'
 export const FILE_VITALS_COMPATIBILITY_VERSION = '0.3.3'
 
 const INSTALL_TIMEOUT_MS = 180_000
@@ -86,7 +85,8 @@ function safeArchiveEntry(value, expectedRoot) {
 }
 
 function archiveFileSize(line, label) {
-  const match = line.match(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+/u)
+  const match = line.match(/^[d-][rwxsStT-]{9}[+]?\s+\S+\s+(\d+)\s+/u)
+    ?? line.match(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+/u)
   if (match === null) throw new Error(`${label} archive inventory could not establish one member size`)
   const bytes = Number(match[1])
   if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > ARCHIVE_ENTRY_EXPANDED_LIMIT) {
@@ -388,9 +388,9 @@ export async function buildArmorialPluginFromVerifiedSource({
   const source = await realpath(sourceRoot)
   const scratch = await realpath(scratchRoot)
   const pkg = parseManifest(await readFile(join(source, 'package.json'), 'utf8'), 'source package manifest')
-  if (pkg.name !== 'armorial' || pkg.version !== ARMORIAL_COMPATIBILITY_VERSION
+  if (pkg.name !== 'armorial' || typeof pkg.version !== 'string' || pkg.version.length === 0
     || typeof pkg.scripts?.['release:plugin'] !== 'string' || pkg.scripts['release:plugin'].trim().length === 0) {
-    throw new Error(`Armorial verified source must declare armorial@${ARMORIAL_COMPATIBILITY_VERSION} and release:plugin`)
+    throw new Error('Armorial verified source must declare armorial with a package version and release:plugin')
   }
   const lockInfo = await lstat(join(source, 'package-lock.json'))
   if (!lockInfo.isFile() || lockInfo.isSymbolicLink()) throw new Error('Armorial verified source lockfile is unsafe')

@@ -101,6 +101,18 @@ placement, and speculative host adapters are deliberately absent. An
 owner-selected featured list, if used, is a profile or working set over these
 same install APIs, not a store; see [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md).
 
+## GitHub plugin archives
+
+A public Codex plugin Release (root directory with `package.json`,
+`.codex-plugin/plugin.json`, and `.mcp.json`) is not a Host component archive.
+Host downloads that official asset, verifies SHA-256, copies plugin bytes
+unmodified, and writes Host-owned `component.json` (schema v0.2) with
+`presentation` and `origin`. Display name, summary, author, homepage, license,
+and logo come from `package.json` / `plugin.json` / `package.json.openadam`
+fields already in the plugin, not from Host source maps. See
+[`UPDATES.md`](UPDATES.md). GitHub catalog data cannot carry commands to
+execute.
+
 ## Execution-path boundary
 
 Discovery is not an execution transport. The v0.3 Skill tells an Agent when a

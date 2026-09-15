@@ -4,6 +4,8 @@ struct ComponentSummary: Decodable, Equatable, Sendable {
     let version: String
     let displayName: String?
     let summary: String?
+    let author: String?
+    let homepage: String?
 }
 
 struct HostEntrySummary: Decodable, Equatable, Sendable {
@@ -1202,6 +1204,8 @@ struct ManagedTool: Identifiable, Equatable {
     let summary: String
     let systemImage: String
     let version: String?
+    let author: String?
+    let homepage: String?
     let state: ManagedItemState
     let availability: String
     let ownership: String

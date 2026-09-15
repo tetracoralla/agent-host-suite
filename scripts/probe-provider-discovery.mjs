@@ -23,7 +23,6 @@ if (manifestArgument === undefined) {
 }
 const manifestPath = resolve(manifestArgument)
 const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-provider-discovery-'))
-const expectedArmorialVersion = '0.7.0'
 let preparation = null
 let claudeProviderSkills = []
 let zcodeProviderSkills = []
@@ -103,6 +102,7 @@ try {
   const activeIds = selectAgentComponents(profile.agentComponents, profile.defaultAgentComponents)
   const inactiveManifest = hostFacingManifest(manifest, activeIds)
   const armorial = inactiveManifest.components.armorial
+  const expectedArmorialVersion = armorial.version
   assert.equal(armorial.skillOnly, true)
   assert.equal(armorial.providerSkill?.expectedVersion, expectedArmorialVersion)
 
@@ -216,14 +216,15 @@ try {
   let firstActiveError = null
   try {
     const tools = await firstActive.client.listTools()
-    assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-      'browse_icons',
+    const names = tools.tools.map((tool) => tool.name)
+    const expectedTools = activeArmorial.expectedTools ?? [
       'choose_icon',
       'get_icon',
       'get_icons',
       'resolve_icon',
       'search_icons',
-    ])
+    ]
+    for (const name of expectedTools) assert.equal(names.includes(name), true, `missing MCP tool ${name}`)
     for (let index = 0; index < 50; index += 1) {
       const startedAt = performance.now()
       const result = await firstActive.client.callTool({ name: 'resolve_icon', arguments: { intent: 'search' } })

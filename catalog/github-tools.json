@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "openadam.agent-host-github-tools.v0.1",
+  "host": {
+    "repository": "tetracoralla/agent-host-suite",
+    "stableTagPrefix": "v",
+    "catalogTag": "tool-catalog",
+    "unsignedPreview": true
+  },
+  "tools": [
+    {
+      "id": "armorial",
+      "repository": "tetracoralla/armorial",
+      "featured": true,
+      "assetName": "armorial-{version}-codex-plugin-{assetPlatform}.tar.gz",
+      "checksumAssetName": "armorial-{version}-codex-plugin-{assetPlatform}.tar.gz.sha256",
+      "platforms": {
+        "darwin-arm64": "macos-arm64"
+      }
+    }
+  ]
+}

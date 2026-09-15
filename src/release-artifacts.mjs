@@ -17,6 +17,7 @@ import {
   REQUIRED_RELEASE_COMPONENTS,
   containedComponentPath,
   currentReleasePlatform,
+  currentReleasePlatformOrLocal,
   installDirectoryName,
   resolveArtifactUrl,
   selectedReleaseComponents,
@@ -562,7 +563,7 @@ function requireLocalBinding(binding, observation) {
     descriptorSha256: observation.releaseComponent.descriptorSha256,
     id: observation.descriptor.id,
     version: observation.descriptor.version,
-    platform: currentReleasePlatform(),
+    platform: currentReleasePlatformOrLocal(),
   }
   const mismatches = Object.entries(actual).filter(([key, value]) => binding[key] !== value).map(([key]) => key)
   if (!isSpdxExpressionSyntax(binding.spdx)) mismatches.push('spdx')

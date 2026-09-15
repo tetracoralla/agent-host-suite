@@ -125,7 +125,14 @@ final class AgentHostStore: ObservableObject {
                 summary: suite?.components?[id]?.summary ?? L10n.text("Installed Agent tool"),
                 systemImage: "shippingbox.fill"
             )
-            return tool(id: id, name: suite?.components?[id]?.displayName ?? metadata.name, summary: suite?.components?[id]?.summary ?? metadata.summary, systemImage: metadata.systemImage)
+            return tool(
+                id: id,
+                name: suite?.components?[id]?.displayName ?? metadata.name,
+                summary: suite?.components?[id]?.summary ?? metadata.summary,
+                systemImage: metadata.systemImage,
+                author: suite?.components?[id]?.author,
+                homepage: suite?.components?[id]?.homepage
+            )
         }
     }
 
@@ -606,7 +613,23 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
-    private func tool(id: String, name: String, summary: String, systemImage: String) -> ManagedTool {
+    func checkUpdates() async {
+        await work("Checking updates") {
+            _ = try await self.cli.run(["updates", "check"], as: GenericResult.self)
+            await self.refresh()
+        }
+    }
+
+    func addGitHubTool(_ url: String) async {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await work("Adding GitHub tool") {
+            _ = try await self.cli.run(["tools", "add", "--github", trimmed], as: GenericResult.self)
+            await self.refresh()
+        }
+    }
+
+    private func tool(id: String, name: String, summary: String, systemImage: String, author: String? = nil, homepage: String? = nil) -> ManagedTool {
         let component = suite?.components?[id]
         let componentFailed = doctor?.check("component.\(id)")?.status == "error"
         let hostFailed = (suite?.hosts ?? [:]).keys.contains { doctor?.hasFailure(prefix: "host.\($0).\(id)") == true }
@@ -637,6 +660,8 @@ final class AgentHostStore: ObservableObject {
             summary: summary,
             systemImage: systemImage,
             version: component?.version,
+            author: author,
+            homepage: homepage,
             state: state,
             availability: availableHosts.isEmpty ? L10n.text("Not selected for an Agent app") : L10n.format("Selected for {apps}", ["apps": availableHosts.joined(separator: L10n.text(" and "))]),
             ownership: ownership,

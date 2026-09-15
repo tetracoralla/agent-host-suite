@@ -39,6 +39,8 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.match(document, /Usage & Reliability/u)
   assert.match(document, /featured/u)
   assert.match(document, /Get featured tools/u)
+  assert.match(document, /Add GitHub project/u)
+  assert.match(document, /Check for updates/u)
   assert.match(document, /Connect later/u)
   assert.equal(document.includes(url.split('/').at(-1)), false)
 

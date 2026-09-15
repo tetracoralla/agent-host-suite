@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ToolsView: View {
     @ObservedObject var store: AgentHostStore
+    @State private var githubURL = ""
 
     var body: some View {
         ScrollView {
@@ -24,6 +25,23 @@ struct ToolsView: View {
                     Panel {
                         LabeledContent(L10n.text("Context cost"), value: catalog)
                             .accessibilityLabel("\(L10n.text("Context cost")): \(catalog)")
+                    }
+                }
+
+                Panel {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(L10n.text("Add GitHub project")).font(.headline)
+                        Text(L10n.text("Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("https://github.com/owner/repo", text: $githubURL)
+                            .textFieldStyle(.roundedBorder)
+                        Button(L10n.text("Add GitHub project")) {
+                            let url = githubURL
+                            githubURL = ""
+                            Task { await store.addGitHubTool(url) }
+                        }
+                        .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
 
@@ -132,6 +150,11 @@ private struct ToolRow: View {
                     }
                 }
                 Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
+                if let author = tool.author, !author.isEmpty {
+                    Text(author)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if paused {
                     Text(L10n.text("Fully paused: no MCP and no on-demand Skill."))
                         .font(.caption)
