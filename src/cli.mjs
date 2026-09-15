@@ -25,6 +25,7 @@ import {
   updatesStatus,
 } from './updates.mjs'
 import { checkApplicationUpdate, updateApplication } from './application-update.mjs'
+import { executeAutoUpdates } from './auto-update.mjs'
 import { FEATURED_READINESS_SCHEMA, inspectFeaturedReadiness } from './featured-readiness.mjs'
 import {
   SOURCE_STATUS_SCHEMA,
@@ -707,7 +708,21 @@ async function run(options, dependencies = {}) {
     if (options.action === 'adapter-plan') return observabilityAdapterPlan(options)
     throw new AgentHostError('CLI_USAGE', `Unknown observability action: ${options.action}`)
   }
-  if (options.command === 'maintenance') return maintenance(options)
+  if (options.command === 'maintenance') {
+    const auto = await executeAutoUpdates(options.stateRoot, { skipIfNotDue: false, force: false }, dependencies).catch((error) => ({
+      status: 'auto-update-failed',
+      error: { code: error.code, message: error.message },
+    }))
+    try {
+      const observability = await maintenance(options)
+      return { ...observability, auto }
+    } catch (error) {
+      if (error instanceof AgentHostError && (error.code === 'OBSERVABILITY_DISABLED' || error.code === 'NOT_INSTALLED')) {
+        return { status: 'ok', auto, observability: { skipped: true, code: error.code } }
+      }
+      throw error
+    }
+  }
   if (options.command === 'host') {
     if (options.action === 'add') return addHost(options)
     if (options.action === 'remove') return removeHost(options)

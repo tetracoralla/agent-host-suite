@@ -1,11 +1,12 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { inspectSourceStatus } from './source-status.mjs'
-import { inspectToolUpdates, checkRegisteredTool, installGitHubTool, updateGitHubTool } from './tool-updates.mjs'
+import { inspectToolUpdates, checkRegisteredTool, installGitHubTool, updateGitHubTool, updateAvailability } from './tool-updates.mjs'
 import { browseRecommendedTools } from './github-project.mjs'
 import { checkApplicationUpdate, recoverApplicationUpdate, updateApplication } from './application-update.mjs'
 import { inspectAgentAppUpdates } from './agent-app-updates.mjs'
 import { readUpdatePreferences, setUpdatePreferences } from './update-preferences.mjs'
+import { executeAutoUpdates } from './auto-update.mjs'
 import { loadState, readStatePaths } from './state.mjs'
 import { resolveStateRoot } from './paths.mjs'
 
@@ -21,6 +22,9 @@ async function packageVersion() {
 export async function updatesStatus(options = {}, dependencies = {}) {
   await recoverApplicationUpdate(options.stateRoot).catch(() => {})
   const preferences = await readUpdatePreferences(options.stateRoot)
+  if (options.skipScheduledAuto !== true && preferences.autoCheck === true) {
+    await executeAutoUpdates(options.stateRoot, { ...options, skipIfNotDue: true }, dependencies).catch(() => {})
+  }
   const source = await inspectSourceStatus(options, dependencies).catch((error) => ({ status: 'error', error }))
   const stateRoot = resolveStateRoot(options.stateRoot)
   const state = await loadState(await readStatePaths(stateRoot))
@@ -78,12 +82,34 @@ export async function updatesCheck(options = {}, dependencies = {}) {
   const checks = []
   for (const tool of tools) {
     try {
-      checks.push(await checkRegisteredTool(tool.id, { fetch: options.fetch, signal: options.signal, channel: report.channel }))
+      checks.push(await checkRegisteredTool(tool.id, {
+        fetch: options.fetch,
+        signal: options.signal,
+        channel: report.channel,
+        stateRoot: options.stateRoot,
+      }))
     } catch (error) {
       checks.push({ id: tool.id, error: { code: error.code, message: error.message } })
     }
   }
-  return { ...report, githubChecks: checks }
+  const byId = new Map(checks.filter((item) => item.version !== undefined).map((item) => [item.id, item]))
+  const items = report.items.map((item) => {
+    const check = byId.get(item.id)
+    if (check === undefined) return item
+    const availableVersion = check.version
+    const availability = item.kind !== 'tool' ? item.availability : updateAvailability({
+      installedVersion: item.installedVersion,
+      availableVersion,
+      platformAvailable: item.availability !== 'no-platform-asset',
+    })
+    return {
+      ...item,
+      availableVersion,
+      availability,
+      lastCheck: { at: new Date().toISOString(), status: availability, from: check.from },
+    }
+  })
+  return { ...report, items, githubChecks: checks }
 }
 
 export async function updatesInstall(options, dependencies = {}) {

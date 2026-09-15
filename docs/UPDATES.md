@@ -58,8 +58,10 @@ list prereleases. GitHub `latest` never includes prerelease.
 `docs/unsigned-preview-release.yml` is the unsigned preview pipeline. Copy it
 to `.github/workflows/release.yml` from an account with the GitHub `workflow`
 scope. It does not request Apple Developer ID or notary secrets. It admits
-registered GitHub tools on a clean runner, packages unsigned macOS/Windows
-carriers, and publishes a prerelease only after those jobs succeed.
+registered GitHub tools on a clean runner, builds a catalog from official
+Node, this repository’s Host runtime packages, and those admitted tools
+(not test fixtures), packages unsigned macOS/Windows carriers, and publishes
+a prerelease only after those jobs succeed.
 
 `docs/scan-github-tools.yml` refreshes catalog pins and opens or updates one
 catalog PR; copy it to `.github/workflows/scan-github-tools.yml` with the same

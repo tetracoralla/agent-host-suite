@@ -10,7 +10,8 @@ import { AgentHostError } from './errors.mjs'
 import {
   extractVerifiedProviderPluginArchive,
   inspectProviderPluginArchive,
-} from '../scripts/provider-source-build.mjs'
+} from './provider-plugin-archive.mjs'
+import { MAX_COMPONENT_DESCRIPTOR_BYTES } from './release-artifacts.mjs'
 import { probeMcpTools } from './mcp-health.mjs'
 import {
   buildToolIntegration,
@@ -281,7 +282,15 @@ export async function wrapGitHubPluginArchive({
       legal: { license: 'LICENSE', notice: 'NOTICE', thirdPartyNotices: 'THIRD_PARTY_NOTICES.txt', sbom: 'sbom.spdx.json' },
     }
     const descriptorPath = join(stage, 'component.json')
-    await writeJson(descriptorPath, descriptor)
+    const descriptorText = `${JSON.stringify(descriptor)}\n`
+    if (Buffer.byteLength(descriptorText) > MAX_COMPONENT_DESCRIPTOR_BYTES) {
+      fail('COMPONENT_DESCRIPTOR_LIMIT', 'Wrapped component.json exceeds the shared descriptor size bound', {
+        bytes: Buffer.byteLength(descriptorText),
+        maximumBytes: MAX_COMPONENT_DESCRIPTOR_BYTES,
+      })
+    }
+    await mkdir(dirname(descriptorPath), { recursive: true })
+    await writeFile(descriptorPath, descriptorText, { mode: 0o600 })
     const stagedArchive = join(parent, `${contract.id}-${contract.version}-host-component.tar.gz`)
     await execFileAsync(tarCommand(), ['-czf', stagedArchive, '-C', stage, '.'], {
       env: { ...process.env, COPYFILE_DISABLE: '1' },

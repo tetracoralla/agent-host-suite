@@ -66,6 +66,13 @@ export function githubReleaseAssetUrl(repository, tag, assetName) {
   return `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(assetName)}`
 }
 
+export function parseAssetDigest(value) {
+  if (typeof value !== 'string' || value.trim() === '') return null
+  const match = value.trim().match(/^sha256:([0-9a-fA-F]{64})$/u)
+  if (match === null) return null
+  return `sha256:${match[1].toLowerCase()}`
+}
+
 export function parseSha256File(text, expectedName = null) {
   if (typeof text !== 'string' || text.trim() === '') fail('GITHUB_CHECKSUM_INVALID', 'The GitHub checksum file is empty')
   const line = text.trim().split(/\r?\n/u)[0].trim()
@@ -131,6 +138,7 @@ function releaseSummary(release) {
       url,
       bytes,
       contentType: typeof asset.content_type === 'string' ? asset.content_type : null,
+      digest: parseAssetDigest(asset.digest),
     }
   }) : []
   return {

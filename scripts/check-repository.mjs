@@ -10,7 +10,7 @@ const required = [
   'windows/Install Agent Host.cmd', 'windows/Install-AgentHost.ps1', 'windows/Uninstall-AgentHost.ps1', 'scripts/package-windows.mjs',
   'docs/PRODUCT_MODEL.md', 'docs/ARCHITECTURE.md', 'docs/TERMINOLOGY.md', 'docs/TOOL_INTEGRATION.md', 'docs/BRAND.md', 'docs/RELEASE.md', 'docs/REVIEW_CONTRACT.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md',
   'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md', 'docs/ADOPTION_ACCEPTANCE.md', 'docs/UNSIGNED_PREVIEW.md', 'docs/UPDATES.md',
-  'docs/unsigned-preview-release.yml', 'docs/scan-github-tools.yml', 'scripts/write-preview-distribution.mjs', 'scripts/admit-github-plugin.mjs', 'scripts/sync-github-catalog.mjs', 'scripts/verify-application-update.mjs',
+  'docs/unsigned-preview-release.yml', 'docs/scan-github-tools.yml', 'scripts/write-preview-distribution.mjs', 'scripts/admit-github-plugin.mjs', 'scripts/sync-github-catalog.mjs', 'scripts/verify-application-update.mjs', 'scripts/build-unsigned-preview-catalog.mjs',
   'catalog/github-tools.json', 'catalog/github-releases/current.json',
   'schemas/agent-host-github-tools.schema.v0.1.json', 'schemas/agent-host-github-catalog.schema.v0.1.json', 'schemas/agent-host-component.schema.v0.2.json',
   'schemas/agent-host-preview-distribution.schema.v0.1.json', 'catalog/preview-distribution.json',
@@ -121,6 +121,12 @@ if (unsignedWorkflow.includes('notarytool') || unsignedWorkflow.includes('APPLE_
 }
 if (!unsignedWorkflow.includes('Unsigned preview') || !unsignedWorkflow.includes('admit-github-plugin.mjs')) {
   throw new Error('unsigned preview workflow draft must admit GitHub tools on a clean runner without Apple secrets')
+}
+if (unsignedWorkflow.includes('createReleaseFixture') || unsignedWorkflow.includes('test/release-helpers.mjs')) {
+  throw new Error('unsigned preview workflow must not package test fixtures as the application payload')
+}
+if (!unsignedWorkflow.includes('build-unsigned-preview-catalog.mjs')) {
+  throw new Error('unsigned preview workflow must build a verified catalog on the runner')
 }
 const readme = await readFile(join(root, 'README.md'), 'utf8')
 if (!readme.includes('not Apple-notarized') && !readme.includes('No notarization')) {

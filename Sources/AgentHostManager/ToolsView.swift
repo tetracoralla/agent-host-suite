@@ -36,12 +36,31 @@ struct ToolsView: View {
                             .foregroundStyle(.secondary)
                         TextField("https://github.com/owner/repo", text: $githubURL)
                             .textFieldStyle(.roundedBorder)
-                        Button(L10n.text("Add GitHub project")) {
-                            let url = githubURL
-                            githubURL = ""
-                            Task { await store.addGitHubTool(url) }
+                        HStack {
+                            Button(L10n.text("Preview GitHub project")) {
+                                let url = githubURL
+                                Task { await store.previewGitHubTool(url) }
+                            }
+                            .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            Button(L10n.text("Add GitHub project")) {
+                                let url = githubURL
+                                githubURL = ""
+                                Task { await store.addGitHubTool(url) }
+                            }
+                            .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
-                        .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if let preview = store.githubPreview {
+                            HStack(alignment: .top, spacing: 12) {
+                                ToolLogoView(logo: preview.presentation?.logo, systemImage: "shippingbox")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(preview.presentation?.displayName ?? preview.origin?.repository ?? "")
+                                        .font(.headline)
+                                    if let summary = preview.presentation?.summary {
+                                        Text(summary).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -135,10 +154,7 @@ private struct ToolRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: tool.systemImage)
-                .font(.title3)
-                .foregroundStyle(.blue)
-                .frame(width: 28, height: 28)
+            ToolLogoView(logo: tool.logo, systemImage: tool.systemImage)
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack {

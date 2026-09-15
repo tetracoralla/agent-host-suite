@@ -32,6 +32,7 @@ jobs:
           path: .build/github-tools
 
   macos:
+    needs: github-tools
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
@@ -40,20 +41,15 @@ jobs:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
-      - name: Package unsigned macOS app from a packaging catalog
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-tools
+          path: .build/github-tools
+      - name: Package unsigned macOS app from verified Host internals and admitted GitHub tools
         run: |
-          node --input-type=module -e "
-            import { readFile } from 'node:fs/promises';
-            import { createReleaseFixture } from './test/release-helpers.mjs';
-            const pkg = JSON.parse(await readFile('./package.json', 'utf8'));
-            await createReleaseFixture('.build/unsigned-package', {
-              suiteVersion: pkg.version,
-              releaseId: 'unsigned-preview-package',
-              marker: 'unsigned',
-              includeObservability: true,
-            });
-          "
-          AGENT_HOST_RELEASE_CATALOG="$PWD/.build/unsigned-package/catalog" ./scripts/package-macos-app.sh release
+          node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
+          ids="$(node -e 'const m=require("./.build/unsigned-catalog/current.json"); process.stdout.write(m.components.map(c=>c.id).join(","))')"
+          AGENT_HOST_BUNDLED_COMPONENTS="$ids" AGENT_HOST_RELEASE_CATALOG="$PWD/.build/unsigned-catalog" ./scripts/package-macos-app.sh release
       - name: Wrap an unsigned DMG
         run: |
           echo "APP_ARCH=$(uname -m)" >> "$GITHUB_ENV"
@@ -78,6 +74,7 @@ jobs:
             .build/SHA256SUMS
 
   windows:
+    needs: github-tools
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -87,13 +84,19 @@ jobs:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-tools
+          path: .build/github-tools
       - name: Package unsigned Windows ZIP
         shell: pwsh
         env:
           AGENT_HOST_ALLOW_LOCAL_SOURCE_DISTRIBUTION: "1"
         run: |
-          node --input-type=module -e "import { readFile } from 'node:fs/promises'; import { createReleaseFixture } from './test/release-helpers.mjs'; const pkg=JSON.parse(await readFile('./package.json','utf8')); await createReleaseFixture('.build/unsigned-package', { suiteVersion: pkg.version, releaseId: 'unsigned-preview-package', marker: 'unsigned', includeObservability: true });"
-          $env:AGENT_HOST_RELEASE_CATALOG = Join-Path $PWD '.build\unsigned-package\catalog'
+          node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
+          $ids = (Get-Content -Raw .build/unsigned-catalog/current.json | ConvertFrom-Json).components.id -join ','
+          $env:AGENT_HOST_BUNDLED_COMPONENTS = $ids
+          $env:AGENT_HOST_RELEASE_CATALOG = Join-Path $PWD '.build\unsigned-catalog'
           npm run package:windows
       - uses: actions/upload-artifact@v4
         with:
@@ -113,7 +116,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled application catalog is a packaging fixture. Featured tools such as Armorial are admitted from their own GitHub Releases (see github-tools artifacts).\n\nprofiles fetch --carrier downloads an installer; it does not replace or relaunch Agent Host. Use app update on a supported OS after comparing digests.'
+          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, and GitHub tools admitted from public Releases (see github-tools artifacts). It is not a test fixture.\n\nprofiles fetch --carrier downloads an installer; it does not replace or relaunch Agent Host. Use app update on a supported OS after comparing digests.'
           files=()
           while IFS= read -r path; do files+=("$path"); done < <(find .build/release-assets -type f)
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \

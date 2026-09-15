@@ -35,7 +35,7 @@ function fail(code, message, details) {
 const MAX_LOCAL_COMPONENT_ARCHIVE_BYTES = 512 * 1024 * 1024
 const MAX_LOCAL_COMPONENT_FILES = 20_000
 const MAX_LOCAL_COMPONENT_EXPANDED_BYTES = 1024 * 1024 * 1024
-const MAX_COMPONENT_DESCRIPTOR_BYTES = 1024 * 1024
+export const MAX_COMPONENT_DESCRIPTOR_BYTES = 4 * 1024 * 1024
 const MIN_ARCHIVE_COMMAND_TIMEOUT_MS = 60_000
 const MAX_ARCHIVE_COMMAND_TIMEOUT_MS = 10 * 60_000
 const ARCHIVE_TIMEOUT_MS_PER_MIB = 2_000
@@ -407,7 +407,8 @@ async function inspectArchive(path, runner) {
 function localArchiveSizes(verboseLines) {
   const sizes = []
   for (const line of verboseLines.filter((value) => value[0] === '-')) {
-    const match = line.match(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+/u)
+    const match = line.match(/^[d-][rwxsStT-]{9}[+]?\s+\S+\s+(\d+)\s+/u)
+      ?? line.match(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+/u)
     if (match === null) fail('LOCAL_COMPONENT_ARCHIVE_INVALID', 'The local component archive inventory could not be bounded before extraction')
     const value = Number(match[1])
     if (!Number.isSafeInteger(value) || value < 0) fail('LOCAL_COMPONENT_ARCHIVE_INVALID', 'The local component archive contains an invalid file size')

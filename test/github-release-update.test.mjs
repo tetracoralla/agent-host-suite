@@ -10,9 +10,12 @@ import { parseGitHubResource, parseSha256File } from '../src/github-api.mjs'
 import { sanitizeSvg, presentationFromPackageMetadata } from '../src/tool-presentation.mjs'
 import { inspectGitHubPluginRoot } from '../src/github-plugin-contract.mjs'
 import { wrapGitHubPluginArchive } from '../src/github-plugin-wrap.mjs'
-import { previewGitHubProject } from '../src/github-project.mjs'
-import { updateAvailability } from '../src/tool-updates.mjs'
-import { applyDirectorySwapUpdate, verifyReplacedApplication } from '../src/application-update.mjs'
+import { admitGitHubRelease, previewGitHubProject } from '../src/github-project.mjs'
+import { inspectToolUpdates, updateAvailability, updateGitHubTool } from '../src/tool-updates.mjs'
+import { MAX_COMPONENT_DESCRIPTOR_BYTES } from '../src/release-artifacts.mjs'
+import { applyDirectorySwapUpdate, updateApplication, verifyReplacedApplication } from '../src/application-update.mjs'
+import { githubOrigin, writeToolSources } from '../src/tool-sources.mjs'
+import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 import { inspectFeaturedReadiness } from '../src/featured-readiness.mjs'
 import { browseRecommendedTools } from '../src/github-project.mjs'
 import { human } from '../src/cli.mjs'
@@ -285,6 +288,12 @@ test('recommended tools come from the GitHub registry without Host tool-id branc
   assert.equal(armorial.releaseUrl.includes('v0.8.0'), true)
 })
 
+test('installed runtime modules do not import scripts/provider-source-build.mjs', async () => {
+  const source = await readFile(new URL('../src/github-plugin-wrap.mjs', import.meta.url), 'utf8')
+  assert.equal(source.includes("from '../scripts/provider-source-build.mjs'"), false)
+  assert.equal(source.includes("from './provider-plugin-archive.mjs'"), true)
+})
+
 test('CLI exposes updates and GitHub add without treating fetch --carrier as app update', async (t) => {
   const isolated = await createIsolatedCli(t)
   const help = runIsolatedCli(['--help'], isolated)
@@ -296,4 +305,302 @@ test('CLI exposes updates and GitHub add without treating fetch --carrier as app
   assert.equal(browse.status, 0, browse.stderr)
   const body = JSON.parse(browse.stdout)
   assert.equal(body.tools.some((tool) => tool.id === 'armorial'), true)
+})
+
+function jsonResponse(value) {
+  return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
+}
+
+function releasePayload(version, { digest, bytes = 100 } = {}) {
+  const name = `glyphmark-${version}-macos-arm64.tar.gz`
+  return {
+    tag_name: `v${version}`,
+    html_url: `https://github.com/north-pier/glyphmark/releases/tag/v${version}`,
+    prerelease: false,
+    draft: false,
+    assets: [{
+      name,
+      browser_download_url: `https://github.com/north-pier/glyphmark/releases/download/v${version}/${name}`,
+      size: bytes,
+      digest: digest ?? `sha256:${'a'.repeat(64)}`,
+    }],
+  }
+}
+
+test('unregistered GitHub preview does not throw and does not download the package', async () => {
+  const calls = []
+  const preview = await previewGitHubProject('https://github.com/north-pier/glyphmark', {
+    fetch: async (url) => {
+      calls.push(String(url))
+      const href = String(url)
+      if (href.endsWith('/repos/north-pier/glyphmark')) {
+        return jsonResponse({
+          name: 'glyphmark',
+          description: 'Stamp a verified mark onto a page.',
+          html_url: 'https://github.com/north-pier/glyphmark',
+          homepage: 'https://example.invalid/glyphmark',
+          license: { spdx_id: 'Apache-2.0' },
+          owner: { login: 'north-pier', html_url: 'https://github.com/north-pier', avatar_url: null },
+        })
+      }
+      if (href.includes('/releases/latest')) return jsonResponse(releasePayload('1.1.0'))
+      throw new Error(`unexpected fetch ${href}`)
+    },
+  })
+  assert.equal(preview.registered, false)
+  assert.equal(preview.downloadedPackage, false)
+  assert.equal(preview.origin.repository, 'north-pier/glyphmark')
+  assert.equal(calls.some((url) => url.includes('glyphmark-1.1.0-macos-arm64.tar.gz')), false)
+})
+
+test('third-party admit uses the GitHub asset digest and requests the archive', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-admit-digest-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const created = await createPluginArchive(root, { version: '1.1.0' })
+  const calls = []
+  const archiveBytes = await readFile(created.archive)
+  await assert.rejects(
+    () => admitGitHubRelease({
+      url: 'https://github.com/north-pier/glyphmark',
+      fetch: async (url) => {
+        calls.push(String(url))
+        const href = String(url)
+        if (href.includes('/releases/latest') || href.includes('/releases/tags/')) {
+          return jsonResponse(releasePayload('1.1.0', { digest: 'sha256:' + '0'.repeat(64), bytes: archiveBytes.length }))
+        }
+        return new Response(archiveBytes, { headers: { 'content-type': 'application/gzip' } })
+      },
+      probe: false,
+      outputPath: join(root, 'wrapped.tar.gz'),
+      workRoot: join(root, 'work'),
+    }),
+    (error) => error.code === 'RELEASE_ARTIFACT_DIGEST_MISMATCH' || error.code === 'GITHUB_CHECKSUM_INVALID',
+  )
+  assert.equal(calls.some((url) => url.includes('/releases/latest') || url.includes('/releases/tags/')), true)
+  assert.equal(calls.some((url) => url.includes('.tar.gz')), true)
+})
+
+test('missing, wrong, and mismatched checksums fail closed', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-checksum-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const created = await createPluginArchive(root)
+  const bytes = await readFile(created.archive)
+  await assert.rejects(
+    () => admitGitHubRelease({
+      url: 'https://github.com/north-pier/glyphmark',
+      fetch: async (url) => {
+        const href = String(url)
+        if (href.includes('/releases/')) {
+          const payload = releasePayload('1.0.0', { bytes: bytes.length })
+          payload.assets[0].digest = undefined
+          return jsonResponse(payload)
+        }
+        if (href.endsWith('.sha256')) return new Response('', { status: 404 })
+        return new Response(bytes)
+      },
+      probe: false,
+      workRoot: join(root, 'missing'),
+    }),
+    (error) => error.code === 'GITHUB_CHECKSUM_INVALID' || error.code === 'RELEASE_DOWNLOAD_FAILED',
+  )
+  await assert.rejects(
+    () => admitGitHubRelease({
+      url: 'https://github.com/north-pier/glyphmark',
+      fetch: async (url) => {
+        const href = String(url)
+        if (href.includes('/releases/')) return jsonResponse(releasePayload('1.0.0', { digest: created.sha256, bytes: bytes.length }))
+        return new Response(Buffer.concat([bytes, Buffer.from('x')]), { headers: { 'content-type': 'application/gzip' } })
+      },
+      probe: false,
+      workRoot: join(root, 'mismatch'),
+    }),
+    (error) => error.code === 'RELEASE_ARTIFACT_DIGEST_MISMATCH' || error.code === 'RELEASE_ARTIFACT_SIZE_MISMATCH',
+  )
+})
+
+test('inspectToolUpdates fetches persisted third-party sources and records an available version', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-tool-check-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  const origin = githubOrigin({
+    repository: 'north-pier/glyphmark',
+    tag: 'v1.0.0',
+    assetName: 'glyphmark-1.0.0-macos-arm64.tar.gz',
+    assetUrl: 'https://github.com/north-pier/glyphmark/releases/download/v1.0.0/glyphmark-1.0.0-macos-arm64.tar.gz',
+    assetSha256: 'sha256:' + 'a'.repeat(64),
+    assetBytes: 100,
+  })
+  await writeToolSources(stateRoot, { tools: { glyphmark: { origin } } })
+  const paths = await prepareStatePaths(stateRoot)
+  await saveState(paths, {
+    schemaVersion: STATE_SCHEMA,
+    suiteVersion: '0.2.0',
+    channel: 'release',
+    profile: 'standard',
+    installedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    components: { glyphmark: { version: '1.0.0', origin } },
+    hosts: {},
+    runtime: { service: null },
+    observability: { enabled: false },
+    availableAgentComponents: ['glyphmark'],
+    agentComponents: [],
+  })
+  let calls = 0
+  const items = await inspectToolUpdates(stateRoot, {
+    fetch: async () => {
+      calls += 1
+      return jsonResponse(releasePayload('1.1.0'))
+    },
+  })
+  const tool = items.find((item) => item.id === 'glyphmark')
+  assert.equal(calls > 0, true)
+  assert.equal(tool.availableVersion, '1.1.0')
+  assert.equal(tool.availability, 'update-available')
+})
+
+test('updateGitHubTool requests the available tag, not the installed tag', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-tool-update-tag-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  const origin = githubOrigin({
+    repository: 'north-pier/glyphmark',
+    tag: 'v1.0.0',
+    assetName: 'glyphmark-1.0.0-macos-arm64.tar.gz',
+    assetUrl: 'https://github.com/north-pier/glyphmark/releases/download/v1.0.0/glyphmark-1.0.0-macos-arm64.tar.gz',
+    assetSha256: 'sha256:' + 'a'.repeat(64),
+    assetBytes: 100,
+  })
+  await writeToolSources(stateRoot, { tools: { glyphmark: { origin } } })
+  const calls = []
+  await assert.rejects(
+    () => updateGitHubTool({
+      stateRoot,
+      target: 'glyphmark',
+      fetch: async (url) => {
+        calls.push(String(url))
+        return jsonResponse(releasePayload('1.1.0'))
+      },
+    }),
+    (error) => error.code === 'RELEASE_ARTIFACT_DIGEST_MISMATCH'
+      || error.code === 'GITHUB_CHECKSUM_INVALID'
+      || error.code === 'RELEASE_DOWNLOAD_FAILED'
+      || error.code === 'RELEASE_ARTIFACT_SIZE_MISMATCH'
+      || error.code === 'GITHUB_PLUGIN_INVALID'
+      || error.code === 'NOT_INSTALLED'
+      || error.code === 'GITHUB_RELEASE_INVALID',
+  )
+  assert.equal(calls.some((url) => url.includes('/releases/tags/v1.0.0')), false)
+  assert.equal(calls.some((url) => url.includes('/releases/latest') || url.includes('/releases/tags/v1.1.0')), true)
+})
+
+test('public application update downloads instead of requiring a pre-staged payload', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-app-entry-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  const payload = Buffer.from('application-carrier-bytes')
+  const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`
+  const result = await updateApplication({
+    stateRoot,
+    currentVersion: '0.2.0',
+    platform: 'darwin-arm64',
+    fetch: async (url) => {
+      const href = String(url)
+      if (href.includes('/releases/latest')) {
+        return jsonResponse({
+          tag_name: 'v0.2.1',
+          html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',
+          prerelease: false,
+          draft: false,
+          assets: [{
+            name: 'Agent-Host-0.2.1-darwin-arm64.dmg',
+            browser_download_url: 'https://github.com/tetracoralla/agent-host-suite/releases/download/v0.2.1/Agent-Host-0.2.1-darwin-arm64.dmg',
+            size: payload.length,
+            digest,
+          }],
+        })
+      }
+      return new Response(payload, { headers: { 'content-type': 'application/gzip' } })
+    },
+  }, { resolver: async () => null })
+  assert.notEqual(result.code, 'APPLICATION_UPDATE_NOT_APPLIED')
+  assert.equal(result.applied, false)
+  assert.equal(result.downloaded?.sha256, digest)
+})
+
+test('failed replacement start restores the previous application and keeps the backup', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-app-recover-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const app = join(root, 'current')
+  const staged = join(root, 'staged')
+  const stateRoot = join(root, 'state')
+  await mkdir(join(app, 'bin'), { recursive: true })
+  await mkdir(join(staged, 'bin'), { recursive: true })
+  await write(join(app, 'marker'), 'working-old')
+  await write(join(staged, 'marker'), 'broken-new')
+  await write(join(app, 'bin/agent-host'), '#!/bin/sh\necho 0.2.0\n', 0o755)
+  await write(join(staged, 'bin/agent-host'), '#!/bin/sh\necho broken\nexit 1\n', 0o755)
+  let failure
+  try {
+    await updateApplication({
+      stateRoot,
+      currentVersion: '0.2.0',
+      applyKind: 'directory-swap',
+      currentRoot: app,
+      stagedRoot: staged,
+      fetch: async () => jsonResponse({
+        tag_name: 'v0.2.1',
+        html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',
+        prerelease: false,
+        draft: false,
+        assets: [{
+          name: 'Agent-Host-0.2.1-directory.tar.gz',
+          browser_download_url: 'https://github.com/tetracoralla/agent-host-suite/releases/download/v0.2.1/Agent-Host-0.2.1-directory.tar.gz',
+          size: 100,
+          digest: 'sha256:' + 'a'.repeat(64),
+        }],
+      }),
+    }, { resolver: async () => null, runner: async () => ({ status: 1, stderr: 'does not start', stdout: '' }) })
+  } catch (error) {
+    failure = error.code
+  }
+  assert.equal(failure, 'APPLICATION_UPDATE_RELAUNCH_FAILED')
+  assert.equal(await readFile(join(app, 'marker'), 'utf8'), 'working-old')
+  assert.equal(await readFile(join(`${app}.previous`, 'marker'), 'utf8'), 'working-old')
+})
+
+test('wrapper and importer share a descriptor bound that admits a real plugin install', async (t) => {
+  assert.equal(MAX_COMPONENT_DESCRIPTOR_BYTES >= 4 * 1024 * 1024, true)
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-install-bound-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const created = await createPluginArchive(root)
+  const wrapped = await wrapGitHubPluginArchive({
+    archivePath: created.archive,
+    expectedSha256: created.sha256,
+    origin: githubOrigin({
+      repository: 'north-pier/glyphmark',
+      tag: 'v1.0.0',
+      assetName: 'glyphmark-1.0.0.tar.gz',
+      assetUrl: 'https://github.com/north-pier/glyphmark/releases/download/v1.0.0/glyphmark-1.0.0.tar.gz',
+      assetSha256: created.sha256,
+      assetBytes: created.bytes,
+    }),
+    expectedTools: ['glyphmark.ping'],
+    probe: false,
+    outputPath: join(root, 'glyphmark-host.tar.gz'),
+    workRoot: join(root, 'wrap'),
+  })
+  const { observeLocalComponentArtifact } = await import('../src/release-artifacts.mjs')
+  const observation = await observeLocalComponentArtifact(wrapped.wrapped.path)
+  assert.equal(observation.descriptor.id, 'glyphmark')
+  assert.equal(observation.descriptor.version, '1.0.0')
+  assert.equal(observation.observed.archiveBytes > 0, true)
+})
+
+test('unknown plugin licenses stay NOASSERTION and are not rewritten as Apache-2.0', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-license-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const created = await createPluginArchive(root)
+  const packageJson = JSON.parse(await readFile(join(created.plugin, 'package.json'), 'utf8'))
+  delete packageJson.license
+  await writeFile(join(created.plugin, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`)
+  const contract = await inspectGitHubPluginRoot(created.plugin)
+  assert.equal(contract.licenseSpdx, 'NOASSERTION')
 })

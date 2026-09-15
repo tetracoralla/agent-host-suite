@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { admitGitHubRelease } from '../src/github-project.mjs'
-import { acquireHttpsFile } from '../src/release-artifacts.mjs'
+import { acquireHttpsFile, observeLocalComponentArtifact } from '../src/release-artifacts.mjs'
 import { parseSha256File } from '../src/github-api.mjs'
 
 const ARMORIAL_URL = 'https://github.com/tetracoralla/armorial/releases/tag/v0.8.0'
@@ -33,6 +33,10 @@ test('public Armorial 0.8.0 downloads, verifies, wraps, and probes without a dev
     assert.equal(tools.includes(name), true, `missing ${name}`)
   }
   assert.equal(admitted.descriptor.integration.discovery?.skill?.id, 'icon-svg-select')
+  const observation = await observeLocalComponentArtifact(admitted.wrapped.path)
+  assert.equal(observation.descriptor.id, 'armorial')
+  assert.equal(observation.descriptor.version, '0.8.0')
+  assert.equal(observation.observed.fileCount > 0, true)
 }, { timeout: 180_000 })
 
 test('truncated Armorial download fails closed and does not keep a bad file', async (t) => {

@@ -5,6 +5,7 @@ import { AgentHostError } from './errors.mjs'
 import {
   fetchGitHubRelease,
   fetchGitHubRepository,
+  parseAssetDigest,
   parseGitHubResource,
   parseSha256File,
   selectReleaseAsset,
@@ -66,7 +67,7 @@ export async function previewGitHubProject(url, {
     }
     throw error
   }
-  const registration = (await loadGitHubToolRegistry()).tools.find((tool) => tool.repository === parsed.repository)
+  const registration = (await loadGitHubToolRegistry()).tools.find((tool) => tool.repository === parsed.repository) ?? null
   let asset = null
   let unavailable = null
   try {
@@ -86,7 +87,13 @@ export async function previewGitHubProject(url, {
   if (typeof repository.owner.avatarUrl === 'string') {
     try {
       const image = await fetchRemotePreviewImage(repository.owner.avatarUrl, { fetch, signal, maxBytes: 128 * 1024 })
-      logo = { mediaType: image.mediaType, sha256: image.sha256, bytes: image.bytes.length, source: 'github-owner-avatar' }
+      logo = {
+        mediaType: image.mediaType,
+        sha256: image.sha256,
+        bytes: image.bytes.length,
+        source: 'github-owner-avatar',
+        dataUrl: `data:${image.mediaType};base64,${image.bytes.toString('base64')}`,
+      }
     } catch {
       logo = null
     }
@@ -141,8 +148,8 @@ export async function downloadGitHubReleaseAsset({
   signal,
   label = 'GitHub release asset',
 }) {
-  let digest = expectedSha256
-  if (digest === null && typeof checksumUrl === 'string') {
+  let digest = expectedSha256 ?? null
+  if (digest == null && typeof checksumUrl === 'string') {
     const checksumDestination = `${destination}.sha256`
     const checksum = await acquireHttpsFile({
       url: checksumUrl,
@@ -155,7 +162,7 @@ export async function downloadGitHubReleaseAsset({
     const { readFile } = await import('node:fs/promises')
     digest = parseSha256File(await readFile(checksum.path, 'utf8')).sha256
   }
-  if (digest === null) fail('GITHUB_CHECKSUM_INVALID', 'GitHub release assets require a SHA-256 before download completes')
+  if (digest == null) fail('GITHUB_CHECKSUM_INVALID', 'GitHub release assets require a SHA-256 before download completes')
   return acquireHttpsFile({
     url,
     destination,
@@ -187,6 +194,7 @@ export async function admitGitHubRelease({
   let assetName
   let expectedSha256
   let expectedBytes
+  let checksumUrl
   let releaseUrl
   let resolvedTag
   let repository = parsed.repository
@@ -205,18 +213,25 @@ export async function admitGitHubRelease({
     resolvedTag = release.tag
     releaseUrl = release.htmlUrl
     const version = release.tag.replace(/^v/u, '')
+    let asset
+    let checksumAssetName = `${parsed.assetName ?? ''}.sha256`
     if (registration !== null && platform !== null) {
       const named = registeredToolAsset(registration, version, platform)
-      const asset = selectReleaseAsset(release, { assetName: parsed.assetName ?? named.assetName, platform })
-      assetUrl = asset.url
-      assetName = asset.name
-      expectedBytes = asset.bytes
+      asset = selectReleaseAsset(release, { assetName: parsed.assetName ?? named.assetName, platform })
+      checksumAssetName = named.checksumAssetName
     } else {
-      const asset = selectReleaseAsset(release, { assetName: parsed.assetName, platform })
-      assetUrl = asset.url
-      assetName = asset.name
-      expectedBytes = asset.bytes
+      asset = selectReleaseAsset(release, { assetName: parsed.assetName, platform })
+      checksumAssetName = `${asset.name}.sha256`
     }
+    assetUrl = asset.url
+    assetName = asset.name
+    expectedBytes = asset.bytes
+    expectedSha256 = parseAssetDigest(asset.digest) ?? null
+    const checksumAsset = release.assets.find((item) => item.name === checksumAssetName)
+      ?? release.assets.find((item) => item.name === `${asset.name}.sha256`)
+      ?? null
+    if (expectedSha256 == null && checksumAsset !== null) checksumUrl = checksumAsset.url
+    else if (expectedSha256 == null) checksumUrl = `${asset.url}.sha256`
   }
   if (assetUrl === undefined) {
     fail('GITHUB_ASSET_UNAVAILABLE', 'This GitHub Release has no installable archive for the current platform')
@@ -227,9 +242,9 @@ export async function admitGitHubRelease({
     const downloaded = await downloadGitHubReleaseAsset({
       url: assetUrl,
       destination: archivePath,
-      expectedSha256,
+      expectedSha256: expectedSha256 ?? null,
       expectedBytes,
-      checksumUrl: expectedSha256 === null ? `${assetUrl}.sha256` : null,
+      checksumUrl: expectedSha256 == null ? (checksumUrl ?? `${assetUrl}.sha256`) : null,
       fetch,
       signal,
       label: assetName ?? 'plugin archive',

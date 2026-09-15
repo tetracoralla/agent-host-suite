@@ -1,5 +1,7 @@
-import { readFile, rename, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { withLifecycleMutation } from './lifecycle-lock.mjs'
+import { statePaths } from './state.mjs'
 import { AgentHostError } from './errors.mjs'
 import { fetchGitHubRelease, fetchGitHubReleases, parseSha256File } from './github-api.mjs'
 import { acquireHttpsFile } from './release-artifacts.mjs'
@@ -116,7 +118,7 @@ export async function checkApplicationUpdate({
     releaseUrl: release.htmlUrl,
     platform,
     availability,
-    carrier: asset === null ? null : { filename: asset.name, url: asset.url, bytes: asset.bytes },
+    carrier: asset === null ? null : { filename: asset.name, url: asset.url, bytes: asset.bytes, sha256: asset.digest ?? null },
     checksum: checksum === null ? null : { filename: checksum.name, url: checksum.url },
     notarized: false,
     note: 'Unsigned preview. Control-click Open on macOS; SmartScreen may warn on Windows. profiles fetch --carrier is not application self-update.',
@@ -130,8 +132,8 @@ export async function downloadApplicationCarrier(check, {
   expectedSha256 = null,
 } = {}) {
   if (check.carrier === null) fail('APPLICATION_UPDATE_UNAVAILABLE', 'No application installer is published for this platform')
-  let digest = expectedSha256
-  if (digest === null && check.checksum !== null) {
+  let digest = expectedSha256 ?? check.carrier?.sha256 ?? null
+  if (digest == null && check.checksum !== null) {
     const sumsPath = `${destination}.SHA256SUMS`
     await acquireHttpsFile({
       url: check.checksum.url,
@@ -146,7 +148,7 @@ export async function downloadApplicationCarrier(check, {
     if (line === undefined) fail('GITHUB_CHECKSUM_INVALID', 'SHA256SUMS does not name the application installer')
     digest = parseSha256File(line, check.carrier.filename).sha256
   }
-  if (digest === null) fail('GITHUB_CHECKSUM_INVALID', 'Application installers require a SHA-256')
+  if (digest == null) fail('GITHUB_CHECKSUM_INVALID', 'Application installers require a SHA-256')
   return acquireHttpsFile({
     url: check.carrier.url,
     destination,
@@ -202,24 +204,83 @@ export async function verifyReplacedApplication({ root, expectedVersion, runner 
   return { version: expectedVersion, output }
 }
 
+async function pathExists(path) {
+  return stat(path).then(() => true).catch((error) => {
+    if (error.code === 'ENOENT') return false
+    throw error
+  })
+}
+
+export async function restorePreviousApplication({ currentRoot, previousRoot }) {
+  if (typeof currentRoot !== 'string' || typeof previousRoot !== 'string') {
+    fail('APPLICATION_UPDATE_INVALID', 'Application recovery requires current and previous directories')
+  }
+  if (await pathExists(previousRoot) !== true) {
+    fail('APPLICATION_UPDATE_RECOVERY_UNAVAILABLE', 'The previous application files are not available to restore')
+  }
+  if (await pathExists(currentRoot) === true) {
+    const failed = `${currentRoot}.failed`
+    await rm(failed, { recursive: true, force: true })
+    await rename(currentRoot, failed)
+  }
+  await cp(previousRoot, currentRoot, { recursive: true, errorOnExist: true })
+  return { currentRoot, previousRoot, restored: true }
+}
+
 export async function recoverApplicationUpdate(stateRoot) {
   const journal = await readApplicationUpdateJournal(stateRoot)
   if (journal.phase === 'idle' || journal.phase === 'complete') return { ...journal, recovered: false }
-  if (journal.phase === 'replacing' && typeof journal.previousRoot === 'string' && typeof journal.currentRoot === 'string') {
-    const currentMissing = await stat(journal.currentRoot).then(() => false).catch((error) => error.code === 'ENOENT')
-    if (currentMissing === true) {
-      await rename(journal.previousRoot, journal.currentRoot)
-    }
-    return writeJournal(stateRoot, { ...journal, phase: 'recovered', error: { code: 'APPLICATION_UPDATE_INTERRUPTED', message: 'Application replacement was interrupted and the previous files were restored.' } })
+  if (typeof journal.previousRoot === 'string' && typeof journal.currentRoot === 'string' && await pathExists(journal.previousRoot)) {
+    await restorePreviousApplication({ currentRoot: journal.currentRoot, previousRoot: journal.previousRoot })
+    return writeJournal(stateRoot, {
+      ...journal,
+      phase: 'recovered',
+      error: { code: 'APPLICATION_UPDATE_INTERRUPTED', message: 'Application replacement was interrupted and the previous files were restored.' },
+    })
   }
   return writeJournal(stateRoot, { ...journal, phase: 'failed' })
 }
 
+async function applyStagedReplacement(options, check, currentVersion, dependencies) {
+  const currentRoot = options.currentRoot
+  const stagedRoot = options.stagedRoot
+  const previousRoot = options.previousRoot ?? `${currentRoot}.previous`
+  const journal = await writeJournal(options.stateRoot, {
+    phase: 'replacing',
+    channel: check.channel,
+    fromVersion: currentVersion,
+    toVersion: check.availableVersion,
+    currentRoot,
+    stagedRoot,
+    previousRoot,
+    carrierPath: options.carrierPath ?? null,
+  })
+  try {
+    const applied = await applyDirectorySwapUpdate({ currentRoot, stagedRoot, previousRoot })
+    await writeJournal(options.stateRoot, { ...journal, phase: 'verifying', previousRoot: applied.previousRoot })
+    const verified = await verifyReplacedApplication({
+      root: applied.currentRoot,
+      expectedVersion: options.expectedVersion ?? check.availableVersion,
+      runner: dependencies.runner,
+      command: options.verifyCommand,
+      args: options.verifyArgs ?? ['--version'],
+    })
+    await writeJournal(options.stateRoot, { ...journal, phase: 'complete', previousRoot: applied.previousRoot })
+    return { ...check, applied: true, replacement: applied, verified, journal: 'complete' }
+  } catch (error) {
+    await recoverApplicationUpdate(options.stateRoot)
+    throw error
+  }
+}
+
 export async function updateApplication(options = {}, dependencies = {}) {
-  const platform = supportedReleasePlatform()
-  const carrier = await (dependencies.resolver ?? resolveApplicationCarrier)(options)
+  const platform = options.platform ?? supportedReleasePlatform()
+  if (options.stateRoot !== undefined) {
+    await recoverApplicationUpdate(options.stateRoot).catch(() => {})
+  }
+  const installed = await (dependencies.resolver ?? resolveApplicationCarrier)(options)
   const currentVersion = options.currentVersion
-    ?? carrier?.version
+    ?? installed?.version
     ?? (await readFile(new URL('../package.json', import.meta.url), 'utf8').then((text) => JSON.parse(text).version))
   const check = await checkApplicationUpdate({
     fetch: options.fetch,
@@ -233,48 +294,77 @@ export async function updateApplication(options = {}, dependencies = {}) {
   }
   if (check.availability === 'current') return { ...check, applied: false }
   if (check.availability === 'check-failed') return check
-  if (options.applyKind === 'directory-swap' && typeof options.currentRoot === 'string' && typeof options.stagedRoot === 'string') {
-    const journal = await writeJournal(options.stateRoot, {
-      phase: 'replacing',
+
+  const runApply = async (payload) => {
+    if (options.stateRoot === undefined) return applyStagedReplacement(payload, check, currentVersion, dependencies)
+    const paths = statePaths(resolveStateRoot(options.stateRoot))
+    return withLifecycleMutation(paths, 'application.update', dependencies, async () => (
+      applyStagedReplacement(payload, check, currentVersion, dependencies)
+    ))
+  }
+
+  if ((options.applyKind === 'directory-swap' || (typeof options.currentRoot === 'string' && typeof options.stagedRoot === 'string'))
+    && typeof options.currentRoot === 'string' && typeof options.stagedRoot === 'string') {
+    return runApply(options)
+  }
+
+  let downloaded = null
+  if (check.carrier !== null && options.stateRoot !== undefined) {
+    const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+    await mkdir(paths.downloads, { recursive: true, mode: 0o700 })
+    const destination = join(paths.downloads, check.carrier.filename)
+    await writeJournal(options.stateRoot, {
+      phase: 'downloading',
       channel: check.channel,
       fromVersion: currentVersion,
       toVersion: check.availableVersion,
-      currentRoot: options.currentRoot,
-      stagedRoot: options.stagedRoot,
+      carrierPath: destination,
     })
-    try {
-      const applied = await applyDirectorySwapUpdate({
-        currentRoot: options.currentRoot,
-        stagedRoot: options.stagedRoot,
-        previousRoot: options.previousRoot,
-      })
-      const verified = await verifyReplacedApplication({
-        root: applied.currentRoot,
-        expectedVersion: options.expectedVersion ?? check.availableVersion,
-        runner: dependencies.runner,
-        command: options.verifyCommand,
-        args: options.verifyArgs ?? ['--version'],
-      })
-      await writeJournal(options.stateRoot, { ...journal, phase: 'complete', previousRoot: applied.previousRoot })
-      return { ...check, applied: true, replacement: applied, verified, journal: 'complete' }
-    } catch (error) {
-      await recoverApplicationUpdate(options.stateRoot)
-      throw error
-    }
+    downloaded = await downloadApplicationCarrier(check, {
+      destination,
+      fetch: options.fetch,
+      signal: options.signal,
+      expectedSha256: check.carrier.sha256 ?? null,
+    })
+    await writeJournal(options.stateRoot, {
+      phase: 'downloaded',
+      channel: check.channel,
+      fromVersion: currentVersion,
+      toVersion: check.availableVersion,
+      carrierPath: downloaded.path,
+    })
+  } else if (check.carrier !== null && options.destination !== undefined) {
+    downloaded = await downloadApplicationCarrier(check, {
+      destination: options.destination,
+      fetch: options.fetch,
+      signal: options.signal,
+      expectedSha256: check.carrier.sha256 ?? null,
+    })
   }
-  if (platform === null || (process.platform !== 'darwin' && process.platform !== 'win32')) {
-    return {
-      ...check,
-      applied: false,
-      availability: check.carrier === null ? 'no-platform-asset' : check.availability,
-      candidate: check.carrier,
-      verification: {
-        command: 'node scripts/verify-application-update.mjs --fixture',
-        macos: 'Download the DMG, compare SHA-256, Control-click Open, then agent-host app update on that Mac.',
-        windows: 'Download the ZIP, compare SHA-256, extract, then run the installer. SmartScreen may warn.',
-      },
-      note: 'This environment cannot replace a macOS app or Windows install. Candidate metadata is returned instead of a mocked system replacement.',
-    }
+
+  if (installed !== null && typeof installed.root === 'string' && (process.platform === 'darwin' || process.platform === 'win32') && typeof options.stagedRoot === 'string') {
+    return runApply({
+      ...options,
+      applyKind: 'directory-swap',
+      currentRoot: installed.root,
+      stagedRoot: options.stagedRoot,
+      carrierPath: downloaded?.path,
+    })
   }
-  fail('APPLICATION_UPDATE_NOT_APPLIED', 'Native application replacement is available on this platform but was not invoked with a staged payload')
+
+  return {
+    ...check,
+    applied: false,
+    downloaded: downloaded === null ? null : { path: downloaded.path, sha256: downloaded.sha256, bytes: downloaded.bytes },
+    availability: check.carrier === null ? 'no-platform-asset' : check.availability,
+    candidate: check.carrier,
+    verification: {
+      command: 'node scripts/verify-application-update.mjs --fixture',
+      macos: 'Download the DMG, compare SHA-256, Control-click Open, then agent-host app update on that Mac.',
+      windows: 'Download the ZIP, compare SHA-256, extract, then run the installer. SmartScreen may warn.',
+    },
+    note: downloaded === null
+      ? 'This environment cannot replace a macOS app or Windows install. Candidate metadata is returned instead of a mocked system replacement.'
+      : 'Installer downloaded and verified. Replacement runs when Agent Host is installed as a macOS app or Windows payload with a staged directory.',
+  }
 }

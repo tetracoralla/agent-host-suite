@@ -1,6 +1,6 @@
 import { AgentHostError } from './errors.mjs'
 import { admitGitHubRelease, browseRecommendedTools, previewGitHubProject, supportedReleasePlatform } from './github-project.mjs'
-import { fetchGitHubRelease } from './github-api.mjs'
+import { fetchGitHubRelease, selectReleaseAsset } from './github-api.mjs'
 import { findCatalogTool, findRegisteredTool, loadGitHubToolCatalog } from './github-registry.mjs'
 import { materializeObservedLocalComponentArtifact, observeLocalComponentArtifact } from './release-artifacts.mjs'
 import { materializeToolComponent } from './tool-component.mjs'
@@ -55,7 +55,7 @@ async function runtimeFromWrapped(wrapped, observation, state) {
     id: observation.descriptor.id,
     version: observation.descriptor.version,
     platform: observation.releaseComponent.platform,
-    spdx: wrapped.contract.licenseSpdx === 'NOASSERTION' ? 'Apache-2.0' : wrapped.contract.licenseSpdx,
+    spdx: wrapped.contract.licenseSpdx,
   }
   if (!isSpdxExpressionSyntax(binding.spdx)) fail('LOCAL_COMPONENT_SPDX_REQUIRED', 'GitHub install requires a valid SPDX license expression')
   return { binding, observation }
@@ -72,7 +72,91 @@ export function updateAvailability({ installedVersion, availableVersion, compati
   return 'current'
 }
 
-export async function inspectToolUpdates(stateRoot, { fetch, signal, catalog } = {}) {
+async function resolveRemoteCandidate(origin, catalogEntry, { fetch, signal, channel = 'stable', platform } = {}) {
+  const repository = origin?.repository ?? catalogEntry?.repository
+  const live = typeof fetch === 'function' || catalogEntry === undefined
+  if (typeof repository !== 'string' || live !== true) {
+    return {
+      availableVersion: catalogEntry?.version ?? null,
+      tag: catalogEntry?.tag ?? null,
+      compatible: true,
+      platformAvailable: catalogEntry === undefined || platform === null ? true : catalogEntry.platforms?.[platform] != null,
+      from: catalogEntry === undefined ? null : 'catalog',
+      error: null,
+    }
+  }
+  try {
+    const release = await fetchGitHubRelease(repository, channel === 'preview' ? null : 'latest', { fetch, signal })
+    const remoteVersion = release.tag.replace(/^v/u, '')
+    if (catalogEntry !== undefined) {
+      const catalogNewer = compareVersions(catalogEntry.version, remoteVersion) >= 0
+      const platformAsset = platform === null ? null : catalogEntry.platforms?.[platform] ?? null
+      if (catalogNewer) {
+        return {
+          availableVersion: catalogEntry.version,
+          tag: catalogEntry.tag,
+          compatible: true,
+          platformAvailable: platform === null ? true : platformAsset !== null,
+          from: 'catalog',
+          remoteVersion,
+          error: null,
+        }
+      }
+      return {
+        availableVersion: remoteVersion,
+        tag: release.tag,
+        compatible: false,
+        platformAvailable: platform === null ? true : platformAsset !== null,
+        from: 'github',
+        remoteVersion,
+        error: null,
+      }
+    }
+    const asset = (() => {
+      try {
+        return selectReleaseAsset(release, { platform })
+      } catch {
+        return null
+      }
+    })()
+    return {
+      availableVersion: remoteVersion,
+      tag: release.tag,
+      compatible: true,
+      platformAvailable: platform === null ? true : asset !== null,
+      from: 'github',
+      remoteVersion,
+      digest: asset?.digest ?? null,
+      assetName: asset?.name ?? null,
+      assetUrl: asset?.url ?? null,
+      assetBytes: asset?.bytes ?? null,
+      releaseUrl: release.htmlUrl,
+      error: null,
+    }
+  } catch (error) {
+    if (catalogEntry !== undefined) {
+      const platformAsset = platform === null ? null : catalogEntry.platforms?.[platform] ?? null
+      return {
+        availableVersion: catalogEntry.version,
+        tag: catalogEntry.tag,
+        compatible: true,
+        platformAvailable: platform === null ? true : platformAsset !== null,
+        from: 'catalog',
+        error: { code: error instanceof AgentHostError ? error.code : 'GITHUB_REQUEST_FAILED', message: error instanceof Error ? error.message : String(error) },
+      }
+    }
+    return {
+      availableVersion: null,
+      tag: origin?.tag ?? null,
+      compatible: true,
+      platformAvailable: true,
+      from: 'github',
+      error: { code: error instanceof AgentHostError ? error.code : 'GITHUB_REQUEST_FAILED', message: error instanceof Error ? error.message : String(error) },
+    }
+  }
+}
+
+export async function inspectToolUpdates(stateRoot, { fetch, signal, catalog, channel = 'stable', persist = true } = {}) {
   const paths = await prepareStatePaths(resolveStateRoot(stateRoot))
   const state = await loadState(paths)
   const sources = await readToolSources(stateRoot)
@@ -84,6 +168,8 @@ export async function inspectToolUpdates(stateRoot, { fetch, signal, catalog } =
     ...pinned.tools.map((tool) => tool.id),
   ])
   const items = []
+  const nextSources = { ...sources.tools }
+  let sourcesChanged = false
   for (const id of [...ids].sort()) {
     const component = state?.components?.[id]
     const source = sources.tools?.[id]
@@ -97,13 +183,29 @@ export async function inspectToolUpdates(stateRoot, { fetch, signal, catalog } =
       assetSha256: catalogEntry.platforms?.[platform]?.sha256,
       assetBytes: catalogEntry.platforms?.[platform]?.bytes,
     }))
-    const availableVersion = catalogEntry?.version ?? null
-    const platformAsset = catalogEntry === undefined || platform === null ? null : catalogEntry.platforms?.[platform] ?? null
-    const availability = updateAvailability({
-      installedVersion: component?.version ?? null,
+    const remote = origin === null && catalogEntry === undefined
+      ? { availableVersion: null, tag: null, compatible: true, platformAvailable: true, from: null, error: null }
+      : await resolveRemoteCandidate(origin, catalogEntry, { fetch, signal, channel, platform })
+    const availableVersion = remote.availableVersion
+    const availability = remote.error !== null && availableVersion === null
+      ? 'check-failed'
+      : updateAvailability({
+        installedVersion: component?.version ?? null,
+        availableVersion,
+        compatible: remote.compatible,
+        platformAvailable: remote.platformAvailable,
+      })
+    const lastCheck = {
+      at: new Date().toISOString(),
+      status: remote.error === null ? availability : 'check-failed',
       availableVersion,
-      platformAvailable: catalogEntry === undefined ? true : platformAsset !== null,
-    })
+      from: remote.from,
+      ...(remote.error === null ? {} : { error: remote.error }),
+    }
+    if (persist === true && source?.origin !== undefined) {
+      nextSources[id] = { ...source, lastCheck }
+      sourcesChanged = true
+    }
     items.push({
       kind: 'tool',
       id,
@@ -118,24 +220,38 @@ export async function inspectToolUpdates(stateRoot, { fetch, signal, catalog } =
       source: origin === null ? null : {
         kind: origin.kind,
         repository: origin.repository,
-        tag: origin.tag,
-        releaseUrl: origin.releaseUrl,
+        tag: remote.tag ?? origin.tag,
+        releaseUrl: remote.releaseUrl ?? origin.releaseUrl,
         identity: originIdentity(origin),
       },
-      lastCheck: source?.lastCheck ?? null,
+      lastCheck,
       restartRequired: component !== undefined && availability === 'update-available',
       paused: state?.agentToolsPaused === true,
       active: state?.agentComponents?.includes(id) === true,
+      candidate: remote.tag === undefined || remote.tag === null ? null : {
+        tag: remote.tag,
+        version: availableVersion,
+        digest: remote.digest ?? null,
+        from: remote.from,
+      },
     })
+  }
+  if (persist === true && sourcesChanged) {
+    try {
+      await writeToolSources(stateRoot, { tools: nextSources })
+    } catch {
+      // lastCheck is advisory; inventory remains authoritative.
+    }
   }
   return items
 }
 
-export async function checkRegisteredTool(id, { fetch, signal, channel = 'stable' } = {}) {
+export async function checkRegisteredTool(id, { fetch, signal, channel = 'stable', stateRoot } = {}) {
   const registration = await findRegisteredTool(id)
   const catalogEntry = await findCatalogTool(id)
-  if (registration === null && catalogEntry === undefined) fail('GITHUB_TOOL_UNKNOWN', `No GitHub registration for ${id}`)
-  const repository = registration?.repository ?? catalogEntry.repository
+  const saved = stateRoot === undefined ? null : (await readToolSources(stateRoot)).tools?.[id]
+  const repository = registration?.repository ?? catalogEntry?.repository ?? saved?.origin?.repository
+  if (typeof repository !== 'string') fail('GITHUB_TOOL_UNKNOWN', `No GitHub registration for ${id}`)
   try {
     const release = await fetchGitHubRelease(repository, channel === 'preview' ? null : 'latest', { fetch, signal })
     return {
@@ -214,10 +330,12 @@ export async function installGitHubTool(options, dependencies = {}) {
   const { binding } = await runtimeFromWrapped(wrapped, observation, state)
   const prepared = await materializeObservedLocalComponentArtifact(observation, binding, paths, { runner: dependencies.artifactRunner })
   let component = await materializeToolComponent(prepared.installed, prepared.releaseComponent, state.components['node-runtime']?.command)
-  const health = wrapped.health ?? await (dependencies.mcpProbe ?? probeMcpToolsFirstAndRepeat)({
-    ...component,
-    healthWorkspaceRoot: state.workspaceRoot ?? component.cwd,
-  })
+  const health = wrapped.health ?? (options.probe === false
+    ? { tools: wrapped.contract.expectedTools, skipped: true }
+    : await (dependencies.mcpProbe ?? probeMcpToolsFirstAndRepeat)({
+      ...component,
+      healthWorkspaceRoot: state.workspaceRoot ?? component.cwd,
+    }))
   const inventory = inventoryFromState(state)
   const previousComponent = inventory.components[binding.id]
   const wasActive = inventory.agentComponents.includes(binding.id)
@@ -289,10 +407,20 @@ export async function updateGitHubTool(options, dependencies = {}) {
   const saved = sources.tools?.[options.target]
   const repository = saved?.origin?.repository ?? catalogEntry?.repository
   if (typeof repository !== 'string') fail('GITHUB_TOOL_UNKNOWN', `${options.target} has no persisted GitHub update source`)
+  let tag = options.tag
+  if (tag === undefined) {
+    const items = await inspectToolUpdates(options.stateRoot, {
+      fetch: options.fetch,
+      signal: options.signal,
+      persist: true,
+    })
+    const item = items.find((entry) => entry.id === options.target)
+    tag = item?.candidate?.tag ?? item?.source?.tag
+  }
   return installGitHubTool({
     ...options,
-    github: saved?.origin?.releaseUrl ?? `https://github.com/${repository}`,
-    tag: options.tag,
+    github: `https://github.com/${repository}`,
+    tag,
     activate: options.activate,
   }, dependencies)
 }
