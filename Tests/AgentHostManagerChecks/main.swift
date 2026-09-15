@@ -440,8 +440,8 @@ do {
     expect(repairPlan.changed.isEmpty && repairPlan.componentChanges.isEmpty, "repair preview must not propose tool version changes")
     expect(repairPlan.repairs.monitoring && repairPlan.repairs.hosts == ["codex"], "repair preview must name connection and monitoring recovery")
     expect(
-        ManagerSection.primaryCases.map(\.rawValue) == ["overview", "tools", "agentApps", "activity"],
-        "primary Manager destinations follow Overview → Tools → Agents → History"
+        ManagerSection.primaryCases.map(\.rawValue) == ["overview", "tools", "updates", "agentApps", "activity"],
+        "primary Manager destinations follow Overview → Tools → Updates → Agents → History"
     )
 
     let usagePayload = Data(#"""
