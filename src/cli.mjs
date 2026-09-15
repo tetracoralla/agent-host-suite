@@ -39,6 +39,8 @@ const USAGE = `Usage:
   agent-host repair [--workspace-root PATH] [--replace-host-conflicts] [--plan-id SHA256] [--dry-run] [--state-root PATH] [--json]
   agent-host tools status [--state-root PATH] [--json]
   agent-host tools set (--tool COMPONENT [--tool COMPONENT] | --profile PROFILE) [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host tools pause [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host tools resume [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools reset [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host component preview --artifact PATH --license-spdx EXPRESSION [--workspace-root PATH] [--path-grant NAME=PATH] [--standalone | --state-root PATH] [--json]
   agent-host component import --artifact PATH --binding PATH [--activate] [--replace] [--workspace-root PATH] [--path-grant NAME=PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
@@ -78,6 +80,8 @@ const ROUTE_ARGUMENTS = Object.freeze({
   maintenance: ['--state-root', '--json'],
   'tools status': ['--state-root', '--json'],
   'tools set': ['--tool', '--profile', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  'tools pause': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  'tools resume': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   'tools reset': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   'component preview': ['--artifact', '--license-spdx', '--workspace-root', '--path-grant', '--standalone', '--state-root', '--json'],
   'component import': ['--artifact', '--binding', '--activate', '--replace', '--workspace-root', '--path-grant', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
@@ -313,6 +317,7 @@ export function human(result) {
     const active = result.activeAgentComponents?.length ?? 0
     const available = result.availableAgentComponents?.length ?? active + (result.inactiveAgentComponents?.length ?? 0)
     const suffix = result.restartRequired === true ? ' · start a fresh Agent task' : ''
+    if (result.paused === true) return `Agent tools · paused · 0 of ${available} projected for new tasks${suffix}`
     return `Agent tools · ${active} of ${available} selected for new tasks${suffix}`
   }
   if (result.schemaVersion === 'openadam.agent-host-operations-snapshot.v0.1') {
@@ -423,6 +428,8 @@ async function status(options) {
     channel: state.channel, profile: state.profile,
     availableAgentComponents: state.availableAgentComponents ?? state.agentComponents ?? Object.keys(state.components),
     agentComponents: state.agentComponents ?? Object.keys(state.components),
+    agentToolsPaused: state.agentToolsPaused === true,
+    ...(state.agentToolsPaused === true ? { resumeAgentComponents: state.resumeAgentComponents ?? [] } : {}),
     installedAt: state.installedAt, updatedAt: state.updatedAt, releaseActivatedAt: state.releaseActivatedAt ?? null,
     bindingsActivatedAt: state.bindingsActivatedAt ?? state.releaseActivatedAt ?? null,
     components: Object.fromEntries(Object.entries(state.components).map(([id, component]) => [id, {
@@ -507,6 +514,8 @@ async function run(options, dependencies = {}) {
       const tools = selectedProfile === undefined ? options.tools : await defaultToolsForProfile(selectedProfile)
       return setActiveTools({ ...options, tools, profile: undefined })
     }
+    if (options.action === 'pause') return setActiveTools({ ...options, pauseTools: true })
+    if (options.action === 'resume') return setActiveTools({ ...options, resumeTools: true })
     if (options.action === 'reset') return setActiveTools({ ...options, resetTools: true })
     throw new AgentHostError('CLI_USAGE', `Unknown tools action: ${options.action}`)
   }

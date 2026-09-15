@@ -117,10 +117,10 @@ test('profile runtime validation matches the published non-empty default set', (
   }, 'invalid-empty-default'), (error) => error.code === 'PROFILE_INVALID')
 })
 
-test('an active tool set is ordered by the installed profile and fails closed for empty or foreign tools', () => {
+test('an active tool set is ordered by the installed profile and may be empty', () => {
   const available = ['math-anchor', 'migratory-time', 'file-vitals']
   assert.deepEqual(selectAgentComponents(available, ['file-vitals', 'math-anchor', 'math-anchor']), ['math-anchor', 'file-vitals'])
-  assert.throws(() => selectAgentComponents(available, []), (error) => error.code === 'TOOL_SET_EMPTY')
+  assert.deepEqual(selectAgentComponents(available, []), [])
   assert.throws(() => selectAgentComponents(available, ['shell']), (error) => error.code === 'TOOL_SET_COMPONENT_UNAVAILABLE')
   assert.deepEqual(selectAgentComponents([], []), [])
 })

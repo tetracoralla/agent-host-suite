@@ -32,6 +32,8 @@ struct SuiteStatus: Decodable, Equatable, Sendable {
     let updatedAt: String?
     let availableAgentComponents: [String]?
     let agentComponents: [String]?
+    let agentToolsPaused: Bool?
+    let resumeAgentComponents: [String]?
     let components: [String: ComponentSummary]?
     let hosts: [String: HostSummary]?
     let service: ServiceSummary?
@@ -59,6 +61,9 @@ enum ManagerToolPolicy {
         let preferredSet = Set(preferred)
         return preferred + ids.filter { !preferredSet.contains($0) }
     }
+
+    static let pauseArguments = ["tools", "pause"]
+    static let resumeArguments = ["tools", "resume"]
 }
 
 enum ManagerCheckPolicy {

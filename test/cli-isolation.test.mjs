@@ -18,6 +18,13 @@ const FEATURED_PROBES = [
   ['repair', '--json'],
 ]
 
+const MONITORING_AND_PAUSE_PROBES = [
+  ['observability', 'disable', '--json'],
+  ['observability', 'enable', '--json'],
+  ['tools', 'pause', '--json'],
+  ['tools', 'resume', '--json'],
+]
+
 async function listFiles(root) {
   const output = []
   let entries
@@ -132,4 +139,21 @@ test('featured CLI probes do not create a real install when none exists', async 
   await assert.rejects(() => readdir(trap.stateRoot), (error) => error.code === 'ENOENT')
   await assert.rejects(() => readFile(trap.hostFiles.claude, 'utf8'), (error) => error.code === 'ENOENT')
   await assert.rejects(() => readFile(trap.hostFiles.codex, 'utf8'), (error) => error.code === 'ENOENT')
+})
+
+test('monitoring and pause CLI probes stay inside the test state root', async (t) => {
+  const trap = await createTrap(t, { installed: true })
+  const beforeState = await snapshot(trap.stateRoot)
+  const beforeHome = await snapshot(trap.home)
+  const isolated = await createIsolatedCli(t)
+  for (const args of MONITORING_AND_PAUSE_PROBES) {
+    const invocation = isolatedCliInvocation(args, isolated, {
+      AGENT_HOST_STATE_ROOT: trap.stateRoot,
+    })
+    assert.equal(invocation.argv[invocation.argv.indexOf('--state-root') + 1], isolated.stateRoot)
+    const result = runIsolatedCli(args, isolated, { env: { AGENT_HOST_STATE_ROOT: trap.stateRoot } })
+    assert.equal(cliErrorCode(result), 'NOT_INSTALLED')
+  }
+  assert.deepEqual(await snapshot(trap.stateRoot), beforeState)
+  assert.deepEqual(await snapshot(trap.home), beforeHome)
 })

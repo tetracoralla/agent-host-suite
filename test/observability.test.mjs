@@ -7,27 +7,73 @@ import { configuredSemanticProviderIds, contextAnalyzerInvocation, disableObserv
 import { assessManagedCatalog, MANAGED_CATALOG_BUDGETS, retryableCatalogError, validateManagedToolBindings } from '../src/context-exporter.mjs'
 import { loadState, prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 
-test('local dogfood cannot disable monitoring and leave a consent-bearing profile incomplete', async (t) => {
+test('local dogfood can disable monitoring without dropping inventory, profile, or the working set', async (t) => {
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-observability-profile-'))
   t.after(() => rm(stateRoot, { recursive: true, force: true }))
   const paths = await prepareStatePaths(stateRoot)
-  await saveState(paths, {
+  const current = {
     schemaVersion: STATE_SCHEMA,
     suiteVersion: '0.1.0-dogfood.3',
     channel: 'release',
     profile: 'local-dogfood',
     installedAt: '2026-08-27T00:00:00.000Z',
     updatedAt: '2026-08-27T00:00:00.000Z',
-    components: {},
-    hosts: {},
-    runtime: {},
-    observability: { enabled: true },
-  })
+    components: {
+      'math-anchor': { version: '0.4.0', command: '/private/node', args: [], root: '/private/math' },
+      'file-vitals': { version: '0.2.0', command: '/private/node', args: [], root: '/private/file-vitals' },
+      'agent-tool-observer': { command: '/private/node', args: ['/private/observer/cli.mjs'], root: '/private/observer' },
+      'context-surface-analyzer': { command: '/private/node', args: ['/private/analyzer/cli.mjs'], root: '/private/analyzer' },
+    },
+    availableAgentComponents: ['math-anchor', 'file-vitals'],
+    agentComponents: ['math-anchor', 'file-vitals'],
+    hosts: { codex: { entries: [{ component: 'math-anchor' }] } },
+    runtime: { observationLog: '/private/direct-runtime.jsonl' },
+    workspaceRoot: '/private/workspace',
+    observability: {
+      enabled: true,
+      consentedAt: '2026-08-27T00:00:00.000Z',
+      maintenance: null,
+      observer: { stateDir: '/private/observer-state', priorLaunchAgent: { existed: false } },
+    },
+  }
+  await saveState(paths, current)
 
-  await assert.rejects(
-    disableObservability({ stateRoot }),
-    (error) => error.code === 'OBSERVABILITY_PROFILE_REQUIRES_ENABLED',
-  )
+  const disabled = await disableObservability({ stateRoot }, {
+    runner: async () => ({ status: 0, stdout: JSON.stringify({ status: 'uninstalled' }), stderr: '' }),
+  })
+  assert.equal(disabled.status, 'disabled')
+  const afterDisable = await loadState(paths)
+  assert.equal(afterDisable.profile, 'local-dogfood')
+  assert.equal(afterDisable.observability.enabled, false)
+  assert.equal(afterDisable.observability.dataPreserved, true)
+  assert.deepEqual(afterDisable.agentComponents, ['math-anchor', 'file-vitals'])
+  assert.equal(afterDisable.components['math-anchor'].version, '0.4.0')
+  assert.equal(afterDisable.components['file-vitals'].version, '0.2.0')
+  assert.equal(afterDisable.components['agent-tool-observer'] !== undefined, true)
+  assert.equal(afterDisable.components['context-surface-analyzer'] !== undefined, true)
+  assert.deepEqual(afterDisable.hosts, current.hosts)
+  assert.equal(afterDisable.workspaceRoot, '/private/workspace')
+
+  let expanded = 0
+  const enabled = await enableObservability({ stateRoot }, {
+    activateObservability: async (candidate) => ({
+      ...candidate,
+      observability: { enabled: true, consentedAt: '2026-09-14T00:00:00.000Z', observer: {}, maintenance: null },
+    }),
+    updateInstallation: async () => {
+      expanded += 1
+      throw new Error('monitoring re-enable must not expand inventory when observer packages remain')
+    },
+  })
+  assert.equal(enabled.status, 'enabled')
+  assert.equal(enabled.profile, 'local-dogfood')
+  assert.equal(expanded, 0)
+  const afterEnable = await loadState(paths)
+  assert.equal(afterEnable.profile, 'local-dogfood')
+  assert.equal(afterEnable.observability.enabled, true)
+  assert.deepEqual(afterEnable.agentComponents, ['math-anchor', 'file-vitals'])
+  assert.equal(afterEnable.components['file-vitals'].version, '0.2.0')
+  assert.deepEqual(afterEnable.hosts, current.hosts)
 })
 
 test('a failed post-commit monitoring activity append returns a warning without restoring enabled state', async (t) => {

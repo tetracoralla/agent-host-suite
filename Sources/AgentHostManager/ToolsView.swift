@@ -49,12 +49,31 @@ struct ToolsView: View {
                 }
 
                 Panel {
-                    Text(L10n.text("For new tasks")).font(.headline)
+                    HStack {
+                        Text(L10n.text("For new tasks")).font(.headline)
+                        Spacer()
+                        if store.suite?.agentToolsPaused == true {
+                            Button(L10n.text("Resume")) { Task { await store.resumeTools() } }
+                                .disabled(store.isBusy)
+                        } else if !store.managedTools.isEmpty {
+                            Button(L10n.text("Pause all")) { Task { await store.pauseAllTools() } }
+                                .disabled(store.isBusy)
+                        }
+                    }
+                    if store.suite?.agentToolsPaused == true {
+                        Text(L10n.text("Fully paused: no MCP and no on-demand Skill."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(L10n.text("Off keeps an on-demand Skill. Pause all withholds both."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     ForEach(Array(store.managedTools.enumerated()), id: \.element.id) { index, tool in
                         ToolRow(
                             tool: tool,
                             isBusy: store.isBusy,
-                            canDeactivate: store.managedTools.filter(\.active).count > 1,
+                            paused: store.suite?.agentToolsPaused == true,
                             onChange: { value in Task { await store.setTool(tool.id, active: value) } }
                         )
                         if index < store.managedTools.count - 1 { Divider() }
@@ -93,7 +112,7 @@ private struct FeaturedCatalogRow: View {
 private struct ToolRow: View {
     let tool: ManagedTool
     let isBusy: Bool
-    let canDeactivate: Bool
+    let paused: Bool
     let onChange: @Sendable (Bool) -> Void
 
     var body: some View {
@@ -113,17 +132,26 @@ private struct ToolRow: View {
                     }
                 }
                 Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
+                if paused {
+                    Text(L10n.text("Fully paused: no MCP and no on-demand Skill."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if !tool.active {
+                    Text(L10n.text("On-demand Skill only"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 20)
             VStack(alignment: .trailing, spacing: 8) {
                 ItemStatePill(state: tool.state)
                 Toggle(L10n.text("Available"), isOn: Binding(
-                    get: { tool.active },
+                    get: { !paused && tool.active },
                     set: onChange
                 ))
                 .toggleStyle(.switch)
                 .labelsHidden()
-                .disabled(isBusy || (tool.active && !canDeactivate))
+                .disabled(isBusy)
                 .accessibilityLabel(L10n.format("Include {tool} in new Agent tasks", ["tool": tool.name]))
             }
         }

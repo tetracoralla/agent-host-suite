@@ -204,7 +204,10 @@ components fails with `OBSERVABILITY_RELEASE_COMPONENTS_MISSING` before
 writing and does not turn monitoring off.
 
 Installed components, Agent-visible components,
-and the smaller active tool set remain distinct. Backstage observation
+and the smaller active tool set remain distinct. The active set may be empty.
+Inactive discovery Providers may remain Skill-only (`on-demand`); `tools pause`
+withholds ordinary MCP and those Skills, and `tools resume` restores the
+previous working set. Backstage observation
 components never enter the callable catalog or spawn Agent-session MCP
 processes. Normalized tool-name conflicts fail before deployment observation
 using the same semantic key as Observer.

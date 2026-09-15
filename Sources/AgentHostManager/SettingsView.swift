@@ -24,16 +24,14 @@ struct SettingsView: View {
                         else { Task { await store.setObservability(false) } }
                     }
                 ))
-                .disabled(store.isBusy || store.suite?.configured != true || store.suite?.profile == "local-dogfood")
+                .disabled(store.isBusy || store.suite?.configured != true)
 
                 Text(L10n.text("Stores counts and timings locally. Prompts, tool arguments, and tool results are not stored or uploaded."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if store.suite?.profile == "local-dogfood" {
-                    Text(L10n.text("Switch to Standard + Monitoring before turning monitoring off."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(L10n.text("Monitoring can be turned off without changing installed tools, Agent connections, or the working set."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section(L10n.text("Tool Set")) {
@@ -42,12 +40,6 @@ struct SettingsView: View {
                     Button(L10n.text("Review Standard + Monitoring…")) { Task { await store.prepareUpdate(profile: "observability") } }
                 } else {
                     Button(L10n.text("Review Local Tool Set…")) { Task { await store.prepareUpdate(profile: "local-dogfood") } }
-                        .disabled(store.observations?.enabled != true)
-                    if store.observations?.enabled != true {
-                        Text(L10n.text("Turn on local monitoring first so this expanded local tool set can measure reliability and usage on this Mac."))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
 

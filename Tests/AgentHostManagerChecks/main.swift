@@ -262,6 +262,25 @@ do {
         ) == ["repair", "--replace-host-conflicts", "--plan-id", "sha256:\(String(repeating: "b", count: 64))"],
         "applying a repair must bind the reviewed plan identity without a catalog profile"
     )
+    expect(
+        ManagerToolPolicy.pauseArguments == ["tools", "pause"]
+            && ManagerToolPolicy.resumeArguments == ["tools", "resume"],
+        "pause and resume must be dedicated tools actions, not a profile change"
+    )
+    let pausedStatus = try JSONDecoder().decode(SuiteStatus.self, from: Data(#"""
+    {
+      "status": "ok",
+      "configured": true,
+      "profile": "local-dogfood",
+      "availableAgentComponents": ["math-anchor", "migratory-time"],
+      "agentComponents": [],
+      "agentToolsPaused": true,
+      "resumeAgentComponents": ["math-anchor", "migratory-time"]
+    }
+    """#.utf8))
+    expect(pausedStatus.agentToolsPaused == true, "status must decode a fully paused working set")
+    expect(pausedStatus.resumeAgentComponents == ["math-anchor", "migratory-time"], "paused status must retain the restore set")
+    expect(pausedStatus.agentComponents?.isEmpty == true, "a paused working set may be empty")
     let updatePlan = try JSONDecoder().decode(UpdatePlan.self, from: Data(#"""
     {
       "status": "ready",

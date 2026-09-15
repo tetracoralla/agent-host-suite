@@ -138,7 +138,7 @@ function exactObject(value, allowed) {
 }
 
 async function action(value, stateRoot) {
-  exactObject(value, ['action', 'host', 'connected', 'enabled', 'profile', 'tools', 'purgeData', 'language'])
+  exactObject(value, ['action', 'host', 'connected', 'enabled', 'profile', 'tools', 'pause', 'resume', 'purgeData', 'language'])
   if (typeof value.action !== 'string') throw new AgentHostError('MANAGER_REQUEST_INVALID', 'The Manager action is missing')
   if (value.action === 'setup') {
     if (!PROFILES.has(value.profile)) throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a supported Agent app and tool set')
@@ -164,9 +164,15 @@ async function action(value, stateRoot) {
     return value.connected ? addHost({ stateRoot, target: value.host }) : removeHost({ stateRoot, target: value.host })
   }
   if (value.action === 'tools') {
-    if (!Array.isArray(value.tools) || value.tools.length === 0 || value.tools.some((item) => typeof item !== 'string')) {
-      throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose at least one installed Agent tool')
+    if (value.pause === true && value.resume === true) {
+      throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Pause and resume cannot be combined')
     }
+    if (value.pause === true) return setActiveTools({ stateRoot, pauseTools: true })
+    if (value.resume === true) return setActiveTools({ stateRoot, resumeTools: true })
+    if (!Array.isArray(value.tools) || value.tools.some((item) => typeof item !== 'string')) {
+      throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose installed Agent tools, or pause all tools')
+    }
+    if (value.tools.length === 0) return setActiveTools({ stateRoot, pauseTools: true })
     return setActiveTools({ stateRoot, tools: [...new Set(value.tools)] })
   }
   if (value.action === 'update') {
@@ -367,7 +373,7 @@ const zh={
 "Script references do not prove execution. Binding counts can include older open sessions.":"脚本引用不能证明实际执行。绑定期间统计可能包括尚未关闭的旧会话。",
 "Use the installed Agent Host operations skill to analyze the current usage report, version history, runtime errors and coverage. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; counts alone do not establish adoption or correctness.":"请使用已安装的 Agent Host operations 技能分析当前使用报告、版本历史、运行错误和采集覆盖。区分真实任务与健康检查、脚本引用与实际执行。结合当前任务提出改进，不要仅凭次数推断采纳或正确性。",
 
-  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源',
+  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','On-demand Skill only; MCP stays off until you include this tool in the working set.':'仅按需 Skill；在重新加入工作集之前不会提供 MCP。','Fully paused: no MCP and no on-demand Skill.':'完全暂停：无 MCP，也无按需 Skill。','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源',
   'Overview':'总览','Environment':'环境','Tools':'工具','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…',
   'Agent environment':'Agent 环境','Installed locally on this PC':'已安装在这台电脑上','Set up a compatible local tool environment':'设置兼容的本地工具环境','Set up tools':'设置工具','Standard tools':'标准工具','Featured tools':'精选工具','Developer Kit':'开发者 Kit','Standard + monitoring':'标准工具 + 监控','Set up':'设置','Setting up tools…':'正在设置工具…','Check again':'重新检测','Connect later':'稍后连接','Detected on this PC':'已在这台电脑上检测到','Math Anchor':'Math Anchor','Migratory Time':'Migratory Time','Armorial':'Armorial','Exact and scientific calculation':'精确与科学计算','Reliable worldwide time conversion':'可靠的全球时区转换','Choose project-aware icons without redrawing them':'按项目选用图标，无需重绘','Skill-only kit; this profile adds no Agent MCP tools':'仅 Skill；此配置不添加 Agent MCP 工具','Choose a tool set, then install.':'先选择工具集并安装 Agent Host；受支持的 Agent 应用可以现在连接，也可以稍后连接。','':'精选配置会从已绑定的兼容版本安装目录库存（含 Armorial）。这不是应用市场。','':'此源码 checkout 没有公开 GitHub Release。除非安装包已带绑定目录，否则设置需要一份绑定目录。','Install now; connect later.':'安装时可以不连接 Agent 应用。若未检测到受支持应用，可先安装 Agent Host，稍后再从“Agent 应用”连接。','Public download is not configured.':'尚未配置公开下载。此 checkout 没有发布 GitHub Release 资产。所有者发布 Release 或 HTTPS 清单后，将 AGENT_HOST_FEATURED_CATALOG_URL 设为该 preview-distribution.json（或绑定的 current.json）。这不是应用商店。','Featured catalog download':'精选目录下载','Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview.':'未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请按住 Control 点击 Agent Host.app（或 DMG 中的应用），选择“打开”，再确认 Gatekeeper 提示。该提示是此预览的预期步骤。','Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.':'未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。',
   'Installed components':'已安装组件','Connected Agent apps':'已连接的 Agent 应用','Allocated bytes':'占用空间（字节）','Local monitoring':'本地监控','On':'已开启','Off':'已关闭','Agent apps':'Agent 应用','Not installed':'未安装','Connected':'已连接','Available':'可连接','Disconnect':'断开连接','Connect':'连接','Disconnecting…':'正在断开连接…','Connecting…':'正在连接…',
@@ -479,12 +485,17 @@ function renderTools(value){
   root.append(catalog);
   const c=card('Working set for new tasks'),available=value.availableAgentComponents||[];
   if(!available.length){c.append(el('p',t('This environment has no Agent tools to activate. Its developer Skill remains available.'),'muted'));root.append(c);return}
+  if(value.paused===true)c.append(el('p',t('All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.'),'muted'));
   const form=el('div',undefined,'tool-grid'),hint=el('p',undefined,'muted');
   const selected=()=>[...form.querySelectorAll('input:checked')].map(x=>x.value);
-  const apply=button('Apply tool set',()=>call({action:'tools',tools:selected()},t('Updating tools…')),'action primary');
-  const update=()=>{const ids=selected();apply.disabled=!ids.length||JSON.stringify([...ids].sort())===JSON.stringify([...(value.activeAgentComponents||[])].sort());hint.textContent=t(ids.length?'Changes take effect in a fresh Agent task.':'Choose at least one installed tool.')};
-  for(const id of available){const label=el('label',undefined,'check'),box=document.createElement('input');box.type='checkbox';box.value=id;box.checked=(value.activeAgentComponents||[]).includes(id);box.onchange=update;label.append(box,el('span',value.components?.[id]?.displayName||id));form.append(label)}
-  c.append(form,hint,apply);root.append(c);update();
+  const apply=button('Apply tool set',()=>{const ids=selected();call({action:'tools',tools:ids},t(ids.length?'Updating tools…':'Pausing tools…'))},'action primary');
+  const update=()=>{const ids=selected();const same=JSON.stringify([...ids].sort())===JSON.stringify([...(value.activeAgentComponents||[])].sort())&&Boolean(value.paused)===!ids.length;apply.disabled=same;hint.textContent=t(ids.length?'Changes take effect in a fresh Agent task.':'Empty selection pauses all ordinary tools.')};
+  for(const id of available){const label=el('label',undefined,'check'),box=document.createElement('input');box.type='checkbox';box.value=id;box.checked=value.paused!==true&&(value.activeAgentComponents||[]).includes(id);box.onchange=update;const name=el('span',value.components?.[id]?.displayName||id);label.append(box,name);if(value.paused===true)label.append(el('div',t('Fully paused: no MCP and no on-demand Skill.'),'muted'));else if(!(value.activeAgentComponents||[]).includes(id))label.append(el('div',t('On-demand Skill only; MCP stays off until you include this tool in the working set.'),'muted'));form.append(label)}
+  const actions=el('div',undefined,'actions');
+  if(value.paused===true)actions.append(button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…')),'action primary'));
+  else actions.append(button('Pause all tools',()=>call({action:'tools',pause:true},t('Pausing tools…'))));
+  actions.append(apply);
+  c.append(form,hint,actions);root.append(c);update();
 }
 async function downloadTrace(provider,session){$('#busyText').textContent=t('Preparing trace export…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/trace-export',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider,session})});if(!r.ok){const v=await r.json();throw new Error(t(v.error?.message||'Trace export failed'))}const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='agent-host-'+provider+'-trace-'+session.slice(0,12)+'.json';document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}catch(e){$('#error').textContent=e.message;$('#error').classList.remove('hidden')}finally{$('#busy').classList.add('hidden')}}
 async function loadTraceSessions(provider,container){$('#busyText').textContent=t('Loading trace sessions…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/trace-sources?provider='+encodeURIComponent(provider)+'&limit=25'),v=await r.json();if(!r.ok)throw new Error(t(v.error?.message||'Trace session list failed'));container.replaceChildren();for(const item of v.sources){const line=el('div',undefined,'row'),label=el('div',undefined,'grow');label.append(el('div',(names[provider]||provider)+' · '+item.sessionHash.slice(0,12)+'…'),el('div',f('{events} events · last observed {date}',{events:number(item.totalEvents),date:new Date(item.lastEventAtMs).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US')}),'muted'));line.append(label,button('Export metadata',()=>downloadTrace(provider,item.sessionHash)));container.append(line)}if(!v.sources.length)container.append(el('p',t('No retained sessions for this provider.'),'muted'))}catch(e){container.replaceChildren(el('p',e.message||t('Trace session list failed'),'notice'))}finally{$('#busy').classList.add('hidden')}}

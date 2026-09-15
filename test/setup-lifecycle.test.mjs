@@ -537,3 +537,93 @@ test('failed native configuration activation and compensation retain recovery ow
   assert.deepEqual(recovered.agentComponents, before.agentComponents)
   assert.deepEqual(recovered.hosts, before.hosts)
 })
+
+test('an empty working set from the developer default stays on-demand instead of fully paused', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-empty-ondemand-workspace-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-empty-ondemand-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  const dependencies = lifecycleDependencies(fake, stateRoot)
+  await setup({ profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false }, dependencies)
+  const emptied = await setActiveTools({ stateRoot, tools: [], dryRun: false }, dependencies)
+  assert.equal(emptied.paused, false)
+  assert.deepEqual(emptied.activeAgentComponents, [])
+  assert.equal(emptied.exposure, 'working-set')
+  assert.equal(emptied.tools.every((tool) => tool.exposure === 'on-demand'), true)
+  const paths = await prepareStatePaths(stateRoot)
+  const state = await loadState(paths)
+  assert.equal(state.agentToolsPaused, undefined)
+  assert.deepEqual(state.agentComponents, [])
+})
+
+test('pause all withholds the working set, resume restores it, and Agent reconnect or failed recovery does not clobber either', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-tool-pause-workspace-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-tool-pause-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  const dependencies = lifecycleDependencies(fake, stateRoot)
+  await setup({ profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false }, dependencies)
+  await setActiveTools({ stateRoot, tools: ['math-anchor', 'migratory-time'], dryRun: false }, dependencies)
+  const paths = await prepareStatePaths(stateRoot)
+
+  const paused = await setActiveTools({ stateRoot, pauseTools: true, dryRun: false }, dependencies)
+  assert.equal(paused.status, 'tool-set-updated')
+  assert.equal(paused.paused, true)
+  assert.deepEqual(paused.activeAgentComponents, [])
+  assert.deepEqual(paused.resumeAgentComponents, ['math-anchor', 'migratory-time'])
+  assert.equal(paused.tools.every((tool) => tool.exposure === 'paused'), true)
+  const pausedState = await loadState(paths)
+  assert.equal(pausedState.agentToolsPaused, true)
+  assert.deepEqual(pausedState.agentComponents, [])
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, false)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, false)
+  assert.equal(pausedState.hosts.codex !== undefined, true)
+
+  await removeHost({ stateRoot, target: 'codex' }, dependencies)
+  await addHost({ stateRoot, target: 'codex' }, dependencies)
+  const afterHost = await loadState(paths)
+  assert.equal(afterHost.agentToolsPaused, true)
+  assert.deepEqual(afterHost.agentComponents, [])
+  assert.deepEqual(afterHost.resumeAgentComponents, ['math-anchor', 'migratory-time'])
+  assert.equal(afterHost.hosts.codex !== undefined, true)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, false)
+
+  const resumed = await setActiveTools({ stateRoot, resumeTools: true, dryRun: false }, dependencies)
+  assert.equal(resumed.paused, false)
+  assert.deepEqual(resumed.activeAgentComponents, ['math-anchor', 'migratory-time'])
+  assert.equal(resumed.tools.find((tool) => tool.id === 'math-anchor').exposure, 'active')
+  const resumedState = await loadState(paths)
+  assert.equal(resumedState.agentToolsPaused, undefined)
+  assert.equal(resumedState.hosts.codex !== undefined, true)
+  assert.equal(fake.enabledPlugins('math-anchor').length > 0, true)
+  assert.equal(fake.enabledPlugins('migratory-time').length > 0, true)
+
+  await setActiveTools({ stateRoot, pauseTools: true, dryRun: false }, dependencies)
+  const beforeFailedResume = await loadState(paths)
+  const failingConfiguration = (executable, options, callback) => fake.configuration(executable, options, (client) => callback({
+    read: client.read,
+    write: async (snapshot, changes) => {
+      if (changes.some((change) => change.keys[2] === 'enabled' && change.value === true)) {
+        throw Object.assign(new Error('native configuration unavailable'), { code: 'FIXTURE_CONFIG_UNAVAILABLE' })
+      }
+      return client.write(snapshot, changes)
+    },
+  }))
+  await assert.rejects(
+    setActiveTools({ stateRoot, resumeTools: true, dryRun: false }, { ...dependencies, codexConfiguration: failingConfiguration }),
+    (error) => error.code === 'FIXTURE_CONFIG_UNAVAILABLE',
+  )
+  const stillPaused = await loadState(paths)
+  assert.equal(stillPaused.agentToolsPaused, true)
+  assert.deepEqual(stillPaused.agentComponents, [])
+  assert.deepEqual(stillPaused.resumeAgentComponents, beforeFailedResume.resumeAgentComponents)
+  assert.equal(stillPaused.hosts.codex !== undefined, true)
+
+  await setActiveTools({ stateRoot, resumeTools: true, dryRun: false }, dependencies)
+  const recovered = await loadState(paths)
+  assert.deepEqual(recovered.agentComponents, beforeFailedResume.resumeAgentComponents)
+  assert.equal(recovered.agentToolsPaused, undefined)
+  assert.equal(recovered.hosts.codex !== undefined, true)
+})

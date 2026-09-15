@@ -72,8 +72,11 @@ These surfaces are different facts:
 | A live Agent task | Whatever that session resolved at start | Host working-set intent |
 
 `hostFacingManifest` sets `skillOnly: false` only for components in the active
-working set. Codex then materializes a new digest and, when the projection
-identity changed, a new marketplace and `plugin add`. Host state can show
+working set. Inactive discovery Providers stay Skill-only (`on-demand`) unless
+the working set is fully paused. `tools pause` omits those ordinary Skills from
+the Host-facing manifest; Developer Kit Skills remain. Codex then materializes
+a new digest and, when the projection identity changed, a new marketplace and
+`plugin add`. Host state can show
 Armorial `active` immediately. An already-open session **might** still hold a
 previous Skill-only cache or a path into a pruned digest. That is a possible
 divergence (Host `active` vs session catalog), not a confirmed observation

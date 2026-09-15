@@ -3,7 +3,7 @@ import { inspectCodex } from './hosts/codex.mjs'
 import { inspectZcode } from './hosts/zcode.mjs'
 import { inspectProductSkills, inspectProviderSkills } from './developer-kit-skill.mjs'
 import { runFile } from './process.mjs'
-import { FEATURED_PROFILE_ID, hostFacingManifest, loadProfile } from './profile.mjs'
+import { FEATURED_PROFILE_ID, hostFacingManifest, isAgentToolsPaused, loadProfile } from './profile.mjs'
 
 export const FEATURED_READINESS_SCHEMA = 'openadam.agent-host-featured-readiness.v0.1'
 export const FEATURED_READINESS_TOOL = 'armorial'
@@ -208,7 +208,11 @@ export async function inspectFeaturedReadiness(state, {
 
   let agentManifest
   try {
-    agentManifest = hostFacingManifest({ components: state.components ?? {} }, active)
+    agentManifest = hostFacingManifest(
+      { components: state.components ?? {} },
+      active,
+      { paused: isAgentToolsPaused(state) },
+    )
   } catch (error) {
     checks.push(check(
       'projection.receipt',
