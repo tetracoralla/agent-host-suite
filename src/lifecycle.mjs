@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { assertPrivateAccess } from './private-permissions.mjs'
 import { homedir, platform, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path'
@@ -118,6 +119,147 @@ function updatedInstallationState({
 
 function activeManifest(manifest) {
   return hostFacingManifest(manifest, manifest.agentComponents ?? Object.keys(manifest.components))
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function planDigest(value) {
+  return `sha256:${createHash('sha256').update(canonicalJson(value)).digest('hex')}`
+}
+
+function versionMap(components) {
+  if (Array.isArray(components)) {
+    return Object.fromEntries(components.map((item) => [item.id, { version: item.version }]))
+  }
+  return Object.fromEntries(Object.entries(components).map(([id, component]) => [id, { version: component.version }]))
+}
+
+export function describeComponentChanges(previousComponents, nextComponents) {
+  const ids = [...new Set([...Object.keys(previousComponents), ...Object.keys(nextComponents)])].sort()
+  const changes = []
+  for (const id of ids) {
+    const current = previousComponents[id]
+    const next = nextComponents[id]
+    if (current === undefined) {
+      changes.push({ id, action: 'install', currentVersion: null, targetVersion: next.version })
+      continue
+    }
+    if (next === undefined) {
+      changes.push({ id, action: 'remove', currentVersion: current.version, targetVersion: null })
+      continue
+    }
+    const versionChanged = current.version !== next.version
+    const packageChanged = current.fingerprint !== undefined && next.fingerprint !== undefined
+      ? current.fingerprint !== next.fingerprint
+      : versionChanged
+    if (!versionChanged && !packageChanged) continue
+    let action = 'replace'
+    if (versionChanged) {
+      const comparison = compareSuiteVersions(next.version, current.version)
+      action = comparison < 0 ? 'downgrade' : comparison > 0 ? 'upgrade' : 'replace'
+    }
+    changes.push({ id, action, currentVersion: current.version, targetVersion: next.version })
+  }
+  return changes
+}
+
+function assertNoComponentDowngrade(previousComponents, nextComponents) {
+  const downgrades = describeComponentChanges(previousComponents, nextComponents).filter((item) => item.action === 'downgrade')
+  if (downgrades.length === 0) return
+  throw new AgentHostError(
+    'COMPONENT_DOWNGRADE_UNSUPPORTED',
+    'Tool updates cannot install older component versions; use the retained rollback action to revert',
+    {
+      components: downgrades.map((item) => ({
+        id: item.id,
+        currentVersion: item.currentVersion,
+        requestedVersion: item.targetVersion,
+      })),
+    },
+  )
+}
+
+function workingSetDelta(previous, activeAgentComponents) {
+  const previousActive = previous.agentComponents ?? Object.keys(previous.components)
+  return {
+    enabledAgentComponents: activeAgentComponents.filter((id) => !previousActive.includes(id)),
+    removedAgentComponents: previousActive.filter((id) => !activeAgentComponents.includes(id)),
+  }
+}
+
+function describeUpdateSource(options, env, manifest, releaseSourceProvenance) {
+  const explicit = typeof options.releaseManifest === 'string' ? options.releaseManifest.trim() : ''
+  const preview = typeof env[FEATURED_CATALOG_DOWNLOAD_ENV] === 'string' ? env[FEATURED_CATALOG_DOWNLOAD_ENV].trim() : ''
+  const provenanceSha256 = releaseSourceProvenance?.recordSha256 ?? null
+  const releaseId = manifest.releaseId ?? null
+  if (explicit !== '') {
+    if (/^https:\/\//iu.test(explicit)) {
+      return { kind: 'remote-catalog', url: explicit, path: null, developmentRoot: null, releaseId, provenanceSha256 }
+    }
+    return { kind: 'release-manifest', url: null, path: explicit, developmentRoot: null, releaseId, provenanceSha256 }
+  }
+  if (preview !== '') {
+    return { kind: 'remote-catalog', url: preview, path: null, developmentRoot: null, releaseId, provenanceSha256 }
+  }
+  if (manifest.channel === 'development') {
+    return { kind: 'development', url: null, path: null, developmentRoot: manifest.developmentRoot ?? null, releaseId: null, provenanceSha256: null }
+  }
+  return { kind: 'bundled-catalog', url: null, path: null, developmentRoot: null, releaseId, provenanceSha256 }
+}
+
+function bindReviewedPlan(options, planId, code) {
+  if (options.planId === undefined) return
+  if (options.planId !== planId) {
+    throw new AgentHostError(code, 'The reviewed plan is no longer current; preview it again before applying', {
+      reviewedPlanId: options.planId,
+      currentPlanId: planId,
+    })
+  }
+}
+
+function updatePlanIdentity({
+  previous, manifest, profile, changed, componentChanges, enabledAgentComponents, removedAgentComponents, source,
+}) {
+  const body = {
+    kind: 'update',
+    source,
+    fromChannel: previous.channel,
+    toChannel: manifest.channel,
+    fromVersion: previous.suiteVersion,
+    toVersion: manifest.suiteVersion,
+    fromReleaseId: previous.releaseId ?? null,
+    toReleaseId: manifest.releaseId ?? null,
+    profile: profile.id,
+    changed: [...changed].sort(),
+    componentChanges,
+    enabledAgentComponents,
+    removedAgentComponents,
+  }
+  return { ...body, planId: planDigest(body) }
+}
+
+function repairPlanIdentity(previous) {
+  const body = {
+    kind: 'repair',
+    suiteVersion: previous.suiteVersion,
+    releaseId: previous.releaseId ?? null,
+    profile: previous.profile,
+    components: Object.fromEntries(
+      Object.entries(previous.components)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([id, component]) => [id, { version: component.version, fingerprint: component.fingerprint ?? null }]),
+    ),
+    hosts: Object.keys(previous.hosts).sort(),
+    monitoring: previous.observability?.enabled === true,
+    service: previous.runtime?.service !== null && previous.runtime?.service !== undefined,
+  }
+  return { ...body, planId: planDigest(body) }
 }
 
 async function validateActiveComponentPathGrants(manifest) {
@@ -694,14 +836,18 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
         requestedVersion: release.manifest.suiteVersion,
       })
     }
+    const preserveObservability = previous.observability?.enabled === true
+    const componentIds = materializeComponentIdsForUpdate(profile.components, { preserveObservability })
+    const selectedVersions = Object.fromEntries(
+      Object.entries(versionMap(release.manifest.components)).filter(([id]) => componentIds.includes(id)),
+    )
+    assertNoComponentDowngrade(previous.components, selectedVersions)
     const provenance = await loadReleaseProvenance(release)
     releaseSourceProvenance = {
       policy: provenance.record.policy,
       recordSha256: provenance.sha256,
       remoteConfirmedAtBuildTime: provenance.record.policy === 'remote-tagged',
     }
-    const preserveObservability = previous.observability?.enabled === true
-    const componentIds = materializeComponentIdsForUpdate(profile.components, { preserveObservability })
     if (preserveObservability) {
       const missing = OBSERVABILITY_RELEASE_COMPONENTS.filter((id) => !selectedReleaseComponents(release.manifest).has(id))
       if (missing.length > 0) {
@@ -749,6 +895,7 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   manifest.agentComponents = activeAgentComponents
   try {
     await validateActiveComponentPathGrants(manifest)
+    assertNoComponentDowngrade(previous.components, manifest.components)
   } catch (error) {
     await cleanupMaterializedRelease(releasePreparation)
     throw error
@@ -793,6 +940,12 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
     await cleanupMaterializedRelease(releasePreparation)
     throw error
   }
+  const componentChanges = describeComponentChanges(previous.components, manifest.components)
+  const { enabledAgentComponents, removedAgentComponents } = workingSetDelta(previous, activeAgentComponents)
+  const source = describeUpdateSource(options, env, manifest, releaseSourceProvenance)
+  const plan = updatePlanIdentity({
+    previous, manifest, profile, changed, componentChanges, enabledAgentComponents, removedAgentComponents, source,
+  })
   if (options.dryRun) {
     try {
       const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(manifest, activeAgentComponents))
@@ -800,12 +953,20 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
       return {
         status: 'ready',
         dryRun: true,
+        kind: 'update',
         fromChannel: previous.channel,
         toChannel: manifest.channel,
+        fromVersion: previous.suiteVersion,
+        toVersion: manifest.suiteVersion,
         releaseId: manifest.releaseId ?? null,
+        source,
         profile: profile.id,
         profileDisplayName: profile.displayName,
         changed,
+        componentChanges,
+        enabledAgentComponents,
+        removedAgentComponents,
+        planId: plan.planId,
         catalogPreflight,
         activation,
         applicationCompatibility,
@@ -814,6 +975,7 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
       await cleanupMaterializedRelease(releasePreparation)
     }
   }
+  bindReviewedPlan(options, plan.planId, 'UPDATE_PLAN_STALE')
   const rebind = dependencies.rebindObservability ?? rebindObservabilityState
   let next = null
   let activationStarted = false
@@ -1378,6 +1540,129 @@ async function uninstallInstallationUnlocked(options, dependencies = {}, prepare
   return { status: 'uninstalled', purgeData: options.purgeData, archive: options.purgeData ? null : archive, results, ...(warnings.length === 0 ? {} : { warnings }) }
 }
 
+async function repairInstallationUnlocked(options, dependencies = {}, preparedPaths = null) {
+  const runner = dependencies.runner ?? runFile
+  const paths = preparedPaths ?? await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  const previous = await loadState(paths)
+  if (previous === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
+  const profile = await loadProfile(previous.profile)
+  const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
+  const active = previous.agentComponents ?? availableAgentComponents(previous)
+  const manifest = { components: previous.components, agentComponents: active }
+  await validateActiveComponentPathGrants(manifest)
+  const plan = repairPlanIdentity(previous)
+  const repairs = {
+    hosts: Object.keys(previous.hosts).sort(),
+    service: previous.runtime?.service !== null && previous.runtime?.service !== undefined,
+    monitoring: previous.observability?.enabled === true,
+  }
+  const candidateActivatedAt = new Date().toISOString()
+  const candidateState = {
+    ...previous,
+    updatedAt: candidateActivatedAt,
+    bindingsActivatedAt: candidateActivatedAt,
+  }
+  const applicationCompatibility = await checkApplicationState(candidateState, dependencies)
+  if (options.dryRun) {
+    return {
+      status: 'ready',
+      dryRun: true,
+      kind: 'repair',
+      suiteVersion: previous.suiteVersion,
+      releaseId: previous.releaseId ?? null,
+      profile: previous.profile,
+      profileDisplayName: profile.displayName,
+      changed: [],
+      componentChanges: [],
+      enabledAgentComponents: [],
+      removedAgentComponents: [],
+      repairs,
+      planId: plan.planId,
+      activation: await inspectActivation(previous, manifest, runner, options, workspaceRoot, dependencies),
+      applicationCompatibility,
+    }
+  }
+  bindReviewedPlan(options, plan.planId, 'REPAIR_PLAN_STALE')
+  const rebind = dependencies.rebindObservability ?? rebindObservabilityState
+  let next = null
+  let activationStarted = false
+  try {
+    activationStarted = true
+    const activated = await activateState(paths, previous, manifest, runner, options, workspaceRoot, dependencies)
+    const activatedAt = new Date().toISOString()
+    next = {
+      ...previous,
+      hosts: activated.hosts,
+      runtime: activated.runtime,
+      updatedAt: activatedAt,
+      bindingsActivatedAt: activatedAt,
+      workspaceRoot,
+    }
+    if (next.observability?.enabled === true) await rebind(next, paths, runner)
+    await (dependencies.saveState ?? saveState)(paths, next)
+  } catch (error) {
+    const rollbackFailures = []
+    const serviceRecovered = await recoverRecordedService(paths)
+    try {
+      if (activationStarted) {
+        if (!serviceRecovered) {
+          await activateState(
+            paths,
+            previous,
+            { components: previous.components, agentComponents: previous.agentComponents },
+            runner,
+            options,
+            previous.workspaceRoot ?? null,
+            dependencies,
+          )
+        }
+        if (previous.observability?.enabled === true) await rebind(previous, paths, runner)
+      }
+    } catch (failure) {
+      rollbackFailures.push(failure)
+    }
+    if (rollbackFailures.length > 0) {
+      throw new AgentHostError('REPAIR_ROLLBACK_FAILED', 'The repair failed and the previous environment could not be fully restored', {
+        repair: error.message,
+        rollback: rollbackFailures.map((failure) => failure?.message ?? String(failure)).join('; '),
+      })
+    }
+    throw error
+  }
+  const warnings = []
+  const projectionCleanup = await committedStep(
+    warnings,
+    'CODEX_PROJECTION_CLEANUP_FAILED',
+    'The environment repair succeeded, but stale Codex projection cleanup could not be completed.',
+    () => pruneStateCodexProjections(paths, next, dependencies.pruneCodexProjections),
+    { status: 'not-completed', removed: 0 },
+  )
+  await committedStep(
+    warnings,
+    'ACTIVITY_LOG_WRITE_FAILED',
+    'The environment repair succeeded, but its activity entry could not be recorded.',
+    () => (dependencies.recordActivity ?? recordActivity)(paths, 'environment.repaired', 'Environment connections repaired', {
+      suiteVersion: next.suiteVersion,
+      hosts: Object.keys(next.hosts),
+      monitoring: next.observability?.enabled === true,
+    }),
+  )
+  return {
+    status: 'repaired',
+    kind: 'repair',
+    suiteVersion: next.suiteVersion,
+    releaseId: next.releaseId ?? null,
+    profile: next.profile,
+    changed: [],
+    componentChanges: [],
+    repairs,
+    planId: plan.planId,
+    restartRequired: Object.keys(next.hosts).length > 0,
+    projectionCleanup,
+    ...(warnings.length === 0 ? {} : { warnings }),
+  }
+}
+
 async function lockedLifecycle(options, dependencies, operation, callback) {
   const paths = statePaths(resolveStateRoot(options.stateRoot))
   return await withLifecycleMutation(paths, operation, { ...dependencies, migrateState: operation !== 'service.recover', recoverEnvironmentChange: true, environmentDryRun: options.dryRun === true }, (lockedDependencies, preparedPaths) =>
@@ -1397,6 +1682,11 @@ export async function removeHost(options, dependencies = {}) {
 export async function updateInstallation(options, dependencies = {}) {
   return await lockedLifecycle(options, dependencies, 'environment.update', (locked, paths) =>
     updateInstallationUnlocked(options, locked, paths))
+}
+
+export async function repairInstallation(options, dependencies = {}) {
+  return await lockedLifecycle(options, dependencies, 'environment.repair', (locked, paths) =>
+    repairInstallationUnlocked(options, locked, paths))
 }
 
 export async function rollbackInstallation(options, dependencies = {}) {

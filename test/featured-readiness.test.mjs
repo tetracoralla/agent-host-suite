@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
@@ -12,8 +11,8 @@ import {
 } from '../src/featured-readiness.mjs'
 import { inspectProviderSkills } from '../src/developer-kit-skill.mjs'
 import { human } from '../src/cli.mjs'
+import { createIsolatedCli, runIsolatedCli } from './cli-isolation.mjs'
 
-const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
 const adoptionRoot = fileURLToPath(new URL('../docs/fixtures/adoption/', import.meta.url))
 const protocolPath = fileURLToPath(new URL('../docs/ADOPTION_ACCEPTANCE.md', import.meta.url))
 
@@ -212,12 +211,13 @@ test('featured readiness is not ok when ZCode MCP is healthy but the Armorial Sk
   assert.match(receipt.message, /Skill projection/u)
 })
 
-test('doctor --featured-readiness is a Host-only route and fails closed without an install', () => {
-  const missing = spawnSync(process.execPath, [cliPath, 'doctor', '--featured-readiness', '--json'], { encoding: 'utf8' })
+test('doctor --featured-readiness is a Host-only route and fails closed without an install', async (t) => {
+  const isolated = await createIsolatedCli(t)
+  const missing = runIsolatedCli(['doctor', '--featured-readiness', '--json'], isolated)
   assert.equal(missing.status, 1)
   assert.equal(JSON.parse(missing.stderr).error.code, 'NOT_INSTALLED')
 
-  const deep = spawnSync(process.execPath, [cliPath, 'doctor', '--featured-readiness', '--deep'], { encoding: 'utf8' })
+  const deep = runIsolatedCli(['doctor', '--featured-readiness', '--deep'], isolated)
   assert.equal(deep.status, 2)
   assert.equal(deep.stderr.trim(), 'CLI_USAGE: doctor --featured-readiness does not accept --deep')
 })

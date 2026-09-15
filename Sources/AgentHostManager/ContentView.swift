@@ -20,10 +20,18 @@ struct ContentView: View {
                     .help(L10n.text("Run a full environment check"))
                     .disabled(store.isBusy)
 
-                    Button { Task { await store.prepareUpdate() } } label: {
-                        Label(L10n.text(store.health.needsRepair ? "Repair" : "Update"), systemImage: "arrow.triangle.2.circlepath")
+                    if store.health.needsRepair {
+                        Button { Task { await store.prepareRepair() } } label: {
+                            Label(L10n.text("Repair"), systemImage: "wrench.and.screwdriver")
+                        }
+                        .help(L10n.text("Repair the installed environment"))
+                        .disabled(store.isBusy)
                     }
-                    .help(L10n.text(store.health.needsRepair ? "Repair the installed environment" : "Check for compatible updates"))
+
+                    Button { Task { await store.prepareUpdate() } } label: {
+                        Label(L10n.text("Update"), systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .help(L10n.text("Check for compatible updates"))
                     .disabled(store.isBusy)
                 }
 

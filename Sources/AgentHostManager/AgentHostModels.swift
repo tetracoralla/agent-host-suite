@@ -151,7 +151,8 @@ enum ManagerSetupPolicy {
         profile: String?,
         releaseManifest: String?,
         replaceHostConflicts: Bool,
-        dryRun: Bool
+        dryRun: Bool,
+        planId: String? = nil
     ) -> [String] {
         var arguments = ["update"]
         if let profile, !profile.isEmpty {
@@ -162,6 +163,27 @@ enum ManagerSetupPolicy {
         }
         if replaceHostConflicts {
             arguments.append("--replace-host-conflicts")
+        }
+        if let planId, !planId.isEmpty {
+            arguments += ["--plan-id", planId]
+        }
+        if dryRun {
+            arguments.append("--dry-run")
+        }
+        return arguments
+    }
+
+    static func repairArguments(
+        replaceHostConflicts: Bool,
+        dryRun: Bool,
+        planId: String? = nil
+    ) -> [String] {
+        var arguments = ["repair"]
+        if replaceHostConflicts {
+            arguments.append("--replace-host-conflicts")
+        }
+        if let planId, !planId.isEmpty {
+            arguments += ["--plan-id", planId]
         }
         if dryRun {
             arguments.append("--dry-run")
@@ -257,15 +279,59 @@ struct ActivationPlan: Decodable, Equatable, Sendable {
     let service: ServicePlan?
 }
 
+struct UpdateSource: Decodable, Equatable, Sendable {
+    let kind: String
+    let path: String?
+    let url: String?
+    let developmentRoot: String?
+    let releaseId: String?
+    let provenanceSha256: String?
+}
+
+struct ComponentVersionChange: Decodable, Equatable, Sendable, Identifiable {
+    let id: String
+    let action: String
+    let currentVersion: String?
+    let targetVersion: String?
+}
+
 struct UpdatePlan: Decodable, Equatable, Sendable {
     let status: String
     let dryRun: Bool
     let fromChannel: String
     let toChannel: String
+    let fromVersion: String
+    let toVersion: String
+    let releaseId: String?
+    let source: UpdateSource
+    let profile: String
+    let profileDisplayName: String?
+    let changed: [String]
+    let componentChanges: [ComponentVersionChange]
+    let enabledAgentComponents: [String]
+    let removedAgentComponents: [String]
+    let planId: String
+    let activation: ActivationPlan
+}
+
+struct RepairTargets: Decodable, Equatable, Sendable {
+    let hosts: [String]
+    let service: Bool
+    let monitoring: Bool
+}
+
+struct RepairPlan: Decodable, Equatable, Sendable {
+    let status: String
+    let dryRun: Bool
+    let kind: String
+    let suiteVersion: String
     let releaseId: String?
     let profile: String
     let profileDisplayName: String?
     let changed: [String]
+    let componentChanges: [ComponentVersionChange]
+    let repairs: RepairTargets
+    let planId: String
     let activation: ActivationPlan
 }
 
@@ -277,6 +343,7 @@ struct RollbackPlan: Decodable, Equatable, Sendable {
 
 enum EnvironmentChangePlan: Equatable, Sendable {
     case update(UpdatePlan, profile: String?, replaceHostConflicts: Bool)
+    case repair(RepairPlan, replaceHostConflicts: Bool)
     case rollback(RollbackPlan)
 }
 
@@ -301,6 +368,7 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
         case "environment.installed":
             L10n.text(detail?["profile"]?.displayText == "featured" ? "Featured tools installed" : "Agent environment installed")
         case "environment.updated": L10n.text(summary == "Environment checked for updates" ? "Environment checked for updates" : "Environment updated")
+        case "environment.repaired": L10n.text("Environment connections repaired")
         case "environment.rolled-back": L10n.text("Previous environment restored")
         case "tool-set.changed": L10n.text("Agent tool availability changed")
         case "environment.uninstalled": L10n.text("Agent Host removed")

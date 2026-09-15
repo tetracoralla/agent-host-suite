@@ -29,8 +29,14 @@ final class AgentHostStore: ObservableObject {
     @Published var selectedSetupHost = "zcode"
     @Published var selectedSetupProfile = ManagerSetupPolicy.defaultProfile
 
+    private enum EnvironmentPreparation: Equatable {
+        case update(profile: String?, replaceHostConflicts: Bool)
+        case repair
+    }
+
     private let cli: AgentHostCLI
     private let environment: [String: String]
+    private var environmentPreparation: EnvironmentPreparation?
 
     init(
         cli: AgentHostCLI = AgentHostCLI(),
@@ -268,13 +274,14 @@ final class AgentHostStore: ObservableObject {
     }
 
     func prepareUpdate(profile: String? = nil, replacingHostConflicts: Bool = false) async {
+        environmentPreparation = .update(profile: profile, replaceHostConflicts: replacingHostConflicts)
         let arguments = ManagerSetupPolicy.updateArguments(
             profile: profile,
             releaseManifest: releaseManifestPath,
             replaceHostConflicts: replacingHostConflicts,
             dryRun: true
         )
-        await work(health.needsRepair ? "Preparing repair" : "Preparing update") {
+        await work("Preparing update") {
             do {
                 let plan = try await self.cli.run(arguments, as: UpdatePlan.self)
                 self.environmentChangePlan = .update(plan, profile: profile, replaceHostConflicts: replacingHostConflicts)
@@ -288,9 +295,36 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
+    func prepareRepair(replacingHostConflicts: Bool = false) async {
+        environmentPreparation = .repair
+        let arguments = ManagerSetupPolicy.repairArguments(
+            replaceHostConflicts: replacingHostConflicts,
+            dryRun: true
+        )
+        await work("Preparing repair") {
+            do {
+                let plan = try await self.cli.run(arguments, as: RepairPlan.self)
+                self.environmentChangePlan = .repair(plan, replaceHostConflicts: replacingHostConflicts)
+                self.isPresentingEnvironmentChangePlan = true
+            } catch let error as CLIError {
+                if case let CLIError.failed(code, _) = error, Self.isHostConflict(code) {
+                    self.recovery = .replaceHostConflicts
+                }
+                throw error
+            }
+        }
+    }
+
     func replaceConflictingInstallations() async {
         recovery = nil
-        await prepareUpdate(replacingHostConflicts: true)
+        switch environmentPreparation {
+        case .repair:
+            await prepareRepair(replacingHostConflicts: true)
+        case let .update(profile, _):
+            await prepareUpdate(profile: profile, replacingHostConflicts: true)
+        case nil:
+            await prepareUpdate(replacingHostConflicts: true)
+        }
     }
 
     func prepareRollback() async {
@@ -306,14 +340,22 @@ final class AgentHostStore: ObservableObject {
         isPresentingEnvironmentChangePlan = false
         environmentChangePlan = nil
         switch plan {
-        case let .update(_, profile, replaceHostConflicts):
+        case let .update(update, profile, replaceHostConflicts):
             let arguments = ManagerSetupPolicy.updateArguments(
                 profile: profile,
                 releaseManifest: releaseManifestPath,
                 replaceHostConflicts: replaceHostConflicts,
-                dryRun: false
+                dryRun: false,
+                planId: update.planId
             )
-            await action(arguments, label: health.needsRepair ? "Repairing environment" : "Updating environment", conflictRecovery: true)
+            await action(arguments, label: "Updating environment", conflictRecovery: true)
+        case let .repair(repair, replaceHostConflicts):
+            let arguments = ManagerSetupPolicy.repairArguments(
+                replaceHostConflicts: replaceHostConflicts,
+                dryRun: false,
+                planId: repair.planId
+            )
+            await action(arguments, label: "Repairing environment", conflictRecovery: true)
         case .rollback:
             await action(["rollback"], label: "Restoring previous version")
         }

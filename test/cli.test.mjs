@@ -48,6 +48,8 @@ test('CLI rejects known options that do not belong to the selected operation', (
     [['component', 'remove', 'private-fixture', '--activate'], 'component remove does not accept --activate'],
     [['component', 'list', '--standalone'], 'component list does not accept --standalone'],
     [['uninstall', '--dry-run'], 'uninstall does not accept --dry-run'],
+    [['repair', '--profile', 'featured'], 'repair does not accept --profile'],
+    [['update', '--plan-id', 'not-a-digest'], '--plan-id requires a SHA-256 digest'],
     [['service', 'recover', '--recovery', 'invalid', '--manifest-sha256', `sha256:${'0'.repeat(64)}`], 'service recover requires a valid --recovery identity'],
     [['service', 'recover', '--recovery', 'service-recovery-v2-00000000-0000-4000-8000-000000000000', '--manifest-sha256', 'invalid'], 'service recover requires a valid --manifest-sha256 digest'],
     [['service', 'recover', '--recovery', 'service-recovery-v2-00000000-0000-4000-8000-000000000000', '--manifest-sha256', `sha256:${'0'.repeat(64)}`, '--recovery-root', '/tmp/bundle'], 'Unknown argument: --recovery-root'],
@@ -189,6 +191,8 @@ test('profiles list names the featured admission set without a store', async () 
   assert.equal(help.status, 0, help.stderr)
   assert.match(help.stdout, /agent-host profiles list/u)
   assert.match(help.stdout, /agent-host profiles fetch/u)
+  assert.match(help.stdout, /agent-host repair/u)
+  assert.match(help.stdout, /--plan-id SHA256/u)
   assert.match(help.stdout, /--no-host/u)
   assert.match(help.stdout, /doctor \[--deep \| --featured-readiness\]/u)
   assert.match(help.stdout, /--profile standard\|featured\|developer\|observability\|local-dogfood/u)
@@ -240,6 +244,34 @@ test('human private component result surfaces pending projection cleanup without
     }],
   })
   assert.equal(output, 'private-fixture removed · removed · stale projection cleanup pending')
+})
+
+test('human update and repair previews name versions and leave tool versions unchanged for repair', () => {
+  assert.equal(
+    human({
+      status: 'ready', dryRun: true, kind: 'repair', suiteVersion: '0.2.0',
+    }),
+    'Repair preview · tool versions unchanged · 0.2.0',
+  )
+  assert.equal(
+    human({
+      status: 'repaired', suiteVersion: '0.2.0',
+    }),
+    'Environment repaired · tool versions unchanged · 0.2.0',
+  )
+  assert.equal(
+    human({
+      status: 'ready',
+      dryRun: true,
+      fromVersion: '0.2.0',
+      toVersion: '0.2.0',
+      source: { kind: 'bundled-catalog' },
+      componentChanges: [
+        { id: 'agent-tool-observer', action: 'downgrade', currentVersion: '0.6.4', targetVersion: '0.6.0' },
+      ],
+    }),
+    'Update preview · bundled catalog · 0.2.0 · 1 component',
+  )
 })
 
 test('human service recovery reports observed running and ready state', () => {

@@ -78,7 +78,7 @@ async function component(catalogRoot, fixtureRoot, definition, marker) {
   }
 }
 
-export async function createReleaseFixture(root, { suiteVersion, releaseId, marker, includeObservability = false, includeDeveloper = false, includeArmorial = false }) {
+export async function createReleaseFixture(root, { suiteVersion, releaseId, marker, includeObservability = false, includeDeveloper = false, includeArmorial = false, componentVersions = {} }) {
   const catalogRoot = join(root, 'catalog')
   await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
   const nodeEntrypoint = platform() === 'win32' ? 'bin/node.exe' : 'bin/node'
@@ -137,7 +137,7 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
   if (includeObservability) {
     definitions.push(
       {
-        id: 'agent-tool-observer', version: '0.1.0', kind: 'agent-tool-observer',
+        id: 'agent-tool-observer', version: componentVersions['agent-tool-observer'] ?? '0.1.0', kind: 'agent-tool-observer',
         files: [['src/cli.mjs', [`// observer ${marker}\n`, false]]],
         identityFiles: ['src/cli.mjs', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json'],
         entrypoints: { cli: 'src/cli.mjs' }, integration: null,

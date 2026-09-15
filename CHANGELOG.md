@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Isolate featured catalog and readiness CLI subprocesses behind a test-owned
+  state root and Host home. Tests pass `--state-root` themselves and do not
+  depend on exporting `AGENT_HOST_STATE_ROOT`. A regression covers both a
+  present trap install and an absent default install.
+- Split Manager repair from update. Monitoring and connection recovery uses
+  `repair` and does not materialize a catalog or change tool versions. Update
+  previews name the catalog source, current and target versions, and
+  enable/remove working-set changes. Ordinary update refuses older component
+  versions even when `suiteVersion` is unchanged; rollback remains the explicit
+  revert. Confirm binds the reviewed plan identity so a changed remote catalog
+  requires a new preview.
 - Land unsigned preview download without Apple notarization: GitHub Releases or
   a configured HTTPS `preview-distribution.json` / bound `current.json`.
   `AGENT_HOST_FEATURED_CATALOG_URL` is a working fetch hook (`profiles fetch`,

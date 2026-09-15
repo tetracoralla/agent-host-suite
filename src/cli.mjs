@@ -1,6 +1,6 @@
 import { doctor } from './doctor.mjs'
 import { asPublicError, AgentHostError } from './errors.mjs'
-import { addHost, hostStatus, recoverServiceInstallation, removeHost, rollbackInstallation, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation } from './lifecycle.mjs'
+import { addHost, hostStatus, recoverServiceInstallation, removeHost, repairInstallation, rollbackInstallation, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation } from './lifecycle.mjs'
 import { disableObservability, enableObservability, exportObservabilityTrace, maintenance, observabilityAdapterPlan, observabilityAdapters, observabilityStatus, observabilitySummary, observabilityTraceSources, refreshObservability } from './observability.mjs'
 import { readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
@@ -35,7 +35,8 @@ const USAGE = `Usage:
   agent-host cleanup [--dry-run] [--state-root PATH] [--json]
   agent-host maintenance [--state-root PATH] [--json]
   agent-host doctor [--deep | --featured-readiness] [--skip-agent-apps] [--state-root PATH] [--json]
-  agent-host update [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--workspace-root PATH] [--release-manifest PATH] [--enable-observability] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host update [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--workspace-root PATH] [--release-manifest PATH] [--enable-observability] [--replace-host-conflicts] [--plan-id SHA256] [--dry-run] [--state-root PATH] [--json]
+  agent-host repair [--workspace-root PATH] [--replace-host-conflicts] [--plan-id SHA256] [--dry-run] [--state-root PATH] [--json]
   agent-host tools status [--state-root PATH] [--json]
   agent-host tools set (--tool COMPONENT [--tool COMPONENT] | --profile PROFILE) [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools reset [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
@@ -70,7 +71,8 @@ const ROUTE_ARGUMENTS = Object.freeze({
   storage: ['--state-root', '--json'],
   cleanup: ['--state-root', '--dry-run', '--json'],
   doctor: ['--state-root', '--deep', '--featured-readiness', '--skip-agent-apps', '--json'],
-  update: ['--profile', '--tool', '--workspace-root', '--release-manifest', '--enable-observability', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  update: ['--profile', '--tool', '--workspace-root', '--release-manifest', '--enable-observability', '--replace-host-conflicts', '--plan-id', '--dry-run', '--state-root', '--json'],
+  repair: ['--workspace-root', '--replace-host-conflicts', '--plan-id', '--dry-run', '--state-root', '--json'],
   rollback: ['--workspace-root', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   uninstall: ['--purge-data', '--state-root', '--json'],
   maintenance: ['--state-root', '--json'],
@@ -134,7 +136,7 @@ function parseArgs(argv) {
     adapter: undefined,
   }
   if (options.command === 'component' && ['status', 'remove', 'rollback'].includes(options.action) && argv[2] !== undefined && !argv[2].startsWith('--')) options.target = argv[2]
-  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--adapter', '--recovery', '--manifest-sha256', '--url'])
+  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--adapter', '--recovery', '--manifest-sha256', '--url', '--plan-id'])
   const booleans = new Map([
     ['--json', 'json'], ['--deep', 'deep'], ['--dry-run', 'dryRun'], ['--no-service', 'noService'], ['--no-host', 'noHost'],
     ['--enable-observability', 'enableObservability'], ['--purge-data', 'purgeData'],
@@ -171,6 +173,10 @@ function parseArgs(argv) {
       else if (arg === '--release-manifest') options.releaseManifest = value
       else if (arg === '--state-root') options.stateRoot = value
       else if (arg === '--url') options.url = value
+      else if (arg === '--plan-id') {
+        if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new AgentHostError('CLI_USAGE', '--plan-id requires a SHA-256 digest')
+        options.planId = value
+      }
       else if (arg === '--artifact') options.artifact = value
       else if (arg === '--binding') options.bindingPath = value
       else if (arg === '--license-spdx') options.licenseSpdx = value
@@ -385,6 +391,26 @@ export function human(result) {
   if (result.status === 'ok' && result.sections?.total !== undefined && result.cleanup !== undefined) return storageSummary(result)
   if (result.status === 'cleaned') return `Storage cleaned · ${result.reclaimedAllocatedBytes} allocated bytes reclaimed.`
   if (result.status === 'ready' && result.plan !== undefined) return `Cleanup preview · ${result.plan.allocatedBytes} allocated bytes eligible; nothing changed.`
+  if (result.status === 'ready' && result.dryRun === true && result.kind === 'repair') {
+    return `Repair preview · tool versions unchanged · ${result.suiteVersion}`
+  }
+  if (result.status === 'repaired') {
+    return `Environment repaired · tool versions unchanged · ${result.suiteVersion}`
+  }
+  if (result.status === 'ready' && result.dryRun === true && result.fromVersion !== undefined && result.toVersion !== undefined) {
+    const source = result.source?.kind === 'remote-catalog'
+      ? result.source.url
+      : result.source?.kind === 'release-manifest'
+        ? 'release manifest'
+        : result.source?.kind === 'development'
+          ? 'development source'
+          : 'bundled catalog'
+    const versions = result.fromVersion === result.toVersion
+      ? result.toVersion
+      : `${result.fromVersion} → ${result.toVersion}`
+    const changing = result.componentChanges?.length ?? result.changed?.length ?? 0
+    return `Update preview · ${source} · ${versions} · ${changing} component${changing === 1 ? '' : 's'}`
+  }
   return `${result.status}${result.restartRequired ? ' · start a fresh Agent session' : ''}`
 }
 
@@ -485,6 +511,7 @@ async function run(options, dependencies = {}) {
     throw new AgentHostError('CLI_USAGE', `Unknown tools action: ${options.action}`)
   }
   if (options.command === 'update') return updateInstallation(options, dependencies)
+  if (options.command === 'repair') return repairInstallation(options, dependencies)
   if (options.command === 'rollback') return rollbackInstallation(options)
   if (options.command === 'observability') {
     if (options.action === 'enable') return enableObservability(options)

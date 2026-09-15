@@ -29,7 +29,10 @@ struct AgentHostManagerApp: App {
                 Button(L10n.text("Run Full Check")) { Task { await store.runDoctor() } }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(store.isBusy || store.suite?.configured != true)
-                Button(L10n.text(store.health.needsRepair ? "Review Repair" : "Review Update")) { Task { await store.prepareUpdate() } }
+                Button(L10n.text("Review Repair")) { Task { await store.prepareRepair() } }
+                    .keyboardShortcut("r", modifiers: [.command, .option])
+                    .disabled(store.isBusy || store.suite?.configured != true || !store.health.needsRepair)
+                Button(L10n.text("Review Update")) { Task { await store.prepareUpdate() } }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                     .disabled(store.isBusy || store.suite?.configured != true)
             }
