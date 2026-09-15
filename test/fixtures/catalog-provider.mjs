@@ -1,13 +1,8 @@
 import { createInterface } from 'node:readline'
+import { catalogToolsForMode } from './managed-catalog-shapes.mjs'
 
 const mode = process.argv[2] ?? 'normal'
-const tools = [
-  { name: 'input_only', description: 'Result schema is available separately on demand.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'inline_output', description: 'Returns one typed object.', inputSchema: { type: 'object', properties: {} }, outputSchema: { type: 'object', properties: { value: { type: 'string' } } } },
-]
-if (mode === 'large') tools[0].description = 'x'.repeat(70_000)
-if (mode === 'bad-input') tools[0].inputSchema = null
-if (mode === 'bad-output') tools[1].outputSchema = []
+const tools = catalogToolsForMode(mode)
 createInterface({ input: process.stdin }).on('line', (line) => {
   const request = JSON.parse(line)
   if (request.id === undefined) return

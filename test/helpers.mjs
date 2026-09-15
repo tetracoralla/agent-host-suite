@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { after } from 'node:test'
 import { createHash } from 'node:crypto'
 import { AgentHostError } from '../src/errors.mjs'
+import { MANAGED_CATALOG_BUDGETS, MANAGED_CATALOG_PREFERENCES } from '../src/context-exporter.mjs'
 import { join } from 'node:path'
 
 async function write(path, contents, mode = 0o600) {
@@ -79,13 +80,21 @@ export async function createDevelopmentObservabilityWorkspace(root) {
 }
 
 export async function healthyCatalogPreflight(components) {
+  const toolCount = Object.keys(components).length
+  const canonicalUtf8Bytes = toolCount * 100
   return {
     status: 'within',
-    canonicalUtf8Bytes: Object.keys(components).length * 100,
-    largestToolUtf8Bytes: Object.keys(components).length === 0 ? 0 : 100,
-    toolCount: Object.keys(components).length,
-    budgets: { maxCatalogUtf8Bytes: 65_536, maxToolCount: 64, maxLargestToolUtf8Bytes: 40_000, maxResultUtf8Bytes: 65_536 },
+    canonicalUtf8Bytes,
+    largestToolUtf8Bytes: toolCount === 0 ? 0 : 100,
+    toolCount,
+    budgets: { ...MANAGED_CATALOG_BUDGETS },
+    preferences: { ...MANAGED_CATALOG_PREFERENCES },
     exceeded: [],
+    preference: {
+      status: 'within',
+      over: [],
+      headroom: { catalogUtf8Bytes: MANAGED_CATALOG_PREFERENCES.preferredCatalogUtf8Bytes - canonicalUtf8Bytes },
+    },
   }
 }
 

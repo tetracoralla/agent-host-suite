@@ -314,16 +314,17 @@ test('catalog assessment uses the same canonical bytes as the declared Agent bud
     budgets: MANAGED_CATALOG_BUDGETS,
   })
   assert.equal(within.status, 'within')
+  assert.equal(within.preference.status, 'within')
   assert.equal(within.toolCount, 1)
   assert.equal(within.headroom.catalogUtf8Bytes, MANAGED_CATALOG_BUDGETS.maxCatalogUtf8Bytes - within.canonicalUtf8Bytes)
 
   const exceeded = assessManagedCatalog({
-    tools: [{ name: 'large', description: 'x'.repeat(65_536), inputSchema: { type: 'object' }, outputSchema: { type: 'object' } }],
+    tools: [{ name: 'large', description: 'x'.repeat(70_000), inputSchema: { type: 'object' }, outputSchema: { type: 'object' } }],
     budgets: MANAGED_CATALOG_BUDGETS,
   })
   assert.equal(exceeded.status, 'exceeded')
-  assert.equal(exceeded.headroom.catalogUtf8Bytes < 0, true)
-  assert.deepEqual(exceeded.exceeded.map((item) => item.metric), ['catalog.canonicalUtf8Bytes', 'catalog.largestToolUtf8Bytes'])
+  assert.equal(exceeded.headroom.largestToolUtf8Bytes < 0, true)
+  assert.deepEqual(exceeded.exceeded.map((item) => item.metric), ['catalog.largestToolUtf8Bytes'])
 })
 
 test('observability summary preserves provider coverage and bounded-routing disclosure', () => {

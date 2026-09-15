@@ -262,15 +262,26 @@ of this product; see [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 
 Package inventory and Agent-visible working set are separate. Every transition
 that can change the working set measures the proposed live catalogs and blocks
-activation when their canonical bytes, largest tool, or tool count exceed the
-declared resource limits. The 64 KiB aggregate limit protects admission of the
-selected managed catalog; it does not require uninstalling inactive tools.
-This is a Host resource policy, not an observed Codex/Claude context-window
-limit or a measurement of a model's input. Provider `tools/list`, a host's native
+activation only when they exceed Host resource-protection limits. Those limits
+are the Context Surface Analyzer snapshot contract the Host actually writes and
+inspects: 384 KiB canonical tools (headroom under the 512 KiB snapshot parse cap
+for pretty-printed snapshot JSON), 128 tools, and 64 KiB for the largest tool
+(analyzer string and schema caps). Per-provider `tools/list` is rejected above
+128 tools before aggregation. A 64 KiB aggregate is a small-working-set product
+preference, not an admission gate and not a measured Codex/Claude
+context-window or model-token cost. Catalog bytes must not be converted into
+claimed token savings without an explicit tokenizer/input observation and a
+comparable run.
+
+The Host directly exposes the selected working-set `tools/list`. Public Codex,
+Claude, and ZCode extension points do not let the suite replace a tool schema
+inside an already-open model turn, so deferred discovery is not available
+without patching those shells. The user-adjustable working set remains the
+product control for which tools are advertised. Inactive tools stay out of the
+callable catalog. Resource-protection failures still stop activation before
+mutation; preference overage does not. Provider `tools/list`, a host's native
 inventory, enabled Skill metadata, loaded Skill contents and the final model
-request are distinct surfaces. A host may filter, defer, add to or transform
-the catalog. Catalog bytes must not be converted into claimed token savings
-without an explicit tokenizer/input observation and a comparable run.
+request remain distinct surfaces.
 
 Current Codex 0.152.0 public read-only inventories can verify effective native
 configuration, active Skill identities and MCP tool metadata in isolated homes.

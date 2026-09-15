@@ -211,8 +211,11 @@ previous working set. Backstage observation
 components never enter the callable catalog or spawn Agent-session MCP
 processes. Normalized tool-name conflicts fail before deployment observation
 using the same semantic key as Observer.
-Managed catalog byte/count limits are resource admission, not model-context
-or token measurements. Distinguish Provider catalogs, native host inventory,
+Managed catalog byte/count limits are Host resource admission grounded in the
+Context Surface Analyzer snapshot contract, not model-context or token
+measurements. A 64 KiB aggregate is a small-working-set preference and must
+not block ordinary combinations such as five tools plus Migratory Time.
+Distinguish Provider catalogs, native host inventory,
 enabled/loaded Skills and the actual model request when making cost claims.
 Ordinary MCP output schemas are optional: preserve omission and validate
 advertised schemas without forcing on-demand contracts into discovery.
