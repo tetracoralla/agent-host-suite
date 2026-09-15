@@ -189,7 +189,7 @@ export async function inspectFeaturedReadiness(state, {
   const installed = Object.keys(state.components ?? {})
   const featuredDefaults = [...(featuredProfile.defaultAgentComponents ?? [])]
   const recipeMissing = featuredDefaults.filter((id) => !active.includes(id))
-  const recipeMatches = profile.id === FEATURED_PROFILE_ID && recipeMissing.length === 0
+  const extraActive = active.filter((id) => !featuredDefaults.includes(id))
   const featuredToolInstalled = installed.includes(featuredToolId)
   const featuredToolActive = active.includes(featuredToolId)
   const paused = isAgentToolsPaused(state)
@@ -200,16 +200,16 @@ export async function inspectFeaturedReadiness(state, {
     expected: featuredDefaults,
     active,
     missing: recipeMissing,
+    extra: extraActive,
     featuredTool: featuredToolId,
     featuredToolActive,
+    experimentalVariable: true,
     userLevelUsesProfileName: false,
   }
   checks.push(check(
     'recipe.consistency',
-    recipeMatches ? 'ok' : 'warning',
-    recipeMatches
-      ? 'Installed recipe matches the featured working set'
-      : `Installed recipe is ${profile.id}, not ${FEATURED_PROFILE_ID}. User-level readiness does not use this name.`,
+    'ok',
+    `Working set recorded as an experimental variable: ${active.join(', ') || 'empty'}. Extra installed tools are not a user-health failure and are not an adoption-scoring gate.`,
     recipeDetail,
   ))
 

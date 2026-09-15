@@ -45,6 +45,8 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Button(L10n.text("Check for updates")) { Task { await store.checkUpdates() } }
+                    .disabled(store.isBusy)
                 Button(L10n.text("Check source")) { Task { await store.checkCatalogSource() } }
                     .disabled(store.isBusy)
                 Button(L10n.text("Use local catalog…")) { showingCatalogImporter = true }

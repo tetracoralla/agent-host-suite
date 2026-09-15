@@ -8,7 +8,6 @@ import { spawn } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
 import { buildProvenance, inspectBuildSources, materializeGitSourceSnapshots } from './release-source-provenance.mjs'
 import {
-  ARMORIAL_COMPATIBILITY_VERSION,
   buildArmorialPluginFromVerifiedSource,
   buildFileVitalsPluginFromSource,
   extractVerifiedProviderPluginArchive,
@@ -118,6 +117,22 @@ async function providerReleaseInputWhenBuilt(componentId, sourceId, environmentN
   return reuseComponentIds.has(componentId)
     ? null
     : providerReleaseInput(sourceId, environmentName, fallbackRelativePath, materializedRoots)
+}
+
+async function packageManifestVersion(sourceRoot, name) {
+  if (typeof process.env.AGENT_HOST_ARMORIAL_VERSION === 'string' && process.env.AGENT_HOST_ARMORIAL_VERSION.length > 0 && name === 'armorial') {
+    return process.env.AGENT_HOST_ARMORIAL_VERSION
+  }
+  try {
+    const pkg = JSON.parse(await readFile(join(sourceRoot, 'package.json'), 'utf8'))
+    if (pkg.name === name && typeof pkg.version === 'string' && pkg.version.length > 0) return pkg.version
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  const catalog = JSON.parse(await readFile(join(suiteRoot, 'catalog/github-releases/current.json'), 'utf8'))
+  const pinned = catalog.tools?.find((tool) => tool.id === name)
+  if (typeof pinned?.version === 'string') return pinned.version
+  throw new Error(`${name} version is not available from its package.json or the GitHub tool catalog`)
 }
 
 function containedBuildOutput(value) {
@@ -869,7 +884,7 @@ async function main() {
         ? await providerReleaseInputWhenBuilt('armorial', 'armorial', 'AGENT_HOST_ARMORIAL_PLUGIN_ROOT', 'plugins/armorial', materializedRoots)
         : materializedRoots.armorial,
       armorialPluginArchive: armorialSourceBuild === null
-        ? await providerReleaseInputWhenBuilt('armorial', 'armorial', 'AGENT_HOST_ARMORIAL_PLUGIN_ARCHIVE', `.release/armorial-${ARMORIAL_COMPATIBILITY_VERSION}-codex-plugin-macos-arm64.tar.gz`, materializedRoots)
+        ? await providerReleaseInputWhenBuilt('armorial', 'armorial', 'AGENT_HOST_ARMORIAL_PLUGIN_ARCHIVE', `.release/armorial-${await packageManifestVersion(sourceRoots.armorial, 'armorial')}-codex-plugin-macos-arm64.tar.gz`, materializedRoots)
         : armorialSourceBuild.archivePath,
       armorialPluginArchiveSha256: armorialSourceBuild?.sha256,
       projectivePluginRoot: await providerReleaseInputWhenBuilt('projective', 'projective', 'AGENT_HOST_PROJECTIVE_PLUGIN_ROOT', 'plugins/projective', materializedRoots),

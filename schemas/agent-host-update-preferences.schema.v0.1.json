@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-update-preferences.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "channel", "autoCheck", "autoDownload", "autoInstall"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-update-preferences.v0.1" },
+    "channel": { "enum": ["stable", "preview"] },
+    "autoCheck": { "type": "boolean" },
+    "autoDownload": { "type": "boolean" },
+    "autoInstall": { "type": "boolean" }
+  }
+}

@@ -126,6 +126,7 @@ struct ContentView: View {
             switch selection {
             case .overview: EnvironmentView(store: store)
             case .tools: ToolsView(store: store)
+            case .updates: UpdatesView(store: store)
             case .agentApps: AgentAppsView(store: store)
             case .usage: UsageReliabilityView(store: store)
             case .activity: ActivityView(store: store)

@@ -1,0 +1,49 @@
+name: Scan GitHub tools
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - name: Refresh GitHub tool catalog pins
+        run: node scripts/sync-github-catalog.mjs
+      - name: Admit pinned tools
+        run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
+      - name: Open or update the catalog PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- catalog/github-releases/current.json; then
+            echo "No catalog pin change"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B chore/github-tool-catalog
+          git add catalog/github-releases/current.json
+          git commit -m "$(cat <<'EOF'
+          Update GitHub tool catalog pins.
+
+          Generated from public GitHub Releases. Does not rebuild Agent Host.
+          EOF
+          )"
+          git push --force origin chore/github-tool-catalog
+          if gh pr view chore/github-tool-catalog --json number >/dev/null 2>&1; then
+            gh pr edit chore/github-tool-catalog --body "Updates the GitHub tool catalog from public Releases. GITHUB_TOKEN pushes do not start downstream workflows; re-run CI from a GitHub App or a human push. See docs/UPDATES.md."
+          else
+            gh pr create --base main --head chore/github-tool-catalog --title "Update GitHub tool catalog" --body "Updates the GitHub tool catalog from public Releases. GITHUB_TOKEN pushes do not start downstream workflows; re-run CI from a GitHub App or a human push. See docs/UPDATES.md."
+          fi

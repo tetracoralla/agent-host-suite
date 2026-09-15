@@ -11,7 +11,7 @@ boundary being changed:
 - `docs/PRIVACY.md` and `docs/TRACE_PLANE.md` for observation, collection, or
   trace export behavior;
 - `docs/TOOL_INTEGRATION.md` for Provider admission and integration records;
-- `docs/RELEASE.md`, `docs/UNSIGNED_PREVIEW.md`, `docs/LOCAL_DOGFOOD.md`, or the platform guide for build,
+- `docs/RELEASE.md`, `docs/UNSIGNED_PREVIEW.md`, `docs/UPDATES.md`, `docs/LOCAL_DOGFOOD.md`, or the platform guide for build,
   installation, packaging, or unsigned preview download work;
 - `docs/TERMINOLOGY.md` for product copy, naming, or stable identifiers; and
 - the relevant sections of `docs/REVIEW_CONTRACT.md` for review scope,

@@ -94,7 +94,9 @@ hook: if `AGENT_HOST_FEATURED_CATALOG_URL` is set and no
 `acquireArtifact` downloads each component archive.
 
 Add `--carrier` to also download the current platform’s DMG or ZIP named by
-the index:
+the index. That file lands in Host private downloads; it does not replace or
+relaunch the running application. Application replacement is `agent-host app
+update` after digest comparison. See [`UPDATES.md`](UPDATES.md).
 
 ```text
 agent-host profiles fetch --carrier --json
@@ -148,15 +150,16 @@ Component `artifact.url` values in a remotely fetched `current.json` must be
 so `github.com/.../releases/download/...` may land on
 `objects.githubusercontent.com`; SHA-256 still binds the bytes.
 
-## Optional workflow draft
+## Unsigned preview workflow
 
-The tracked `.github/workflows/release.yml` still contains the older
-notarization job. This product does **not** use those Apple secrets. Copy
-[`unsigned-preview-release.yml`](unsigned-preview-release.yml) to
-`.github/workflows/unsigned-preview-release.yml` (or replace `release.yml`)
-with GitHub Desktop from an account that has the `workflow` scope. The draft
-uploads an unsigned prerelease, does not invoke Apple notarization tooling,
-and fails closed when a bound catalog is missing; it does not invent artifacts.
+The live `.github/workflows/release.yml` may still contain the older
+notarization job until an account with the GitHub `workflow` scope copies
+[`unsigned-preview-release.yml`](unsigned-preview-release.yml) over it and
+copies [`scan-github-tools.yml`](scan-github-tools.yml) to
+`.github/workflows/scan-github-tools.yml`. The docs copies admit registered
+GitHub tools on a clean runner, package unsigned macOS/Windows carriers, and
+do **not** request Apple secrets. See [`UPDATES.md`](UPDATES.md).
+Do not copy Apple notarization jobs back into the live workflow.
 
 ## Non-goals
 

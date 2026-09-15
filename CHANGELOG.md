@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- GitHub Releases are the public update channel for Agent Host and registered
+  tools. Browse recommended tools, add a GitHub project or Release, persist
+  the update source with the installed instance, and check or install updates
+  from Manager and `agent-host updates` / `tools add --github` / `app update`.
+  `profiles fetch --carrier` remains installer download only. Unsigned preview
+  workflow no longer requires Apple notarization secrets. Armorial 0.8.0 is
+  the first pinned public sample; versions come from the GitHub catalog rather
+  than scattered 0.7.0 build constants. Installed npm/macOS/Windows payloads
+  load GitHub wrap code without a source-tree `scripts/` path. Third-party
+  GitHub projects preview and install without a central-registry entry;
+  checksums come from asset digest or `.sha256` files. Tool update checks
+  fetch persisted GitHub sources. Application update downloads the carrier
+  from the public CLI and restores the previous files if the new process
+  fails to start. Manager and the local web UI show version items, logos,
+  preview results, and install actions. Auto-check preferences have a
+  maintenance executor. Unknown licenses stay `NOASSERTION`.
+- `doctor --featured-readiness` records the working set as an experimental
+  variable. A healthy Armorial projection is not excluded because other tools
+  are installed or the profile name is `local-dogfood`.
 - Show application build, environment release, and tool versions as separate
   planes, plus catalog source and last check. Manager Settings and
   `agent-host source status|check|set|clear` can choose a local bound catalog

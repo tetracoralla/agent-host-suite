@@ -9,8 +9,10 @@ const required = [
   'Package.swift', 'macos/Info.plist', 'macos/AgentHost.icns', 'macos/AgentHostIcon.png', 'macos/brand/AgentHost-1024.png', 'macos/brand/AgentHost-carrier-1024.png', 'macos/AgentHostMenuBar.svg', 'scripts/build-app-icon.sh',
   'windows/Install Agent Host.cmd', 'windows/Install-AgentHost.ps1', 'windows/Uninstall-AgentHost.ps1', 'scripts/package-windows.mjs',
   'docs/PRODUCT_MODEL.md', 'docs/ARCHITECTURE.md', 'docs/TERMINOLOGY.md', 'docs/TOOL_INTEGRATION.md', 'docs/BRAND.md', 'docs/RELEASE.md', 'docs/REVIEW_CONTRACT.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md',
-  'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md', 'docs/ADOPTION_ACCEPTANCE.md', 'docs/UNSIGNED_PREVIEW.md',
-  'docs/unsigned-preview-release.yml', 'scripts/write-preview-distribution.mjs',
+  'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md', 'docs/ADOPTION_ACCEPTANCE.md', 'docs/UNSIGNED_PREVIEW.md', 'docs/UPDATES.md',
+  'docs/unsigned-preview-release.yml', 'docs/scan-github-tools.yml', 'scripts/write-preview-distribution.mjs', 'scripts/admit-github-plugin.mjs', 'scripts/sync-github-catalog.mjs', 'scripts/verify-application-update.mjs', 'scripts/build-unsigned-preview-catalog.mjs',
+  'catalog/github-tools.json', 'catalog/github-releases/current.json',
+  'schemas/agent-host-github-tools.schema.v0.1.json', 'schemas/agent-host-github-catalog.schema.v0.1.json', 'schemas/agent-host-component.schema.v0.2.json',
   'schemas/agent-host-preview-distribution.schema.v0.1.json', 'catalog/preview-distribution.json',
   'scripts/check-manager-models.sh', 'scripts/write-internal-beta-distribution.mjs', 'scripts/check-macos-distribution.sh', 'Tests/AgentHostManagerChecks/main.swift',
   'scripts/release-source-provenance.mjs', 'scripts/check-release-source-provenance.mjs', 'scripts/provider-source-build.mjs', 'src/release-provenance.mjs',
@@ -100,6 +102,9 @@ if (!featuredDoc.includes('profiles fetch') || !featuredDoc.includes('public dow
 if (!featuredDoc.includes('source status') || !featuredDoc.includes('Catalog assets are unpublished')) {
   throw new Error('featured catalog document must name source status and unpublished catalog assets')
 }
+if (!featuredDoc.includes('experimental variable')) {
+  throw new Error('featured catalog document must treat recipe consistency as an experimental variable')
+}
 const previewDoc = await readFile(join(root, 'docs/UNSIGNED_PREVIEW.md'), 'utf8')
 if (!previewDoc.includes('Control-click') || !previewDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !previewDoc.includes('preview-distribution.json')) {
   throw new Error('unsigned preview document must name Gatekeeper, the catalog URL hook, and the index asset')
@@ -107,12 +112,31 @@ if (!previewDoc.includes('Control-click') || !previewDoc.includes('AGENT_HOST_FE
 if (previewDoc.includes('notarytool') || previewDoc.includes('APPLE_NOTARY')) {
   throw new Error('unsigned preview document must not instruct Apple notarization')
 }
+if (!previewDoc.includes('UPDATES.md') || !previewDoc.includes('unsigned-preview-release.yml')) {
+  throw new Error('unsigned preview document must name the unsigned pipeline draft and UPDATES.md')
+}
+const unsignedWorkflow = await readFile(join(root, 'docs/unsigned-preview-release.yml'), 'utf8')
+if (unsignedWorkflow.includes('notarytool') || unsignedWorkflow.includes('APPLE_NOTARY') || unsignedWorkflow.includes('APPLE_DEVELOPER_ID')) {
+  throw new Error('unsigned preview workflow draft must not require Apple notarization credentials')
+}
+if (!unsignedWorkflow.includes('Unsigned preview') || !unsignedWorkflow.includes('admit-github-plugin.mjs')) {
+  throw new Error('unsigned preview workflow draft must admit GitHub tools on a clean runner without Apple secrets')
+}
+if (unsignedWorkflow.includes('createReleaseFixture') || unsignedWorkflow.includes('test/release-helpers.mjs')) {
+  throw new Error('unsigned preview workflow must not package test fixtures as the application payload')
+}
+if (!unsignedWorkflow.includes('build-unsigned-preview-catalog.mjs')) {
+  throw new Error('unsigned preview workflow must build a verified catalog on the runner')
+}
 const readme = await readFile(join(root, 'README.md'), 'utf8')
 if (!readme.includes('not Apple-notarized') && !readme.includes('No notarization')) {
   throw new Error('README must state that preview distribution is not notarized')
 }
 if (!readme.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !readme.includes('UNSIGNED_PREVIEW.md')) {
   throw new Error('README must name the catalog download hook and unsigned preview document')
+}
+if (!readme.includes('UPDATES.md') || !readme.includes('profiles fetch --carrier')) {
+  throw new Error('README must name GitHub updates and that carrier fetch is not application replacement')
 }
 const readmeZh = await readFile(join(root, 'README.zh-CN.md'), 'utf8')
 if (!readmeZh.includes('无公证') || !readmeZh.includes('AGENT_HOST_FEATURED_CATALOG_URL')) {
@@ -135,6 +159,9 @@ if (!adoptionDoc.includes('fresh Agent task') || !adoptionDoc.includes('not adop
 }
 if (!adoptionDoc.includes('recipe.consistency') || !adoptionDoc.includes('userStatus') || !adoptionDoc.includes('local-dogfood')) {
   throw new Error('adoption protocol must separate user-level readiness from recipe consistency')
+}
+if (!adoptionDoc.includes('experimental variable') || adoptionDoc.includes('unnamed adoption cannot be scored on that Host even when user-level readiness')) {
+  throw new Error('adoption protocol must record working set as an experimental variable and must not gate scoring on recipe name')
 }
 if (!adoptionDoc.includes('docs/fixtures/adoption')) {
   throw new Error('adoption protocol must ship unnamed fixtures')

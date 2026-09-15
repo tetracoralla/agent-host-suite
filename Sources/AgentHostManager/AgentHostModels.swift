@@ -1,9 +1,98 @@
 import Foundation
 
+struct ToolLogo: Decodable, Equatable, Sendable {
+    let path: String?
+    let mediaType: String?
+    let sha256: String?
+    let bytes: Int?
+    let dataUrl: String?
+    let source: String?
+}
+
 struct ComponentSummary: Decodable, Equatable, Sendable {
     let version: String
     let displayName: String?
     let summary: String?
+    let author: String?
+    let homepage: String?
+    let logo: ToolLogo?
+
+    init(
+        version: String,
+        displayName: String? = nil,
+        summary: String? = nil,
+        author: String? = nil,
+        homepage: String? = nil,
+        logo: ToolLogo? = nil
+    ) {
+        self.version = version
+        self.displayName = displayName
+        self.summary = summary
+        self.author = author
+        self.homepage = homepage
+        self.logo = logo
+    }
+}
+
+struct UpdateItem: Decodable, Equatable, Identifiable, Sendable {
+    let kind: String?
+    let id: String
+    let displayName: String?
+    let summary: String?
+    let author: String?
+    let homepage: String?
+    let logo: ToolLogo?
+    let installedVersion: String?
+    let availableVersion: String?
+    let availability: String?
+    let lastCheck: SourceCheck?
+    let restartRequired: Bool?
+    let upgrade: String?
+    let note: String?
+}
+
+struct UpdatesReport: Decodable, Equatable, Sendable {
+    let schemaVersion: String?
+    let status: String
+    let channel: String?
+    let items: [UpdateItem]?
+    let assessmentBoundary: String?
+}
+
+struct GitHubProjectPreview: Decodable, Equatable, Sendable {
+    let schemaVersion: String?
+    let status: String?
+    let presentation: GitHubPresentation?
+    let origin: GitHubOrigin?
+    let compatibility: GitHubCompatibility?
+    let downloadedPackage: Bool?
+    let permissions: GitHubPermissions?
+}
+
+struct GitHubPresentation: Decodable, Equatable, Sendable {
+    let displayName: String?
+    let summary: String?
+    let author: String?
+    let homepage: String?
+    let license: String?
+    let logo: ToolLogo?
+}
+
+struct GitHubOrigin: Decodable, Equatable, Sendable {
+    let kind: String?
+    let repository: String?
+    let tag: String?
+    let releaseUrl: String?
+}
+
+struct GitHubCompatibility: Decodable, Equatable, Sendable {
+    let platform: String?
+    let available: Bool?
+    let reason: String?
+}
+
+struct GitHubPermissions: Decodable, Equatable, Sendable {
+    let message: String?
 }
 
 struct HostEntrySummary: Decodable, Equatable, Sendable {
@@ -1166,19 +1255,21 @@ struct ManagerHealthFacet: Equatable, Identifiable, Sendable {
 enum ManagerSection: String, CaseIterable, Identifiable {
     case overview
     case tools
+    case updates
     case agentApps
     case activity
     case usage
 
     var id: String { rawValue }
 
-    /// Primary sidebar: install → tools → connect → history. Usage is advanced.
-    static var primaryCases: [ManagerSection] { [.overview, .tools, .agentApps, .activity] }
+    /// Primary sidebar: install → tools → versions → connect → history. Usage is advanced.
+    static var primaryCases: [ManagerSection] { [.overview, .tools, .updates, .agentApps, .activity] }
 
     var title: String {
         switch self {
         case .overview: "Overview"
         case .tools: "Tools"
+        case .updates: "Updates"
         case .agentApps: "Agents"
         case .activity: "History"
         case .usage: "Usage"
@@ -1189,6 +1280,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "house"
         case .tools: "wrench.and.screwdriver"
+        case .updates: "arrow.triangle.2.circlepath"
         case .agentApps: "link"
         case .activity: "clock"
         case .usage: "chart.bar.xaxis"
@@ -1202,6 +1294,9 @@ struct ManagedTool: Identifiable, Equatable {
     let summary: String
     let systemImage: String
     let version: String?
+    let author: String?
+    let homepage: String?
+    let logo: ToolLogo?
     let state: ManagedItemState
     let availability: String
     let ownership: String

@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { AgentHostError } from './errors.mjs'
 import { materializeToolComponent } from './tool-component.mjs'
 import { recordActivity } from './activity.mjs'
-import { currentReleasePlatform, installDirectoryName } from './release-manifest.mjs'
+import { currentReleasePlatformOrLocal, installDirectoryName } from './release-manifest.mjs'
 import { materializeObservedLocalComponentArtifact, observeLocalComponentArtifact, verifyReleaseComponent } from './release-artifacts.mjs'
 import { probeMcpToolsFirstAndRepeat } from './mcp-health.mjs'
 import { resolveStateRoot } from './paths.mjs'
@@ -63,7 +63,7 @@ function bindingFromObservation(observation, spdx) {
     descriptorSha256: observation.observed.descriptorSha256,
     id: observation.descriptor.id,
     version: observation.descriptor.version,
-    platform: currentReleasePlatform(),
+    platform: currentReleasePlatformOrLocal(),
     spdx,
   }
 }
