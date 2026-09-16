@@ -1,10 +1,13 @@
 # Required unsigned preview pipeline draft (docs/). Copy to
 # .github/workflows/unsigned-preview-release.yml only with GitHub workflow scope;
 # that path is not enabled until the file exists under .github/workflows/.
+# Token for this checkout lacks the `workflow` scope, so this file stays a docs
+# draft and must not be described as a live Actions workflow.
 # The notarized .github/workflows/release.yml remains a separate signed path
 # and requires Apple secrets. This unsigned preview must not request them.
-# Each platform job admits GitHub tools for that runner. Do not reuse another
-# OS archive and relabel it. Gatekeeper (Control-click → Open) remains required.
+# Each platform job admits GitHub tools for that runner and obtains version-
+# pinned Math Anchor / Migratory Time inputs. Do not reuse another OS archive
+# and relabel it. Gatekeeper (Control-click → Open) remains required.
 
 name: Unsigned preview release
 
@@ -21,6 +24,29 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
+      - name: Check out pinned Math Anchor source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/math-anchor
+          ref: 62562762ba60093a804a72ad917a5a3753c840c3
+          path: .build/profile-sources/math-anchor
+      - name: Check out pinned Migratory Time source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/migratory-time
+          ref: 0355fd34c99cd9c51a0eeecf20f20ef6369cdd54
+          path: .build/profile-sources/migratory-time
+      - name: Build Math Anchor runtime for this macOS runner
+        working-directory: .build/profile-sources/math-anchor
+        run: |
+          if [ -x scripts/build_plugin.sh ]; then
+            ./scripts/build_plugin.sh
+          elif [ -f Package.swift ]; then
+            swift build -c release
+          else
+            echo "Math Anchor checkout has no documented build entry; provide AGENT_HOST_MATH_ANCHOR_ARTIFACT instead." >&2
+            exit 1
+          fi
       - uses: actions/setup-node@v7
         with:
           node-version: 22.16.0
@@ -29,6 +55,11 @@ jobs:
       - name: Admit GitHub tools for this macOS runner
         run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
       - name: Package unsigned macOS app from verified Host internals and admitted GitHub tools
+        env:
+          AGENT_HOST_PROFILE_SOURCES_ROOT: ${{ github.workspace }}/.build/profile-sources
+          AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/math-anchor
+          AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/migratory-time
+          AGENT_HOST_MATH_ANCHOR_VERSION: "0.7.1"
         run: |
           node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
           ids="$(node -e 'const m=require("./.build/unsigned-catalog/current.json"); process.stdout.write(m.components.map(c=>c.id).join(","))')"
@@ -62,6 +93,29 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Check out pinned Math Anchor source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/math-anchor
+          ref: 62562762ba60093a804a72ad917a5a3753c840c3
+          path: .build/profile-sources/math-anchor
+      - name: Check out pinned Migratory Time source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/migratory-time
+          ref: 0355fd34c99cd9c51a0eeecf20f20ef6369cdd54
+          path: .build/profile-sources/migratory-time
+      - name: Obtain Math Anchor Windows platform artifact or fail closed
+        shell: pwsh
+        run: |
+          if ($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT) {
+            Write-Host "Using pre-supplied Math Anchor artifact"
+          } elseif (Test-Path .build/profile-sources/math-anchor/plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime.exe) {
+            Write-Host "Math Anchor Windows runtime already present in the pinned checkout"
+          } else {
+            Write-Error "Windows unsigned preview requires AGENT_HOST_MATH_ANCHOR_ARTIFACT (version-pinned platform archive) or a checkout that already contains the Windows runtime entrypoint. Building the Swift runtime on Windows is not assumed."
+            exit 1
+          }
       - uses: actions/setup-node@v7
         with:
           node-version: 22.16.0
@@ -73,6 +127,10 @@ jobs:
         shell: pwsh
         env:
           AGENT_HOST_ALLOW_LOCAL_SOURCE_DISTRIBUTION: "1"
+          AGENT_HOST_PROFILE_SOURCES_ROOT: ${{ github.workspace }}/.build/profile-sources
+          AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/math-anchor
+          AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/migratory-time
+          AGENT_HOST_MATH_ANCHOR_VERSION: "0.7.1"
         run: |
           node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
           $ids = (Get-Content -Raw .build/unsigned-catalog/current.json | ConvertFrom-Json).components.id -join ','
@@ -99,7 +157,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nEach platform job admitted GitHub tools for that runner. Native archives are not reused across operating systems.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer adapters, and GitHub tools admitted from public Releases for that platform. It is not a test fixture.\n\nprofiles fetch --carrier downloads an installer. agent-host app update on a supported OS mounts or unpacks the carrier, replaces the installed application, and relaunches it after comparing digests.'
+          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nEach platform job admitted GitHub tools for that runner and obtained version-pinned Math Anchor / Migratory Time inputs from catalog/unsigned-preview-source-pins.json (or AGENT_HOST_*_ARTIFACT). Native archives are not reused across operating systems.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer adapters, and GitHub tools admitted from public Releases for that platform. Incomplete manifests are refused.\n\nprofiles fetch --carrier downloads an installer. agent-host app update on a supported OS mounts or unpacks the carrier, replaces the installed application, and relaunches it after comparing digests.'
           files=()
           while IFS= read -r path; do files+=("$path"); done < <(find .build/release-assets -type f)
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \

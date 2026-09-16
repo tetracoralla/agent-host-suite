@@ -15,6 +15,8 @@ import { resolvePathGrant, validateComponentPathGrants } from './component-envir
 import { readJson } from './json.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
+import { readToolSources, restoreToolSourceAfterRollback } from './tool-sources.mjs'
+import { clearUpdateCandidate } from './update-candidates.mjs'
 
 const PRIVATE_COMPONENT_STATE_SCHEMA = 'openadam.agent-host-private-component-state.v0.1'
 const PREVIEW_SCHEMA = 'openadam.agent-host-local-component-preview.v0.1'
@@ -385,11 +387,37 @@ async function verifyRetainedRollbackTarget(paths, state, target, options, depen
   return { component, health }
 }
 
+async function syncGithubSourceAfterRollback(options, dependencies, {
+  restoredComponent = null,
+  replacedComponent = null,
+}) {
+  if (options.dryRun === true) return
+  const id = options.target
+  const sources = await readToolSources(options.stateRoot)
+  const source = sources.tools?.[id]
+  const restoredLooksGithub = restoredComponent?.origin?.kind === 'github-release' || source?.rollback?.origin?.kind === 'github-release'
+  const replacedLooksGithub = replacedComponent?.origin?.kind === 'github-release' || source?.origin?.kind === 'github-release'
+  if (source === undefined && restoredLooksGithub !== true && replacedLooksGithub !== true) return
+  const restoredOrigin = restoredComponent === null
+    ? null
+    : (source?.rollback?.origin ?? restoredComponent.origin ?? null)
+  await restoreToolSourceAfterRollback(options.stateRoot, id, {
+    restoredOrigin,
+    restoredVersion: restoredComponent?.version ?? source?.rollback?.version ?? null,
+    restoredRoot: restoredComponent?.root ?? source?.rollback?.root ?? null,
+    replacedOrigin: source?.origin ?? replacedComponent?.origin ?? null,
+    replacedVersion: replacedComponent?.version ?? null,
+    replacedRoot: replacedComponent?.root ?? null,
+  })
+  await clearUpdateCandidate(options.stateRoot, id, dependencies)
+}
+
 async function rollbackLocalComponentUnlocked(options, dependencies = {}, preparedPaths = null) {
   const { paths, state } = await installedState(options.stateRoot, preparedPaths)
   const record = state.privateComponents?.[options.target]
   if (record?.rollback === null || record?.rollback === undefined) fail('LOCAL_COMPONENT_ROLLBACK_UNAVAILABLE', `No private component rollback is retained for ${options.target}`)
   const target = record.rollback
+  const replacedComponent = record.current?.component ?? state.components?.[options.target] ?? null
   if (target.removed === true) {
     const inventory = inventoryFromState(state)
     delete inventory.components[options.target]
@@ -401,6 +429,10 @@ async function rollbackLocalComponentUnlocked(options, dependencies = {}, prepar
       rollback: { ...record.current, active: (state.agentComponents ?? []).includes(options.target) },
     }
     const transition = await transitionComponentInventory(options, inventory, dependencies)
+    await syncGithubSourceAfterRollback(options, dependencies, {
+      restoredComponent: null,
+      replacedComponent,
+    })
     let warnings = [...(transition.warnings ?? [])]
     if (options.dryRun !== true) {
       warnings.push(...await recordCommittedActivity(dependencies, paths, 'private-component.rolled-back', `${record.current.component.displayName} removal restored`, {
@@ -429,6 +461,10 @@ async function rollbackLocalComponentUnlocked(options, dependencies = {}, prepar
     rollback: record.current === null ? structuredClone(REMOVED_ROLLBACK_TARGET) : record.current,
   }
   const transition = await transitionComponentInventory(options, inventory, dependencies)
+  await syncGithubSourceAfterRollback(options, dependencies, {
+    restoredComponent: verifiedTarget.component,
+    replacedComponent,
+  })
   let warnings = [...(transition.warnings ?? [])]
   if (options.dryRun !== true) {
     warnings.push(...await recordCommittedActivity(dependencies, paths, 'private-component.rolled-back', `${verifiedTarget.component.displayName} restored`, {

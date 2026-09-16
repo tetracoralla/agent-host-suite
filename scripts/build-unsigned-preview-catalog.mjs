@@ -7,7 +7,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
-import { currentReleasePlatform } from '../src/release-manifest.mjs'
+import { currentReleasePlatform, REQUIRED_RELEASE_COMPONENTS, validateReleaseManifest } from '../src/release-manifest.mjs'
 import { runFile } from '../src/process.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -317,19 +317,24 @@ async function copyPluginTree(sourceRoot, destinationRoot) {
   await cp(sourceRoot, destinationRoot, { recursive: true })
 }
 
-async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, identityFiles, entrypoint, workRoot, artifactRoot, platform, title }) {
-  if (sourceRoot === undefined || await pathExists(sourceRoot) !== true) {
-    throw new Error(`${id} is required for the unsigned preview catalog. Set AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_SOURCE_ROOT to a built plugin tree.`)
+async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, identityFiles, entrypoint, workRoot, artifactRoot, platform, title, artifactPath = null, pins = null }) {
+  let resolvedRoot = sourceRoot
+  if ((resolvedRoot === undefined || await pathExists(resolvedRoot) !== true) && typeof artifactPath === 'string') {
+    resolvedRoot = await materializeProfileArtifact(id, artifactPath, workRoot)
   }
-  const pluginSource = join(sourceRoot, pluginRelative)
+  if (resolvedRoot === undefined || await pathExists(resolvedRoot) !== true) {
+    throw new Error(`${id} is required for the unsigned preview catalog. Set AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_SOURCE_ROOT to a built plugin tree, or AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_ARTIFACT to a version-pinned platform archive.`)
+  }
+  await assertPinnedVersion(id, resolvedRoot, pluginRelative, pins)
+  const pluginSource = join(resolvedRoot, pluginRelative)
   if (await pathExists(pluginSource) !== true) {
     throw new Error(`${id} source does not contain ${pluginRelative}`)
   }
   const root = join(workRoot, id)
   await mkdir(join(root, dirname(pluginRelative)), { recursive: true })
   await copyPluginTree(pluginSource, join(root, pluginRelative))
-  const marketplace = join(sourceRoot, '.agents/plugins/marketplace.json')
-  const hostedMarketplace = join(sourceRoot, 'integrations/agent-host/marketplace.json')
+  const marketplace = join(resolvedRoot, '.agents/plugins/marketplace.json')
+  const hostedMarketplace = join(resolvedRoot, 'integrations/agent-host/marketplace.json')
   if (await pathExists(marketplace)) {
     await mkdir(join(root, '.agents/plugins'), { recursive: true })
     await cp(marketplace, join(root, '.agents/plugins/marketplace.json'))
@@ -361,14 +366,63 @@ async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, 
   })
 }
 
+async function readSourcePins() {
+  const pinPath = join(suiteRoot, 'catalog/unsigned-preview-source-pins.json')
+  if (await pathExists(pinPath) !== true) return null
+  return JSON.parse(await readFile(pinPath, 'utf8'))
+}
+
 function resolveProfileSource(id, fallbackRelative) {
   const envName = `AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_SOURCE_ROOT`
   if (typeof process.env[envName] === 'string' && process.env[envName].length > 0) return process.env[envName]
+  const sourcesRoot = process.env.AGENT_HOST_PROFILE_SOURCES_ROOT
+  if (typeof sourcesRoot === 'string' && sourcesRoot.length > 0) {
+    return join(sourcesRoot, id)
+  }
   const sibling = join(dirname(suiteRoot), fallbackRelative)
   return sibling
 }
 
-export { buildWorkspacePackage, importGithubTools }
+function resolveProfileArtifact(id) {
+  const envName = `AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_ARTIFACT`
+  if (typeof process.env[envName] === 'string' && process.env[envName].length > 0) return process.env[envName]
+  return null
+}
+
+async function materializeProfileArtifact(id, artifactPath, workRoot) {
+  if (await pathExists(artifactPath) !== true) {
+    throw new Error(`${id} artifact path does not exist: ${artifactPath}`)
+  }
+  const root = join(workRoot, `${id}-artifact`)
+  await mkdir(root, { recursive: true, mode: 0o700 })
+  const info = await stat(artifactPath)
+  if (info.isDirectory()) {
+    await cp(artifactPath, root, { recursive: true })
+    return root
+  }
+  // Version-pinned platform archive: extract into an isolated source root.
+  await execFileAsync(tarCommand(), ['-xzf', artifactPath, '-C', root], {
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
+  })
+  return root
+}
+
+async function assertPinnedVersion(id, sourceRoot, pluginRelative, pins) {
+  const expected = pins?.sources?.[id]?.expectedVersion
+  const override = process.env[`AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_VERSION`]
+  const requiredVersion = override || expected
+  if (requiredVersion === undefined || requiredVersion === null || requiredVersion === '') return
+  const versionFile = join(sourceRoot, pluginRelative, '.codex-plugin/plugin.json')
+  if (await pathExists(versionFile) !== true) {
+    throw new Error(`${id} is missing ${pluginRelative}/.codex-plugin/plugin.json while a pinned version was required`)
+  }
+  const plugin = JSON.parse(await readFile(versionFile, 'utf8'))
+  if (plugin.version !== requiredVersion) {
+    throw new Error(`${id} source version ${plugin.version} does not match pinned ${requiredVersion}`)
+  }
+}
+
+export { buildWorkspacePackage, importGithubTools, buildRequiredProfileTool, resolveProfileSource, resolveProfileArtifact, readSourcePins, REQUIRED_RELEASE_COMPONENTS }
 
 export async function main() {
 const output = resolve(argument('--output', join(suiteRoot, '.build/unsigned-catalog')))
@@ -381,6 +435,7 @@ await rm(output, { recursive: true, force: true })
 await mkdir(artifactRoot, { recursive: true, mode: 0o755 })
 await mkdir(workRoot, { recursive: true, mode: 0o700 })
 try {
+  const pins = await readSourcePins()
   const components = [
     await buildNode(workRoot, artifactRoot, platform),
     await buildWorkspacePackage({
@@ -398,6 +453,8 @@ try {
       id: 'math-anchor',
       kind: 'math-anchor',
       sourceRoot: resolveProfileSource('math-anchor', 'calculator'),
+      artifactPath: resolveProfileArtifact('math-anchor'),
+      pins,
       pluginRelative: 'plugins/math-anchor',
       identityFiles: [
         'plugins/math-anchor/.codex-plugin/plugin.json',
@@ -414,6 +471,8 @@ try {
       id: 'migratory-time',
       kind: 'migratory-time',
       sourceRoot: resolveProfileSource('migratory-time', 'migratory-time'),
+      artifactPath: resolveProfileArtifact('migratory-time'),
+      pins,
       pluginRelative: 'plugins/migratory-time',
       identityFiles: [
         'plugins/migratory-time/.codex-plugin/plugin.json',
@@ -466,6 +525,11 @@ try {
     createdAt: new Date().toISOString(),
     platforms: [platform],
     components,
+  }
+  validateReleaseManifest(manifest)
+  const missingRequired = REQUIRED_RELEASE_COMPONENTS.filter((id) => !manifest.components.some((item) => item.id === id))
+  if (missingRequired.length > 0) {
+    throw new Error(`unsigned preview catalog is incomplete; missing required components: ${missingRequired.join(', ')}`)
   }
   await writeJson(join(output, 'current.json'), manifest)
   const revision = await gitRevision()

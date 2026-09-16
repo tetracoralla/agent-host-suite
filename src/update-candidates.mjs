@@ -24,17 +24,24 @@ function emptyRecord() {
   }
 }
 
+function validDigest(value) {
+  return value === null || value === undefined || /^sha256:[0-9a-f]{64}$/u.test(value)
+}
+
 function validCandidate(value) {
   return value !== null
     && typeof value === 'object'
     && !Array.isArray(value)
     && (value.tag === null || typeof value.tag === 'string')
     && (value.version === null || typeof value.version === 'string')
-    && (value.digest === null || value.digest === undefined || /^sha256:[0-9a-f]{64}$/u.test(value.digest))
+    && validDigest(value.digest)
+    && validDigest(value.upstreamDigest)
+    && validDigest(value.wrappedDigest)
     && (value.from === null || typeof value.from === 'string')
     && (value.platform === null || typeof value.platform === 'string')
     && typeof value.compatible === 'boolean'
     && typeof value.platformAvailable === 'boolean'
+    && (value.downloadedPath === null || value.downloadedPath === undefined || typeof value.downloadedPath === 'string')
 }
 
 function validCatalog(value) {
@@ -81,12 +88,45 @@ export async function writeUpdateCandidates(stateRoot, record) {
   return value
 }
 
+function sameCandidateIdentity(previous, next) {
+  return previous !== null
+    && previous !== undefined
+    && previous.tag === next.tag
+    && previous.platform === next.platform
+}
+
+function mergeCandidate(previous, next) {
+  if (next === null) return null
+  const merged = { ...(previous ?? {}), ...next }
+  const explicitCache = Object.prototype.hasOwnProperty.call(next, 'downloadedPath')
+  if (explicitCache) return merged
+  // Inspect refreshes omit downloadedPath. Keep a Host-managed verified cache for
+  // the same tag/platform, even when digest flips between upstream and wrapped.
+  if (sameCandidateIdentity(previous, merged) && typeof previous.downloadedPath === 'string') {
+    merged.downloadedPath = previous.downloadedPath
+    if (previous.wrappedDigest !== undefined) merged.wrappedDigest = previous.wrappedDigest
+    if (previous.upstreamDigest !== undefined) {
+      merged.upstreamDigest = previous.upstreamDigest
+    } else if (typeof merged.digest === 'string' && merged.digest !== previous.wrappedDigest) {
+      merged.upstreamDigest = merged.digest
+    }
+    return merged
+  }
+  if (typeof previous?.downloadedPath === 'string') {
+    merged.downloadedPath = null
+    merged.upstreamDigest = null
+    merged.wrappedDigest = null
+  }
+  return merged
+}
+
 export async function mergeUpdateCandidates(stateRoot, patch, dependencies = {}) {
   const apply = async () => {
     const current = await readUpdateCandidates(stateRoot)
     const tools = { ...(current.recoveredInvalid === true ? {} : current.tools) }
     for (const [id, candidate] of Object.entries(patch.tools ?? {})) {
-      tools[id] = { ...tools[id], ...candidate }
+      if (candidate === null) delete tools[id]
+      else tools[id] = mergeCandidate(tools[id], candidate)
     }
     return writeUpdateCandidates(stateRoot, {
       catalog: patch.catalog === undefined ? current.catalog : patch.catalog,
@@ -104,7 +144,7 @@ export async function mergeUpdateCandidates(stateRoot, patch, dependencies = {})
 }
 
 export function candidateFromRemote(remote, { platform, catalogId = null } = {}) {
-  return {
+  const candidate = {
     tag: remote.tag ?? null,
     version: remote.availableVersion ?? null,
     digest: remote.digest ?? null,
@@ -118,6 +158,15 @@ export function candidateFromRemote(remote, { platform, catalogId = null } = {})
     releaseUrl: remote.releaseUrl ?? null,
     catalogId,
     checkedAt: new Date().toISOString(),
-    downloadedPath: remote.downloadedPath ?? null,
   }
+  // Only set cache fields when the remote payload explicitly carries them.
+  // Inspect refreshes must not null out a Host-managed verified download.
+  if (remote.downloadedPath !== undefined) candidate.downloadedPath = remote.downloadedPath
+  if (remote.upstreamDigest !== undefined) candidate.upstreamDigest = remote.upstreamDigest
+  if (remote.wrappedDigest !== undefined) candidate.wrappedDigest = remote.wrappedDigest
+  return candidate
+}
+
+export async function clearUpdateCandidate(stateRoot, id, dependencies = {}) {
+  return mergeUpdateCandidates(stateRoot, { tools: { [id]: null } }, dependencies)
 }

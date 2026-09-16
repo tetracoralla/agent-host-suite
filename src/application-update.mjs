@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
 import { statePaths } from './state.mjs'
@@ -39,6 +39,7 @@ function emptyJournal() {
     stagedRoot: null,
     previousRoot: null,
     currentRoot: null,
+    restored: null,
     error: null,
     pid: null,
     processStartedAt: null,
@@ -223,6 +224,46 @@ async function pathExists(path) {
   })
 }
 
+function updateTransactionMarkerPath(currentRoot) {
+  return join(currentRoot, '.agent-host-update-txn.json')
+}
+
+async function writeUpdateTransactionMarker(currentRoot, journal) {
+  if (typeof currentRoot !== 'string') return
+  await writeFile(updateTransactionMarkerPath(currentRoot), `${JSON.stringify({
+    schemaVersion: 'openadam.agent-host-application-update-txn.v0.1',
+    fromVersion: journal.fromVersion ?? null,
+    toVersion: journal.toVersion ?? null,
+    previousRoot: journal.previousRoot ?? null,
+    updatedAt: new Date().toISOString(),
+  }, null, 2)}\n`, { mode: 0o600 })
+}
+
+async function readUpdateTransactionMarker(currentRoot) {
+  if (typeof currentRoot !== 'string') return null
+  try {
+    const value = JSON.parse(await readFile(updateTransactionMarkerPath(currentRoot), 'utf8'))
+    if (value?.schemaVersion !== 'openadam.agent-host-application-update-txn.v0.1') return null
+    return value
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    return null
+  }
+}
+
+async function clearUpdateTransactionMarker(currentRoot) {
+  if (typeof currentRoot !== 'string') return
+  await rm(updateTransactionMarkerPath(currentRoot), { force: true }).catch(() => {})
+}
+
+function markerMatchesJournal(marker, journal) {
+  return marker !== null
+    && marker.fromVersion === journal.fromVersion
+    && marker.toVersion === journal.toVersion
+    && marker.previousRoot === journal.previousRoot
+}
+
+
 export async function resolveReplacedApplicationLaunch({ root, command, args = ['--version'] } = {}) {
   if (typeof command === 'string' && command.length > 0) return { command, args }
   const macosExec = join(root, 'Contents', 'MacOS', 'agent-host')
@@ -300,16 +341,41 @@ async function recoverApplicationUpdateUnlocked(stateRoot) {
   const journal = await readApplicationUpdateJournal(stateRoot)
   if (TERMINAL_PHASES.has(journal.phase)) return { ...journal, recovered: false }
   if (journalOwnerAlive(journal)) return { ...journal, recovered: false, live: true }
-  if (typeof journal.previousRoot === 'string' && typeof journal.currentRoot === 'string' && await pathExists(journal.previousRoot)) {
-    await restorePreviousApplication({ currentRoot: journal.currentRoot, previousRoot: journal.previousRoot })
+  if (journal.phase === 'failed' && journal.restored === true) {
     const recovered = await writeJournal(stateRoot, {
       ...journal,
       phase: 'recovered',
+      error: journal.error ?? { code: 'APPLICATION_UPDATE_ALREADY_RESTORED', message: 'The previous application was already restored for this failed update.' },
+    })
+    await clearUpdateTransactionMarker(journal.currentRoot)
+    return { ...recovered, recovered: false }
+  }
+  if (typeof journal.previousRoot === 'string' && typeof journal.currentRoot === 'string' && await pathExists(journal.previousRoot)) {
+    const marker = await readUpdateTransactionMarker(journal.currentRoot)
+    if (journal.phase === 'failed' && markerMatchesJournal(marker, journal) !== true) {
+      // Current tree is no longer the failed replacement (already restored or user replaced it).
+      const recovered = await writeJournal(stateRoot, {
+        ...journal,
+        phase: 'recovered',
+        restored: true,
+        error: {
+          code: 'APPLICATION_UPDATE_RECOVERY_SKIPPED',
+          message: 'Recovery skipped because the current application directory no longer belongs to the failed update transaction.',
+        },
+      })
+      return { ...recovered, recovered: false }
+    }
+    await restorePreviousApplication({ currentRoot: journal.currentRoot, previousRoot: journal.previousRoot })
+    await clearUpdateTransactionMarker(journal.currentRoot)
+    const recovered = await writeJournal(stateRoot, {
+      ...journal,
+      phase: 'recovered',
+      restored: true,
       error: { code: 'APPLICATION_UPDATE_INTERRUPTED', message: 'Application replacement was interrupted and the previous files were restored.' },
     })
     return { ...recovered, recovered: true }
   }
-  const failed = await writeJournal(stateRoot, { ...journal, phase: 'failed' })
+  const failed = await writeJournal(stateRoot, { ...journal, phase: 'failed', restored: false })
   return { ...failed, recovered: false }
 }
 
@@ -344,7 +410,9 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
   })
   try {
     const applied = await applyDirectorySwapUpdate({ currentRoot, stagedRoot, previousRoot })
-    await writeJournal(options.stateRoot, { ...journal, phase: 'verifying', previousRoot: applied.previousRoot, currentRoot: applied.currentRoot })
+    const active = { ...journal, previousRoot: applied.previousRoot, currentRoot: applied.currentRoot }
+    await writeUpdateTransactionMarker(applied.currentRoot, active)
+    await writeJournal(options.stateRoot, { ...active, phase: 'verifying' })
     const verified = await verifyReplacedApplication({
       root: applied.currentRoot,
       expectedVersion: options.expectedVersion ?? check.availableVersion,
@@ -352,7 +420,7 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
       command: options.verifyCommand,
       args: options.verifyArgs ?? ['--version'],
     })
-    await writeJournal(options.stateRoot, { ...journal, phase: 'relaunching', previousRoot: applied.previousRoot, currentRoot: applied.currentRoot })
+    await writeJournal(options.stateRoot, { ...active, phase: 'relaunching' })
     const relaunched = options.relaunch === false
       ? { skipped: true }
       : await relaunchReplacedApplication({
@@ -361,15 +429,26 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
         command: options.relaunchCommand ?? options.verifyCommand,
         args: options.relaunchArgs ?? [],
       })
-    await writeJournal(options.stateRoot, { ...journal, phase: 'complete', previousRoot: applied.previousRoot, currentRoot: applied.currentRoot })
+    await clearUpdateTransactionMarker(applied.currentRoot)
+    await writeJournal(options.stateRoot, { ...active, phase: 'complete', restored: false })
     return { ...check, applied: true, replacement: applied, verified, relaunched, journal: 'complete' }
   } catch (error) {
     const backup = previousRoot
+    let restored = false
     if (typeof options.currentRoot === 'string' && typeof backup === 'string' && await pathExists(backup)) {
-      await restorePreviousApplication({ currentRoot: options.currentRoot, previousRoot: backup }).catch(() => {})
+      try {
+        await restorePreviousApplication({ currentRoot: options.currentRoot, previousRoot: backup })
+        restored = true
+        await clearUpdateTransactionMarker(options.currentRoot)
+      } catch {
+        restored = false
+      }
       await writeJournal(options.stateRoot, {
         ...journal,
-        phase: 'failed',
+        phase: restored ? 'recovered' : 'failed',
+        restored,
+        previousRoot: backup,
+        currentRoot: options.currentRoot,
         error: { code: error instanceof AgentHostError ? error.code : 'APPLICATION_UPDATE_FAILED', message: error instanceof Error ? error.message : String(error) },
       })
     }

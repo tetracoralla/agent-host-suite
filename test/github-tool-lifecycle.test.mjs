@@ -362,3 +362,195 @@ test('auto-install reuses the lifecycle lease instead of deadlocking', async (t)
   const state = await loadState(await prepareStatePaths(stateRoot))
   assert.equal(state.components['review-alpha'].version, '1.1.0')
 })
+
+test('R1 source-replacement rollback restores tool-sources and invalidates candidates', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r1-source-roll-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const stateRoot = join(root, 'state')
+  const { dependencies } = await installedEnvironment(stateRoot)
+  const alpha = await createPluginArchive(join(root, 'alpha'), { id: 'review-alpha', version: '1.0.0' })
+  const fork = await createPluginArchive(join(root, 'fork'), { id: 'review-alpha', version: '1.1.0' })
+  await installGitHubTool({
+    stateRoot,
+    github: 'https://github.com/review-labs/review-alpha',
+    fetch: githubFetch({ repository: 'review-labs/review-alpha', version: '1.0.0', archive: alpha.archive, sha256: alpha.sha256, bytes: alpha.bytes }),
+    probe: false,
+  }, dependencies)
+  await installGitHubTool({
+    stateRoot,
+    github: 'https://github.com/review-forks/review-alpha',
+    tag: 'v1.1.0',
+    replaceSource: true,
+    fetch: githubFetch({ repository: 'review-forks/review-alpha', version: '1.1.0', archive: fork.archive, sha256: fork.sha256, bytes: fork.bytes }),
+    probe: false,
+  }, dependencies)
+  const before = await readToolSources(stateRoot)
+  assert.equal(before.tools['review-alpha'].origin.repository, 'review-forks/review-alpha')
+  assert.equal(before.tools['review-alpha'].rollback.origin.repository, 'review-labs/review-alpha')
+  const { mergeUpdateCandidates } = await import('../src/update-candidates.mjs')
+  await mergeUpdateCandidates(stateRoot, {
+    tools: {
+      'review-alpha': {
+        tag: 'v1.1.0',
+        version: '1.1.0',
+        digest: fork.sha256,
+        from: 'github',
+        platform: 'test',
+        compatible: true,
+        platformAvailable: true,
+      },
+    },
+  })
+  const rolled = await rollbackLocalComponent({ stateRoot, target: 'review-alpha' }, dependencies)
+  assert.equal(rolled.status, 'rolled-back')
+  const restored = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(restored.components['review-alpha'].version, '1.0.0')
+  const sources = await readToolSources(stateRoot)
+  assert.equal(sources.tools['review-alpha'].origin.repository, 'review-labs/review-alpha')
+  const { readUpdateCandidates } = await import('../src/update-candidates.mjs')
+  assert.equal(Object.hasOwn(await readUpdateCandidates(stateRoot).then((value) => value.tools), 'review-alpha'), false)
+  const inspected = await inspectToolUpdates(stateRoot, {
+    persist: true,
+    fetch: githubFetch({ repository: 'review-labs/review-alpha', version: '1.0.0', archive: alpha.archive, sha256: alpha.sha256, bytes: alpha.bytes }),
+  })
+  const item = inspected.find((entry) => entry.id === 'review-alpha')
+  assert.equal(item.source.repository, 'review-labs/review-alpha')
+})
+
+test('R2 autodownload cache survives inspect refresh and install reuses it', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r2-cache-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const stateRoot = join(root, 'state')
+  const { dependencies } = await installedEnvironment(stateRoot)
+  const alpha = await createPluginArchive(join(root, 'alpha'), { id: 'review-alpha', version: '1.0.0' })
+  const alphaNext = await createPluginArchive(join(root, 'alpha-11'), { id: 'review-alpha', version: '1.1.0' })
+  await installGitHubTool({
+    stateRoot,
+    github: 'https://github.com/review/alpha',
+    fetch: githubFetch({ repository: 'review/alpha', version: '1.0.0', archive: alpha.archive, sha256: alpha.sha256, bytes: alpha.bytes }),
+    probe: false,
+  }, dependencies)
+  let archiveHits = 0
+  const trackingFetch = async (url) => {
+    const href = String(url)
+    const response = await githubFetch({
+      repository: 'review/alpha', version: '1.1.0', archive: alphaNext.archive, sha256: alphaNext.sha256, bytes: alphaNext.bytes,
+    })(url)
+    if (href.includes('.tar.gz') && !href.includes('/releases/')) archiveHits += 1
+    if (href.endsWith('.tar.gz')) archiveHits += 1
+    return response
+  }
+  // Count only asset body downloads more carefully
+  archiveHits = 0
+  const countedFetch = async (url) => {
+    const href = String(url)
+    if (href.includes('/releases/latest') || href.includes('/releases/tags/')) {
+      return githubFetch({
+        repository: 'review/alpha', version: '1.1.0', archive: alphaNext.archive, sha256: alphaNext.sha256, bytes: alphaNext.bytes,
+      })(url)
+    }
+    if (href.includes('.tar.gz')) {
+      archiveHits += 1
+      return new Response(await readFile(alphaNext.archive), { headers: { 'content-type': 'application/gzip' } })
+    }
+    return githubFetch({
+      repository: 'review/alpha', version: '1.1.0', archive: alphaNext.archive, sha256: alphaNext.sha256, bytes: alphaNext.bytes,
+    })(url)
+  }
+  const { downloadGitHubToolUpdate } = await import('../src/tool-updates.mjs')
+  const downloaded = await downloadGitHubToolUpdate({
+    stateRoot,
+    target: 'review-alpha',
+    fetch: countedFetch,
+  }, dependencies)
+  assert.equal(downloaded.downloaded, true)
+  assert.equal(typeof downloaded.path, 'string')
+  assert.equal((await stat(downloaded.path)).isFile(), true)
+  const firstHits = archiveHits
+  assert.equal(firstHits >= 1, true)
+  const afterInspect = await inspectToolUpdates(stateRoot, { persist: true, fetch: countedFetch })
+  const item = afterInspect.find((entry) => entry.id === 'review-alpha')
+  assert.equal(item.candidate.downloadedPath, downloaded.path)
+  assert.equal(item.candidate.wrappedDigest, downloaded.sha256)
+  const { readUpdateCandidates } = await import('../src/update-candidates.mjs')
+  const persisted = (await readUpdateCandidates(stateRoot)).tools['review-alpha']
+  assert.equal(persisted.downloadedPath, downloaded.path)
+  assert.notEqual(persisted.upstreamDigest, undefined)
+  archiveHits = 0
+  await updateGitHubTool({
+    stateRoot,
+    target: 'review-alpha',
+    fetch: countedFetch,
+    probe: false,
+  }, dependencies)
+  assert.equal(archiveHits, 0, 'install must reuse the Host-managed verified cache')
+  const after = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(after.components['review-alpha'].version, '1.1.0')
+})
+
+test('R4 blocked compatible-after-host-update candidate is refused by updateGitHubTool', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r4-block-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const stateRoot = join(root, 'state')
+  const { dependencies } = await installedEnvironment(stateRoot)
+  const alpha = await createPluginArchive(join(root, 'alpha'), { id: 'review-alpha', version: '1.0.0' })
+  const alphaNext = await createPluginArchive(join(root, 'alpha-11'), { id: 'review-alpha', version: '1.1.0' })
+  await installGitHubTool({
+    stateRoot,
+    github: 'https://github.com/review/alpha',
+    fetch: githubFetch({ repository: 'review/alpha', version: '1.0.0', archive: alpha.archive, sha256: alpha.sha256, bytes: alpha.bytes }),
+    probe: false,
+  }, dependencies)
+  const catalog = {
+    catalogId: 'test-catalog',
+    tools: [{
+      id: 'review-alpha',
+      version: '1.0.0',
+      repository: 'review/alpha',
+      tag: 'v1.0.0',
+      releaseUrl: 'https://github.com/review/alpha/releases/tag/v1.0.0',
+      platforms: {
+        [process.platform === 'darwin' ? (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x86_64') : (process.arch === 'arm64' ? 'win32-arm64' : 'win32-x64')]: {
+          assetName: 'alpha-1.0.0.tar.gz',
+          url: 'https://github.com/review/alpha/releases/download/v1.0.0/alpha-1.0.0.tar.gz',
+          sha256: alpha.sha256,
+          bytes: alpha.bytes,
+        },
+      },
+    }],
+  }
+  // Force a known platform key used by supportedReleasePlatform
+  const { supportedReleasePlatform } = await import('../src/github-project.mjs')
+  const platform = supportedReleasePlatform()
+  if (platform !== null) {
+    catalog.tools[0].platforms = {
+      [platform]: {
+        assetName: 'alpha-1.0.0.tar.gz',
+        url: 'https://github.com/review/alpha/releases/download/v1.0.0/alpha-1.0.0.tar.gz',
+        sha256: alpha.sha256,
+        bytes: alpha.bytes,
+      },
+    }
+  }
+  const items = await inspectToolUpdates(stateRoot, {
+    persist: true,
+    catalog,
+    fetch: githubFetch({ repository: 'review/alpha', version: '1.1.0', archive: alphaNext.archive, sha256: alphaNext.sha256, bytes: alphaNext.bytes }),
+  })
+  const item = items.find((entry) => entry.id === 'review-alpha')
+  assert.equal(item.availability, 'compatible-after-host-update')
+  assert.equal(item.candidate.compatible, false)
+  assert.equal(item.candidate.version, '1.1.0')
+  assert.notEqual(item.candidate.assetName, 'alpha-1.0.0.tar.gz')
+  await assert.rejects(
+    () => updateGitHubTool({
+      stateRoot,
+      target: 'review-alpha',
+      fetch: githubFetch({ repository: 'review/alpha', version: '1.1.0', archive: alphaNext.archive, sha256: alphaNext.sha256, bytes: alphaNext.bytes }),
+      probe: false,
+    }, dependencies),
+    (error) => error.code === 'GITHUB_TOOL_UPDATE_BLOCKED',
+  )
+  const after = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(after.components['review-alpha'].version, '1.0.0')
+})

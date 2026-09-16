@@ -15,6 +15,7 @@ import { inspectToolUpdates, updateAvailability, updateGitHubTool } from '../src
 import { MAX_COMPONENT_DESCRIPTOR_BYTES } from '../src/release-artifacts.mjs'
 import {
   applyDirectorySwapUpdate,
+  readApplicationUpdateJournal,
   recoverApplicationUpdate,
   resolveReplacedApplicationLaunch,
   updateApplication,
@@ -762,4 +763,50 @@ test('unknown plugin licenses stay NOASSERTION and are not rewritten as Apache-2
   await writeFile(join(created.plugin, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`)
   const contract = await inspectGitHubPluginRoot(created.plugin)
   assert.equal(contract.licenseSpdx, 'NOASSERTION')
+})
+
+test('R3 failed relaunch that already restored does not re-recover over a later user restore', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r3-restored-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const app = join(root, 'current')
+  const staged = join(root, 'staged')
+  const stateRoot = join(root, 'state')
+  await writeApplicationVersionFixture(app, '0.2.0')
+  await writeApplicationVersionFixture(staged, '0.2.1')
+  await write(join(app, 'marker'), 'working-old')
+  await write(join(staged, 'marker'), 'broken-new')
+  let failure
+  try {
+    await updateApplication({
+      stateRoot,
+      currentVersion: '0.2.0',
+      applyKind: 'directory-swap',
+      currentRoot: app,
+      stagedRoot: staged,
+      fetch: async () => jsonResponse({
+        tag_name: 'v0.2.1',
+        html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',
+        prerelease: false,
+        draft: false,
+        assets: [{
+          name: 'Agent-Host-0.2.1-directory.tar.gz',
+          browser_download_url: 'https://github.com/tetracoralla/agent-host-suite/releases/download/v0.2.1/Agent-Host-0.2.1-directory.tar.gz',
+          size: 100,
+          digest: 'sha256:' + 'a'.repeat(64),
+        }],
+      }),
+    }, { resolver: async () => null, runner: async () => ({ status: 1, stderr: 'does not start', stdout: '' }) })
+  } catch (error) {
+    failure = error.code
+  }
+  assert.equal(failure, 'APPLICATION_UPDATE_RELAUNCH_FAILED')
+  assert.equal(await readFile(join(app, 'marker'), 'utf8'), 'working-old')
+  const journal = await readApplicationUpdateJournal(stateRoot)
+  assert.equal(journal.phase, 'recovered')
+  assert.equal(journal.restored, true)
+  await write(join(app, 'marker'), 'later-user-restored-version')
+  const again = await recoverApplicationUpdate(stateRoot)
+  assert.equal(again.recovered, false)
+  assert.equal(again.phase, 'recovered')
+  assert.equal(await readFile(join(app, 'marker'), 'utf8'), 'later-user-restored-version')
 })

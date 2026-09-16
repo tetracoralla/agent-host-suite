@@ -153,12 +153,26 @@ so `github.com/.../releases/download/...` may land on
 ## Unsigned preview workflow
 
 The required unsigned pipeline draft is
-[`unsigned-preview-release.yml`](unsigned-preview-release.yml). Copy it to
-`.github/workflows/unsigned-preview-release.yml` only when an account with the
-GitHub `workflow` scope can push workflow files; do not claim that Actions path
-is live while the file is absent. Each platform job admits GitHub tools for that
-runner; native archives are not reused across operating systems. The draft does
-**not** request Apple secrets. The notarized
+[`unsigned-preview-release.yml`](unsigned-preview-release.yml). It remains under
+`docs/` until an account with the GitHub `workflow` scope can push
+`.github/workflows/unsigned-preview-release.yml`; do **not** claim that Actions
+path is live while the file is absent from `.github/workflows/`.
+
+Each platform job must:
+
+1. Check out Host.
+2. Obtain **version-pinned** Math Anchor and Migratory Time inputs using
+   [`catalog/unsigned-preview-source-pins.json`](../catalog/unsigned-preview-source-pins.json)
+   (source checkout at the pinned revision, or
+   `AGENT_HOST_MATH_ANCHOR_ARTIFACT` /
+   `AGENT_HOST_MIGRATORY_TIME_ARTIFACT` platform archives).
+3. Admit GitHub tools for **that** runner.
+4. Run `scripts/build-unsigned-preview-catalog.mjs`, which still **refuses** an
+   incomplete default profile (`math-anchor`, `migratory-time`, and the Host
+   runtime packages).
+
+Native archives are not reused across operating systems. The draft does **not**
+request Apple secrets. The notarized
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) is a
 separate signed path and is not this preview. Copy
 [`scan-github-tools.yml`](scan-github-tools.yml) to

@@ -11,7 +11,7 @@ const required = [
   'docs/PRODUCT_MODEL.md', 'docs/ARCHITECTURE.md', 'docs/TERMINOLOGY.md', 'docs/TOOL_INTEGRATION.md', 'docs/BRAND.md', 'docs/RELEASE.md', 'docs/REVIEW_CONTRACT.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md',
   'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md', 'docs/ADOPTION_ACCEPTANCE.md', 'docs/UNSIGNED_PREVIEW.md', 'docs/UPDATES.md',
   'docs/unsigned-preview-release.yml', 'docs/scan-github-tools.yml', 'scripts/write-preview-distribution.mjs', 'scripts/admit-github-plugin.mjs', 'scripts/sync-github-catalog.mjs', 'scripts/verify-application-update.mjs', 'scripts/build-unsigned-preview-catalog.mjs',
-  'catalog/github-tools.json', 'catalog/github-releases/current.json',
+  'catalog/github-tools.json', 'catalog/github-releases/current.json', 'catalog/unsigned-preview-source-pins.json',
   'schemas/agent-host-github-tools.schema.v0.1.json', 'schemas/agent-host-github-catalog.schema.v0.1.json', 'schemas/agent-host-component.schema.v0.2.json',
   'schemas/agent-host-preview-distribution.schema.v0.1.json', 'catalog/preview-distribution.json',
   'scripts/check-manager-models.sh', 'scripts/write-internal-beta-distribution.mjs', 'scripts/check-macos-distribution.sh', 'Tests/AgentHostManagerChecks/main.swift',
@@ -143,6 +143,22 @@ if (unsignedWorkflow.includes('createReleaseFixture') || unsignedWorkflow.includ
 }
 if (!unsignedWorkflow.includes('build-unsigned-preview-catalog.mjs')) {
   throw new Error('unsigned preview workflow must build a verified catalog on the runner')
+}
+if (!unsignedWorkflow.includes('math-anchor') || !unsignedWorkflow.includes('migratory-time')) {
+  throw new Error('unsigned preview workflow draft must obtain Math Anchor and Migratory Time inputs')
+}
+if (!unsignedWorkflow.includes('AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT') || !unsignedWorkflow.includes('AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT')) {
+  throw new Error('unsigned preview workflow draft must set version-pinned profile SOURCE_ROOT env vars')
+}
+const sourcePins = JSON.parse(await readFile(join(root, 'catalog/unsigned-preview-source-pins.json'), 'utf8'))
+if (sourcePins.schemaVersion !== 'openadam.agent-host-unsigned-preview-source-pins.v0.1') {
+  throw new Error('unsigned preview source pins schema is invalid')
+}
+for (const id of ['math-anchor', 'migratory-time']) {
+  const pin = sourcePins.sources?.[id]
+  if (typeof pin?.repository !== 'string' || typeof pin?.revision !== 'string' || !/^[0-9a-f]{40}$/u.test(pin.revision)) {
+    throw new Error(`unsigned preview source pin for ${id} must name repository and a 40-char revision`)
+  }
 }
 const readme = await readFile(join(root, 'README.md'), 'utf8')
 if (!readme.includes('not Apple-notarized') && !readme.includes('No notarization')) {

@@ -1,5 +1,8 @@
-import { dirname } from 'node:path'
-import { rm, rmdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import { cp, mkdir, rm, rmdir, stat } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { pipeline } from 'node:stream/promises'
 import { AgentHostError } from './errors.mjs'
 import { admitGitHubRelease, browseRecommendedTools, previewGitHubProject, supportedReleasePlatform } from './github-project.mjs'
 import { fetchGitHubRelease, selectReleaseAsset } from './github-api.mjs'
@@ -142,17 +145,26 @@ async function resolveRemoteCandidate(origin, catalogEntry, { fetch, signal, cha
           error: null,
         }
       }
+      const remoteAsset = (() => {
+        try {
+          return selectReleaseAsset(release, { platform })
+        } catch {
+          return null
+        }
+      })()
       return {
         availableVersion: remoteVersion,
         tag: release.tag,
         compatible: false,
-        platformAvailable: platform === null ? true : platformAsset !== null,
+        platformAvailable: platform === null ? true : remoteAsset !== null,
         from: 'github',
         remoteVersion,
-        digest: platformAsset?.sha256 ?? null,
-        assetName: platformAsset?.assetName ?? null,
-        assetUrl: platformAsset?.url ?? null,
-        assetBytes: platformAsset?.bytes ?? null,
+        // Keep version/tag/digest/asset fields from the same remote release.
+        // Do not pair a newer GitHub version with older catalog asset metadata.
+        digest: remoteAsset?.digest ?? null,
+        assetName: remoteAsset?.name ?? null,
+        assetUrl: remoteAsset?.url ?? null,
+        assetBytes: remoteAsset?.bytes ?? null,
         releaseUrl: release.htmlUrl,
         error: null,
       }
@@ -304,10 +316,25 @@ export async function inspectToolUpdates(stateRoot, { fetch, signal, catalog, ch
       from: remote.from,
       ...(remote.error === null ? {} : { error: remote.error }),
     }
-    const candidate = remote.tag === undefined || remote.tag === null ? null : candidateFromRemote(remote, {
+    let candidate = remote.tag === undefined || remote.tag === null ? null : candidateFromRemote(remote, {
       platform,
       catalogId: pinned.catalogId ?? null,
     })
+    const previousCandidate = persisted.tools?.[id]
+    if (
+      candidate !== null
+      && previousCandidate !== undefined
+      && previousCandidate.tag === candidate.tag
+      && previousCandidate.platform === candidate.platform
+      && typeof previousCandidate.downloadedPath === 'string'
+    ) {
+      candidate = {
+        ...candidate,
+        downloadedPath: previousCandidate.downloadedPath,
+        wrappedDigest: previousCandidate.wrappedDigest ?? candidate.wrappedDigest,
+        upstreamDigest: previousCandidate.upstreamDigest ?? candidate.upstreamDigest,
+      }
+    }
     items.push({
       kind: 'tool',
       id,
@@ -523,14 +550,69 @@ export async function installGitHubTool(options, dependencies = {}) {
   }
   const paths = await prepareStatePaths(resolveStateRoot(stateRoot))
   const state = await loadState(paths)
-  const wrapped = await admitGitHubRelease({
-    url: options.github,
-    tag: options.tag,
-    fetch: options.fetch,
-    signal: options.signal,
-    nodeCommand: state?.components?.['node-runtime']?.command ?? process.execPath,
-    probe: options.probe !== false,
-  })
+  let wrapped
+  if (typeof options.wrappedArchivePath === 'string' && options.wrappedArchivePath.length > 0) {
+    const observation = await observeLocalComponentArtifact(options.wrappedArchivePath, { runner: dependencies.artifactRunner })
+    const repository = String(options.github).replace(/^https:\/\/github\.com\//u, '').replace(/\/$/u, '')
+    const origin = observation.descriptor?.origin ?? githubOrigin({
+      repository,
+      tag: options.tag,
+      assetName: options.expectedAssetName ?? 'component.tar.gz',
+      assetUrl: `https://github.com/${repository}/releases/download/${options.tag}/component.tar.gz`,
+      assetSha256: options.expectedUpstreamDigest ?? observation.releaseComponent.artifact.sha256,
+      assetBytes: observation.releaseComponent.artifact.bytes,
+    })
+    wrapped = {
+      descriptor: observation.descriptor,
+      presentation: observation.descriptor.presentation ?? {
+        displayName: observation.descriptor.id,
+        summary: observation.descriptor.id,
+        author: null,
+        homepage: null,
+        logo: null,
+      },
+      contract: {
+        licenseSpdx: observation.releaseComponent.license?.spdx ?? 'Apache-2.0',
+        expectedTools: observation.descriptor?.integration?.expectedTools ?? [],
+      },
+      origin,
+      upstream: {
+        sha256: options.expectedUpstreamDigest ?? origin.assetSha256 ?? null,
+      },
+      wrapped: {
+        path: options.wrappedArchivePath,
+        sha256: observation.releaseComponent.artifact.sha256,
+        bytes: observation.releaseComponent.artifact.bytes,
+      },
+      health: null,
+      _observation: observation,
+    }
+  } else {
+    wrapped = await admitGitHubRelease({
+      url: options.github,
+      tag: options.tag,
+      fetch: options.fetch,
+      signal: options.signal,
+      nodeCommand: state?.components?.['node-runtime']?.command ?? process.execPath,
+      probe: options.probe !== false,
+    })
+    if (options.expectedDigest !== null && options.expectedDigest !== undefined
+      && wrapped.wrapped.sha256 !== options.expectedDigest) {
+      fail('GITHUB_TOOL_UPDATE_DIGEST_MISMATCH', 'Downloaded update archive digest does not match the persisted candidate', {
+        expected: options.expectedDigest,
+        actual: wrapped.wrapped.sha256,
+      })
+    }
+    if (options.expectedUpstreamDigest !== null && options.expectedUpstreamDigest !== undefined) {
+      const upstream = wrapped.upstream?.sha256 ?? wrapped.origin?.assetSha256
+      if (upstream !== options.expectedUpstreamDigest) {
+        fail('GITHUB_TOOL_UPDATE_DIGEST_MISMATCH', 'Upstream archive digest does not match the persisted candidate', {
+          expected: options.expectedUpstreamDigest,
+          actual: upstream,
+        })
+      }
+    }
+  }
   if (options.dryRun === true || state === null) {
     return {
       schemaVersion: TOOL_UPDATE_SCHEMA,
@@ -555,7 +637,8 @@ export async function installGitHubTool(options, dependencies = {}) {
         : 'GitHub archive verified; dry-run did not change the installed environment.',
     }
   }
-  const observation = await observeLocalComponentArtifact(wrapped.wrapped.path, { runner: dependencies.artifactRunner })
+  const observation = wrapped._observation
+    ?? await observeLocalComponentArtifact(wrapped.wrapped.path, { runner: dependencies.artifactRunner })
   const { binding } = await runtimeFromWrapped(wrapped, observation)
   const prepared = await materializeObservedLocalComponentArtifact(observation, binding, paths, { runner: dependencies.artifactRunner })
   let inventoryAdopted = false
@@ -585,6 +668,91 @@ export async function installGitHubTool(options, dependencies = {}) {
   }
 }
 
+
+async function sha256File(path) {
+  const hash = createHash('sha256')
+  await pipeline(createReadStream(path), hash)
+  return `sha256:${hash.digest('hex')}`
+}
+
+function digestDirName(digest) {
+  return String(digest).replace(/^sha256:/u, '')
+}
+
+async function toolUpdateCachePath(stateRoot, { id, platform, wrappedDigest }) {
+  const paths = await prepareStatePaths(resolveStateRoot(stateRoot))
+  return join(paths.downloads, 'tool-updates', id, platform ?? 'unknown', digestDirName(wrappedDigest), 'component.tar.gz')
+}
+
+async function pathExists(path) {
+  return stat(path).then(() => true).catch((error) => {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  })
+}
+
+async function persistVerifiedToolCache(stateRoot, {
+  id,
+  platform,
+  wrappedPath,
+  wrappedDigest,
+  upstreamDigest = null,
+}) {
+  const destination = await toolUpdateCachePath(stateRoot, { id, platform, wrappedDigest })
+  await mkdir(dirname(destination), { recursive: true, mode: 0o700 })
+  if (await pathExists(destination) !== true) {
+    await cp(wrappedPath, destination)
+  }
+  const actual = await sha256File(destination)
+  if (actual !== wrappedDigest) {
+    await rm(destination, { force: true }).catch(() => {})
+    fail('GITHUB_TOOL_CACHE_DIGEST_MISMATCH', 'The Host-managed tool update cache failed digest verification', {
+      expected: wrappedDigest,
+      actual,
+    })
+  }
+  return {
+    downloadedPath: destination,
+    wrappedDigest,
+    upstreamDigest,
+  }
+}
+
+async function reuseCachedToolArchive(stateRoot, candidate) {
+  if (candidate === null || candidate === undefined) return null
+  const wrappedDigest = candidate.wrappedDigest ?? candidate.digest ?? null
+  if (typeof candidate.downloadedPath !== 'string' || wrappedDigest === null) return null
+  if (await pathExists(candidate.downloadedPath) !== true) return null
+  const actual = await sha256File(candidate.downloadedPath)
+  if (actual !== wrappedDigest) return null
+  return {
+    path: candidate.downloadedPath,
+    wrappedDigest,
+    upstreamDigest: candidate.upstreamDigest ?? null,
+  }
+}
+
+function assertCandidateInstallable(candidate, { force = false, platform = null } = {}) {
+  if (candidate === null || candidate === undefined) return
+  if (force === true) return
+  if (candidate.compatible === false) {
+    fail(
+      'GITHUB_TOOL_UPDATE_BLOCKED',
+      'This update is listed as compatible only after a Host/catalog advance; refusing install without --force',
+      {
+        availability: 'compatible-after-host-update',
+        version: candidate.version ?? null,
+        tag: candidate.tag ?? null,
+      },
+    )
+  }
+  if (candidate.platformAvailable === false) {
+    fail('GITHUB_TOOL_UPDATE_BLOCKED', 'No installable archive is published for the current platform', {
+      platform: candidate.platform ?? platform,
+    })
+  }
+}
+
 export async function downloadGitHubToolUpdate(options, dependencies = {}) {
   const items = await inspectToolUpdates(options.stateRoot, {
     fetch: options.fetch,
@@ -596,9 +764,23 @@ export async function downloadGitHubToolUpdate(options, dependencies = {}) {
   if (item.availability !== 'update-available' && options.force !== true) {
     return { id: options.target, downloaded: false, availability: item.availability, candidate: item.candidate }
   }
+  assertCandidateInstallable(item.candidate, { force: options.force === true, platform: item.candidate?.platform })
+  const cached = await reuseCachedToolArchive(options.stateRoot, item.candidate)
+  if (cached !== null) {
+    return {
+      id: options.target,
+      downloaded: true,
+      reused: true,
+      path: cached.path,
+      sha256: cached.wrappedDigest,
+      version: item.candidate?.version ?? null,
+      dryRun: false,
+    }
+  }
   const sources = await readToolSources(options.stateRoot)
   const repository = sources.tools?.[options.target]?.origin?.repository ?? item.source?.repository
   if (typeof repository !== 'string') fail('GITHUB_TOOL_UNKNOWN', `${options.target} has no persisted GitHub update source`)
+  const platform = item.candidate?.platform ?? supportedReleasePlatform()
   const wrapped = await admitGitHubRelease({
     url: `https://github.com/${repository}`,
     tag: item.candidate?.tag ?? options.tag,
@@ -606,22 +788,36 @@ export async function downloadGitHubToolUpdate(options, dependencies = {}) {
     signal: options.signal,
     probe: false,
   })
+  const cache = await persistVerifiedToolCache(options.stateRoot, {
+    id: options.target,
+    platform,
+    wrappedPath: wrapped.wrapped.path,
+    wrappedDigest: wrapped.wrapped.sha256,
+    upstreamDigest: wrapped.upstream?.sha256 ?? wrapped.origin?.assetSha256 ?? null,
+  })
   await mergeUpdateCandidates(options.stateRoot, {
     tools: {
       [options.target]: {
         ...item.candidate,
-        downloadedPath: wrapped.wrapped.path,
-        digest: wrapped.wrapped.sha256,
+        downloadedPath: cache.downloadedPath,
+        digest: cache.wrappedDigest,
+        wrappedDigest: cache.wrappedDigest,
+        upstreamDigest: cache.upstreamDigest,
         version: wrapped.descriptor.version,
         tag: wrapped.origin.tag,
+        assetName: wrapped.origin.assetName,
+        assetUrl: wrapped.origin.assetUrl,
+        assetBytes: wrapped.origin.assetBytes,
+        releaseUrl: wrapped.origin.releaseUrl,
       },
     },
   }, dependencies)
   return {
     id: options.target,
     downloaded: true,
-    path: wrapped.wrapped.path,
-    sha256: wrapped.wrapped.sha256,
+    reused: false,
+    path: cache.downloadedPath,
+    sha256: cache.wrappedDigest,
     bytes: wrapped.wrapped.bytes,
     version: wrapped.descriptor.version,
     dryRun: false,
@@ -632,24 +828,40 @@ export async function updateGitHubTool(options, dependencies = {}) {
   const sources = await readToolSources(options.stateRoot)
   const catalogEntry = await findCatalogTool(options.target, { fetch: options.fetch, signal: options.signal })
   const saved = sources.tools?.[options.target]
-  const persisted = (await readUpdateCandidates(options.stateRoot)).tools?.[options.target]
+  let persisted = (await readUpdateCandidates(options.stateRoot)).tools?.[options.target]
   const repository = saved?.origin?.repository ?? catalogEntry?.repository
   if (typeof repository !== 'string') fail('GITHUB_TOOL_UNKNOWN', `${options.target} has no persisted GitHub update source`)
   let tag = options.tag ?? persisted?.tag
-  if (tag === undefined) {
+  let candidate = persisted ?? null
+  if (tag === undefined || candidate === null || candidate === undefined) {
     const items = await inspectToolUpdates(options.stateRoot, {
       fetch: options.fetch,
       signal: options.signal,
       persist: true,
     }, dependencies)
     const item = items.find((entry) => entry.id === options.target)
-    tag = item?.candidate?.tag ?? item?.source?.tag
+    tag = tag ?? item?.candidate?.tag ?? item?.source?.tag
+    candidate = item?.candidate ?? candidate
+    persisted = (await readUpdateCandidates(options.stateRoot)).tools?.[options.target] ?? candidate
   }
+  assertCandidateInstallable(persisted ?? candidate, {
+    force: options.force === true,
+    platform: (persisted ?? candidate)?.platform,
+  })
+  const expected = persisted ?? candidate
+  const cached = await reuseCachedToolArchive(options.stateRoot, expected)
+  const wrappedDigest = expected?.wrappedDigest ?? null
+  const upstreamDigest = expected?.upstreamDigest
+    ?? (wrappedDigest === null ? (expected?.digest ?? null) : null)
   return installGitHubTool({
     ...options,
     github: `https://github.com/${repository}`,
     tag,
     activate: options.activate,
+    expectedDigest: wrappedDigest,
+    expectedUpstreamDigest: upstreamDigest,
+    expectedAssetName: expected?.assetName ?? null,
+    wrappedArchivePath: cached?.path,
   }, dependencies)
 }
 

@@ -114,3 +114,36 @@ export function githubOrigin({
     assetBytes,
   }
 }
+
+export async function restoreToolSourceAfterRollback(stateRoot, id, {
+  restoredOrigin = null,
+  restoredVersion = null,
+  restoredRoot = null,
+  replacedOrigin = null,
+  replacedVersion = null,
+  replacedRoot = null,
+} = {}) {
+  const current = await readToolSources(stateRoot)
+  const tools = { ...(current.recoveredInvalid === true ? {} : current.tools) }
+  const previous = tools[id]
+  if (restoredOrigin === null || restoredOrigin === undefined) {
+    if (previous !== undefined) delete tools[id]
+  } else {
+    tools[id] = {
+      origin: restoredOrigin,
+      wrappedSha256: previous?.rollback?.wrappedSha256 ?? previous?.wrappedSha256 ?? undefined,
+      wrappedBytes: previous?.rollback?.wrappedBytes ?? previous?.wrappedBytes ?? undefined,
+      lastCheck: {
+        at: new Date().toISOString(),
+        status: 'rolled-back',
+        availableVersion: restoredVersion,
+      },
+      rollback: replacedOrigin === null || replacedOrigin === undefined ? null : {
+        origin: replacedOrigin,
+        version: replacedVersion,
+        root: replacedRoot,
+      },
+    }
+  }
+  return writeToolSources(stateRoot, { tools })
+}
