@@ -15,7 +15,7 @@ import { resolvePathGrant, validateComponentPathGrants } from './component-envir
 import { readJson } from './json.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
-import { readToolSources, restoreToolSourceAfterRollback } from './tool-sources.mjs'
+import { readToolSources, recordToolSourceAfterRemove, restoreToolSourceAfterRollback } from './tool-sources.mjs'
 import { clearUpdateCandidate } from './update-candidates.mjs'
 
 const PRIVATE_COMPONENT_STATE_SCHEMA = 'openadam.agent-host-private-component-state.v0.1'
@@ -317,6 +317,13 @@ async function removeLocalComponentUnlocked(options, dependencies = {}, prepared
     rollback: { ...record.current, active: (state.agentComponents ?? []).includes(options.target) },
   }
   const transition = await transitionComponentInventory(options, inventory, dependencies)
+  if (options.dryRun !== true) {
+    await recordToolSourceAfterRemove(options.stateRoot, options.target, {
+      removedOrigin: record.current.component?.origin ?? null,
+      removedVersion: record.current.binding?.version ?? record.current.component?.version ?? null,
+    })
+    await clearUpdateCandidate(options.stateRoot, options.target, dependencies)
+  }
   let warnings = [...(transition.warnings ?? [])]
   if (options.dryRun !== true) {
     warnings.push(...await recordCommittedActivity(dependencies, paths, 'private-component.removed', `${record.current.component.displayName} removed`, {
@@ -398,14 +405,22 @@ async function syncGithubSourceAfterRollback(options, dependencies, {
   const restoredLooksGithub = restoredComponent?.origin?.kind === 'github-release' || source?.rollback?.origin?.kind === 'github-release'
   const replacedLooksGithub = replacedComponent?.origin?.kind === 'github-release' || source?.origin?.kind === 'github-release'
   if (source === undefined && restoredLooksGithub !== true && replacedLooksGithub !== true) return
+  // Verified restored component binding is source of truth. Do not prefer an
+  // independent tool-sources rollback.origin from an earlier upgrade/source-switch
+  // over the package that rollback just restored (undo-remove after replaceSource).
   const restoredOrigin = restoredComponent === null
     ? null
-    : (source?.rollback?.origin ?? restoredComponent.origin ?? null)
+    : (restoredComponent.origin ?? source?.rollback?.origin ?? null)
+  // When undoing a remove, replacedComponent is null — do not treat the lingering
+  // source.origin as a replaced upgrade target.
+  const replacedOrigin = replacedComponent === null
+    ? null
+    : (replacedComponent.origin ?? source?.origin ?? null)
   await restoreToolSourceAfterRollback(options.stateRoot, id, {
     restoredOrigin,
     restoredVersion: restoredComponent?.version ?? source?.rollback?.version ?? null,
     restoredRoot: restoredComponent?.root ?? source?.rollback?.root ?? null,
-    replacedOrigin: source?.origin ?? replacedComponent?.origin ?? null,
+    replacedOrigin,
     replacedVersion: replacedComponent?.version ?? null,
     replacedRoot: replacedComponent?.root ?? null,
   })

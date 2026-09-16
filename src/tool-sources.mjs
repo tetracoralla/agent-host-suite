@@ -115,6 +115,38 @@ export function githubOrigin({
   }
 }
 
+export async function recordToolSourceAfterRemove(stateRoot, id, {
+  removedOrigin = null,
+  removedVersion = null,
+} = {}) {
+  const current = await readToolSources(stateRoot)
+  const tools = { ...(current.recoveredInvalid === true ? {} : current.tools) }
+  const previous = tools[id]
+  const origin = removedOrigin?.kind === 'github-release'
+    ? removedOrigin
+    : (previous?.origin?.kind === 'github-release' ? previous.origin : null)
+  if (origin === null) {
+    if (previous !== undefined) delete tools[id]
+    else return current
+  } else {
+    // Remove is not a GitHub upgrade. Keep the removed binding as origin for
+    // identity, but clear any prior upgrade/source-switch rollback so undo-remove
+    // cannot resurrect a stale repository from an earlier source replacement.
+    tools[id] = {
+      origin,
+      wrappedSha256: previous?.wrappedSha256,
+      wrappedBytes: previous?.wrappedBytes,
+      lastCheck: {
+        at: new Date().toISOString(),
+        status: 'removed',
+        availableVersion: removedVersion ?? null,
+      },
+      rollback: null,
+    }
+  }
+  return writeToolSources(stateRoot, { tools })
+}
+
 export async function restoreToolSourceAfterRollback(stateRoot, id, {
   restoredOrigin = null,
   restoredVersion = null,

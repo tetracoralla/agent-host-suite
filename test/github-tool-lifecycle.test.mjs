@@ -554,3 +554,112 @@ test('R4 blocked compatible-after-host-update candidate is refused by updateGitH
   const after = await loadState(await prepareStatePaths(stateRoot))
   assert.equal(after.components['review-alpha'].version, '1.0.0')
 })
+
+test('A undo-remove after source switch restores component origin into tool-sources', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-a-undo-remove-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const stateRoot = join(root, 'state')
+  const { dependencies } = await installedEnvironment(stateRoot)
+  const labs = await createPluginArchive(join(root, 'labs'), { id: 'review-alpha', version: '1.0.0' })
+  const fork = await createPluginArchive(join(root, 'fork'), { id: 'review-alpha', version: '1.1.0' })
+  await installGitHubTool({
+    stateRoot,
+    github: 'https://github.com/review-labs/review-alpha',
+    fetch: githubFetch({ repository: 'review-labs/review-alpha', version: '1.0.0', archive: labs.archive, sha256: labs.sha256, bytes: labs.bytes }),
+    probe: false,
+  }, dependencies)
+  await installGitHubTool({
+    stateRoot,
+    github: 'https://github.com/review-forks/review-alpha',
+    tag: 'v1.1.0',
+    replaceSource: true,
+    fetch: githubFetch({ repository: 'review-forks/review-alpha', version: '1.1.0', archive: fork.archive, sha256: fork.sha256, bytes: fork.bytes }),
+    probe: false,
+  }, dependencies)
+  const afterSwitch = await readToolSources(stateRoot)
+  assert.equal(afterSwitch.tools['review-alpha'].origin.repository, 'review-forks/review-alpha')
+  assert.equal(afterSwitch.tools['review-alpha'].rollback.origin.repository, 'review-labs/review-alpha')
+  await removeLocalComponent({ stateRoot, target: 'review-alpha' }, dependencies)
+  const afterRemove = await readToolSources(stateRoot)
+  assert.equal(afterRemove.tools['review-alpha'].origin.repository, 'review-forks/review-alpha')
+  assert.equal(afterRemove.tools['review-alpha'].rollback, null)
+  const undone = await rollbackLocalComponent({ stateRoot, target: 'review-alpha' }, dependencies)
+  assert.equal(undone.status, 'rolled-back')
+  const restored = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(restored.components['review-alpha'].origin.repository, 'review-forks/review-alpha')
+  assert.equal(restored.components['review-alpha'].version, '1.1.0')
+  const sources = await readToolSources(stateRoot)
+  assert.equal(sources.tools['review-alpha'].origin.repository, 'review-forks/review-alpha')
+  assert.notEqual(sources.tools['review-alpha'].origin.repository, 'review-labs/review-alpha')
+})
+
+test('B same-tag reissue invalidates cache so install uses new upstream bytes', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-b-reissue-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const stateRoot = join(root, 'state')
+  const { dependencies } = await installedEnvironment(stateRoot)
+  const alpha = await createPluginArchive(join(root, 'alpha'), { id: 'review-alpha', version: '1.0.0' })
+  const first11 = await createPluginArchive(join(root, 'alpha-11a'), {
+    id: 'review-alpha', version: '1.1.0', summary: 'first-issue-bytes',
+  })
+  const reissued11 = await createPluginArchive(join(root, 'alpha-11b'), {
+    id: 'review-alpha', version: '1.1.0', summary: 'reissued-bytes-under-same-tag',
+  })
+  assert.notEqual(first11.sha256, reissued11.sha256)
+  await installGitHubTool({
+    stateRoot,
+    github: 'https://github.com/review/alpha',
+    fetch: githubFetch({ repository: 'review/alpha', version: '1.0.0', archive: alpha.archive, sha256: alpha.sha256, bytes: alpha.bytes }),
+    probe: false,
+  }, dependencies)
+  let active = { archive: first11.archive, sha256: first11.sha256, bytes: first11.bytes }
+  let archiveHits = 0
+  const countedFetch = async (url) => {
+    const href = String(url)
+    if (href.includes('/releases/latest') || href.includes('/releases/tags/')) {
+      return githubFetch({
+        repository: 'review/alpha', version: '1.1.0', archive: active.archive, sha256: active.sha256, bytes: active.bytes,
+      })(url)
+    }
+    if (href.includes('.tar.gz')) {
+      archiveHits += 1
+      return new Response(await readFile(active.archive), { headers: { 'content-type': 'application/gzip' } })
+    }
+    return githubFetch({
+      repository: 'review/alpha', version: '1.1.0', archive: active.archive, sha256: active.sha256, bytes: active.bytes,
+    })(url)
+  }
+  const { downloadGitHubToolUpdate } = await import('../src/tool-updates.mjs')
+  const downloaded = await downloadGitHubToolUpdate({
+    stateRoot,
+    target: 'review-alpha',
+    fetch: countedFetch,
+  }, dependencies)
+  assert.equal(downloaded.downloaded, true)
+  const cachedPath = downloaded.path
+  const { readUpdateCandidates } = await import('../src/update-candidates.mjs')
+  const beforeReissue = (await readUpdateCandidates(stateRoot)).tools['review-alpha']
+  assert.equal(beforeReissue.upstreamDigest, first11.sha256)
+  assert.equal(beforeReissue.downloadedPath, cachedPath)
+  // Publisher replaces archive under the same tag with different bytes.
+  active = { archive: reissued11.archive, sha256: reissued11.sha256, bytes: reissued11.bytes }
+  const inspected = await inspectToolUpdates(stateRoot, { persist: true, fetch: countedFetch })
+  const item = inspected.find((entry) => entry.id === 'review-alpha')
+  assert.equal(item.candidate.digest, reissued11.sha256)
+  assert.equal(item.candidate.upstreamDigest, reissued11.sha256)
+  assert.equal(item.candidate.downloadedPath, null)
+  const persisted = (await readUpdateCandidates(stateRoot)).tools['review-alpha']
+  assert.equal(persisted.downloadedPath, null)
+  assert.equal(persisted.upstreamDigest, reissued11.sha256)
+  archiveHits = 0
+  await updateGitHubTool({
+    stateRoot,
+    target: 'review-alpha',
+    fetch: countedFetch,
+    probe: false,
+  }, dependencies)
+  assert.equal(archiveHits >= 1, true, 'install must fetch reissued bytes instead of old cache')
+  const after = await loadState(await prepareStatePaths(stateRoot))
+  assert.equal(after.components['review-alpha'].version, '1.1.0')
+  assert.equal(after.components['review-alpha'].origin.assetSha256, reissued11.sha256)
+})

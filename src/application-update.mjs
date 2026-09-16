@@ -352,15 +352,23 @@ async function recoverApplicationUpdateUnlocked(stateRoot) {
   }
   if (typeof journal.previousRoot === 'string' && typeof journal.currentRoot === 'string' && await pathExists(journal.previousRoot)) {
     const marker = await readUpdateTransactionMarker(journal.currentRoot)
-    if (journal.phase === 'failed' && markerMatchesJournal(marker, journal) !== true) {
-      // Current tree is no longer the failed replacement (already restored or user replaced it).
+    const currentExists = await pathExists(journal.currentRoot)
+    const markerOk = markerMatchesJournal(marker, journal) === true
+    const inFlight = journal.phase === 'failed'
+      || journal.phase === 'replacing'
+      || journal.phase === 'verifying'
+      || journal.phase === 'relaunching'
+    // In-flight swap/verify: require txn marker on current, or a mid-replacing hole
+    // (current missing after rename). A later user-placed directory without this
+    // marker must not be overwritten — including crashes stuck in verifying.
+    if (inFlight && markerOk !== true && !(currentExists !== true && journal.phase === 'replacing')) {
       const recovered = await writeJournal(stateRoot, {
         ...journal,
         phase: 'recovered',
         restored: true,
         error: {
           code: 'APPLICATION_UPDATE_RECOVERY_SKIPPED',
-          message: 'Recovery skipped because the current application directory no longer belongs to the failed update transaction.',
+          message: 'Recovery skipped because the current application directory no longer belongs to the interrupted update transaction.',
         },
       })
       return { ...recovered, recovered: false }
@@ -409,6 +417,10 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
     carrierPath: options.carrierPath ?? null,
   })
   try {
+    // Stamp the staged tree before swap so a crash after rename still carries txn
+    // identity on currentRoot (verifying/relaunching recover can trust the marker).
+    const pending = { ...journal, previousRoot, currentRoot, stagedRoot }
+    await writeUpdateTransactionMarker(stagedRoot, pending)
     const applied = await applyDirectorySwapUpdate({ currentRoot, stagedRoot, previousRoot })
     const active = { ...journal, previousRoot: applied.previousRoot, currentRoot: applied.currentRoot }
     await writeUpdateTransactionMarker(applied.currentRoot, active)

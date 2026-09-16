@@ -317,18 +317,35 @@ async function copyPluginTree(sourceRoot, destinationRoot) {
   await cp(sourceRoot, destinationRoot, { recursive: true })
 }
 
+export function profileRuntimeEntrypoint(baseEntrypoint, platform) {
+  if (typeof baseEntrypoint !== 'string' || baseEntrypoint.length === 0) return baseEntrypoint
+  const windows = typeof platform === 'string' && platform.startsWith('win32-')
+  if (windows && !baseEntrypoint.endsWith('.exe')) return `${baseEntrypoint}.exe`
+  if (!windows && baseEntrypoint.endsWith('.exe')) return baseEntrypoint.slice(0, -4)
+  return baseEntrypoint
+}
+
 async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, identityFiles, entrypoint, workRoot, artifactRoot, platform, title, artifactPath = null, pins = null }) {
-  let resolvedRoot = sourceRoot
-  if ((resolvedRoot === undefined || await pathExists(resolvedRoot) !== true) && typeof artifactPath === 'string') {
+  // ARTIFACT wins whenever provided — even if a source checkout also exists.
+  // Workflow drafts always check out pins into SOURCE_ROOT; that must not hide a
+  // verified platform archive that actually contains the runtime entrypoint.
+  let resolvedRoot
+  let resolvedFrom = null
+  if (typeof artifactPath === 'string' && artifactPath.length > 0) {
     resolvedRoot = await materializeProfileArtifact(id, artifactPath, workRoot)
+    resolvedFrom = 'artifact'
+  } else {
+    resolvedRoot = sourceRoot
+    resolvedFrom = 'source'
   }
   if (resolvedRoot === undefined || await pathExists(resolvedRoot) !== true) {
-    throw new Error(`${id} is required for the unsigned preview catalog. Set AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_SOURCE_ROOT to a built plugin tree, or AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_ARTIFACT to a version-pinned platform archive.`)
+    throw new Error(`${id} is required for the unsigned preview catalog. Set AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_SOURCE_ROOT to a built plugin tree that already contains the runtime entrypoint, or AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_ARTIFACT to a version-pinned platform archive.`)
   }
+  const resolvedEntrypoint = profileRuntimeEntrypoint(entrypoint, platform)
   await assertPinnedVersion(id, resolvedRoot, pluginRelative, pins)
   const pluginSource = join(resolvedRoot, pluginRelative)
   if (await pathExists(pluginSource) !== true) {
-    throw new Error(`${id} source does not contain ${pluginRelative}`)
+    throw new Error(`${id} ${resolvedFrom} does not contain ${pluginRelative}`)
   }
   const root = join(workRoot, id)
   await mkdir(join(root, dirname(pluginRelative)), { recursive: true })
@@ -345,10 +362,14 @@ async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, 
   await copyLegal(root, title)
   const presentIdentity = []
   for (const path of identityFiles) {
-    if (await pathExists(join(root, path))) presentIdentity.push(path)
+    const candidate = profileRuntimeEntrypoint(path, platform) === resolvedEntrypoint
+      ? resolvedEntrypoint
+      : path
+    if (await pathExists(join(root, candidate))) presentIdentity.push(candidate)
+    else if (candidate !== path && await pathExists(join(root, path))) presentIdentity.push(path)
   }
-  if (!presentIdentity.includes(entrypoint) && await pathExists(join(root, entrypoint)) !== true) {
-    throw new Error(`${id} is missing its runtime entrypoint ${entrypoint}; build the plugin before including it in the unsigned catalog`)
+  if (!presentIdentity.includes(resolvedEntrypoint) && await pathExists(join(root, resolvedEntrypoint)) !== true) {
+    throw new Error(`${id} is missing its runtime entrypoint ${resolvedEntrypoint} (from ${resolvedFrom}); use script/package_runtime.sh (or a verified platform ARTIFACT), not a source tree that only builds the Swift GUI`)
   }
   const versionFile = join(root, pluginRelative, '.codex-plugin/plugin.json')
   const plugin = await pathExists(versionFile)
@@ -359,8 +380,8 @@ async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, 
     id,
     version: plugin.version ?? '0.0.0',
     kind,
-    identityFiles: [...new Set(['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json', ...presentIdentity, entrypoint].filter((path) => path !== undefined))],
-    entrypoints: { command: entrypoint },
+    identityFiles: [...new Set(['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json', ...presentIdentity, resolvedEntrypoint].filter((path) => path !== undefined))],
+    entrypoints: { command: resolvedEntrypoint },
     artifactRoot,
     platform,
   })

@@ -88,11 +88,42 @@ export async function writeUpdateCandidates(stateRoot, record) {
   return value
 }
 
-function sameCandidateIdentity(previous, next) {
-  return previous !== null
-    && previous !== undefined
-    && previous.tag === next.tag
-    && previous.platform === next.platform
+function repositoryFromCandidate(candidate) {
+  if (typeof candidate?.repository === 'string' && candidate.repository.length > 0) return candidate.repository
+  const releaseUrl = candidate?.releaseUrl
+  if (typeof releaseUrl === 'string') {
+    const match = /github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/u.exec(releaseUrl)
+    if (match) return match[1]
+  }
+  return null
+}
+
+function upstreamDigestOf(candidate) {
+  if (candidate === null || candidate === undefined) return null
+  if (typeof candidate.upstreamDigest === 'string') return candidate.upstreamDigest
+  // Inspect populates digest from the remote/upstream asset. After a Host wrap,
+  // digest may equal wrappedDigest — only treat digest as upstream when it is not
+  // the wrapped digest.
+  if (typeof candidate.digest === 'string'
+    && (candidate.wrappedDigest === undefined || candidate.wrappedDigest === null || candidate.digest !== candidate.wrappedDigest)) {
+    return candidate.digest
+  }
+  return null
+}
+
+/** Cache identity: repo + asset + platform + upstream digest (not tag alone). */
+export function sameCandidateCacheIdentity(previous, next) {
+  if (previous === null || previous === undefined || next === null || next === undefined) return false
+  if (previous.tag !== next.tag || previous.platform !== next.platform) return false
+  if ((previous.assetName ?? null) !== (next.assetName ?? null)) return false
+  if ((previous.assetUrl ?? null) !== (next.assetUrl ?? null)) return false
+  const previousRepo = repositoryFromCandidate(previous)
+  const nextRepo = repositoryFromCandidate(next)
+  if (previousRepo !== null && nextRepo !== null && previousRepo !== nextRepo) return false
+  const previousUpstream = upstreamDigestOf(previous)
+  const nextUpstream = upstreamDigestOf(next)
+  if (previousUpstream !== null && nextUpstream !== null && previousUpstream !== nextUpstream) return false
+  return true
 }
 
 function mergeCandidate(previous, next) {
@@ -100,12 +131,12 @@ function mergeCandidate(previous, next) {
   const merged = { ...(previous ?? {}), ...next }
   const explicitCache = Object.prototype.hasOwnProperty.call(next, 'downloadedPath')
   if (explicitCache) return merged
-  // Inspect refreshes omit downloadedPath. Keep a Host-managed verified cache for
-  // the same tag/platform, even when digest flips between upstream and wrapped.
-  if (sameCandidateIdentity(previous, merged) && typeof previous.downloadedPath === 'string') {
+  // Inspect refreshes omit downloadedPath. Keep a Host-managed verified cache only
+  // when repo/asset/platform/upstream digest still identify the same bytes.
+  if (sameCandidateCacheIdentity(previous, merged) && typeof previous.downloadedPath === 'string') {
     merged.downloadedPath = previous.downloadedPath
     if (previous.wrappedDigest !== undefined) merged.wrappedDigest = previous.wrappedDigest
-    if (previous.upstreamDigest !== undefined) {
+    if (previous.upstreamDigest !== undefined && previous.upstreamDigest !== null) {
       merged.upstreamDigest = previous.upstreamDigest
     } else if (typeof merged.digest === 'string' && merged.digest !== previous.wrappedDigest) {
       merged.upstreamDigest = merged.digest
@@ -113,8 +144,9 @@ function mergeCandidate(previous, next) {
     return merged
   }
   if (typeof previous?.downloadedPath === 'string') {
+    // Remote bytes changed under the same tag (or asset/repo drifted): drop cache.
     merged.downloadedPath = null
-    merged.upstreamDigest = null
+    merged.upstreamDigest = upstreamDigestOf(merged)
     merged.wrappedDigest = null
   }
   return merged

@@ -6,8 +6,13 @@
 # The notarized .github/workflows/release.yml remains a separate signed path
 # and requires Apple secrets. This unsigned preview must not request them.
 # Each platform job admits GitHub tools for that runner and obtains version-
-# pinned Math Anchor / Migratory Time inputs. Do not reuse another OS archive
-# and relabel it. Gatekeeper (Control-click → Open) remains required.
+# pinned Math Anchor / Migratory Time inputs. Math Anchor needs the PyInstaller
+# runtime from script/package_runtime.sh (macOS) or a verified platform ARTIFACT
+# (Windows). `swift build` does not produce the Host entrypoint. ARTIFACT wins
+# over SOURCE_ROOT when both are set. Catalog builder comment: ARTIFACT wins over SOURCE_ROOT.
+# Do not reuse another OS archive and relabel it. This file remains a docs draft —
+# not a live .github/workflows job until copied with workflow scope. Gatekeeper
+# (Control-click → Open) remains required.
 
 name: Unsigned preview release
 
@@ -36,15 +41,25 @@ jobs:
           repository: tetracoralla/migratory-time
           ref: 0355fd34c99cd9c51a0eeecf20f20ef6369cdd54
           path: .build/profile-sources/migratory-time
-      - name: Build Math Anchor runtime for this macOS runner
+      - name: Build Math Anchor PyInstaller runtime for this macOS runner
         working-directory: .build/profile-sources/math-anchor
         run: |
-          if [ -x scripts/build_plugin.sh ]; then
+          # Host requires plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime.
+          # That path is produced by script/package_runtime.sh (Python/PyInstaller), not by
+          # `swift build` (MathAnchor GUI/Core) and not by a missing scripts/build_plugin.sh.
+          if [ -n "${AGENT_HOST_MATH_ANCHOR_ARTIFACT:-}" ]; then
+            echo "Using pre-supplied Math Anchor ARTIFACT; skipping source runtime package."
+          elif [ -x script/package_runtime.sh ]; then
+            ./script/package_runtime.sh
+          elif [ -x scripts/build_plugin.sh ]; then
             ./scripts/build_plugin.sh
-          elif [ -f Package.swift ]; then
-            swift build -c release
           else
-            echo "Math Anchor checkout has no documented build entry; provide AGENT_HOST_MATH_ANCHOR_ARTIFACT instead." >&2
+            echo "Pinned Math Anchor has no script/package_runtime.sh; set AGENT_HOST_MATH_ANCHOR_ARTIFACT to a verified platform archive." >&2
+            exit 1
+          fi
+          entry="plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime"
+          if [ -z "${AGENT_HOST_MATH_ANCHOR_ARTIFACT:-}" ] && [ ! -x "$entry" ]; then
+            echo "Math Anchor runtime entrypoint missing after package_runtime: $entry" >&2
             exit 1
           fi
       - uses: actions/setup-node@v7
@@ -59,6 +74,10 @@ jobs:
           AGENT_HOST_PROFILE_SOURCES_ROOT: ${{ github.workspace }}/.build/profile-sources
           AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/math-anchor
           AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/migratory-time
+          # Optional: set repository variable AGENT_HOST_MATH_ANCHOR_ARTIFACT to a
+          # runner-local path, or export it in an earlier step. When set, catalog
+          # build prefers ARTIFACT over the pinned SOURCE_ROOT checkout.
+          AGENT_HOST_MATH_ANCHOR_ARTIFACT: ${{ vars.AGENT_HOST_MATH_ANCHOR_ARTIFACT }}
           AGENT_HOST_MATH_ANCHOR_VERSION: "0.7.1"
         run: |
           node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
@@ -107,13 +126,27 @@ jobs:
           path: .build/profile-sources/migratory-time
       - name: Obtain Math Anchor Windows platform artifact or fail closed
         shell: pwsh
+        env:
+          AGENT_HOST_MATH_ANCHOR_ARTIFACT: ${{ vars.AGENT_HOST_MATH_ANCHOR_ARTIFACT }}
+          AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL: ${{ vars.AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL }}
         run: |
-          if ($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT) {
-            Write-Host "Using pre-supplied Math Anchor artifact"
-          } elseif (Test-Path .build/profile-sources/math-anchor/plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime.exe) {
+          # Pinned Math Anchor source does not ship a Windows PyInstaller runtime.
+          # Do not treat the checkout (or a .exe path check alone) as a build step.
+          # Prefer a verified platform ARTIFACT path or download URL; ARTIFACT then
+          # wins over SOURCE_ROOT in build-unsigned-preview-catalog.mjs.
+          $entry = ".build/profile-sources/math-anchor/plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime.exe"
+          if ($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT -and (Test-Path $env:AGENT_HOST_MATH_ANCHOR_ARTIFACT)) {
+            Write-Host "Using pre-supplied Math Anchor ARTIFACT at $($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT)"
+          } elseif ($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL) {
+            New-Item -ItemType Directory -Force -Path .build/profile-artifacts | Out-Null
+            $dest = Join-Path $PWD ".build/profile-artifacts/math-anchor-windows.tgz"
+            Write-Host "Downloading Math Anchor Windows ARTIFACT from configured URL"
+            Invoke-WebRequest -Uri $env:AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL -OutFile $dest
+            "AGENT_HOST_MATH_ANCHOR_ARTIFACT=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } elseif (Test-Path $entry) {
             Write-Host "Math Anchor Windows runtime already present in the pinned checkout"
           } else {
-            Write-Error "Windows unsigned preview requires AGENT_HOST_MATH_ANCHOR_ARTIFACT (version-pinned platform archive) or a checkout that already contains the Windows runtime entrypoint. Building the Swift runtime on Windows is not assumed."
+            Write-Error "Windows unsigned preview requires repository variable AGENT_HOST_MATH_ANCHOR_ARTIFACT (path) or AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL (download) pointing at a version-pinned platform archive that contains plugins/math-anchor/runtime/.../math-anchor-runtime.exe. The pinned source checkout alone does not produce that entrypoint on Windows."
             exit 1
           }
       - uses: actions/setup-node@v7
@@ -130,8 +163,10 @@ jobs:
           AGENT_HOST_PROFILE_SOURCES_ROOT: ${{ github.workspace }}/.build/profile-sources
           AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/math-anchor
           AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/migratory-time
+          AGENT_HOST_MATH_ANCHOR_ARTIFACT: ${{ env.AGENT_HOST_MATH_ANCHOR_ARTIFACT }}
           AGENT_HOST_MATH_ANCHOR_VERSION: "0.7.1"
         run: |
+          # Catalog builder prefers ARTIFACT over SOURCE_ROOT and appends .exe on win32.
           node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
           $ids = (Get-Content -Raw .build/unsigned-catalog/current.json | ConvertFrom-Json).components.id -join ','
           $env:AGENT_HOST_BUNDLED_COMPONENTS = $ids

@@ -232,6 +232,83 @@ test('R5 docs unsigned-preview workflow draft obtains pinned profile sources and
   assert.match(workflow, /0355fd34c99cd9c51a0eeecf20f20ef6369cdd54/u)
   assert.match(workflow, /AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT/u)
   assert.match(workflow, /AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT/u)
+  assert.match(workflow, /script\/package_runtime\.sh/u)
+  assert.doesNotMatch(workflow, /elif \[ -f Package\.swift \]; then\s*\n\s*swift build -c release/u)
+  assert.match(workflow, /AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL/u)
+  assert.match(workflow, /ARTIFACT wins over SOURCE_ROOT/u)
   const { access } = await import('node:fs/promises')
   await assert.rejects(() => access(fileURLToPath(new URL('../.github/workflows/unsigned-preview-release.yml', import.meta.url))))
+})
+
+test('D ARTIFACT wins over SOURCE_ROOT that lacks the runtime entrypoint', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-d-artifact-wins-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const { buildRequiredProfileTool, profileRuntimeEntrypoint } = await import('../scripts/build-unsigned-preview-catalog.mjs')
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const execFileAsync = promisify(execFile)
+  const tar = process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar'
+
+  const sourceRoot = join(root, 'source-without-runtime')
+  const plugin = join(sourceRoot, 'plugins/math-anchor')
+  await mkdir(join(plugin, '.codex-plugin'), { recursive: true })
+  await writeFile(join(plugin, '.codex-plugin/plugin.json'), `${JSON.stringify({ name: 'math-anchor', version: '0.7.1' })}\n`)
+  await writeFile(join(plugin, '.mcp.json'), '{}\n')
+  await writeFile(join(sourceRoot, 'LICENSE'), 'Apache-2.0\n')
+  await writeFile(join(sourceRoot, 'NOTICE'), 'source-only\n')
+  // Deliberately no runtime/ tree — mirrors pinned Math Anchor before package_runtime.
+
+  const artifactTree = join(root, 'artifact-tree')
+  const artifactPlugin = join(artifactTree, 'plugins/math-anchor')
+  const entry = 'plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime'
+  await mkdir(join(artifactPlugin, 'runtime/math-anchor-runtime'), { recursive: true })
+  await mkdir(join(artifactPlugin, '.codex-plugin'), { recursive: true })
+  await writeFile(join(artifactPlugin, '.codex-plugin/plugin.json'), `${JSON.stringify({ name: 'math-anchor', version: '0.7.1' })}\n`)
+  await writeFile(join(artifactPlugin, '.mcp.json'), '{}\n')
+  await writeFile(join(artifactTree, entry), '#!/bin/sh\necho math-anchor-runtime\n', { mode: 0o755 })
+  await writeFile(join(artifactTree, 'LICENSE'), 'Apache-2.0\n')
+  await writeFile(join(artifactTree, 'NOTICE'), 'artifact-tree\n')
+  const artifactArchive = join(root, 'math-anchor-artifact.tgz')
+  await execFileAsync(tar, ['-czf', artifactArchive, '-C', artifactTree, '.'], {
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
+  })
+
+  await assert.rejects(
+    () => buildRequiredProfileTool({
+      id: 'math-anchor',
+      kind: 'math-anchor',
+      sourceRoot,
+      pluginRelative: 'plugins/math-anchor',
+      identityFiles: ['plugins/math-anchor/.codex-plugin/plugin.json', 'plugins/math-anchor/.mcp.json'],
+      entrypoint: entry,
+      workRoot: join(root, 'work-fail'),
+      artifactRoot: join(root, 'artifacts-fail'),
+      platform: 'test-platform',
+      title: 'Math Anchor',
+      pins: { sources: { 'math-anchor': { expectedVersion: '0.7.1' } } },
+    }),
+    /missing its runtime entrypoint|package_runtime/u,
+  )
+
+  const artifactRootOk = join(root, 'artifacts-ok')
+  await mkdir(artifactRootOk, { recursive: true })
+  const component = await buildRequiredProfileTool({
+    id: 'math-anchor',
+    kind: 'math-anchor',
+    sourceRoot,
+    artifactPath: artifactArchive,
+    pluginRelative: 'plugins/math-anchor',
+    identityFiles: ['plugins/math-anchor/.codex-plugin/plugin.json', 'plugins/math-anchor/.mcp.json'],
+    entrypoint: entry,
+    workRoot: join(root, 'work-ok'),
+    artifactRoot: artifactRootOk,
+    platform: 'test-platform',
+    title: 'Math Anchor',
+    pins: { sources: { 'math-anchor': { expectedVersion: '0.7.1' } } },
+  })
+  assert.equal(component.id, 'math-anchor')
+  assert.equal(component.version, '0.7.1')
+  assert.match(component.artifact.sha256, /^sha256:[0-9a-f]{64}$/u)
+  assert.equal(profileRuntimeEntrypoint(entry, 'win32-x64'), `${entry}.exe`)
+  assert.equal(profileRuntimeEntrypoint(`${entry}.exe`, 'darwin-arm64'), entry)
 })

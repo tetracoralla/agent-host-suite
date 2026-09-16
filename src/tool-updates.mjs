@@ -17,7 +17,7 @@ import { transitionComponentInventory } from './lifecycle.mjs'
 import { isAgentToolsPaused } from './profile.mjs'
 import { recordActivity } from './activity.mjs'
 import { assertCompatibleOrigin, githubOrigin, originIdentity, readToolSources, writeToolSources } from './tool-sources.mjs'
-import { candidateFromRemote, mergeUpdateCandidates, readUpdateCandidates } from './update-candidates.mjs'
+import { candidateFromRemote, mergeUpdateCandidates, readUpdateCandidates, sameCandidateCacheIdentity } from './update-candidates.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
 import { presentInstalledLogo } from './tool-presentation.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
@@ -324,15 +324,27 @@ export async function inspectToolUpdates(stateRoot, { fetch, signal, catalog, ch
     if (
       candidate !== null
       && previousCandidate !== undefined
-      && previousCandidate.tag === candidate.tag
-      && previousCandidate.platform === candidate.platform
       && typeof previousCandidate.downloadedPath === 'string'
+      && sameCandidateCacheIdentity(previousCandidate, candidate)
     ) {
       candidate = {
         ...candidate,
         downloadedPath: previousCandidate.downloadedPath,
         wrappedDigest: previousCandidate.wrappedDigest ?? candidate.wrappedDigest,
-        upstreamDigest: previousCandidate.upstreamDigest ?? candidate.upstreamDigest,
+        upstreamDigest: previousCandidate.upstreamDigest ?? candidate.upstreamDigest ?? candidate.digest,
+      }
+    } else if (
+      candidate !== null
+      && previousCandidate !== undefined
+      && typeof previousCandidate.downloadedPath === 'string'
+    ) {
+      // Same tag can be reissued with different upstream bytes. Never present a
+      // new candidate.digest while still bound to an old Host-managed cache.
+      candidate = {
+        ...candidate,
+        downloadedPath: null,
+        wrappedDigest: null,
+        upstreamDigest: candidate.upstreamDigest ?? candidate.digest ?? null,
       }
     }
     items.push({

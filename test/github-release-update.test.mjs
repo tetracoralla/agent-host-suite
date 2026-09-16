@@ -810,3 +810,75 @@ test('R3 failed relaunch that already restored does not re-recover over a later 
   assert.equal(again.phase, 'recovered')
   assert.equal(await readFile(join(app, 'marker'), 'utf8'), 'later-user-restored-version')
 })
+
+test('C interrupted verifying recover restores when txn marker matches', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-c-verify-restore-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const current = join(root, 'current')
+  const previous = join(root, 'previous')
+  const stateRoot = join(root, 'state')
+  await writeApplicationVersionFixture(current, '0.2.1-new')
+  await writeApplicationVersionFixture(previous, '0.2.0-old')
+  await write(join(current, 'marker'), 'replacement-in-verifying')
+  await write(join(previous, 'marker'), 'working-old')
+  const { writePrivateJson } = await import('../src/json.mjs')
+  const { prepareStatePaths } = await import('../src/state.mjs')
+  const paths = await prepareStatePaths(stateRoot)
+  const journal = {
+    schemaVersion: 'openadam.agent-host-application-update-state.v0.1',
+    phase: 'verifying',
+    channel: 'stable',
+    fromVersion: '0.2.0-old',
+    toVersion: '0.2.1-new',
+    currentRoot: current,
+    previousRoot: previous,
+    pid: 2147483646,
+    processStartedAt: '1970-01-01T00:00:00.000Z',
+    updatedAt: new Date().toISOString(),
+  }
+  await writePrivateJson(join(paths.root, 'application-update.json'), journal)
+  await write(join(current, '.agent-host-update-txn.json'), `${JSON.stringify({
+    schemaVersion: 'openadam.agent-host-application-update-txn.v0.1',
+    fromVersion: journal.fromVersion,
+    toVersion: journal.toVersion,
+    previousRoot: journal.previousRoot,
+    updatedAt: new Date().toISOString(),
+  }, null, 2)}\n`)
+  const recovered = await recoverApplicationUpdate(stateRoot)
+  assert.equal(recovered.recovered, true)
+  assert.equal(recovered.phase, 'recovered')
+  assert.equal(await readFile(join(current, 'marker'), 'utf8'), 'working-old')
+})
+
+test('C interrupted verifying recover does not overwrite a later user-placed directory', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-c-verify-skip-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const current = join(root, 'current')
+  const previous = join(root, 'previous')
+  const stateRoot = join(root, 'state')
+  await writeApplicationVersionFixture(current, 'user-restored-later')
+  await writeApplicationVersionFixture(previous, '0.2.0-old')
+  await write(join(current, 'marker'), 'later-user-restored-version')
+  await write(join(previous, 'marker'), 'working-old')
+  const { writePrivateJson } = await import('../src/json.mjs')
+  const { prepareStatePaths } = await import('../src/state.mjs')
+  const paths = await prepareStatePaths(stateRoot)
+  await writePrivateJson(join(paths.root, 'application-update.json'), {
+    schemaVersion: 'openadam.agent-host-application-update-state.v0.1',
+    phase: 'verifying',
+    channel: 'stable',
+    fromVersion: '0.2.0-old',
+    toVersion: '0.2.1-new',
+    currentRoot: current,
+    previousRoot: previous,
+    pid: 2147483646,
+    processStartedAt: '1970-01-01T00:00:00.000Z',
+    updatedAt: new Date().toISOString(),
+  })
+  // No matching txn marker: user replaced the verifying tree.
+  const skipped = await recoverApplicationUpdate(stateRoot)
+  assert.equal(skipped.recovered, false)
+  assert.equal(skipped.phase, 'recovered')
+  assert.equal(skipped.error?.code, 'APPLICATION_UPDATE_RECOVERY_SKIPPED')
+  assert.equal(await readFile(join(current, 'marker'), 'utf8'), 'later-user-restored-version')
+})
