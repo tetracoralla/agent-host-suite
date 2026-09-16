@@ -11,21 +11,53 @@ const execFileAsync = promisify(execFile)
 const root = fileURLToPath(new URL('../', import.meta.url))
 const directory = await mkdtemp(resolve(tmpdir(), 'direct-execution-package-'))
 
-async function windowsDescendants(ownerPid) {
+function helperTimedOut(error) {
+  return error?.code === 'ETIMEDOUT' || (error?.killed === true && error?.signal === 'SIGTERM')
+}
+
+// Match Agent Host's 30s call allowance (also used by fakeConfig on Windows and
+// host-service persistent preparation). Keep this bounded — not an open inflation
+// of product deadlines. Serve readiness on win32 uses the same cold-start margin.
+const packagedCallTimeoutMs = 30_000
+const packagedReadinessTimeoutMs = process.platform === 'win32' ? 30_000 : 10_000
+// CLI clientTimeout(workOrder) = max(call.timeoutMs) + 5s; keep client ahead of
+// the server-side call deadline so cold provider startup is not raced by the socket client.
+const packagedClientSlackMs = 5_000
+
+async function windowsDescendants(ownerPid, { required = false } = {}) {
   if (process.platform !== 'win32') return []
-  const { stdout } = await execFileAsync('powershell.exe', [
-    '-NoProfile', '-NonInteractive', '-Command',
-    "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules'); Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress",
-  ], { timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true })
-  const rows = JSON.parse(stdout)
-  const owned = new Set([ownerPid])
-  for (let pass = 0; pass < rows.length; pass += 1) {
-    const before = owned.size
-    for (const row of rows) if (owned.has(row.ParentProcessId)) owned.add(row.ProcessId)
-    if (owned.size === before) break
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules'); Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress",
+    ], { timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true })
+    const rows = JSON.parse(stdout)
+    const owned = new Set([ownerPid])
+    for (let pass = 0; pass < rows.length; pass += 1) {
+      const before = owned.size
+      for (const row of rows) if (owned.has(row.ParentProcessId)) owned.add(row.ProcessId)
+      if (owned.size === before) break
+    }
+    owned.delete(ownerPid)
+    return [...owned]
+  } catch (error) {
+    // Cleanup snapshots are best-effort: a slow/killed CIM query must not turn a
+    // retryable packaged HOST_TIMEOUT into AggregateError. Success-path callers
+    // pass required:true and still surface the query failure.
+    if (!required) return []
+    throw error
   }
-  owned.delete(ownerPid)
-  return [...owned]
+}
+
+async function forceKillWindowsTree(pid) {
+  if (process.platform !== 'win32' || !Number.isInteger(pid)) return
+  try {
+    await execFileAsync('taskkill.exe', ['/pid', String(pid), '/t', '/f'], {
+      timeout: 10000, windowsHide: true,
+    })
+  } catch {
+    // Best-effort: process may already be gone; temp rm still retries on EBUSY.
+  }
 }
 
 async function assertProcessesExited(pids) {
@@ -71,7 +103,7 @@ function releaseChildHandles(child) {
   }
 }
 
-function waitForJsonLine(child, timeoutMs = 10_000) {
+function waitForJsonLine(child, timeoutMs = packagedReadinessTimeoutMs) {
   return new Promise((resolvePromise, reject) => {
     let stdout = ''
     let stderr = ''
@@ -116,9 +148,10 @@ function packagedProviderConfig(fakeRoot) {
       maxResultBytes: 262144,
       maxProtocolLineBytes: 1048576,
       maxStderrBytes: 4096,
-      // Exercise the actual Agent Host consumer allowance. The general library
-      // default and explicit short-deadline regression cases are unchanged.
-      defaultTimeoutMs: 30000,
+      // Exercise the Agent Host / Windows cold-start allowance used by fakeConfig
+      // and host-service preparation (30s on win32). Short-deadline regressions
+      // live elsewhere and stay on the library's general 10s default.
+      defaultTimeoutMs: packagedCallTimeoutMs,
       circuitBreakerFailureThreshold: 3,
       circuitBreakerCooldownMs: 50,
     },
@@ -154,6 +187,10 @@ function packagedWorkOrder(id) {
         capabilityVersion: '0.1.0',
         operationId: 'echo',
       },
+      // Explicit per-call deadline so cli.mjs clientTimeout (max + 5s) matches the
+      // packaged provider defaultTimeoutMs. Without this, CLI run --socket uses
+      // call.timeoutMs ?? 10_000 and the client races Windows cold provider start.
+      timeoutMs: packagedCallTimeoutMs,
       input: { value: 'packaged-host', delayMs: 0 },
     }],
   }
@@ -288,9 +325,14 @@ try {
   let descendants = []
   let flowError
   try {
-    ready = await waitForJsonLine(service)
-    const firstRun = await execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', firstOrderPath])
-    const secondRun = await execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', secondOrderPath])
+    ready = await waitForJsonLine(service, packagedReadinessTimeoutMs)
+    const runTimeoutMs = packagedCallTimeoutMs + packagedClientSlackMs + 5_000
+    const firstRun = await execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', firstOrderPath], {
+      timeout: runTimeoutMs, maxBuffer: 1024 * 1024,
+    })
+    const secondRun = await execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', secondOrderPath], {
+      timeout: runTimeoutMs, maxBuffer: 1024 * 1024,
+    })
     first = JSON.parse(firstRun.stdout)
     second = JSON.parse(secondRun.stdout)
     if (first.calls?.[0]?.result?.value !== 'packaged-host' || first.calls[0].session !== 'cold') {
@@ -299,23 +341,43 @@ try {
     if (second.calls?.[0]?.result?.value !== 'packaged-host' || second.calls[0].session !== 'warm') {
       throw new Error(`second packaged host call did not reuse the provider session: ${JSON.stringify(second)}`)
     }
-    descendants = await windowsDescendants(service.pid)
+    descendants = await windowsDescendants(service.pid, { required: true })
     if (process.platform === 'win32' && descendants.length < 2) throw new Error('packaged Host did not retain its Windows guardian and Provider')
   } catch (error) {
     flowError = error
   }
   try {
-    if (process.platform === 'win32' && descendants.length === 0) descendants = await windowsDescendants(service.pid)
+    // Snapshot the tree before kill when possible; a timed-out CIM query returns []
+    // and must not become a second hard failure that masks a retryable HOST_TIMEOUT.
+    if (process.platform === 'win32' && descendants.length === 0 && service?.pid) {
+      descendants = await windowsDescendants(service.pid, { required: false })
+    }
     const terminating = service.exitCode === null && service.signalCode === null
-    if (terminating) service.kill('SIGTERM')
+    if (terminating) {
+      try { service.kill('SIGTERM') } catch { /* already exiting */ }
+      // After a failed packaged run, force the Windows Job/guardian tree down so
+      // temp cleanup is not blocked by leftover Provider children. Success path
+      // still prefers a plain SIGTERM like the prior check.
+      if (flowError !== undefined) {
+        await forceKillWindowsTree(service.pid)
+        for (const pid of descendants) await forceKillWindowsTree(pid)
+      }
+    }
     const exited = await serviceExit
     if (exited.error !== undefined) throw exited.error
     const expectedWindowsTermination = process.platform === 'win32' && terminating
-      && (exited.signal === 'SIGTERM' || exited.code === 1)
+      && (exited.signal === 'SIGTERM' || exited.code === 1 || exited.code === null)
     if (exited.code !== 0 && !expectedWindowsTermination) throw new Error(`packaged service exit was unexpected: ${exited.code ?? exited.signal}`)
-    await assertProcessesExited(descendants)
+    if (descendants.length > 0) await assertProcessesExited(descendants)
+    // Close stdio handles before the finally rm so Windows does not EBUSY the tree.
+    releaseChildHandles(service)
   } catch (cleanupError) {
-    if (flowError !== undefined) throw new AggregateError([flowError, cleanupError], 'Packaged execution and cleanup both failed')
+    // Prefer the primary packaged-run failure (e.g. retryable HOST_TIMEOUT) over a
+    // secondary process-tree / kill helper flake during cleanup.
+    if (flowError !== undefined) {
+      if (helperTimedOut(cleanupError)) throw flowError
+      throw new AggregateError([flowError, cleanupError], 'Packaged execution and cleanup both failed')
+    }
     throw cleanupError
   }
   if (flowError !== undefined) throw flowError
