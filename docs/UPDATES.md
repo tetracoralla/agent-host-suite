@@ -55,9 +55,11 @@ list prereleases. GitHub `latest` never includes prerelease.
 
 ## Automation
 
-`.github/workflows/unsigned-preview-release.yml` is the unsigned preview
-pipeline (tracked copy: `docs/unsigned-preview-release.yml`). It does not
-request Apple Developer ID or notary secrets. Each platform job admits
+`docs/unsigned-preview-release.yml` is the required unsigned preview pipeline
+draft. Copy it to `.github/workflows/unsigned-preview-release.yml` only from an
+account with the GitHub `workflow` scope; that Actions path is not enabled in
+this repository until the file is present under `.github/workflows/`. The draft
+does not request Apple Developer ID or notary secrets. Each platform job admits
 registered GitHub tools for that runner, builds a catalog from official Node,
 this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer
 adapters, and those admitted tools (not test fixtures), packages unsigned

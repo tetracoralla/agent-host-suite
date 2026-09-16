@@ -1,4 +1,6 @@
-# Tracked copy of .github/workflows/unsigned-preview-release.yml.
+# Required unsigned preview pipeline draft (docs/). Copy to
+# .github/workflows/unsigned-preview-release.yml only with GitHub workflow scope;
+# that path is not enabled until the file exists under .github/workflows/.
 # The notarized .github/workflows/release.yml remains a separate signed path
 # and requires Apple secrets. This unsigned preview must not request them.
 # Each platform job admits GitHub tools for that runner. Do not reuse another

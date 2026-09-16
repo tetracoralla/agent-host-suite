@@ -152,13 +152,15 @@ so `github.com/.../releases/download/...` may land on
 
 ## Unsigned preview workflow
 
-The live unsigned pipeline is
-[`.github/workflows/unsigned-preview-release.yml`](../.github/workflows/unsigned-preview-release.yml).
-A tracked copy lives at [`unsigned-preview-release.yml`](unsigned-preview-release.yml).
-Each platform job admits GitHub tools for that runner; native archives are not
-reused across operating systems. It does **not** request Apple secrets.
-The notarized [`.github/workflows/release.yml`](../.github/workflows/release.yml)
-is a separate signed path and is not this preview. Copy
+The required unsigned pipeline draft is
+[`unsigned-preview-release.yml`](unsigned-preview-release.yml). Copy it to
+`.github/workflows/unsigned-preview-release.yml` only when an account with the
+GitHub `workflow` scope can push workflow files; do not claim that Actions path
+is live while the file is absent. Each platform job admits GitHub tools for that
+runner; native archives are not reused across operating systems. The draft does
+**not** request Apple secrets. The notarized
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) is a
+separate signed path and is not this preview. Copy
 [`scan-github-tools.yml`](scan-github-tools.yml) to
 `.github/workflows/scan-github-tools.yml` from an account with the GitHub
 `workflow` scope if catalog pin automation is not yet enabled. See
