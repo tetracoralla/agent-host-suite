@@ -317,11 +317,28 @@ async function copyPluginTree(sourceRoot, destinationRoot) {
   await cp(sourceRoot, destinationRoot, { recursive: true })
 }
 
+const SCRIPT_ENTRYPOINT_EXTENSIONS = new Set(['.mjs', '.js', '.cjs', '.ts'])
+
+function hasScriptEntrypointExtension(entrypoint) {
+  const base = entrypoint.split(/[\\/]/u).pop() ?? entrypoint
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0) return false
+  return SCRIPT_ENTRYPOINT_EXTENSIONS.has(base.slice(dot).toLowerCase())
+}
+
 export function profileRuntimeEntrypoint(baseEntrypoint, platform) {
   if (typeof baseEntrypoint !== 'string' || baseEntrypoint.length === 0) return baseEntrypoint
   const windows = typeof platform === 'string' && platform.startsWith('win32-')
-  if (windows && !baseEntrypoint.endsWith('.exe')) return `${baseEntrypoint}.exe`
-  if (!windows && baseEntrypoint.endsWith('.exe')) return baseEntrypoint.slice(0, -4)
+  if (windows) {
+    // Native Windows binaries (no extension / known binary basenames) get .exe.
+    // Node/script entrypoints such as server/index.mjs must stay unchanged —
+    // appending .exe would invent index.mjs.exe and fail the runtime check.
+    if (baseEntrypoint.endsWith('.exe') || hasScriptEntrypointExtension(baseEntrypoint)) {
+      return baseEntrypoint
+    }
+    return `${baseEntrypoint}.exe`
+  }
+  if (baseEntrypoint.endsWith('.exe')) return baseEntrypoint.slice(0, -4)
   return baseEntrypoint
 }
 

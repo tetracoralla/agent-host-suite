@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
-import { githubAssetMatchesPlatform, officialNodeBinaryPath, buildWorkspacePackage } from '../scripts/build-unsigned-preview-catalog.mjs'
+import { githubAssetMatchesPlatform, officialNodeBinaryPath, buildWorkspacePackage, profileRuntimeEntrypoint } from '../scripts/build-unsigned-preview-catalog.mjs'
 
 test('unsigned preview catalogs keep the default profile component set', async () => {
   const source = await readFile(new URL('../src/release-manifest.mjs', import.meta.url), 'utf8')
@@ -236,6 +236,10 @@ test('R5 docs unsigned-preview workflow draft obtains pinned profile sources and
   assert.doesNotMatch(workflow, /elif \[ -f Package\.swift \]; then\s*\n\s*swift build -c release/u)
   assert.match(workflow, /AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL/u)
   assert.match(workflow, /ARTIFACT wins over SOURCE_ROOT/u)
+  // D2: both pre-supplied path and URL download must export absolute ARTIFACT via GITHUB_ENV.
+  assert.match(workflow, /Using pre-supplied Math Anchor ARTIFACT[\s\S]*?GITHUB_ENV/u)
+  assert.match(workflow, /Downloading Math Anchor Windows ARTIFACT[\s\S]*?GITHUB_ENV/u)
+  assert.equal((workflow.match(/AGENT_HOST_MATH_ANCHOR_ARTIFACT=\$resolved/g) ?? []).length, 2)
   const { access } = await import('node:fs/promises')
   await assert.rejects(() => access(fileURLToPath(new URL('../.github/workflows/unsigned-preview-release.yml', import.meta.url))))
 })
@@ -311,4 +315,106 @@ test('D ARTIFACT wins over SOURCE_ROOT that lacks the runtime entrypoint', async
   assert.match(component.artifact.sha256, /^sha256:[0-9a-f]{64}$/u)
   assert.equal(profileRuntimeEntrypoint(entry, 'win32-x64'), `${entry}.exe`)
   assert.equal(profileRuntimeEntrypoint(`${entry}.exe`, 'darwin-arm64'), entry)
+  assert.equal(profileRuntimeEntrypoint('plugins/migratory-time/server/index.mjs', 'win32-x64'), 'plugins/migratory-time/server/index.mjs')
+})
+
+test('D1 profileRuntimeEntrypoint appends .exe only for native Windows binaries', () => {
+  const math = 'plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime'
+  const migratory = 'plugins/migratory-time/server/index.mjs'
+  assert.equal(profileRuntimeEntrypoint(math, 'win32-x64'), `${math}.exe`)
+  assert.equal(profileRuntimeEntrypoint(`${math}.exe`, 'win32-x64'), `${math}.exe`)
+  assert.equal(profileRuntimeEntrypoint(migratory, 'win32-x64'), migratory)
+  assert.equal(profileRuntimeEntrypoint('plugins/demo/server/index.js', 'win32-x64'), 'plugins/demo/server/index.js')
+  assert.equal(profileRuntimeEntrypoint('plugins/demo/server/index.cjs', 'win32-x64'), 'plugins/demo/server/index.cjs')
+  assert.equal(profileRuntimeEntrypoint('plugins/demo/server/index.ts', 'win32-x64'), 'plugins/demo/server/index.ts')
+  assert.equal(profileRuntimeEntrypoint(math, 'darwin-arm64'), math)
+  assert.equal(profileRuntimeEntrypoint(`${math}.exe`, 'darwin-arm64'), math)
+  assert.equal(profileRuntimeEntrypoint(migratory, 'darwin-arm64'), migratory)
+})
+
+test('D1 win32 builder keeps Migratory Time .mjs and requires Math Anchor .exe', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-d1-win32-entry-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const { buildRequiredProfileTool } = await import('../scripts/build-unsigned-preview-catalog.mjs')
+  const artifactRoot = join(root, 'artifacts')
+  const workRoot = join(root, 'work')
+  await mkdir(artifactRoot, { recursive: true })
+
+  async function seedProfile(id, entrypointRelative, version, { windowsNative = false } = {}) {
+    const sourceRoot = join(root, 'sources', id)
+    const plugin = join(sourceRoot, 'plugins', id)
+    await mkdir(join(plugin, dirname(entrypointRelative)), { recursive: true })
+    await mkdir(join(plugin, '.codex-plugin'), { recursive: true })
+    await writeFile(join(plugin, '.codex-plugin/plugin.json'), `${JSON.stringify({ name: id, version }, null, 2)}\n`)
+    await writeFile(join(plugin, '.mcp.json'), `${JSON.stringify({ mcpServers: { [id]: { command: 'node', args: ['server.mjs'] } } }, null, 2)}\n`)
+    const onDisk = windowsNative ? `${entrypointRelative}.exe` : entrypointRelative
+    await mkdir(join(plugin, dirname(onDisk)), { recursive: true })
+    await writeFile(join(plugin, onDisk), windowsNative ? 'MZ-native-stub\n' : 'export {}\n')
+    await writeFile(join(sourceRoot, 'LICENSE'), 'Apache-2.0\n')
+    await writeFile(join(sourceRoot, 'NOTICE'), `${id}\n`)
+    return sourceRoot
+  }
+
+  const mathRoot = await seedProfile(
+    'math-anchor',
+    'runtime/math-anchor-runtime/math-anchor-runtime',
+    '0.7.1',
+    { windowsNative: true },
+  )
+  const timeRoot = await seedProfile('migratory-time', 'server/index.mjs', '2.0.0+codex.20260830163923')
+
+  const math = await buildRequiredProfileTool({
+    id: 'math-anchor',
+    kind: 'math-anchor',
+    sourceRoot: mathRoot,
+    pluginRelative: 'plugins/math-anchor',
+    identityFiles: [
+      'plugins/math-anchor/.codex-plugin/plugin.json',
+      'plugins/math-anchor/.mcp.json',
+    ],
+    entrypoint: 'plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime',
+    title: 'Math Anchor',
+    workRoot,
+    artifactRoot,
+    platform: 'win32-x64',
+    pins: { sources: { 'math-anchor': { expectedVersion: '0.7.1' } } },
+  })
+  assert.equal(math.id, 'math-anchor')
+  assert.equal(math.platform, 'win32-x64')
+
+  const migratory = await buildRequiredProfileTool({
+    id: 'migratory-time',
+    kind: 'migratory-time',
+    sourceRoot: timeRoot,
+    pluginRelative: 'plugins/migratory-time',
+    identityFiles: [
+      'plugins/migratory-time/.codex-plugin/plugin.json',
+      'plugins/migratory-time/.mcp.json',
+    ],
+    entrypoint: 'plugins/migratory-time/server/index.mjs',
+    title: 'Migratory Time',
+    workRoot,
+    artifactRoot,
+    platform: 'win32-x64',
+    pins: { sources: { 'migratory-time': { expectedVersion: '2.0.0+codex.20260830163923' } } },
+  })
+  assert.equal(migratory.id, 'migratory-time')
+  assert.equal(migratory.platform, 'win32-x64')
+
+  // Regression: pre-fix builder looked for server/index.mjs.exe and failed closed.
+  await assert.rejects(
+    () => buildRequiredProfileTool({
+      id: 'migratory-time',
+      kind: 'migratory-time',
+      sourceRoot: join(root, 'sources', 'missing-mjs-exe'),
+      pluginRelative: 'plugins/migratory-time',
+      identityFiles: ['plugins/migratory-time/.codex-plugin/plugin.json'],
+      entrypoint: 'plugins/migratory-time/server/index.mjs',
+      title: 'Migratory Time',
+      workRoot: join(root, 'work-missing'),
+      artifactRoot: join(root, 'artifacts-missing'),
+      platform: 'win32-x64',
+    }),
+    /migratory-time is required|SOURCE_ROOT|ARTIFACT/u,
+  )
 })

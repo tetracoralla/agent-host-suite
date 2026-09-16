@@ -136,13 +136,17 @@ jobs:
           # wins over SOURCE_ROOT in build-unsigned-preview-catalog.mjs.
           $entry = ".build/profile-sources/math-anchor/plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime.exe"
           if ($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT -and (Test-Path $env:AGENT_HOST_MATH_ANCHOR_ARTIFACT)) {
-            Write-Host "Using pre-supplied Math Anchor ARTIFACT at $($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT)"
+            $resolved = (Resolve-Path -LiteralPath $env:AGENT_HOST_MATH_ANCHOR_ARTIFACT).Path
+            Write-Host "Using pre-supplied Math Anchor ARTIFACT at $resolved"
+            # Step env does not cross steps; export absolute path for Package unsigned Windows ZIP.
+            "AGENT_HOST_MATH_ANCHOR_ARTIFACT=$resolved" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           } elseif ($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL) {
             New-Item -ItemType Directory -Force -Path .build/profile-artifacts | Out-Null
-            $dest = Join-Path $PWD ".build/profile-artifacts/math-anchor-windows.tgz"
+            $dest = (Join-Path $PWD ".build/profile-artifacts/math-anchor-windows.tgz")
             Write-Host "Downloading Math Anchor Windows ARTIFACT from configured URL"
             Invoke-WebRequest -Uri $env:AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL -OutFile $dest
-            "AGENT_HOST_MATH_ANCHOR_ARTIFACT=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            $resolved = (Resolve-Path -LiteralPath $dest).Path
+            "AGENT_HOST_MATH_ANCHOR_ARTIFACT=$resolved" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           } elseif (Test-Path $entry) {
             Write-Host "Math Anchor Windows runtime already present in the pinned checkout"
           } else {
@@ -166,7 +170,7 @@ jobs:
           AGENT_HOST_MATH_ANCHOR_ARTIFACT: ${{ env.AGENT_HOST_MATH_ANCHOR_ARTIFACT }}
           AGENT_HOST_MATH_ANCHOR_VERSION: "0.7.1"
         run: |
-          # Catalog builder prefers ARTIFACT over SOURCE_ROOT and appends .exe on win32.
+          # Catalog builder prefers ARTIFACT over SOURCE_ROOT; native win32 binaries get .exe, JS entrypoints do not.
           node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
           $ids = (Get-Content -Raw .build/unsigned-catalog/current.json | ConvertFrom-Json).components.id -join ','
           $env:AGENT_HOST_BUNDLED_COMPONENTS = $ids
