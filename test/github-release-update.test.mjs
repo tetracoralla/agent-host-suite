@@ -584,7 +584,7 @@ test('failed replacement start restores the previous application and keeps the b
   assert.equal(await readFile(join(`${app}.previous`, 'marker'), 'utf8'), 'working-old')
 })
 
-test('macOS .app replacement launch uses Contents/MacOS, not bin/agent-host', async (t) => {
+test('macOS .app replacement launch uses Contents/MacOS, not bin/agent-host', { skip: process.platform === 'win32' }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-macos-launch-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const exec = join(root, 'Contents', 'MacOS', 'agent-host')

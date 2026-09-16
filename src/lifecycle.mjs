@@ -1762,7 +1762,12 @@ async function repairInstallationUnlocked(options, dependencies = {}, preparedPa
 }
 
 async function lockedLifecycle(options, dependencies, operation, callback) {
-  const paths = statePaths(resolveStateRoot(options.stateRoot))
+  // When an outer mutation already holds the lease (GitHub install, auto-update),
+  // reuse its canonical root so nested inventory commits do not re-acquire.
+  const lease = dependencies.lifecycleLease
+  const paths = typeof lease?.root === 'string'
+    ? statePaths(lease.root)
+    : statePaths(resolveStateRoot(options.stateRoot))
   return await withLifecycleMutation(paths, operation, { ...dependencies, migrateState: operation !== 'service.recover', recoverEnvironmentChange: true, environmentDryRun: options.dryRun === true }, (lockedDependencies, preparedPaths) =>
     callback(lockedDependencies, preparedPaths))
 }

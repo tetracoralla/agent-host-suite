@@ -601,11 +601,24 @@ function completedMutationCleanupFailure(operation, cleanupError, roots) {
 
 export async function withLifecycleMutation(paths, operation, dependencies, callback) {
   const inherited = dependencies.lifecycleLease
-  if (liveLeases.has(inherited) && (inherited.root === paths.root || inherited.requestedRoot === paths.root)) {
+  if (liveLeases.has(inherited)) {
     // Nested callers may still use the requested spelling (for example /var
-    // versus /private/var). Keep their state access in the canonical journal
-    // namespace already owned by the outer lease.
-    return await callback(dependencies, statePaths(inherited.root))
+    // versus /private/var after prepareStatePaths realpath). Keep their state
+    // access in the canonical journal namespace already owned by the outer lease.
+    let resolvedNested = paths.root
+    try {
+      resolvedNested = await realpath(paths.root)
+    } catch {
+      // Create-root flows may not have a followable path yet.
+    }
+    if (
+      inherited.root === paths.root
+      || inherited.requestedRoot === paths.root
+      || inherited.root === resolvedNested
+      || inherited.requestedRoot === resolvedNested
+    ) {
+      return await callback(dependencies, statePaths(inherited.root))
+    }
   }
   const lease = await acquireLifecycleLease(paths, operation, dependencies)
   let preparedPaths = statePaths(lease.root)

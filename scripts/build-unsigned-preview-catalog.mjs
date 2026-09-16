@@ -202,13 +202,42 @@ async function removeLinks(root) {
   await walk(root)
 }
 
+async function resolveNpmCli() {
+  if (typeof process.env.npm_execpath === 'string' && process.env.npm_execpath.length > 0) {
+    return process.env.npm_execpath
+  }
+  // Direct `node --test` / script invocation outside `npm run`.
+  for (const candidate of [
+    join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ]) {
+    if (await pathExists(candidate)) return candidate
+  }
+  return null
+}
+
 async function installProductionDependencies(root) {
-  await execFileAsync(process.platform === 'win32' ? 'npm.cmd' : 'npm', [
-    'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund',
-  ], {
-    cwd: root,
-    env: { ...process.env, npm_config_update_notifier: 'false' },
-  })
+  const npmCli = await resolveNpmCli()
+  const args = ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund']
+  if (npmCli !== null) {
+    await execFileAsync(process.execPath, [npmCli, ...args], {
+      cwd: root,
+      env: { ...process.env, npm_config_update_notifier: 'false' },
+    })
+  } else if (process.platform === 'win32') {
+    // Node refuses to spawn .cmd without a shell (EINVAL); keep production install.
+    await execFileAsync('npm.cmd', args, {
+      cwd: root,
+      env: { ...process.env, npm_config_update_notifier: 'false' },
+      shell: true,
+      windowsHide: true,
+    })
+  } else {
+    await execFileAsync('npm', args, {
+      cwd: root,
+      env: { ...process.env, npm_config_update_notifier: 'false' },
+    })
+  }
   const modules = join(root, 'node_modules')
   if (await pathExists(modules)) await removeLinks(modules)
 }
