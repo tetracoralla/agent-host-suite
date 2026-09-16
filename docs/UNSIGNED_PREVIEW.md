@@ -152,14 +152,17 @@ so `github.com/.../releases/download/...` may land on
 
 ## Unsigned preview workflow
 
-The live `.github/workflows/release.yml` may still contain the older
-notarization job until an account with the GitHub `workflow` scope copies
-[`unsigned-preview-release.yml`](unsigned-preview-release.yml) over it and
-copies [`scan-github-tools.yml`](scan-github-tools.yml) to
-`.github/workflows/scan-github-tools.yml`. The docs copies admit registered
-GitHub tools on a clean runner, package unsigned macOS/Windows carriers, and
-do **not** request Apple secrets. See [`UPDATES.md`](UPDATES.md).
-Do not copy Apple notarization jobs back into the live workflow.
+The live unsigned pipeline is
+[`.github/workflows/unsigned-preview-release.yml`](../.github/workflows/unsigned-preview-release.yml).
+A tracked copy lives at [`unsigned-preview-release.yml`](unsigned-preview-release.yml).
+Each platform job admits GitHub tools for that runner; native archives are not
+reused across operating systems. It does **not** request Apple secrets.
+The notarized [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+is a separate signed path and is not this preview. Copy
+[`scan-github-tools.yml`](scan-github-tools.yml) to
+`.github/workflows/scan-github-tools.yml` from an account with the GitHub
+`workflow` scope if catalog pin automation is not yet enabled. See
+[`UPDATES.md`](UPDATES.md).
 
 ## Non-goals
 

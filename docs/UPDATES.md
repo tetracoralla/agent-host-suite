@@ -55,13 +55,15 @@ list prereleases. GitHub `latest` never includes prerelease.
 
 ## Automation
 
-`docs/unsigned-preview-release.yml` is the unsigned preview pipeline. Copy it
-to `.github/workflows/release.yml` from an account with the GitHub `workflow`
-scope. It does not request Apple Developer ID or notary secrets. It admits
-registered GitHub tools on a clean runner, builds a catalog from official
-Node, this repository’s Host runtime packages, and those admitted tools
-(not test fixtures), packages unsigned macOS/Windows carriers, and publishes
-a prerelease only after those jobs succeed.
+`.github/workflows/unsigned-preview-release.yml` is the unsigned preview
+pipeline (tracked copy: `docs/unsigned-preview-release.yml`). It does not
+request Apple Developer ID or notary secrets. Each platform job admits
+registered GitHub tools for that runner, builds a catalog from official Node,
+this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer
+adapters, and those admitted tools (not test fixtures), packages unsigned
+macOS/Windows carriers, and publishes a prerelease only after those jobs
+succeed. Native archives are not reused across operating systems. The
+notarized `.github/workflows/release.yml` remains a separate signed path.
 
 `docs/scan-github-tools.yml` refreshes catalog pins and opens or updates one
 catalog PR; copy it to `.github/workflows/scan-github-tools.yml` with the same

@@ -1,8 +1,8 @@
-# Copy to .github/workflows/release.yml (and copy docs/scan-github-tools.yml
-# to .github/workflows/scan-github-tools.yml) from an account with the
-# GitHub `workflow` scope. This is an unsigned preview. It must not request
-# Apple Developer ID or notary secrets. Gatekeeper (Control-click → Open)
-# remains required.
+# Tracked copy of .github/workflows/unsigned-preview-release.yml.
+# The notarized .github/workflows/release.yml remains a separate signed path
+# and requires Apple secrets. This unsigned preview must not request them.
+# Each platform job admits GitHub tools for that runner. Do not reuse another
+# OS archive and relabel it. Gatekeeper (Control-click → Open) remains required.
 
 name: Unsigned preview release
 
@@ -15,24 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  github-tools:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.16.0
-          cache: npm
-      - run: npm ci
-      - name: Admit registered GitHub tools from public Releases
-        run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
-      - uses: actions/upload-artifact@v4
-        with:
-          name: github-tools
-          path: .build/github-tools
-
   macos:
-    needs: github-tools
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
@@ -41,10 +24,8 @@ jobs:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
-      - uses: actions/download-artifact@v4
-        with:
-          name: github-tools
-          path: .build/github-tools
+      - name: Admit GitHub tools for this macOS runner
+        run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
       - name: Package unsigned macOS app from verified Host internals and admitted GitHub tools
         run: |
           node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
@@ -72,9 +53,9 @@ jobs:
           path: |
             .build/Agent-Host-*.dmg
             .build/SHA256SUMS
+            .build/unsigned-catalog/current.json
 
   windows:
-    needs: github-tools
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -84,10 +65,8 @@ jobs:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
-      - uses: actions/download-artifact@v4
-        with:
-          name: github-tools
-          path: .build/github-tools
+      - name: Admit GitHub tools for this Windows runner
+        run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
       - name: Package unsigned Windows ZIP
         shell: pwsh
         env:
@@ -101,10 +80,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-unsigned
-          path: .build/windows/distribution/Agent-Host-*.zip
+          path: |
+            .build/windows/distribution/Agent-Host-*.zip
+            .build/unsigned-catalog/current.json
 
   publish:
-    needs: [github-tools, macos, windows]
+    needs: [macos, windows]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -116,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, and GitHub tools admitted from public Releases (see github-tools artifacts). It is not a test fixture.\n\nprofiles fetch --carrier downloads an installer; it does not replace or relaunch Agent Host. Use app update on a supported OS after comparing digests.'
+          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nEach platform job admitted GitHub tools for that runner. Native archives are not reused across operating systems.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer adapters, and GitHub tools admitted from public Releases for that platform. It is not a test fixture.\n\nprofiles fetch --carrier downloads an installer. agent-host app update on a supported OS mounts or unpacks the carrier, replaces the installed application, and relaunches it after comparing digests.'
           files=()
           while IFS= read -r path; do files+=("$path"); done < <(find .build/release-assets -type f)
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \

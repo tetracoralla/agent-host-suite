@@ -4,7 +4,7 @@ import { readJson, writePrivateJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { prepareStatePaths } from './state.mjs'
 import { readUpdatePreferences } from './update-preferences.mjs'
-import { inspectToolUpdates, updateGitHubTool } from './tool-updates.mjs'
+import { inspectToolUpdates, updateGitHubTool, downloadGitHubToolUpdate } from './tool-updates.mjs'
 import { checkApplicationUpdate, updateApplication } from './application-update.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
 import { statePaths } from './state.mjs'
@@ -58,42 +58,66 @@ export async function executeAutoUpdates(stateRoot, options = {}, dependencies =
     return { status: 'skipped', reason: 'recent', preferences, journal }
   }
   const paths = statePaths(resolveStateRoot(stateRoot))
-  return withLifecycleMutation(paths, 'updates.auto', dependencies, async () => {
+  return withLifecycleMutation(paths, 'updates.auto', dependencies, async (locked) => {
     await writeJournal(stateRoot, { phase: 'checking', lastRunAt: new Date(now).toISOString() })
     const tools = await inspectToolUpdates(stateRoot, {
       fetch: options.fetch,
       signal: options.signal,
       persist: true,
-    })
+    }, locked)
     const application = await checkApplicationUpdate({
       fetch: options.fetch,
       signal: options.signal,
       channel: preferences.channel,
       currentVersion: options.currentVersion,
+      platform: options.platform,
     }).catch((error) => ({
       availability: 'check-failed',
       error: { code: error instanceof AgentHostError ? error.code : 'GITHUB_REQUEST_FAILED', message: error instanceof Error ? error.message : String(error) },
     }))
     const downloaded = []
     const installed = []
-    if (preferences.autoDownload === true && application.availability === 'update-available') {
-      downloaded.push(await updateApplication({
-        stateRoot,
-        fetch: options.fetch,
-        signal: options.signal,
-        channel: preferences.channel,
-        currentVersion: options.currentVersion,
-        dryRun: preferences.autoInstall !== true,
-      }, dependencies))
-    }
     if (preferences.autoInstall === true) {
+      if (application.availability === 'update-available') {
+        installed.push(await updateApplication({
+          stateRoot,
+          fetch: options.fetch,
+          signal: options.signal,
+          channel: preferences.channel,
+          currentVersion: options.currentVersion,
+          platform: options.platform,
+          dryRun: false,
+        }, locked))
+      }
       for (const tool of tools.filter((item) => item.availability === 'update-available')) {
         installed.push(await updateGitHubTool({
           stateRoot,
           target: tool.id,
           fetch: options.fetch,
           signal: options.signal,
-        }, dependencies))
+          probe: options.probe,
+        }, locked))
+      }
+    } else if (preferences.autoDownload === true) {
+      if (application.availability === 'update-available') {
+        downloaded.push(await updateApplication({
+          stateRoot,
+          fetch: options.fetch,
+          signal: options.signal,
+          channel: preferences.channel,
+          currentVersion: options.currentVersion,
+          platform: options.platform,
+          downloadOnly: true,
+          dryRun: false,
+        }, locked))
+      }
+      for (const tool of tools.filter((item) => item.availability === 'update-available')) {
+        downloaded.push(await downloadGitHubToolUpdate({
+          stateRoot,
+          target: tool.id,
+          fetch: options.fetch,
+          signal: options.signal,
+        }, locked))
       }
     }
     const result = {
@@ -116,6 +140,7 @@ export async function executeAutoUpdates(stateRoot, options = {}, dependencies =
         application: application.availability,
         toolsChecked: tools.length,
         installed: installed.length,
+        downloaded: downloaded.length,
       },
     })
     return result

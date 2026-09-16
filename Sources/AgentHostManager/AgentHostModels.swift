@@ -2,6 +2,7 @@ import Foundation
 
 struct ToolLogo: Decodable, Equatable, Sendable {
     let path: String?
+    let absolutePath: String?
     let mediaType: String?
     let sha256: String?
     let bytes: Int?

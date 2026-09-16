@@ -13,7 +13,13 @@ import { wrapGitHubPluginArchive } from '../src/github-plugin-wrap.mjs'
 import { admitGitHubRelease, previewGitHubProject } from '../src/github-project.mjs'
 import { inspectToolUpdates, updateAvailability, updateGitHubTool } from '../src/tool-updates.mjs'
 import { MAX_COMPONENT_DESCRIPTOR_BYTES } from '../src/release-artifacts.mjs'
-import { applyDirectorySwapUpdate, updateApplication, verifyReplacedApplication } from '../src/application-update.mjs'
+import {
+  applyDirectorySwapUpdate,
+  recoverApplicationUpdate,
+  resolveReplacedApplicationLaunch,
+  updateApplication,
+  verifyReplacedApplication,
+} from '../src/application-update.mjs'
 import { githubOrigin, writeToolSources } from '../src/tool-sources.mjs'
 import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 import { inspectFeaturedReadiness } from '../src/featured-readiness.mjs'
@@ -576,6 +582,147 @@ test('failed replacement start restores the previous application and keeps the b
   assert.equal(failure, 'APPLICATION_UPDATE_RELAUNCH_FAILED')
   assert.equal(await readFile(join(app, 'marker'), 'utf8'), 'working-old')
   assert.equal(await readFile(join(`${app}.previous`, 'marker'), 'utf8'), 'working-old')
+})
+
+test('macOS .app replacement launch uses Contents/MacOS, not bin/agent-host', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-macos-launch-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const exec = join(root, 'Contents', 'MacOS', 'agent-host')
+  await write(exec, `#!/bin/sh\necho 0.2.1\n`, 0o755)
+  const launch = await resolveReplacedApplicationLaunch({ root, args: ['--version'] })
+  assert.equal(launch.command, exec)
+  const verified = await verifyReplacedApplication({ root, expectedVersion: '0.2.1' })
+  assert.match(verified.output, /0\.2\.1/u)
+})
+
+test('public application update stages a directory carrier and replaces the installed root', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-app-apply-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const current = join(root, 'current')
+  const stagedSource = join(root, 'payload')
+  const stateRoot = join(root, 'state')
+  await writeApplicationVersionFixture(current, '0.2.0')
+  await writeApplicationVersionFixture(stagedSource, '0.2.1')
+  const archive = join(root, 'Agent-Host-0.2.1-directory.tar.gz')
+  await execFileAsync(tar, ['-czf', archive, '-C', stagedSource, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } })
+  const payload = await readFile(archive)
+  const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`
+  const result = await updateApplication({
+    stateRoot,
+    currentVersion: '0.2.0',
+    currentRoot: current,
+    platform: 'directory',
+    relaunch: false,
+    fetch: async (url) => {
+      const href = String(url)
+      if (href.includes('/releases/latest')) {
+        return jsonResponse({
+          tag_name: 'v0.2.1',
+          html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',
+          prerelease: false,
+          draft: false,
+          assets: [{
+            name: 'Agent-Host-0.2.1-directory.tar.gz',
+            browser_download_url: 'https://github.com/tetracoralla/agent-host-suite/releases/download/v0.2.1/Agent-Host-0.2.1-directory.tar.gz',
+            size: payload.length,
+            digest,
+          }],
+        })
+      }
+      return new Response(payload, { headers: { 'content-type': 'application/gzip' } })
+    },
+  }, {
+    resolver: async () => ({ kind: 'directory', root: current, version: '0.2.0' }),
+  })
+  assert.equal(result.applied, true)
+  assert.equal(result.downloaded?.sha256, digest)
+  const verified = await verifyReplacedApplication({ root: current, expectedVersion: '0.2.1' })
+  assert.match(verified.output, /0\.2\.1/u)
+})
+
+test('application recovery does not interrupt a live update and recovered is idempotent', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-app-recover-live-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const current = join(root, 'current')
+  const previous = join(root, 'previous')
+  const stateRoot = join(root, 'state')
+  await writeApplicationVersionFixture(current, 'new-in-progress')
+  await writeApplicationVersionFixture(previous, 'old')
+  const { writePrivateJson } = await import('../src/json.mjs')
+  const { prepareStatePaths } = await import('../src/state.mjs')
+  const paths = await prepareStatePaths(stateRoot)
+  await writePrivateJson(join(paths.root, 'application-update.json'), {
+    schemaVersion: 'openadam.agent-host-application-update-state.v0.1',
+    phase: 'verifying',
+    channel: 'stable',
+    fromVersion: 'old',
+    toVersion: 'new-in-progress',
+    currentRoot: current,
+    previousRoot: previous,
+    pid: process.pid,
+    processStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+  const live = await recoverApplicationUpdate(stateRoot)
+  assert.equal(live.recovered, false)
+  assert.equal(live.live, true)
+  assert.equal(await readFile(join(current, 'app/bin/agent-host.mjs'), 'utf8').then((text) => text.includes('new-in-progress')), true)
+  const { writePrivateJson: writeJournal } = await import('../src/json.mjs')
+  await writeJournal(join(paths.root, 'application-update.json'), {
+    schemaVersion: 'openadam.agent-host-application-update-state.v0.1',
+    phase: 'recovered',
+    channel: 'stable',
+    fromVersion: 'old',
+    toVersion: 'new-in-progress',
+    currentRoot: current,
+    previousRoot: previous,
+    pid: process.pid,
+    processStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+    updatedAt: new Date().toISOString(),
+    error: { code: 'APPLICATION_UPDATE_INTERRUPTED', message: 'restored' },
+  })
+  await write(join(current, 'marker'), 'later-user-restored-version')
+  const again = await recoverApplicationUpdate(stateRoot)
+  assert.equal(again.recovered, false)
+  assert.equal(await readFile(join(current, 'marker'), 'utf8'), 'later-user-restored-version')
+})
+
+test('auto-download stores a verified installer instead of a dry-run preview', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-auto-download-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const { executeAutoUpdates } = await import('../src/auto-update.mjs')
+  const { setUpdatePreferences } = await import('../src/update-preferences.mjs')
+  const payload = Buffer.from('verified-application-carrier')
+  const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`
+  await setUpdatePreferences(root, { autoCheck: true, autoDownload: true, autoInstall: false })
+  const result = await executeAutoUpdates(root, {
+    force: true,
+    currentVersion: '0.2.0',
+    platform: 'directory',
+    fetch: async (url) => {
+      const href = String(url)
+      if (href.includes('/releases/latest') || href.includes('/releases/tags/')) {
+        return jsonResponse({
+          tag_name: 'v0.2.1',
+          html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',
+          prerelease: false,
+          draft: false,
+          assets: [{
+            name: 'Agent-Host-0.2.1-directory.tar.gz',
+            browser_download_url: 'https://github.com/tetracoralla/agent-host-suite/releases/download/v0.2.1/Agent-Host-0.2.1-directory.tar.gz',
+            size: payload.length,
+            digest,
+          }],
+        })
+      }
+      return new Response(payload, { headers: { 'content-type': 'application/gzip' } })
+    },
+  }, { resolver: async () => null })
+  assert.equal(result.status, 'ok')
+  assert.equal(result.downloaded[0].dryRun, false)
+  assert.equal(result.downloaded[0].applied, false)
+  assert.equal(result.downloaded[0].downloaded.sha256, digest)
+  assert.equal((await stat(result.downloaded[0].downloaded.path)).size, payload.length)
 })
 
 test('wrapper and importer share a descriptor bound that admits a real plugin install', async (t) => {

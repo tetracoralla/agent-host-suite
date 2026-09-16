@@ -202,7 +202,8 @@ do {
     let updates = try JSONDecoder().decode(UpdatesReport.self, from: updatesPayload)
     expect(updates.items?.first?.availability == "update-available", "update reports must keep item availability")
     expect(updates.items?.first?.logo?.mediaType == "image/svg+xml", "update reports must keep logo metadata")
-    let summaryWithLogo = ComponentSummary(version: "1.0.0", displayName: "Glyphmark", logo: ToolLogo(path: "logo.svg", mediaType: "image/svg+xml", sha256: nil, bytes: 12, dataUrl: nil, source: nil))
+    let summaryWithLogo = ComponentSummary(version: "1.0.0", displayName: "Glyphmark", logo: ToolLogo(path: "logo.svg", absolutePath: "/tmp/logo.svg", mediaType: "image/svg+xml", sha256: nil, bytes: 12, dataUrl: nil, source: nil))
+    expect(summaryWithLogo.logo?.absolutePath == "/tmp/logo.svg", "installed logos must expose a verified filesystem path")
     expect(summaryWithLogo.logo?.path == "logo.svg", "component summaries must carry logo metadata")
     expect(ManagerSection.primaryCases.contains(.updates), "Manager sidebar must include Updates")
     expect(

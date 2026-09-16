@@ -456,7 +456,7 @@ async function localArtifactObservation(path, runner) {
   const releaseComponent = {
     id: descriptor?.id,
     version: descriptor?.version,
-    platform: 'local',
+    platform: currentReleasePlatformOrLocal(),
     artifact: {
       url: pathToFileURL(artifactPath).href,
       sha256: await digestFile(artifactPath),

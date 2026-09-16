@@ -164,9 +164,7 @@ export function validateReleaseManifest(manifest) {
   for (const component of manifest.components) validateComponent(component, manifest.status)
   const selected = manifest.components.filter((item) => item.platform === currentReleasePlatform())
   const ids = selected.map((item) => item.id).sort()
-  const required = manifest.status === 'unsigned-preview'
-    ? ['node-runtime', 'direct-execution-runtime']
-    : REQUIRED_RELEASE_COMPONENTS
+  const required = REQUIRED_RELEASE_COMPONENTS
   const missing = required.filter((id) => !ids.includes(id))
   const invalid = ids.filter((id) => !/^[a-z][a-z0-9-]*$/u.test(id))
   const observabilityCount = OBSERVABILITY_RELEASE_COMPONENTS.filter((id) => ids.includes(id)).length

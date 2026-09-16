@@ -26,6 +26,7 @@ import { FEATURED_CATALOG_DOWNLOAD_ENV, resolveReleaseManifestPath } from './pre
 import { catalogSourceConfigured, readCatalogSource } from './source-status.mjs'
 import { loadReleaseProvenance } from './release-provenance.mjs'
 import { FEATURED_PROFILE_ID, hostFacingManifest, isAgentToolsPaused, loadProfile, selectAgentComponents, toolExposure } from './profile.mjs'
+import { presentInstalledLogo } from './tool-presentation.mjs'
 import { inspectOperationsSkill, installOperationsSkill, preflightOperationsSkill, uninstallOperationsSkill } from './host-operations-skill.mjs'
 import { checkApplicationState } from './state-migration.mjs'
 import { validateComponentPathGrants } from './component-environment.mjs'
@@ -1288,19 +1289,19 @@ export async function toolSetStatus(options = {}) {
     paused,
     exposure: paused ? 'paused' : 'working-set',
     resumeAgentComponents: paused ? [...(state.resumeAgentComponents ?? [])] : undefined,
-    tools: available.map((id) => ({
+    tools: await Promise.all(available.map(async (id) => ({
       id,
       version: state.components[id]?.version ?? null,
       displayName: state.components[id]?.displayName ?? id,
       summary: state.components[id]?.summary ?? null,
       author: state.components[id]?.author ?? null,
       homepage: state.components[id]?.homepage ?? null,
-      logo: state.components[id]?.logo ?? null,
+      logo: await presentInstalledLogo(state.components[id]),
       origin: state.components[id]?.origin ?? null,
       private: state.privateComponents?.[id]?.current?.component !== undefined,
       active: active.includes(id),
       exposure: toolExposure(active.includes(id), paused),
-    })),
+    }))),
     freshSession: {
       requiredAfterChange: true,
       currentSessionUptake: 'not-observed',
@@ -1447,14 +1448,25 @@ async function transitionComponentInventoryUnlocked(options, inventory, dependen
   const paths = preparedPaths ?? await prepareStatePaths(resolveStateRoot(options.stateRoot))
   const previous = await loadState(paths)
   if (previous === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
+  const paused = inventory.agentToolsPaused === false
+    ? false
+    : inventory.agentToolsPaused === true || isAgentToolsPaused(previous)
   const available = [...inventory.availableAgentComponents]
-  const active = selectAgentComponents(available, inventory.agentComponents)
+  const requestedActive = selectAgentComponents(available, inventory.agentComponents)
+  const resumeAgentComponents = paused
+    ? [...new Set(inventory.resumeAgentComponents ?? previous.resumeAgentComponents ?? [])].filter((id) => available.includes(id))
+    : []
+  const active = paused ? [] : requestedActive
   const missing = Object.keys(inventory.components).filter((id) => inventory.components[id]?.root === undefined)
   if (missing.length > 0 || available.some((id) => inventory.components[id] === undefined)) {
     throw new AgentHostError('COMPONENT_INVENTORY_INVALID', 'The proposed component inventory is incomplete', { components: missing })
   }
   const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
-  const manifest = { components: inventory.components, agentComponents: active }
+  const manifest = {
+    components: inventory.components,
+    agentComponents: active,
+    ...pausedManifestFields(paused, resumeAgentComponents),
+  }
   await validateActiveComponentPathGrants(manifest)
   const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(manifest, active))
   if (options.dryRun === true) {
@@ -1477,16 +1489,17 @@ async function transitionComponentInventoryUnlocked(options, inventory, dependen
     activated = await activateState(paths, previous, manifest, runner, options, workspaceRoot, dependencies)
     const activatedAt = new Date().toISOString()
     next = {
-      ...previous,
+      ...omitPauseFields(previous),
       components: inventory.components,
       availableAgentComponents: available,
       agentComponents: active,
-      privateComponents: inventory.privateComponents,
+      privateComponents: inventory.privateComponents ?? previous.privateComponents ?? {},
       hosts: activated.hosts,
       runtime: activated.runtime,
       updatedAt: activatedAt,
       bindingsActivatedAt: activatedAt,
       workspaceRoot,
+      ...pausedManifestFields(paused, resumeAgentComponents),
     }
     if (next.observability?.enabled === true) await rebind(next, paths, runner)
     // Private component rollback is carried by `privateComponents[*].rollback`.

@@ -21,15 +21,18 @@ if (registryMode) {
   const catalog = await loadGitHubToolCatalog()
   const registry = await loadGitHubToolRegistry()
   const platform = supportedReleasePlatform()
+  if (platform === null) {
+    throw new Error('admit --registry requires a supported release platform; do not reuse another OS asset')
+  }
   for (const tool of registry.tools) {
     const pinned = catalog.tools.find((item) => item.id === tool.id)
     if (pinned === undefined) {
       results.push({ id: tool.id, status: 'skipped', reason: 'not in GitHub catalog pin' })
       continue
     }
-    const asset = platform === null ? Object.values(pinned.platforms)[0] : pinned.platforms[platform]
+    const asset = pinned.platforms[platform]
     if (asset === undefined) {
-      results.push({ id: tool.id, status: 'skipped', reason: `no asset for ${platform ?? 'this runner'}` })
+      results.push({ id: tool.id, status: 'skipped', reason: `no asset for ${platform}` })
       continue
     }
     const admitted = await admitGitHubRelease({

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct UpdatesView: View {
@@ -159,11 +160,28 @@ struct ToolLogoView: View {
             }
             .frame(width: 28, height: 28)
             .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else if let nsImage = verifiedInstalledImage {
+            Image(nsImage: nsImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
         } else {
             Image(systemName: systemImage)
                 .font(.title3)
                 .foregroundStyle(.blue)
                 .frame(width: 28, height: 28)
         }
+    }
+
+    private var verifiedInstalledImage: NSImage? {
+        guard let logo else { return nil }
+        let path = logo.absolutePath ?? (logo.path?.hasPrefix("/") == true ? logo.path : nil)
+        guard let path, FileManager.default.fileExists(atPath: path) else { return nil }
+        if let expected = logo.bytes {
+            let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? -1
+            if size != expected { return nil }
+        }
+        return NSImage(contentsOfFile: path)
     }
 }

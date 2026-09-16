@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { AgentHostError } from './errors.mjs'
+import { fetchGitHubRelease } from './github-api.mjs'
 import { currentReleasePlatform } from './release-manifest.mjs'
 
 export const GITHUB_TOOLS_SCHEMA = 'openadam.agent-host-github-tools.v0.1'
@@ -45,12 +46,78 @@ export async function loadGitHubToolRegistry() {
   return { ...value, tools }
 }
 
-export async function loadGitHubToolCatalog() {
-  const value = await readTrackedJson(CATALOG_URL, 'GitHub tool catalog')
+export function parseGitHubToolCatalog(value) {
   exactKeys(value, ['schemaVersion', 'catalogId', 'createdAt', 'channel', 'incompletePlatforms', 'tools'], 'GitHub tool catalog')
   if (value.schemaVersion !== GITHUB_CATALOG_SCHEMA) fail('GITHUB_CATALOG_INVALID', 'Unsupported GitHub tool catalog schema')
   if (!Array.isArray(value.tools)) fail('GITHUB_CATALOG_INVALID', 'GitHub tool catalog tools must be an array')
   return value
+}
+
+export async function loadBundledGitHubToolCatalog() {
+  return parseGitHubToolCatalog(await readTrackedJson(CATALOG_URL, 'GitHub tool catalog'))
+}
+
+export async function fetchPublishedGitHubCatalog({ fetch = globalThis.fetch, signal } = {}) {
+  const registry = await loadGitHubToolRegistry()
+  const tag = registry.host.catalogTag
+  const release = await fetchGitHubRelease(registry.host.repository, tag, { fetch, signal })
+  const asset = release.assets.find((item) => item.name === 'current.json')
+    ?? release.assets.find((item) => item.name === 'github-releases.json')
+    ?? release.assets.find((item) => item.name.endsWith('.json'))
+  if (asset === undefined) {
+    fail('GITHUB_CATALOG_UNAVAILABLE', 'The GitHub catalog tag does not include a catalog JSON asset')
+  }
+  let response
+  try {
+    response = await fetch(asset.url, {
+      method: 'GET',
+      redirect: 'follow',
+      signal,
+      headers: {
+        accept: 'application/json',
+        'user-agent': 'openAdam-agent-host-suite',
+      },
+    })
+  } catch (error) {
+    fail('GITHUB_NETWORK', `GitHub catalog could not be reached${error instanceof Error ? `: ${error.message}` : ''}`)
+  }
+  if (!response.ok) fail('GITHUB_CATALOG_UNAVAILABLE', 'The GitHub catalog asset could not be downloaded', { status: response.status })
+  const text = await response.text()
+  if (text.length > 2 * 1024 * 1024) fail('GITHUB_CATALOG_INVALID', 'The GitHub catalog exceeded the supported size')
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    fail('GITHUB_CATALOG_INVALID', 'The GitHub catalog asset is not valid JSON')
+  }
+  return {
+    catalog: parseGitHubToolCatalog(parsed),
+    source: {
+      kind: 'github-release',
+      repository: registry.host.repository,
+      tag,
+      assetName: asset.name,
+      url: asset.url,
+      digest: asset.digest ?? null,
+      fetchedAt: new Date().toISOString(),
+    },
+  }
+}
+
+export async function loadGitHubToolCatalog(options = {}) {
+  const bundled = await loadBundledGitHubToolCatalog()
+  if (options.bundledOnly === true) return bundled
+  try {
+    const live = await fetchPublishedGitHubCatalog({
+      fetch: options.fetch ?? globalThis.fetch,
+      signal: options.signal,
+    })
+    if (typeof options.onFetched === 'function') await options.onFetched(live)
+    return live.catalog
+  } catch {
+    if (options.fallbackCatalog !== undefined && options.fallbackCatalog !== null) return options.fallbackCatalog
+    return bundled
+  }
 }
 
 export function interpolateAssetName(pattern, { version, assetPlatform }) {
@@ -81,7 +148,7 @@ export async function findRegisteredTool(id) {
   return registry.tools.find((tool) => tool.id === id) ?? null
 }
 
-export async function findCatalogTool(id) {
-  const catalog = await loadGitHubToolCatalog()
+export async function findCatalogTool(id, options = {}) {
+  const catalog = await loadGitHubToolCatalog(options)
   return catalog.tools.find((tool) => tool.id === id) ?? null
 }

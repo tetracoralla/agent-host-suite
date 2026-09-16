@@ -1,5 +1,5 @@
-import { cp, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { cp, mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
 import { statePaths } from './state.mjs'
 import { AgentHostError } from './errors.mjs'
@@ -17,6 +17,8 @@ export const APPLICATION_UPDATE_SCHEMA = 'openadam.agent-host-application-update
 export const APPLICATION_UPDATE_STATE_SCHEMA = 'openadam.agent-host-application-update-state.v0.1'
 
 const HOST_REPO = 'tetracoralla/agent-host-suite'
+const TERMINAL_PHASES = new Set(['idle', 'complete', 'recovered'])
+const LIVE_PHASES = new Set(['downloading', 'downloaded', 'staging', 'replacing', 'verifying', 'relaunching'])
 
 function fail(code, message, details) {
   throw new AgentHostError(code, message, details)
@@ -36,9 +38,36 @@ function emptyJournal() {
     carrierPath: null,
     stagedRoot: null,
     previousRoot: null,
+    currentRoot: null,
     error: null,
+    pid: null,
+    processStartedAt: null,
     updatedAt: null,
   }
+}
+
+function ownerFields() {
+  return {
+    pid: process.pid,
+    processStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+  }
+}
+
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid < 1) return false
+  if (pid === process.pid) return true
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false
+    if (error?.code === 'EPERM') return true
+    throw error
+  }
+}
+
+function journalOwnerAlive(journal) {
+  return LIVE_PHASES.has(journal.phase) && processIsAlive(journal.pid)
 }
 
 export async function readApplicationUpdateJournal(stateRoot) {
@@ -51,7 +80,13 @@ export async function readApplicationUpdateJournal(stateRoot) {
 
 async function writeJournal(stateRoot, value) {
   const paths = await prepareStatePaths(resolveStateRoot(stateRoot))
-  const record = { ...emptyJournal(), ...value, schemaVersion: APPLICATION_UPDATE_STATE_SCHEMA, updatedAt: new Date().toISOString() }
+  const record = {
+    ...emptyJournal(),
+    ...value,
+    ...ownerFields(),
+    schemaVersion: APPLICATION_UPDATE_STATE_SCHEMA,
+    updatedAt: new Date().toISOString(),
+  }
   await writePrivateJson(journalPath(paths.root), record)
   return record
 }
@@ -181,8 +216,19 @@ export async function applyDirectorySwapUpdate({
   return { currentRoot, previousRoot: backup, kind: 'directory-swap' }
 }
 
+async function pathExists(path) {
+  return stat(path).then(() => true).catch((error) => {
+    if (error.code === 'ENOENT') return false
+    throw error
+  })
+}
+
 export async function resolveReplacedApplicationLaunch({ root, command, args = ['--version'] } = {}) {
   if (typeof command === 'string' && command.length > 0) return { command, args }
+  const macosExec = join(root, 'Contents', 'MacOS', 'agent-host')
+  if (await pathExists(macosExec)) {
+    return { command: macosExec, args }
+  }
   const cli = join(root, 'app', 'bin', 'agent-host.mjs')
   const bundledNode = join(root, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node')
   if (await pathExists(cli)) {
@@ -218,11 +264,20 @@ export async function verifyReplacedApplication({ root, expectedVersion, runner 
   return { version: expectedVersion, output }
 }
 
-async function pathExists(path) {
-  return stat(path).then(() => true).catch((error) => {
-    if (error.code === 'ENOENT') return false
-    throw error
+export async function relaunchReplacedApplication({ root, runner = runFile, command, args = [] } = {}) {
+  const launch = await resolveReplacedApplicationLaunch({ root, command, args })
+  const result = await runner(launch.command, launch.args, {
+    allowFailure: true,
+    timeoutMs: 15_000,
+    cwd: root,
+    maxBuffer: 64 * 1024,
   })
+  if (result.status !== 0 && result.status !== null) {
+    fail('APPLICATION_UPDATE_RELAUNCH_FAILED', 'The replaced application could not be restarted', {
+      output: [result.stderr, result.stdout].filter(Boolean).join('\n').slice(0, 2048),
+    })
+  }
+  return { command: launch.command, args: launch.args, status: result.status }
 }
 
 export async function restorePreviousApplication({ currentRoot, previousRoot }) {
@@ -241,18 +296,36 @@ export async function restorePreviousApplication({ currentRoot, previousRoot }) 
   return { currentRoot, previousRoot, restored: true }
 }
 
-export async function recoverApplicationUpdate(stateRoot) {
+async function recoverApplicationUpdateUnlocked(stateRoot) {
   const journal = await readApplicationUpdateJournal(stateRoot)
-  if (journal.phase === 'idle' || journal.phase === 'complete') return { ...journal, recovered: false }
+  if (TERMINAL_PHASES.has(journal.phase)) return { ...journal, recovered: false }
+  if (journalOwnerAlive(journal)) return { ...journal, recovered: false, live: true }
   if (typeof journal.previousRoot === 'string' && typeof journal.currentRoot === 'string' && await pathExists(journal.previousRoot)) {
     await restorePreviousApplication({ currentRoot: journal.currentRoot, previousRoot: journal.previousRoot })
-    return writeJournal(stateRoot, {
+    const recovered = await writeJournal(stateRoot, {
       ...journal,
       phase: 'recovered',
       error: { code: 'APPLICATION_UPDATE_INTERRUPTED', message: 'Application replacement was interrupted and the previous files were restored.' },
     })
+    return { ...recovered, recovered: true }
   }
-  return writeJournal(stateRoot, { ...journal, phase: 'failed' })
+  const failed = await writeJournal(stateRoot, { ...journal, phase: 'failed' })
+  return { ...failed, recovered: false }
+}
+
+export async function recoverApplicationUpdate(stateRoot, dependencies = {}) {
+  if (stateRoot === undefined) return { ...emptyJournal(), recovered: false }
+  if (dependencies.lifecycleLease !== undefined) return recoverApplicationUpdateUnlocked(stateRoot)
+  const paths = statePaths(resolveStateRoot(stateRoot))
+  try {
+    return await withLifecycleMutation(paths, 'application.recover', dependencies, () => recoverApplicationUpdateUnlocked(stateRoot))
+  } catch (error) {
+    if (error instanceof AgentHostError && error.code === 'LIFECYCLE_BUSY') {
+      const journal = await readApplicationUpdateJournal(stateRoot)
+      return { ...journal, recovered: false, live: true }
+    }
+    throw error
+  }
 }
 
 async function applyStagedReplacement(options, check, currentVersion, dependencies) {
@@ -271,7 +344,7 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
   })
   try {
     const applied = await applyDirectorySwapUpdate({ currentRoot, stagedRoot, previousRoot })
-    await writeJournal(options.stateRoot, { ...journal, phase: 'verifying', previousRoot: applied.previousRoot })
+    await writeJournal(options.stateRoot, { ...journal, phase: 'verifying', previousRoot: applied.previousRoot, currentRoot: applied.currentRoot })
     const verified = await verifyReplacedApplication({
       root: applied.currentRoot,
       expectedVersion: options.expectedVersion ?? check.availableVersion,
@@ -279,18 +352,107 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
       command: options.verifyCommand,
       args: options.verifyArgs ?? ['--version'],
     })
-    await writeJournal(options.stateRoot, { ...journal, phase: 'complete', previousRoot: applied.previousRoot })
-    return { ...check, applied: true, replacement: applied, verified, journal: 'complete' }
+    await writeJournal(options.stateRoot, { ...journal, phase: 'relaunching', previousRoot: applied.previousRoot, currentRoot: applied.currentRoot })
+    const relaunched = options.relaunch === false
+      ? { skipped: true }
+      : await relaunchReplacedApplication({
+        root: applied.currentRoot,
+        runner: dependencies.runner,
+        command: options.relaunchCommand ?? options.verifyCommand,
+        args: options.relaunchArgs ?? [],
+      })
+    await writeJournal(options.stateRoot, { ...journal, phase: 'complete', previousRoot: applied.previousRoot, currentRoot: applied.currentRoot })
+    return { ...check, applied: true, replacement: applied, verified, relaunched, journal: 'complete' }
   } catch (error) {
-    await recoverApplicationUpdate(options.stateRoot)
+    const backup = previousRoot
+    if (typeof options.currentRoot === 'string' && typeof backup === 'string' && await pathExists(backup)) {
+      await restorePreviousApplication({ currentRoot: options.currentRoot, previousRoot: backup }).catch(() => {})
+      await writeJournal(options.stateRoot, {
+        ...journal,
+        phase: 'failed',
+        error: { code: error instanceof AgentHostError ? error.code : 'APPLICATION_UPDATE_FAILED', message: error instanceof Error ? error.message : String(error) },
+      })
+    }
     throw error
   }
 }
 
+function tarCommand() {
+  return process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar'
+}
+
+export async function findStagedApplicationRoot(destination) {
+  const macosExec = join(destination, 'Contents', 'MacOS', 'agent-host')
+  if (await pathExists(macosExec)) return destination
+  const windowsCli = join(destination, 'app', 'bin', 'agent-host.mjs')
+  if (await pathExists(windowsCli)) return destination
+  const directoryCli = join(destination, 'app', 'bin', 'agent-host.mjs')
+  if (await pathExists(directoryCli)) return destination
+  const entries = await readdir(destination, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries.filter((item) => item.isDirectory())) {
+    const child = join(destination, entry.name)
+    if (entry.name.endsWith('.app') && await pathExists(join(child, 'Contents', 'MacOS', 'agent-host'))) return child
+    const nested = await findStagedApplicationRoot(child).catch(() => null)
+    if (typeof nested === 'string') return nested
+  }
+  return destination
+}
+
+export async function stageApplicationCarrier({
+  carrierPath,
+  destination,
+  runner = runFile,
+} = {}) {
+  if (typeof carrierPath !== 'string' || typeof destination !== 'string') {
+    fail('APPLICATION_UPDATE_INVALID', 'Application staging requires a downloaded carrier and destination')
+  }
+  await rm(destination, { recursive: true, force: true })
+  await mkdir(destination, { recursive: true, mode: 0o700 })
+  const name = basename(carrierPath)
+  if (name.endsWith('.dmg')) {
+    if (process.platform !== 'darwin') {
+      fail('APPLICATION_UPDATE_STAGE_UNAVAILABLE', 'Mounting a macOS disk image requires macOS')
+    }
+    const mountpoint = `${destination}.mount`
+    await rm(mountpoint, { recursive: true, force: true })
+    await mkdir(mountpoint, { recursive: true, mode: 0o700 })
+    try {
+      await runner('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', mountpoint, carrierPath], {
+        timeoutMs: 60_000,
+        maxBuffer: 64 * 1024,
+      })
+      const entries = await readdir(mountpoint)
+      const app = entries.find((item) => item.endsWith('.app'))
+      if (app === undefined) fail('APPLICATION_UPDATE_STAGE_UNAVAILABLE', 'The disk image does not contain Agent Host.app')
+      await cp(join(mountpoint, app), join(destination, app), { recursive: true })
+    } finally {
+      await runner('hdiutil', ['detach', mountpoint, '-force'], { allowFailure: true, timeoutMs: 30_000 }).catch(() => {})
+      await rm(mountpoint, { recursive: true, force: true }).catch(() => {})
+    }
+    return findStagedApplicationRoot(destination)
+  }
+  if (name.endsWith('.zip') || name.endsWith('.tar.gz') || name.endsWith('.tgz')) {
+    await runner(tarCommand(), ['-xf', carrierPath, '-C', destination], {
+      timeoutMs: 120_000,
+      maxBuffer: 64 * 1024,
+    })
+    return findStagedApplicationRoot(destination)
+  }
+  fail('APPLICATION_UPDATE_STAGE_UNAVAILABLE', `Unsupported application carrier: ${name}`)
+}
+
+async function runApply(options, check, currentVersion, dependencies) {
+  if (options.stateRoot === undefined) return applyStagedReplacement(options, check, currentVersion, dependencies)
+  const paths = statePaths(resolveStateRoot(options.stateRoot))
+  return withLifecycleMutation(paths, 'application.update', dependencies, async (locked) => (
+    applyStagedReplacement(options, check, currentVersion, locked)
+  ))
+}
+
 export async function updateApplication(options = {}, dependencies = {}) {
   const platform = options.platform ?? supportedReleasePlatform()
-  if (options.stateRoot !== undefined) {
-    await recoverApplicationUpdate(options.stateRoot).catch(() => {})
+  if (options.stateRoot !== undefined && options.skipRecovery !== true) {
+    await recoverApplicationUpdate(options.stateRoot, dependencies).catch(() => {})
   }
   const installed = await (dependencies.resolver ?? resolveApplicationCarrier)(options)
   const currentVersion = options.currentVersion
@@ -304,22 +466,14 @@ export async function updateApplication(options = {}, dependencies = {}) {
     platform,
   })
   if (options.dryRun === true) {
-    return { ...check, dryRun: true, applied: false, note: `${check.note} This is a preview; files were not replaced.` }
+    return { ...check, dryRun: true, applied: false, downloaded: null, note: `${check.note} This is a preview; files were not replaced.` }
   }
   if (check.availability === 'current') return { ...check, applied: false }
   if (check.availability === 'check-failed') return check
 
-  const runApply = async (payload) => {
-    if (options.stateRoot === undefined) return applyStagedReplacement(payload, check, currentVersion, dependencies)
-    const paths = statePaths(resolveStateRoot(options.stateRoot))
-    return withLifecycleMutation(paths, 'application.update', dependencies, async () => (
-      applyStagedReplacement(payload, check, currentVersion, dependencies)
-    ))
-  }
-
   if ((options.applyKind === 'directory-swap' || (typeof options.currentRoot === 'string' && typeof options.stagedRoot === 'string'))
     && typeof options.currentRoot === 'string' && typeof options.stagedRoot === 'string') {
-    return runApply(options)
+    return runApply(options, check, currentVersion, dependencies)
   }
 
   let downloaded = null
@@ -356,20 +510,67 @@ export async function updateApplication(options = {}, dependencies = {}) {
     })
   }
 
-  if (installed !== null && typeof installed.root === 'string' && (process.platform === 'darwin' || process.platform === 'win32') && typeof options.stagedRoot === 'string') {
-    return runApply({
-      ...options,
-      applyKind: 'directory-swap',
-      currentRoot: installed.root,
-      stagedRoot: options.stagedRoot,
-      carrierPath: downloaded?.path,
-    })
+  const downloadedRecord = downloaded === null ? null : { path: downloaded.path, sha256: downloaded.sha256, bytes: downloaded.bytes }
+
+  if (options.downloadOnly === true) {
+    return {
+      ...check,
+      applied: false,
+      downloaded: downloadedRecord,
+      dryRun: false,
+      note: downloaded === null
+        ? check.note
+        : 'Installer downloaded and verified. It was not applied because only automatic download is enabled.',
+    }
+  }
+
+  const currentRoot = options.currentRoot ?? installed?.root
+  if (downloaded !== null && typeof currentRoot === 'string' && options.stateRoot !== undefined) {
+    const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+    const stagingHome = join(paths.downloads, `staged-${check.availableVersion}`)
+    try {
+      await writeJournal(options.stateRoot, {
+        phase: 'staging',
+        channel: check.channel,
+        fromVersion: currentVersion,
+        toVersion: check.availableVersion,
+        carrierPath: downloaded.path,
+        currentRoot,
+        stagedRoot: stagingHome,
+      })
+      const stagedRoot = await stageApplicationCarrier({
+        carrierPath: downloaded.path,
+        destination: stagingHome,
+        runner: dependencies.runner ?? runFile,
+      })
+      return {
+        ...await runApply({
+          ...options,
+          applyKind: 'directory-swap',
+          currentRoot,
+          stagedRoot,
+          carrierPath: downloaded.path,
+        }, check, currentVersion, dependencies),
+        downloaded: downloadedRecord,
+      }
+    } catch (error) {
+      if (error instanceof AgentHostError && error.code === 'APPLICATION_UPDATE_STAGE_UNAVAILABLE') {
+        return {
+          ...check,
+          applied: false,
+          downloaded: downloadedRecord,
+          error: { code: error.code, message: error.message },
+          note: 'Installer downloaded and verified. This environment cannot mount or unpack that carrier to replace Agent Host.',
+        }
+      }
+      throw error
+    }
   }
 
   return {
     ...check,
     applied: false,
-    downloaded: downloaded === null ? null : { path: downloaded.path, sha256: downloaded.sha256, bytes: downloaded.bytes },
+    downloaded: downloadedRecord,
     availability: check.carrier === null ? 'no-platform-asset' : check.availability,
     candidate: check.carrier,
     verification: {
@@ -379,6 +580,6 @@ export async function updateApplication(options = {}, dependencies = {}) {
     },
     note: downloaded === null
       ? 'This environment cannot replace a macOS app or Windows install. Candidate metadata is returned instead of a mocked system replacement.'
-      : 'Installer downloaded and verified. Replacement runs when Agent Host is installed as a macOS app or Windows payload with a staged directory.',
+      : 'Installer downloaded and verified. Replacement runs when Agent Host is installed as a macOS app or Windows payload.',
   }
 }

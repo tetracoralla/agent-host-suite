@@ -407,7 +407,7 @@ function managerDocument() {
 @media(prefers-color-scheme:dark){:root{background:#0d0f12;color:#f1f2f4}.side{background:#08090b}.card,dialog{background:#17191e;border-color:#2b2f36;color:#f1f2f4}.row{border-color:#2b2f36}button.action,.setting-row select{background:#202329;border-color:#3a3f48;color:#f1f2f4}.muted,.sub{color:#9da4af}.busy{background:#0d0f12aa}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand">Agent Host</div><nav class="nav" id="nav"><button data-page="environment" aria-current="true"></button><button data-page="tools"></button><button data-page="updates"></button><button data-page="activity"></button><button data-page="usage"></button></nav><div class="side-footer"><button id="refreshButton"></button><button id="settingsButton"></button><div class="version" id="version"></div></div></aside><main class="main"><div id="error" class="notice hidden" role="alert"></div><section id="environment"></section><section id="tools" class="hidden"></section><section id="updates" class="hidden"></section><section id="usage" class="hidden"></section><section id="activity" class="hidden"></section></main></div><dialog id="settingsDialog"><h2 id="settingsTitle"></h2><label class="setting-row"><span id="languageLabel"></span><select id="languageSelect"></select></label><div id="versionPlanes"></div><div id="sourceSettings"></div><div class="actions"><button class="action primary" id="settingsDone"></button></div></dialog><div id="busy" class="busy hidden" role="status" aria-live="polite"><div id="busyText"></div></div>
 <script>
-const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};let data,languageSelection='system',changing=false,lastPreview=null,lastUpdates=null;
+const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};let data,languageSelection='system',changing=false,lastPreview=null,lastUpdates=null,lastGithubTarget='',lastGithubPreviewed='';
 const names={zcode:'ZCode',codex:'Codex',claude:'Claude Code','deepseek-harness':'DeepSeek Harness','gemini-cli':'Gemini CLI','github-copilot-cli':'GitHub Copilot CLI'};
 const zh={
 "Tool activity":"工具使用情况",
@@ -470,7 +470,7 @@ async function call(action,label){
     confirmed=true;
     if(action.action==='preferences'){languageSelection=action.language;applyChrome()}
     if(v.dashboard)acceptDashboard(v.dashboard);
-    if(action.action==='github'&&action.preview) lastPreview=v.result;
+    if(action.action==='github'&&action.preview){ lastPreview=v.result; lastGithubTarget=action.github; lastGithubPreviewed=action.github }
     if(action.action==='github'&&!action.preview) lastPreview=null;
     if(action.action==='updates-check'||action.action==='updates-install') lastUpdates=v.result;
     if(v.dashboard)render();
@@ -536,9 +536,14 @@ function renderUpdates(){
   }
   const add=card('Add GitHub project');
   const input=el('input');input.type='url';input.placeholder='https://github.com/owner/repo';input.setAttribute('aria-label',t('GitHub repository or Release URL'));
+  input.value=lastGithubTarget;
+  input.addEventListener('input',()=>{
+    lastGithubTarget=input.value;
+    if(lastPreview&&input.value.trim()!==lastGithubPreviewed) lastPreview=null;
+  });
   const previewActions=el('div',undefined,'actions');
-  previewActions.append(button('Preview GitHub project',()=>call({action:'github',github:input.value,preview:true},t('Previewing GitHub project…'))));
-  previewActions.append(button('Add from GitHub',()=>call({action:'github',github:input.value},t('Adding GitHub tool…')),'action primary'));
+  previewActions.append(button('Preview GitHub project',()=>call({action:'github',github:input.value||lastGithubTarget,preview:true},t('Previewing GitHub project…'))));
+  previewActions.append(button('Add from GitHub',()=>call({action:'github',github:input.value||lastGithubTarget},t('Adding GitHub tool…')),'action primary'));
   add.append(input,previewActions,el('p',t('Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it.'),'muted'));
   if(lastPreview?.presentation){
     const p=el('div',undefined,'row');

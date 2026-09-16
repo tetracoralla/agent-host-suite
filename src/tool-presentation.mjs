@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { extname, posix } from 'node:path'
+import { extname, join, posix } from 'node:path'
 import { AgentHostError } from './errors.mjs'
 import { integrationRelativePath } from './tool-integration.mjs'
 
@@ -133,6 +133,25 @@ export function bindPresentationLogo(presentation, { pluginRoot, files, digest, 
   return {
     ...rest,
     logo: { path: relative, sha256: digest, bytes, mediaType: type },
+  }
+}
+
+export async function presentInstalledLogo(component, fallback = null) {
+  const logo = component?.logo ?? fallback
+  if (logo === null || logo === undefined) return logo ?? null
+  if (typeof component?.root !== 'string' || typeof logo.path !== 'string') return logo
+  try {
+    const verified = await readVerifiedLogoBytes(component.root, logo)
+    if (verified === null) return logo
+    return {
+      ...logo,
+      absolutePath: join(component.root, ...String(logo.path).split('/')),
+      bytes: verified.bytes.length,
+      mediaType: verified.mediaType,
+      sha256: logo.sha256,
+    }
+  } catch {
+    return logo
   }
 }
 

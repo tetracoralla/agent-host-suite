@@ -140,12 +140,14 @@ async function buildNode(workRoot, artifactRoot, platform) {
   const root = join(workRoot, 'node-runtime')
   await mkdir(extracted, { recursive: true })
   await mkdir(join(root, 'bin'), { recursive: true })
-  await execFileAsync(tarCommand(), ['-xzf', cache, '-C', extracted])
+  await execFileAsync(tarCommand(), [archiveName.endsWith('.zip') ? '-xf' : '-xzf', cache, '-C', extracted])
   const entries = await readdir(extracted)
   const upstreamRoot = join(extracted, entries[0])
-  const nodeName = process.platform === 'win32' ? 'node.exe' : 'node'
-  await cp(join(upstreamRoot, 'bin', nodeName), join(root, 'bin', nodeName))
-  if (process.platform !== 'win32') await chmod(join(root, 'bin', nodeName), 0o755)
+  const nodeName = platform.startsWith('win32-') ? 'node.exe' : 'node'
+  const nodeSource = await officialNodeBinaryPath(upstreamRoot, platform)
+  await mkdir(join(root, 'bin'), { recursive: true })
+  await cp(nodeSource, join(root, 'bin', nodeName))
+  if (!platform.startsWith('win32-')) await chmod(join(root, 'bin', nodeName), 0o755)
   await cp(join(upstreamRoot, 'LICENSE'), join(root, 'LICENSE'))
   await writeFile(join(root, 'NOTICE'), `Node.js ${NODE_VERSION} official binary subset.\nUpstream: ${url}\n`, { mode: 0o600 })
   await cp(join(upstreamRoot, 'LICENSE'), join(root, 'THIRD_PARTY_NOTICES.txt'))
@@ -172,11 +174,50 @@ function failPlatform(value) {
   throw new Error(`Unsupported unsigned preview platform: ${value}`)
 }
 
-async function buildWorkspacePackage({ id, kind, source, entrypoint, workRoot, artifactRoot, platform, title }) {
+async function pathExists(path) {
+  return stat(path).then(() => true).catch((error) => error.code === 'ENOENT' ? false : Promise.reject(error))
+}
+
+export async function officialNodeBinaryPath(upstreamRoot, targetPlatform) {
+  const nodeName = targetPlatform.startsWith('win32-') ? 'node.exe' : 'node'
+  const windowsLayout = join(upstreamRoot, nodeName)
+  const unixLayout = join(upstreamRoot, 'bin', nodeName)
+  if (targetPlatform.startsWith('win32-')) {
+    if (await pathExists(windowsLayout)) return windowsLayout
+    if (await pathExists(unixLayout)) return unixLayout
+    throw new Error(`official Windows Node layout is missing ${nodeName} at the archive root`)
+  }
+  if (await pathExists(unixLayout)) return unixLayout
+  throw new Error(`official Node layout is missing bin/${nodeName}`)
+}
+
+async function removeLinks(root) {
+  async function walk(current) {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const path = join(current, entry.name)
+      if (entry.isSymbolicLink()) await rm(path, { force: true })
+      else if (entry.isDirectory()) await walk(path)
+    }
+  }
+  await walk(root)
+}
+
+async function installProductionDependencies(root) {
+  await execFileAsync(process.platform === 'win32' ? 'npm.cmd' : 'npm', [
+    'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund',
+  ], {
+    cwd: root,
+    env: { ...process.env, npm_config_update_notifier: 'false' },
+  })
+  const modules = join(root, 'node_modules')
+  if (await pathExists(modules)) await removeLinks(modules)
+}
+
+async function buildWorkspacePackage({ id, kind, source, entrypoint, workRoot, artifactRoot, platform, title, extraPaths = [], extraIdentityFiles = [], installDependencies = false }) {
   const root = join(workRoot, id)
-  for (const path of ['package.json', 'package-lock.json', 'src', 'LICENSE', 'NOTICE']) {
+  for (const path of ['package.json', 'package-lock.json', 'src', 'LICENSE', 'NOTICE', ...extraPaths]) {
     const from = join(source, path)
-    if (await stat(from).then(() => true).catch((error) => error.code === 'ENOENT' ? false : Promise.reject(error))) {
+    if (await pathExists(from)) {
       await cp(from, join(root, path), { recursive: true })
     }
   }
@@ -184,18 +225,32 @@ async function buildWorkspacePackage({ id, kind, source, entrypoint, workRoot, a
   if (await stat(schemas).then((info) => info.isDirectory()).catch(() => false)) {
     await cp(schemas, join(root, 'schemas'), { recursive: true })
   }
+  if (installDependencies === true && await pathExists(join(root, 'package-lock.json'))) {
+    await installProductionDependencies(root)
+  }
   await copyLegal(root, title)
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  const identityFiles = ['package.json', entrypoint, 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json', ...extraIdentityFiles]
   return finalizeComponent({
     root,
     id,
     version: pkg.version,
     kind,
-    identityFiles: ['package.json', entrypoint, 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json'],
+    identityFiles,
     entrypoints: { cli: entrypoint },
     artifactRoot,
     platform,
   })
+}
+
+export function githubAssetMatchesPlatform(name, descriptor, platform) {
+  const assetName = descriptor.origin?.assetName ?? name
+  const darwin = platform.startsWith('darwin-')
+  const windows = platform.startsWith('win32-')
+  if ((assetName.includes('macos-') || assetName.includes('darwin-')) && darwin !== true) return false
+  if ((assetName.includes('windows-') || assetName.includes('win32-')) && windows !== true) return false
+  if (typeof descriptor.platform === 'string' && descriptor.platform !== 'local' && descriptor.platform !== platform) return false
+  return true
 }
 
 async function importGithubTools(githubToolsRoot, artifactRoot, platform) {
@@ -209,6 +264,9 @@ async function importGithubTools(githubToolsRoot, artifactRoot, platform) {
       maxBuffer: 4 * 1024 * 1024,
     })
     const descriptor = JSON.parse(descriptorResult.stdout)
+    if (githubAssetMatchesPlatform(name, descriptor, platform) !== true) {
+      throw new Error(`${descriptor.id} was admitted for a different platform than ${platform}; each runner must download its own GitHub assets`)
+    }
     const destName = `${descriptor.id}-${descriptor.version}-${platform}.tar.gz`
     const dest = join(artifactRoot, destName)
     await cp(source, dest)
@@ -226,6 +284,64 @@ async function importGithubTools(githubToolsRoot, artifactRoot, platform) {
   return components
 }
 
+async function copyPluginTree(sourceRoot, destinationRoot) {
+  await cp(sourceRoot, destinationRoot, { recursive: true })
+}
+
+async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, identityFiles, entrypoint, workRoot, artifactRoot, platform, title }) {
+  if (sourceRoot === undefined || await pathExists(sourceRoot) !== true) {
+    throw new Error(`${id} is required for the unsigned preview catalog. Set AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_SOURCE_ROOT to a built plugin tree.`)
+  }
+  const pluginSource = join(sourceRoot, pluginRelative)
+  if (await pathExists(pluginSource) !== true) {
+    throw new Error(`${id} source does not contain ${pluginRelative}`)
+  }
+  const root = join(workRoot, id)
+  await mkdir(join(root, dirname(pluginRelative)), { recursive: true })
+  await copyPluginTree(pluginSource, join(root, pluginRelative))
+  const marketplace = join(sourceRoot, '.agents/plugins/marketplace.json')
+  const hostedMarketplace = join(sourceRoot, 'integrations/agent-host/marketplace.json')
+  if (await pathExists(marketplace)) {
+    await mkdir(join(root, '.agents/plugins'), { recursive: true })
+    await cp(marketplace, join(root, '.agents/plugins/marketplace.json'))
+  } else if (await pathExists(hostedMarketplace)) {
+    await mkdir(join(root, '.agents/plugins'), { recursive: true })
+    await cp(hostedMarketplace, join(root, '.agents/plugins/marketplace.json'))
+  }
+  await copyLegal(root, title)
+  const presentIdentity = []
+  for (const path of identityFiles) {
+    if (await pathExists(join(root, path))) presentIdentity.push(path)
+  }
+  if (!presentIdentity.includes(entrypoint) && await pathExists(join(root, entrypoint)) !== true) {
+    throw new Error(`${id} is missing its runtime entrypoint ${entrypoint}; build the plugin before including it in the unsigned catalog`)
+  }
+  const versionFile = join(root, pluginRelative, '.codex-plugin/plugin.json')
+  const plugin = await pathExists(versionFile)
+    ? JSON.parse(await readFile(versionFile, 'utf8'))
+    : { version: '0.0.0' }
+  return finalizeComponent({
+    root,
+    id,
+    version: plugin.version ?? '0.0.0',
+    kind,
+    identityFiles: [...new Set(['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json', ...presentIdentity, entrypoint].filter((path) => path !== undefined))],
+    entrypoints: { command: entrypoint },
+    artifactRoot,
+    platform,
+  })
+}
+
+function resolveProfileSource(id, fallbackRelative) {
+  const envName = `AGENT_HOST_${id.replaceAll('-', '_').toUpperCase()}_SOURCE_ROOT`
+  if (typeof process.env[envName] === 'string' && process.env[envName].length > 0) return process.env[envName]
+  const sibling = join(dirname(suiteRoot), fallbackRelative)
+  return sibling
+}
+
+export { buildWorkspacePackage, importGithubTools }
+
+export async function main() {
 const output = resolve(argument('--output', join(suiteRoot, '.build/unsigned-catalog')))
 const githubTools = argument('--github-tools')
 const platform = currentReleasePlatform(osPlatform(), arch())
@@ -247,6 +363,39 @@ try {
       workRoot,
       artifactRoot,
       platform,
+      installDependencies: true,
+    }),
+    await buildRequiredProfileTool({
+      id: 'math-anchor',
+      kind: 'math-anchor',
+      sourceRoot: resolveProfileSource('math-anchor', 'calculator'),
+      pluginRelative: 'plugins/math-anchor',
+      identityFiles: [
+        'plugins/math-anchor/.codex-plugin/plugin.json',
+        'plugins/math-anchor/.mcp.json',
+        'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json',
+      ],
+      entrypoint: 'plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime',
+      title: 'Math Anchor',
+      workRoot,
+      artifactRoot,
+      platform,
+    }),
+    await buildRequiredProfileTool({
+      id: 'migratory-time',
+      kind: 'migratory-time',
+      sourceRoot: resolveProfileSource('migratory-time', 'migratory-time'),
+      pluginRelative: 'plugins/migratory-time',
+      identityFiles: [
+        'plugins/migratory-time/.codex-plugin/plugin.json',
+        'plugins/migratory-time/.mcp.json',
+        'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json',
+      ],
+      entrypoint: 'plugins/migratory-time/server/index.mjs',
+      title: 'Migratory Time',
+      workRoot,
+      artifactRoot,
+      platform,
     }),
     await buildWorkspacePackage({
       id: 'agent-tool-observer',
@@ -257,6 +406,16 @@ try {
       workRoot,
       artifactRoot,
       platform,
+      extraPaths: ['adapters', 'integrations'],
+      extraIdentityFiles: [
+        'adapters/claude-code-hooks.json',
+        'adapters/claude-project-events.json',
+        'adapters/codex-session-events.json',
+        'adapters/deepseek-harness-session-events.json',
+        'adapters/gemini-cli-otel.json',
+        'adapters/github-copilot-cli-hooks.json',
+        'adapters/zcode-model-io.json',
+      ],
     }),
     await buildWorkspacePackage({
       id: 'context-surface-analyzer',
@@ -301,4 +460,11 @@ try {
   process.stdout.write(`${JSON.stringify({ status: 'ok', catalog: output, components: components.map((item) => item.id) }, null, 2)}\n`)
 } finally {
   await rm(workRoot, { recursive: true, force: true }).catch(() => {})
+}
+}
+
+const invokedAsCli = process.argv[1] !== undefined
+  && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+if (invokedAsCli) {
+  await main()
 }
