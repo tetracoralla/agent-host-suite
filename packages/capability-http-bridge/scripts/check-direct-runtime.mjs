@@ -40,6 +40,23 @@ const server = createServer(async (request, response) => {
   }))
 })
 
+
+const TRANSIENT_TEMP_RM_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'])
+
+async function rmTempTree(target) {
+  const maxAttempts = process.platform === 'win32' ? 10 : 1
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (error?.code === 'ENOENT') return
+      if (attempt + 1 >= maxAttempts || !TRANSIENT_TEMP_RM_CODES.has(error?.code)) throw error
+      await new Promise((done) => setTimeout(done, 50 * (attempt + 1)))
+    }
+  }
+}
+
 const root = await mkdtemp(resolve(tmpdir(), 'capability-http-direct-pilot-'))
 let runtime
 try {
@@ -137,5 +154,5 @@ try {
 } finally {
   if (runtime !== undefined) await runtime.close()
   await new Promise((resolveClose) => server.close(() => resolveClose()))
-  await rm(root, { recursive: true, force: true })
+  await rmTempTree(root)
 }

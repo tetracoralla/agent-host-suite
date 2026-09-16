@@ -46,6 +46,27 @@ for (const file of sourceFiles(path.join(repoRoot, "src", "providers"))) {
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 assert.deepEqual(packageJson.dependencies ?? {}, {}, "runtime dependencies must remain empty");
 
+
+const TRANSIENT_TEMP_RM_CODES = new Set(["EBUSY", "EPERM", "EACCES", "ENOTEMPTY"]);
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function rmTempTreeSync(target) {
+  const maxAttempts = process.platform === "win32" ? 10 : 1;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      if (attempt + 1 >= maxAttempts || !TRANSIENT_TEMP_RM_CODES.has(error?.code)) throw error;
+      sleepSync(50 * (attempt + 1));
+    }
+  }
+}
+
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tool-observer-contract-"));
 try {
   const config = resolveConfig({ ATO_STATE_DIR: path.join(temporary, "state") }, path.join(temporary, "home"));
@@ -67,7 +88,7 @@ try {
   assert.deepEqual(violations, [], "persisted schema contains raw-content fields");
   database.close();
 } finally {
-  fs.rmSync(temporary, { recursive: true, force: true });
+  rmTempTreeSync(temporary);
 }
 
 process.stdout.write("contract checks: ok\n");

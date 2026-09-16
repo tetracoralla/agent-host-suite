@@ -40,6 +40,37 @@ async function assertProcessesExited(pids) {
   }
 }
 
+const TRANSIENT_TEMP_RM_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'])
+
+async function rmTempTree(target) {
+  // Windows runners briefly lock freshly-installed trees (AV/indexer/npm). Retry
+  // the whole recursive remove with short backoff; never treat leftover temp as
+  // success without exhausting the bounded attempts.
+  const maxAttempts = process.platform === 'win32' ? 10 : 1
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (error?.code === 'ENOENT') return
+      if (attempt + 1 >= maxAttempts || !TRANSIENT_TEMP_RM_CODES.has(error?.code)) throw error
+      await new Promise((done) => setTimeout(done, 50 * (attempt + 1)))
+    }
+  }
+}
+
+function releaseChildHandles(child) {
+  if (child === undefined || child === null) return
+  try {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+  } catch {
+    // Best-effort: cleanup still retries the directory remove.
+  }
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    try { stream?.destroy() } catch { /* ignore */ }
+  }
+}
+
 function waitForJsonLine(child, timeoutMs = 10_000) {
   return new Promise((resolvePromise, reject) => {
     let stdout = ''
@@ -144,6 +175,7 @@ function packagedResolutionRequest() {
   }
 }
 
+let service
 try {
   const packed = await execFileAsync(process.execPath, [process.env.npm_execpath,'pack', '--json', '--pack-destination', directory], {
     cwd: root,
@@ -242,7 +274,7 @@ try {
   ) {
     throw new Error('installed config-backed resolver did not return the bounded exact candidate')
   }
-  const service = spawn(process.execPath, [installedCli, 'serve', '--config', configPath, '--socket', socketPath], {
+  service = spawn(process.execPath, [installedCli, 'serve', '--config', configPath, '--socket', socketPath], {
     cwd: consumer,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -315,5 +347,6 @@ try {
     },
   }) + '\n')
 } finally {
-  await rm(directory, { recursive: true, force: true })
+  releaseChildHandles(service)
+  await rmTempTree(directory)
 }
