@@ -646,7 +646,8 @@ test('R1 / F2 long-running Manager relaunch detaches and survives updater handof
   if (process.platform === 'win32') {
     const managerScript = join(staged, 'bin', 'manager-keepalive.mjs')
     await write(managerScript, `import { writeFileSync } from 'node:fs'
-writeFileSync(process.argv[1], String(process.pid))
+// argv[2] is pidPath when invoked as node script.mjs <pidPath>
+writeFileSync(process.argv[2], String(process.pid))
 setInterval(() => {}, 1000)
 `)
     // Layout realism only — relaunch uses explicit node below.

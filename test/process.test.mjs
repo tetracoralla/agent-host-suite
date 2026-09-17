@@ -149,7 +149,8 @@ test('startDetachedProcess launches a spaced Windows .cmd via cmd.exe and readyF
   const pidPath = join(root, 'alive.pid')
   const script = join(root, 'keepalive.mjs')
   await writeFile(script, `import { writeFileSync } from 'node:fs'
-writeFileSync(process.argv[1], String(process.pid))
+// argv[2] is pidPath when invoked as node script.mjs <pidPath>
+writeFileSync(process.argv[2], String(process.pid))
 setInterval(() => {}, 1000)
 `)
   const batch = join(root, 'Agent Host.cmd')
