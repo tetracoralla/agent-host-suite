@@ -157,7 +157,7 @@ setInterval(() => {}, 1000)
     batch,
     `@echo off\r\n"${process.execPath}" "${script}" "${pidPath}"\r\n`,
   )
-  // cmd.exe /d /c call <argv…> — Node quotes each arg (incl. spaced .cmd).
+  // shell:true — Node/cmd quotes spaced .cmd paths.
   // readyFile/probe is required when provided (no pid fallback).
   const started = await startDetachedProcess(batch, [], {
     confirmMs: 10_000,

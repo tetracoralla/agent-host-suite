@@ -119,37 +119,36 @@ function windowsBatchCommand(command) {
   return platform() === 'win32' && /\.(cmd|bat)$/iu.test(String(command))
 }
 
-function windowsComSpec() {
-  if (typeof process.env.ComSpec === 'string' && process.env.ComSpec.length > 0) {
-    return process.env.ComSpec
-  }
-  return win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe')
-}
-
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Same kill(0) semantics as application-update processIsAlive: EPERM = alive. */
+function processExists(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false
+    if (error?.code === 'EPERM') return true
+    throw error
+  }
 }
 
 async function readyFileProbe(readyFile) {
   try {
     const text = await readFile(readyFile, 'utf8')
     const pid = Number(String(text).trim().split(/\s+/u)[0])
-    if (!Number.isInteger(pid) || pid <= 0) return false
-    process.kill(pid, 0)
-    return true
+    return processExists(pid)
   } catch {
+    // Missing file / unreadable → not ready yet (or never).
     return false
   }
 }
 
 function childPidAlive(child) {
-  if (child?.pid === undefined) return false
-  try {
-    process.kill(child.pid, 0)
-    return true
-  } catch {
-    return false
-  }
+  return processExists(child?.pid)
 }
 
 export async function startDetachedProcess(command, args = [], options = {}) {
@@ -160,11 +159,10 @@ export async function startDetachedProcess(command, args = [], options = {}) {
     : (typeof options.readyFile === 'string' && options.readyFile.length > 0
       ? () => readyFileProbe(options.readyFile)
       : null)
-  // Windows .cmd/.bat: spawn cmd.exe with separate argv so Node quotes each
-  // argument (paths with spaces like `Agent Host.cmd`). Use `call` so the
-  // batch's foreground node/Manager stays under the outer cmd. Do not pack a
-  // single `/s /c` string with windowsVerbatimArguments: true — that path
-  // never started the batch on windows-latest. Do not use `start /b`.
+  // Windows .cmd/.bat: spawn with shell:true so Node/cmd.exe quote spaced
+  // paths (e.g. `Agent Host.cmd`). Prefer this over ComSpec + call argv —
+  // detached children often yield EPERM on kill(0), which readyFileProbe
+  // must treat as alive. Do not use start /b or windowsVerbatimArguments.
 
   return new Promise((resolve, reject) => {
     let settled = false
@@ -174,26 +172,14 @@ export async function startDetachedProcess(command, args = [], options = {}) {
     let exitSignal = null
 
     try {
-      if (useWindowsBatch) {
-        child = spawn(windowsComSpec(), ['/d', '/c', 'call', command, ...args], {
-          cwd: options.cwd,
-          env: options.env ?? process.env,
-          stdio: options.stdio ?? 'ignore',
-          detached: true,
-          windowsHide: true,
-          shell: false,
-          // default windowsVerbatimArguments: false — Node quotes each argv.
-        })
-      } else {
-        child = spawn(command, args, {
-          cwd: options.cwd,
-          env: options.env ?? process.env,
-          stdio: options.stdio ?? 'ignore',
-          detached: true,
-          windowsHide: true,
-          shell: false,
-        })
-      }
+      child = spawn(command, args, {
+        cwd: options.cwd,
+        env: options.env ?? process.env,
+        stdio: options.stdio ?? 'ignore',
+        detached: true,
+        windowsHide: true,
+        shell: useWindowsBatch,
+      })
     } catch (error) {
       reject(new AgentHostError(
         'HOST_COMMAND_FAILED',
@@ -245,9 +231,9 @@ export async function startDetachedProcess(command, args = [], options = {}) {
       exitStatus = status
       exitSignal = signal
       if (settled) return
-      // With `call`, early exit means the batch ended before confirmation.
-      // When readyProbe/readyFile is set, confirm() still waits for the probe
-      // (Manager may outlive a short-lived wrapper). Without a probe, fail now.
+      // Early shell/batch exit before confirmation. When readyProbe/readyFile
+      // is set, confirm() still waits for the probe (Manager may outlive a
+      // short-lived wrapper). Without a probe, fail now.
       if (readyProbe !== null) return
       settleFailure(
         'HOST_COMMAND_FAILED',
