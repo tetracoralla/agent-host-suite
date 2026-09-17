@@ -17,7 +17,8 @@ import { transitionComponentInventory } from './lifecycle.mjs'
 import { isAgentToolsPaused } from './profile.mjs'
 import { recordActivity } from './activity.mjs'
 import { assertCompatibleOrigin, githubOrigin, originIdentity, readToolSources, writeToolSources } from './tool-sources.mjs'
-import { candidateFromRemote, mergeUpdateCandidates, readUpdateCandidates, sameCandidateCacheIdentity } from './update-candidates.mjs'
+import { candidateFromRemote, clearUpdateCandidate, mergeUpdateCandidates, readUpdateCandidates, sameCandidateCacheIdentity } from './update-candidates.mjs'
+import { compareSemVer } from './semver.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
 import { presentInstalledLogo } from './tool-presentation.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
@@ -30,23 +31,7 @@ function fail(code, message, details) {
 }
 
 function compareVersions(left, right) {
-  const parts = (value) => String(value).replace(/^v/u, '').split(/[.-]/u)
-  const a = parts(left)
-  const b = parts(right)
-  const length = Math.max(a.length, b.length)
-  for (let index = 0; index < length; index += 1) {
-    const leftPart = a[index] ?? '0'
-    const rightPart = b[index] ?? '0'
-    const leftNumeric = /^\d+$/u.test(leftPart)
-    const rightNumeric = /^\d+$/u.test(rightPart)
-    if (leftNumeric && rightNumeric) {
-      const comparison = Number(leftPart) - Number(rightPart)
-      if (comparison !== 0) return comparison < 0 ? -1 : 1
-      continue
-    }
-    if (leftPart !== rightPart) return leftPart < rightPart ? -1 : 1
-  }
-  return 0
+  return compareSemVer(left, right)
 }
 
 function inventoryFromState(state) {
@@ -60,10 +45,32 @@ function inventoryFromState(state) {
   }
 }
 
-async function cleanupUnadoptedPackage(prepared) {
+function samePackageRoot(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') return false
+  return left === right
+}
+
+function packageIsReferenced(state, packageRoot) {
+  if (state === null || state === undefined || typeof packageRoot !== 'string') return false
+  for (const component of Object.values(state.components ?? {})) {
+    if (samePackageRoot(component?.root, packageRoot)) return true
+  }
+  for (const record of Object.values(state.privateComponents ?? {})) {
+    if (samePackageRoot(record?.current?.component?.root, packageRoot)) return true
+    if (samePackageRoot(record?.rollback?.component?.root, packageRoot)) return true
+  }
+  return false
+}
+
+async function cleanupUnadoptedPackage(prepared, preparedPaths = null) {
   if (prepared?.installed?.created !== true) return
-  const packageRoot = dirname(prepared.installed.root)
-  await rm(prepared.installed.root, { recursive: true, force: true })
+  const installedRoot = prepared.installed.root
+  if (preparedPaths !== null) {
+    const state = await loadState(preparedPaths).catch(() => null)
+    if (packageIsReferenced(state, installedRoot)) return
+  }
+  const packageRoot = dirname(installedRoot)
+  await rm(installedRoot, { recursive: true, force: true })
   try {
     await rmdir(packageRoot)
   } catch (error) {
@@ -467,7 +474,23 @@ async function commitGitHubInstall(options, { wrapped, binding, component, healt
     && previousSource === undefined
     && previousComponent.origin?.kind !== 'github-release'
   ) {
-    fail('LOCAL_COMPONENT_ID_RESERVED', `Component ${binding.id} is owned by the installed compatibility release`)
+    // Allow a verified migration onto a registered GitHub-managed tool for the same id.
+    // Keep reserved-ID protection for unregistered / mismatched repositories.
+    const registered = await findRegisteredTool(binding.id)
+    const allowedMigration = typeof registered?.repository === 'string'
+      && registered.repository === wrapped.origin?.repository
+      && wrapped.origin?.kind === 'github-release'
+    if (!allowedMigration) {
+      fail('LOCAL_COMPONENT_ID_RESERVED', `Component ${binding.id} is owned by the installed compatibility release`)
+    }
+  }
+  if (options.allowDowngrade !== true && previousComponent?.version !== undefined) {
+    if (compareVersions(previousComponent.version, binding.version) > 0) {
+      fail('GITHUB_TOOL_DOWNGRADE_REFUSED', `Refusing to downgrade ${binding.id} from ${previousComponent.version} to ${binding.version}`, {
+        installedVersion: previousComponent.version,
+        candidateVersion: binding.version,
+      })
+    }
   }
   const { paused, active, wasActive } = applyPausedWorkingSet(inventory, state, binding.id, {
     activate: options.activate,
@@ -674,9 +697,10 @@ export async function installGitHubTool(options, dependencies = {}) {
       ),
     )
     inventoryAdopted = true
+    await clearUpdateCandidate(stateRoot, binding.id).catch(() => {})
     return result
   } finally {
-    if (!inventoryAdopted) await cleanupUnadoptedPackage(prepared).catch(() => {})
+    if (!inventoryAdopted) await cleanupUnadoptedPackage(prepared, paths).catch(() => {})
   }
 }
 
@@ -861,6 +885,46 @@ export async function updateGitHubTool(options, dependencies = {}) {
     platform: (persisted ?? candidate)?.platform,
   })
   const expected = persisted ?? candidate
+  // Re-read installed version before applying a persisted candidate so a newer
+  // install that happened after check cannot be silently downgraded.
+  const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  const state = await loadState(paths)
+  const installedVersion = state?.components?.[options.target]?.version
+    ?? state?.privateComponents?.[options.target]?.current?.component?.version
+    ?? saved?.origin?.tag?.replace(/^v/u, '')
+  const candidateVersion = expected?.version ?? (typeof tag === 'string' ? tag.replace(/^v/u, '') : null)
+  if (
+    options.allowDowngrade !== true
+    && typeof installedVersion === 'string'
+    && typeof candidateVersion === 'string'
+    && compareVersions(installedVersion, candidateVersion) > 0
+  ) {
+    await clearUpdateCandidate(options.stateRoot, options.target).catch(() => {})
+    fail('GITHUB_TOOL_STALE_CANDIDATE', `Persisted candidate ${candidateVersion} is older than installed ${installedVersion}; refusing downgrade`, {
+      installedVersion,
+      candidateVersion,
+      tag,
+    })
+  }
+  if (
+    typeof installedVersion === 'string'
+    && typeof candidateVersion === 'string'
+    && compareVersions(installedVersion, candidateVersion) === 0
+  ) {
+    await clearUpdateCandidate(options.stateRoot, options.target).catch(() => {})
+    return {
+      schemaVersion: TOOL_UPDATE_SCHEMA,
+      status: 'ok',
+      component: {
+        id: options.target,
+        version: installedVersion,
+        displayName: state?.components?.[options.target]?.displayName ?? options.target,
+      },
+      installed: true,
+      applied: false,
+      message: 'Installed tool already matches the persisted candidate; cleared stale update candidate.',
+    }
+  }
   const cached = await reuseCachedToolArchive(options.stateRoot, expected)
   const wrappedDigest = expected?.wrappedDigest ?? null
   const upstreamDigest = expected?.upstreamDigest

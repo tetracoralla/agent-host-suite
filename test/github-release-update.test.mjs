@@ -38,10 +38,21 @@ async function write(path, contents, mode = 0o600) {
 }
 
 async function writeApplicationVersionFixture(root, version) {
+  // Formal payload version interface: package.json (Windows/directory) — not a fake --version CLI.
+  await write(join(root, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: String(version) }, null, 2)}\n`)
   const cli = join(root, 'app', 'bin', 'agent-host.mjs')
-  await write(cli, `process.stdout.write(${JSON.stringify(String(version))} + '\\n')\n`)
+  // Real CLI stub: reject --version the way formal cli.mjs does; support manager relaunch.
+  await write(cli, `const args = process.argv.slice(2)
+if (args[0] === '--version' || args[0] === 'version') {
+  console.error('CLI_USAGE: Unknown command: ' + args[0])
+  process.exit(1)
+}
+if (args[0] === 'manager') process.exit(0)
+process.stdout.write(${JSON.stringify(String(version))} + '\\n')
+`)
   if (process.platform === 'win32') {
     await write(join(root, 'bin', 'agent-host.cmd'), `@echo off\r\n"${process.execPath}" "%~dp0..\\app\\bin\\agent-host.mjs" %*\r\n`)
+    await write(join(root, 'bin', 'Agent Host.cmd'), `@echo off\r\n"${process.execPath}" "%~dp0..\\app\\bin\\agent-host.mjs" manager %*\r\n`)
   } else {
     await write(join(root, 'bin', 'agent-host'), `#!/bin/sh\nexec "${process.execPath}" "${cli}" "$@"\n`, 0o755)
   }
@@ -589,11 +600,18 @@ test('macOS .app replacement launch uses Contents/MacOS, not bin/agent-host', { 
   const root = await mkdtemp(join(tmpdir(), 'agent-host-macos-launch-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const exec = join(root, 'Contents', 'MacOS', 'agent-host')
-  await write(exec, `#!/bin/sh\necho 0.2.1\n`, 0o755)
-  const launch = await resolveReplacedApplicationLaunch({ root, args: ['--version'] })
+  const manager = join(root, 'Contents', 'MacOS', 'AgentHostManager')
+  await write(exec, `#!/bin/sh\necho cli-shim\n`, 0o755)
+  await write(manager, `#!/bin/sh\nexit 0\n`, 0o755)
+  await write(join(root, 'Contents', 'Resources', 'agent-host-suite', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
+  const launch = await resolveReplacedApplicationLaunch({ root, args: [] })
   assert.equal(launch.command, exec)
   const verified = await verifyReplacedApplication({ root, expectedVersion: '0.2.1' })
-  assert.match(verified.output, /0\.2\.1/u)
+  assert.equal(verified.version, '0.2.1')
+  const { resolveManagerRelaunchLaunch } = await import('../src/application-update.mjs')
+  const relaunch = await resolveManagerRelaunchLaunch({ root })
+  assert.equal(relaunch.command, manager)
+  assert.equal(relaunch.kind, 'macos-manager')
 })
 
 test('public application update stages a directory carrier and replaces the installed root', async (t) => {

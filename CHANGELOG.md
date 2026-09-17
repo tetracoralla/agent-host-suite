@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+
+- Resolve the default state root for `app update` so CLI/Manager downloads work without `--state-root` (F1).
+- Verify replaced applications from payload version metadata and relaunch Manager separately from CLI help (F2).
+- Keep concurrently adopted tool packages when a racing install fails under the lifecycle lock (F3).
+- Emit Host consumer entrypoints/integration from the unsigned preview builder for Math Anchor and Migratory Time (F4).
+- Allow registered GitHub tools to migrate off compatibility-release reserved IDs while retaining rollback (F5).
+- Refuse stale-candidate downgrades on tool update and invalidate candidates after install (F6).
+- Use SemVer precedence for tool/app version compares; refuse app downgrades on plain update (F7/F8).
+- Honor saved update channel preferences for application update/check (F9).
+- Refuse sole GitHub archives that name a different platform (F10).
+- Run GitHub tool admission on macOS in the scan workflow draft; publish uniquely named unsigned catalog assets (F11/F12).
+
 - GitHub Releases are the public update channel for Agent Host and registered
   tools. Browse recommended tools, add a GitHub project or Release, persist
   the update source with the installed instance, and check or install updates

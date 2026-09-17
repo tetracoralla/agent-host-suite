@@ -66,7 +66,7 @@ function tarCommand() {
   return process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar'
 }
 
-async function finalizeComponent({ root, id, version, kind, identityFiles, entrypoints, license = 'Apache-2.0', artifactRoot, platform }) {
+async function finalizeComponent({ root, id, version, kind, identityFiles, entrypoints, integration = null, license = 'Apache-2.0', artifactRoot, platform }) {
   const files = await inventory(root)
   const paths = new Set(files.map((item) => item.path))
   for (const path of identityFiles) {
@@ -80,7 +80,7 @@ async function finalizeComponent({ root, id, version, kind, identityFiles, entry
     files,
     identityFiles,
     entrypoints,
-    integration: null,
+    integration,
     legal: { license: 'LICENSE', notice: 'NOTICE', thirdPartyNotices: 'THIRD_PARTY_NOTICES.txt', sbom: 'sbom.spdx.json' },
   }
   const descriptorPath = join(root, 'component.json')
@@ -342,6 +342,43 @@ export function profileRuntimeEntrypoint(baseEntrypoint, platform) {
   return baseEntrypoint
 }
 
+async function existingRelative(root, relative) {
+  return (await pathExists(join(root, relative))) ? relative : null
+}
+
+async function collectSkillFiles(pluginRoot) {
+  const output = []
+  async function walk(current) {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const path = join(current, entry.name)
+      if (entry.isDirectory()) await walk(path)
+      else if (entry.isFile() && entry.name === 'SKILL.md') output.push(relative(pluginRoot, path).split(sep).join('/'))
+    }
+  }
+  const skills = join(pluginRoot, 'skills')
+  if (await pathExists(skills) === true) await walk(skills)
+  return output.sort()
+}
+
+function resolveCapabilityContractsRoot() {
+  if (typeof process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT === 'string'
+    && process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT.length > 0) {
+    return process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT
+  }
+  const sourcesRoot = process.env.AGENT_HOST_PROFILE_SOURCES_ROOT
+  if (typeof sourcesRoot === 'string' && sourcesRoot.length > 0) {
+    return join(sourcesRoot, 'capability-contracts')
+  }
+  return join(dirname(suiteRoot), 'capability-contracts')
+}
+
+async function copyIfPresent(source, destination) {
+  if (await pathExists(source) !== true) return false
+  await mkdir(dirname(destination), { recursive: true })
+  await cp(source, destination, { recursive: true })
+  return true
+}
+
 async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, identityFiles, entrypoint, workRoot, artifactRoot, platform, title, artifactPath = null, pins = null }) {
   // ARTIFACT wins whenever provided — even if a source checkout also exists.
   // Workflow drafts always check out pins into SOURCE_ROOT; that must not hide a
@@ -367,16 +404,105 @@ async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, 
   const root = join(workRoot, id)
   await mkdir(join(root, dirname(pluginRelative)), { recursive: true })
   await copyPluginTree(pluginSource, join(root, pluginRelative))
-  const marketplace = join(resolvedRoot, '.agents/plugins/marketplace.json')
-  const hostedMarketplace = join(resolvedRoot, 'integrations/agent-host/marketplace.json')
-  if (await pathExists(marketplace)) {
+
+  // Prefer Host-facing marketplace naming; fall back to the source marketplace.
+  const marketplaceCandidates = [
+    join(resolvedRoot, 'integrations/agent-host/marketplace.json'),
+    join(resolvedRoot, '.agents/plugins/marketplace.json'),
+  ]
+  let marketplaceName = id === 'math-anchor' ? 'math-anchor-agent-host' : id
+  let wroteMarketplace = false
+  for (const candidate of marketplaceCandidates) {
+    if (await pathExists(candidate) !== true) continue
     await mkdir(join(root, '.agents/plugins'), { recursive: true })
-    await cp(marketplace, join(root, '.agents/plugins/marketplace.json'))
-  } else if (await pathExists(hostedMarketplace)) {
-    await mkdir(join(root, '.agents/plugins'), { recursive: true })
-    await cp(hostedMarketplace, join(root, '.agents/plugins/marketplace.json'))
+    const marketplace = JSON.parse(await readFile(candidate, 'utf8'))
+    if (id === 'math-anchor') marketplace.name = 'math-anchor-agent-host'
+    marketplaceName = marketplace.name ?? marketplaceName
+    await writeJson(join(root, '.agents/plugins/marketplace.json'), marketplace)
+    wroteMarketplace = true
+    break
   }
-  await copyLegal(root, title)
+  if (!wroteMarketplace) {
+    await mkdir(join(root, '.agents/plugins'), { recursive: true })
+    await writeJson(join(root, '.agents/plugins/marketplace.json'), {
+      name: marketplaceName,
+      interface: { displayName: title },
+      plugins: [{
+        name: id,
+        source: { source: 'local', path: `./plugins/${id}` },
+        policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' },
+        category: 'Productivity',
+      }],
+    })
+  }
+
+  // Migratory Time consumer contract needs repo-level capabilities / scripts / package metadata
+  // and the Capability Profile from capability-contracts — not only the plugin subtree.
+  if (id === 'migratory-time') {
+    for (const relativePath of [
+      'package.json',
+      'package-lock.json',
+      'capabilities/provider.json',
+      'capabilities/schemas',
+      'scripts/runCapabilityAdapter.mjs',
+      'scripts/capabilityProviderLib.mjs',
+    ]) {
+      const copied = await copyIfPresent(join(resolvedRoot, relativePath), join(root, relativePath))
+      if (!copied && ['capabilities/provider.json', 'scripts/runCapabilityAdapter.mjs'].includes(relativePath)) {
+        throw new Error(`${id} ${resolvedFrom} is missing ${relativePath}; Host materializeRelease requires the full Migratory Time consumer contract`)
+      }
+    }
+    const capabilityRoot = resolveCapabilityContractsRoot()
+    const profileCopies = [
+      ['catalog/capabilities/time-zone-convert.v0.2.json', 'capability-contracts/time-zone-convert.v0.2.json'],
+      ['catalog/capabilities/schemas/time-zone.convert.v0.2.input.schema.json', 'capability-contracts/schemas/time-zone.convert.v0.2.input.schema.json'],
+      ['catalog/capabilities/schemas/time-zone.convert.v0.2.output.schema.json', 'capability-contracts/schemas/time-zone.convert.v0.2.output.schema.json'],
+    ]
+    for (const [fromRelative, toRelative] of profileCopies) {
+      const copied = await copyIfPresent(join(capabilityRoot, fromRelative), join(root, toRelative))
+      if (!copied) {
+        throw new Error(`${id} requires capability-contracts at ${capabilityRoot} (${fromRelative}); set AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT`)
+      }
+    }
+    if (await pathExists(join(root, 'package-lock.json')) === true) {
+      const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+      try {
+        await execFileAsync(npm, ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+          cwd: root,
+          env: { ...process.env, npm_config_update_notifier: 'false' },
+        })
+      } catch {
+        await execFileAsync(npm, ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+          cwd: root,
+          env: { ...process.env, npm_config_update_notifier: 'false' },
+        }).catch(() => {})
+      }
+    }
+  }
+
+  // Prefer source legal files when present; otherwise fall back to suite placeholders.
+  const licenseCopied = await copyIfPresent(join(resolvedRoot, 'LICENSE'), join(root, 'LICENSE'))
+  const noticeCopied = await copyIfPresent(join(resolvedRoot, 'NOTICE'), join(root, 'NOTICE'))
+  if (!licenseCopied || !noticeCopied) await copyLegal(root, title)
+  else {
+    if (await pathExists(join(root, 'THIRD_PARTY_NOTICES.txt')) !== true) {
+      const third = join(resolvedRoot, 'THIRD_PARTY_NOTICES.txt')
+      if (await pathExists(third)) await cp(third, join(root, 'THIRD_PARTY_NOTICES.txt'))
+      else await writeFile(join(root, 'THIRD_PARTY_NOTICES.txt'), `# Third-Party Notices\n\n${title}\n`, { mode: 0o600 })
+    }
+    if (await pathExists(join(root, 'sbom.spdx.json')) !== true) {
+      await writeJson(join(root, 'sbom.spdx.json'), {
+        spdxVersion: 'SPDX-2.3',
+        dataLicense: 'CC0-1.0',
+        SPDXID: 'SPDXRef-DOCUMENT',
+        name: title,
+        documentNamespace: `https://openadam.dev/spdx/unsigned-preview/${encodeURIComponent(title)}`,
+        creationInfo: { created: '2000-01-01T00:00:00.000Z', creators: ['Tool: Agent Host unsigned preview catalog'] },
+        packages: [],
+      })
+    }
+  }
+
   const presentIdentity = []
   for (const path of identityFiles) {
     const candidate = profileRuntimeEntrypoint(path, platform) === resolvedEntrypoint
@@ -391,14 +517,92 @@ async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, 
   const versionFile = join(root, pluginRelative, '.codex-plugin/plugin.json')
   const plugin = await pathExists(versionFile)
     ? JSON.parse(await readFile(versionFile, 'utf8'))
-    : { version: '0.0.0' }
+    : { version: '0.0.0', name: id }
+  const pluginName = plugin.name ?? id
+  const skillFiles = await collectSkillFiles(join(root, pluginRelative))
+  const runtimeWithinPlugin = resolvedEntrypoint.startsWith(`${pluginRelative}/`)
+    ? resolvedEntrypoint.slice(pluginRelative.length + 1)
+    : resolvedEntrypoint
+  // Keep only identity files that exist in the staged tree.
+  const presentPluginIdentity = []
+  for (const item of ['.codex-plugin/plugin.json', '.mcp.json', runtimeWithinPlugin, ...skillFiles]) {
+    if (await pathExists(join(root, pluginRelative, item))) presentPluginIdentity.push(item)
+  }
+
+  let entrypoints
+  let integration
+  let extraIdentity = []
+  if (id === 'migratory-time') {
+    entrypoints = {
+      server: 'plugins/migratory-time/server/index.mjs',
+      adapter: 'scripts/runCapabilityAdapter.mjs',
+      manifest: 'capabilities/provider.json',
+      inputSchema: 'capabilities/schemas/time-zone.convert.input.schema.json',
+      outputSchema: 'capabilities/schemas/time-zone.convert.output.schema.json',
+      profile: 'capability-contracts/time-zone-convert.v0.2.json',
+    }
+    for (const required of Object.values(entrypoints)) {
+      if (await pathExists(join(root, required)) !== true) {
+        throw new Error(`${id} is missing consumer entrypoint file ${required}`)
+      }
+    }
+    extraIdentity = [
+      'package.json',
+      '.agents/plugins/marketplace.json',
+      ...Object.values(entrypoints),
+      'scripts/capabilityProviderLib.mjs',
+      'capability-contracts/schemas/time-zone.convert.v0.2.input.schema.json',
+      'capability-contracts/schemas/time-zone.convert.v0.2.output.schema.json',
+    ]
+    integration = {
+      pluginRoot: pluginRelative,
+      marketplaceRoot: '.',
+      marketplace: marketplaceName,
+      plugin: pluginName,
+      pluginIdentityRelativeFiles: presentPluginIdentity,
+    }
+  } else if (id === 'math-anchor') {
+    entrypoints = { command: resolvedEntrypoint }
+    extraIdentity = ['.agents/plugins/marketplace.json']
+    integration = {
+      pluginRoot: pluginRelative,
+      marketplaceRoot: '.',
+      marketplace: marketplaceName,
+      plugin: pluginName,
+      pluginIdentityRelativeFiles: presentPluginIdentity,
+      args: ['mcp'],
+    }
+  } else {
+    entrypoints = { command: resolvedEntrypoint }
+    integration = {
+      pluginRoot: pluginRelative,
+      marketplaceRoot: '.',
+      marketplace: marketplaceName,
+      plugin: pluginName,
+      pluginIdentityRelativeFiles: presentPluginIdentity,
+    }
+  }
+
+  const identity = [...new Set([
+    'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json',
+    ...presentIdentity,
+    resolvedEntrypoint,
+    ...extraIdentity,
+    ...presentPluginIdentity.map((item) => `${pluginRelative}/${item}`),
+  ].filter((item) => item !== undefined))]
+  const presentFinalIdentity = []
+  for (const item of identity) {
+    if (await pathExists(join(root, item))) presentFinalIdentity.push(item)
+  }
+
   return finalizeComponent({
     root,
     id,
     version: plugin.version ?? '0.0.0',
     kind,
-    identityFiles: [...new Set(['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json', ...presentIdentity, resolvedEntrypoint].filter((path) => path !== undefined))],
-    entrypoints: { command: resolvedEntrypoint },
+    identityFiles: presentFinalIdentity,
+    entrypoints,
+    integration,
     artifactRoot,
     platform,
   })

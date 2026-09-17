@@ -10,7 +10,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  scan:
+  refresh:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -21,7 +21,28 @@ jobs:
       - run: npm ci
       - name: Refresh GitHub tool catalog pins
         run: node scripts/sync-github-catalog.mjs
-      - name: Admit pinned tools
+      - uses: actions/upload-artifact@v4
+        with:
+          name: github-catalog-pins
+          path: catalog/github-releases/current.json
+
+  # admit --registry requires a supported release platform (macOS/Windows).
+  # Keep pin refresh on Linux; run admission where Host can select a real platform asset.
+  admit:
+    needs: refresh
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-catalog-pins
+          path: catalog/github-releases
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.16.0
+          cache: npm
+      - run: npm ci
+      - name: Admit pinned tools on a supported release platform
         run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
       - name: Open or update the catalog PR
         env:
@@ -43,7 +64,7 @@ jobs:
           )"
           git push --force origin chore/github-tool-catalog
           if gh pr view chore/github-tool-catalog --json number >/dev/null 2>&1; then
-            gh pr edit chore/github-tool-catalog --body "Updates the GitHub tool catalog from public Releases. GITHUB_TOKEN pushes do not start downstream workflows; re-run CI from a GitHub App or a human push. See docs/UPDATES.md."
+            gh pr edit chore/github-tool-catalog --body "Updates the GitHub tool catalog from public Releases. Admission runs on macOS because Linux is not a supported release platform. GITHUB_TOKEN pushes do not start downstream workflows; re-run CI from a GitHub App or a human push. See docs/UPDATES.md."
           else
-            gh pr create --base main --head chore/github-tool-catalog --title "Update GitHub tool catalog" --body "Updates the GitHub tool catalog from public Releases. GITHUB_TOKEN pushes do not start downstream workflows; re-run CI from a GitHub App or a human push. See docs/UPDATES.md."
+            gh pr create --base main --head chore/github-tool-catalog --title "Update GitHub tool catalog" --body "Updates the GitHub tool catalog from public Releases. Admission runs on macOS because Linux is not a supported release platform. GITHUB_TOKEN pushes do not start downstream workflows; re-run CI from a GitHub App or a human push. See docs/UPDATES.md."
           fi

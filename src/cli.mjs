@@ -25,6 +25,7 @@ import {
   updatesStatus,
 } from './updates.mjs'
 import { checkApplicationUpdate, updateApplication } from './application-update.mjs'
+import { readUpdatePreferences } from './update-preferences.mjs'
 import { executeAutoUpdates } from './auto-update.mjs'
 import { FEATURED_READINESS_SCHEMA, inspectFeaturedReadiness } from './featured-readiness.mjs'
 import {
@@ -690,7 +691,13 @@ async function run(options, dependencies = {}) {
     throw new AgentHostError('CLI_USAGE', `Unknown updates action: ${options.action}`)
   }
   if (options.command === 'app') {
-    if (options.action === 'status' || options.action === 'check') return checkApplicationUpdate(options)
+    if (options.action === 'status' || options.action === 'check') {
+      const preferences = await readUpdatePreferences(options.stateRoot)
+      return checkApplicationUpdate({
+        ...options,
+        channel: options.channel ?? preferences.channel,
+      })
+    }
     if (options.action === 'update') return updateApplication(options, dependencies)
     throw new AgentHostError('CLI_USAGE', `Unknown app action: ${options.action}`)
   }

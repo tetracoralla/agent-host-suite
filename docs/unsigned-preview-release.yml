@@ -99,13 +99,17 @@ jobs:
           echo "DMG_PATH=$dmg" >> "$GITHUB_ENV"
           echo "SUITE_VERSION=$version" >> "$GITHUB_ENV"
           (cd .build && shasum -a 256 "$(basename "$dmg")" > SHA256SUMS)
+      - name: Name unsigned catalog for unique Release assets
+        run: |
+          cp .build/unsigned-catalog/current.json .build/unsigned-catalog-darwin-arm64.json
+          # Keep a platform-qualified copy beside the carrier so publish never sees two basename current.json files.
       - uses: actions/upload-artifact@v4
         with:
           name: macos-unsigned
           path: |
             .build/Agent-Host-*.dmg
             .build/SHA256SUMS
-            .build/unsigned-catalog/current.json
+            .build/unsigned-catalog-darwin-arm64.json
 
   windows:
     runs-on: windows-latest
@@ -176,12 +180,16 @@ jobs:
           $env:AGENT_HOST_BUNDLED_COMPONENTS = $ids
           $env:AGENT_HOST_RELEASE_CATALOG = Join-Path $PWD '.build\unsigned-catalog'
           npm run package:windows
+      - name: Name unsigned catalog for unique Release assets
+        shell: pwsh
+        run: |
+          Copy-Item .build/unsigned-catalog/current.json .build/unsigned-catalog-win32-x64.json
       - uses: actions/upload-artifact@v4
         with:
           name: windows-unsigned
           path: |
             .build/windows/distribution/Agent-Host-*.zip
-            .build/unsigned-catalog/current.json
+            .build/unsigned-catalog-win32-x64.json
 
   publish:
     needs: [macos, windows]
@@ -199,5 +207,14 @@ jobs:
           notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nEach platform job admitted GitHub tools for that runner and obtained version-pinned Math Anchor / Migratory Time inputs from catalog/unsigned-preview-source-pins.json (or AGENT_HOST_*_ARTIFACT). Native archives are not reused across operating systems.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer adapters, and GitHub tools admitted from public Releases for that platform. Incomplete manifests are refused.\n\nprofiles fetch --carrier downloads an installer. agent-host app update on a supported OS mounts or unpacks the carrier, replaces the installed application, and relaunches it after comparing digests.'
           files=()
           while IFS= read -r path; do files+=("$path"); done < <(find .build/release-assets -type f)
+          # GitHub Release assets are keyed by basename; refuse duplicate names before upload.
+          basenames=()
+          for path in "${files[@]}"; do basenames+=("$(basename "$path")"); done
+          duplicates=$(printf '%s\n' "${basenames[@]}" | sort | uniq -d)
+          if [[ -n "$duplicates" ]]; then
+            echo "Duplicate release asset basenames would fail GitHub upload:" >&2
+            echo "$duplicates" >&2
+            exit 1
+          fi
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --prerelease --verify-tag --title "Agent Host unsigned preview" --notes "$notes"

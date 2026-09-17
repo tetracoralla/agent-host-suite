@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -152,9 +154,29 @@ test('R5 unsigned catalog builds a complete default profile from explicit SOURCE
     await writeFile(join(plugin, entrypointRelative), '#!/bin/sh\necho ok\n')
     await writeFile(join(sourceRoot, 'LICENSE'), 'Apache-2.0\n')
     await writeFile(join(sourceRoot, 'NOTICE'), `${id}\n`)
+    await mkdir(join(sourceRoot, '.agents/plugins'), { recursive: true })
+    await writeFile(join(sourceRoot, '.agents/plugins/marketplace.json'), `${JSON.stringify({
+      name: id === 'math-anchor' ? 'math-anchor-agent-host' : id,
+      plugins: [{ name: id, source: { source: 'local', path: `./plugins/${id}` } }],
+    }, null, 2)}\n`)
+    if (id === 'migratory-time') {
+      await writeFile(join(sourceRoot, 'package.json'), `${JSON.stringify({ name: id, version, private: true }, null, 2)}\n`)
+      await mkdir(join(sourceRoot, 'capabilities/schemas'), { recursive: true })
+      await writeFile(join(sourceRoot, 'capabilities/provider.json'), `${JSON.stringify({
+        provider: { id: 'migratory-time', version },
+        implementations: [{ capabilityId: 'time-zone.convert', capabilityVersion: '0.2', adapter: { protocol: 'openadam.capability-jsonl.v0.1', command: 'plugins/migratory-time/runtime/node', args: [] } }],
+      }, null, 2)}\n`)
+      await writeFile(join(sourceRoot, 'capabilities/schemas/time-zone.convert.input.schema.json'), '{}\n')
+      await writeFile(join(sourceRoot, 'capabilities/schemas/time-zone.convert.output.schema.json'), '{}\n')
+      await mkdir(join(sourceRoot, 'scripts'), { recursive: true })
+      await writeFile(join(sourceRoot, 'scripts/runCapabilityAdapter.mjs'), 'export {}\n')
+      await writeFile(join(sourceRoot, 'scripts/capabilityProviderLib.mjs'), 'export {}\n')
+    }
     return sourceRoot
   }
 
+  const execFileAsync = promisify(execFile)
+  process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT = '/workspace/openadam-procedure-reuse/repos/capability-contracts'
   const mathRoot = await seedProfile('math-anchor', 'runtime/math-anchor-runtime/math-anchor-runtime', '0.7.1')
   const timeRoot = await seedProfile('migratory-time', 'server/index.mjs', '2.0.0+codex.20260830163923')
 
@@ -217,6 +239,20 @@ test('R5 unsigned catalog builds a complete default profile from explicit SOURCE
   }
   for (const component of components.filter((item) => item.id === 'math-anchor' || item.id === 'migratory-time')) {
     assert.equal(typeof component.artifact?.url, 'string')
+    const archivePath = join(artifactRoot, component.artifact.url.replace(/^artifacts\//u, ''))
+    const extract = join(root, `extract-${component.id}`)
+    await mkdir(extract, { recursive: true })
+    await execFileAsync(process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar', ['-xzf', archivePath, '-C', extract])
+    const descriptor = JSON.parse(await readFile(join(extract, 'component.json'), 'utf8'))
+    assert.notEqual(descriptor.integration, null)
+    assert.equal(descriptor.integration.pluginRoot, `plugins/${component.id}`)
+    if (component.id === 'migratory-time') {
+      for (const name of ['server', 'adapter', 'manifest', 'inputSchema', 'outputSchema', 'profile']) {
+        assert.equal(typeof descriptor.entrypoints[name], 'string', name)
+      }
+    } else {
+      assert.equal(typeof descriptor.entrypoints.command, 'string')
+    }
     assert.match(component.artifact.sha256, /^sha256:[0-9a-f]{64}$/u)
     assert.equal(component.platform, 'test-platform')
   }
@@ -352,9 +388,28 @@ test('D1 win32 builder keeps Migratory Time .mjs and requires Math Anchor .exe',
     await writeFile(join(plugin, onDisk), windowsNative ? 'MZ-native-stub\n' : 'export {}\n')
     await writeFile(join(sourceRoot, 'LICENSE'), 'Apache-2.0\n')
     await writeFile(join(sourceRoot, 'NOTICE'), `${id}\n`)
+    await mkdir(join(sourceRoot, '.agents/plugins'), { recursive: true })
+    await writeFile(join(sourceRoot, '.agents/plugins/marketplace.json'), `${JSON.stringify({
+      name: id === 'math-anchor' ? 'math-anchor-agent-host' : id,
+      plugins: [{ name: id, source: { source: 'local', path: `./plugins/${id}` } }],
+    }, null, 2)}\n`)
+    if (id === 'migratory-time') {
+      await writeFile(join(sourceRoot, 'package.json'), `${JSON.stringify({ name: id, version, private: true }, null, 2)}\n`)
+      await mkdir(join(sourceRoot, 'capabilities/schemas'), { recursive: true })
+      await writeFile(join(sourceRoot, 'capabilities/provider.json'), `${JSON.stringify({
+        provider: { id: 'migratory-time', version },
+        implementations: [{ capabilityId: 'time-zone.convert', capabilityVersion: '0.2', adapter: { protocol: 'openadam.capability-jsonl.v0.1', command: 'plugins/migratory-time/runtime/node', args: [] } }],
+      }, null, 2)}\n`)
+      await writeFile(join(sourceRoot, 'capabilities/schemas/time-zone.convert.input.schema.json'), '{}\n')
+      await writeFile(join(sourceRoot, 'capabilities/schemas/time-zone.convert.output.schema.json'), '{}\n')
+      await mkdir(join(sourceRoot, 'scripts'), { recursive: true })
+      await writeFile(join(sourceRoot, 'scripts/runCapabilityAdapter.mjs'), 'export {}\n')
+      await writeFile(join(sourceRoot, 'scripts/capabilityProviderLib.mjs'), 'export {}\n')
+    }
     return sourceRoot
   }
 
+  process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT = '/workspace/openadam-procedure-reuse/repos/capability-contracts'
   const mathRoot = await seedProfile(
     'math-anchor',
     'runtime/math-anchor-runtime/math-anchor-runtime',

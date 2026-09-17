@@ -193,6 +193,26 @@ export async function fetchGitHubReleases(repository, { fetch, signal, channel =
   return summaries.filter((item) => item.prerelease !== true)
 }
 
+function assetLooksLikePlatform(name, platform) {
+  if (typeof platform !== 'string' || platform.length === 0) return false
+  const token = platform.replace('darwin-', 'macos-').replace('win32-', 'windows-')
+  return name.includes(token) || name.includes(platform)
+}
+
+function assetDeclaresForeignPlatform(name, platform) {
+  if (typeof platform !== 'string' || platform.length === 0) return false
+  const markers = [
+    'macos-arm64', 'macos-x64', 'macos-x86_64', 'darwin-arm64', 'darwin-x86_64', 'darwin-x64',
+    'windows-x64', 'windows-arm64', 'win32-x64', 'win32-arm64',
+    'linux-x64', 'linux-arm64',
+  ]
+  const self = new Set([
+    platform,
+    platform.replace('darwin-', 'macos-').replace('win32-', 'windows-'),
+  ])
+  return markers.some((marker) => name.includes(marker) && ![...self].some((token) => name.includes(token) || token.includes(marker)))
+}
+
 export function selectReleaseAsset(release, { assetName = null, platform = null, namePattern = null } = {}) {
   const assets = release?.assets ?? []
   if (assetName !== null) {
@@ -206,10 +226,20 @@ export function selectReleaseAsset(release, { assetName = null, platform = null,
     if (match !== undefined) return match
   }
   if (typeof platform === 'string') {
-    const token = platform.replace('darwin-', 'macos-').replace('win32-', 'windows-')
-    const match = pluginArchives.find((asset) => asset.name.includes(token) || asset.name.includes(platform))
+    const match = pluginArchives.find((asset) => assetLooksLikePlatform(asset.name, platform))
     if (match !== undefined) return match
+    // A sole archive that clearly names a different platform is not "compatible".
+    if (pluginArchives.length === 1 && assetDeclaresForeignPlatform(pluginArchives[0].name, platform)) {
+      fail('GITHUB_ASSET_UNAVAILABLE', 'This GitHub Release has no installable archive for the current platform', {
+        platform,
+        assetName: pluginArchives[0].name,
+      })
+    }
   }
-  if (pluginArchives.length === 1) return pluginArchives[0]
+  // Only accept an unnamed sole archive when the caller did not ask for a platform,
+  // or the archive does not advertise a conflicting platform token.
+  if (pluginArchives.length === 1 && (platform === null || !assetDeclaresForeignPlatform(pluginArchives[0].name, platform))) {
+    return pluginArchives[0]
+  }
   fail('GITHUB_ASSET_UNAVAILABLE', 'This GitHub Release has no installable archive for the current platform')
 }

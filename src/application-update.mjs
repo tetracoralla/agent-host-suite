@@ -12,6 +12,8 @@ import { prepareStatePaths } from './state.mjs'
 import { loadGitHubToolRegistry } from './github-registry.mjs'
 import { supportedReleasePlatform } from './github-project.mjs'
 import { runFile } from './process.mjs'
+import { compareSemVer } from './semver.mjs'
+import { readUpdatePreferences } from './update-preferences.mjs'
 
 export const APPLICATION_UPDATE_SCHEMA = 'openadam.agent-host-application-update.v0.1'
 export const APPLICATION_UPDATE_STATE_SCHEMA = 'openadam.agent-host-application-update-state.v0.1'
@@ -142,7 +144,7 @@ export async function checkApplicationUpdate({
   if (platform === null) availability = 'no-platform-asset'
   else if (asset === null) availability = 'no-platform-asset'
   else if (currentVersion === undefined || currentVersion === null) availability = 'update-available'
-  else if (currentVersion !== version) availability = 'update-available'
+  else if (compareSemVer(currentVersion, version) < 0) availability = 'update-available'
   return {
     schemaVersion: APPLICATION_UPDATE_SCHEMA,
     status: 'ok',
@@ -264,7 +266,7 @@ function markerMatchesJournal(marker, journal) {
 }
 
 
-export async function resolveReplacedApplicationLaunch({ root, command, args = ['--version'] } = {}) {
+export async function resolveReplacedApplicationLaunch({ root, command, args = [] } = {}) {
   if (typeof command === 'string' && command.length > 0) return { command, args }
   const macosExec = join(root, 'Contents', 'MacOS', 'agent-host')
   if (await pathExists(macosExec)) {
@@ -282,8 +284,68 @@ export async function resolveReplacedApplicationLaunch({ root, command, args = [
   }
 }
 
-export async function verifyReplacedApplication({ root, expectedVersion, runner = runFile, command, args = ['--version'] }) {
-  const launch = await resolveReplacedApplicationLaunch({ root, command, args })
+async function readJsonVersion(path) {
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8'))
+    if (typeof value?.version === 'string' && value.version.length > 0) return value.version
+    if (typeof value?.suiteVersion === 'string' && value.suiteVersion.length > 0) return value.suiteVersion
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  return null
+}
+
+/** Read the version the formal payload already carries (package / distribution / Info.plist). */
+export async function readReplacedApplicationVersion(root) {
+  const candidates = [
+    join(root, 'app', 'package.json'),
+    join(root, 'Contents', 'Resources', 'agent-host-suite', 'package.json'),
+    join(root, 'package.json'),
+    join(root, 'distribution.json'),
+    join(root, 'app', 'distribution.json'),
+  ]
+  for (const candidate of candidates) {
+    const version = await readJsonVersion(candidate)
+    if (version !== null) return { version, source: candidate }
+  }
+  const plist = join(root, 'Contents', 'Info.plist')
+  try {
+    const text = await readFile(plist, 'utf8')
+    const match = text.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/u)
+    if (match) return { version: match[1], source: plist }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  return null
+}
+
+export async function verifyReplacedApplication({
+  root,
+  expectedVersion,
+  runner = runFile,
+  command,
+  args,
+} = {}) {
+  // Prefer the formal payload's version metadata. Do not invent a --version CLI that
+  // the shipped agent-host.mjs does not implement.
+  if (command === undefined && args === undefined) {
+    const recorded = await readReplacedApplicationVersion(root)
+    if (recorded === null) {
+      fail('APPLICATION_UPDATE_VERSION_MISMATCH', 'The replaced application does not expose a readable version payload', {
+        expectedVersion,
+        root,
+      })
+    }
+    if (typeof expectedVersion === 'string' && recorded.version !== expectedVersion && !String(recorded.version).includes(expectedVersion)) {
+      fail('APPLICATION_UPDATE_VERSION_MISMATCH', 'The replaced application did not report the new version', {
+        expectedVersion,
+        output: recorded.version,
+        source: recorded.source,
+      })
+    }
+    return { version: recorded.version, output: recorded.version, source: recorded.source }
+  }
+  const launch = await resolveReplacedApplicationLaunch({ root, command, args: args ?? [] })
   const result = await runner(launch.command, launch.args, {
     allowFailure: true,
     timeoutMs: 15_000,
@@ -305,8 +367,31 @@ export async function verifyReplacedApplication({ root, expectedVersion, runner 
   return { version: expectedVersion, output }
 }
 
-export async function relaunchReplacedApplication({ root, runner = runFile, command, args = [] } = {}) {
-  const launch = await resolveReplacedApplicationLaunch({ root, command, args })
+export async function resolveManagerRelaunchLaunch({ root, command, args = [] } = {}) {
+  if (typeof command === 'string' && command.length > 0) return { command, args, kind: 'explicit' }
+  const macosManager = join(root, 'Contents', 'MacOS', 'AgentHostManager')
+  if (await pathExists(macosManager)) {
+    return { command: macosManager, args, kind: 'macos-manager' }
+  }
+  const windowsManager = join(root, 'bin', 'Agent Host.cmd')
+  if (await pathExists(windowsManager)) {
+    return { command: windowsManager, args, kind: 'windows-manager' }
+  }
+  const windowsManagerAlt = join(root, 'bin', 'AgentHostManager.exe')
+  if (await pathExists(windowsManagerAlt)) {
+    return { command: windowsManagerAlt, args, kind: 'windows-manager' }
+  }
+  // Fall back to CLI "manager" for directory / Windows payloads that ship the CLI only.
+  const cliLaunch = await resolveReplacedApplicationLaunch({ root, args: ['manager'] })
+  return { ...cliLaunch, kind: 'cli-manager' }
+}
+
+export async function relaunchReplacedApplication({ root, runner = runFile, command, args } = {}) {
+  const launch = await resolveManagerRelaunchLaunch({
+    root,
+    command,
+    args: args ?? [],
+  })
   const result = await runner(launch.command, launch.args, {
     allowFailure: true,
     timeoutMs: 15_000,
@@ -316,9 +401,10 @@ export async function relaunchReplacedApplication({ root, runner = runFile, comm
   if (result.status !== 0 && result.status !== null) {
     fail('APPLICATION_UPDATE_RELAUNCH_FAILED', 'The replaced application could not be restarted', {
       output: [result.stderr, result.stdout].filter(Boolean).join('\n').slice(0, 2048),
+      kind: launch.kind,
     })
   }
-  return { command: launch.command, args: launch.args, status: result.status }
+  return { command: launch.command, args: launch.args, status: result.status, kind: launch.kind }
 }
 
 export async function restorePreviousApplication({ currentRoot, previousRoot }) {
@@ -430,7 +516,7 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
       expectedVersion: options.expectedVersion ?? check.availableVersion,
       runner: dependencies.runner,
       command: options.verifyCommand,
-      args: options.verifyArgs ?? ['--version'],
+      args: options.verifyArgs,
     })
     await writeJournal(options.stateRoot, { ...active, phase: 'relaunching' })
     const relaunched = options.relaunch === false
@@ -438,8 +524,8 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
       : await relaunchReplacedApplication({
         root: applied.currentRoot,
         runner: dependencies.runner,
-        command: options.relaunchCommand ?? options.verifyCommand,
-        args: options.relaunchArgs ?? [],
+        command: options.relaunchCommand,
+        args: options.relaunchArgs,
       })
     await clearUpdateTransactionMarker(applied.currentRoot)
     await writeJournal(options.stateRoot, { ...active, phase: 'complete', restored: false })
@@ -542,37 +628,47 @@ async function runApply(options, check, currentVersion, dependencies) {
 
 export async function updateApplication(options = {}, dependencies = {}) {
   const platform = options.platform ?? supportedReleasePlatform()
-  if (options.stateRoot !== undefined && options.skipRecovery !== true) {
-    await recoverApplicationUpdate(options.stateRoot, dependencies).catch(() => {})
+  // Public CLI / Manager omit --state-root; resolve the same default used by other state APIs.
+  const stateRoot = resolveStateRoot(options.stateRoot)
+  const effective = { ...options, stateRoot }
+  if (effective.skipRecovery !== true) {
+    await recoverApplicationUpdate(stateRoot, dependencies).catch(() => {})
   }
-  const installed = await (dependencies.resolver ?? resolveApplicationCarrier)(options)
-  const currentVersion = options.currentVersion
+  const installed = await (dependencies.resolver ?? resolveApplicationCarrier)(effective)
+  const currentVersion = effective.currentVersion
     ?? installed?.version
     ?? (await readFile(new URL('../package.json', import.meta.url), 'utf8').then((text) => JSON.parse(text).version))
+  const preferences = await readUpdatePreferences(stateRoot).catch(() => ({ channel: 'stable' }))
+  const channel = effective.channel ?? preferences.channel ?? 'stable'
   const check = await checkApplicationUpdate({
-    fetch: options.fetch,
-    signal: options.signal,
-    channel: options.channel ?? 'stable',
+    fetch: effective.fetch,
+    signal: effective.signal,
+    channel,
     currentVersion,
     platform,
   })
-  if (options.dryRun === true) {
+  if (effective.dryRun === true) {
     return { ...check, dryRun: true, applied: false, downloaded: null, note: `${check.note} This is a preview; files were not replaced.` }
   }
   if (check.availability === 'current') return { ...check, applied: false }
   if (check.availability === 'check-failed') return check
+  // Plain update never downgrades; explicit rollback/recovery is a separate path.
+  if (typeof currentVersion === 'string' && typeof check.availableVersion === 'string'
+    && compareSemVer(currentVersion, check.availableVersion) > 0) {
+    return { ...check, applied: false, availability: 'current', note: 'Installed application is newer than the selected channel candidate; refusing downgrade.' }
+  }
 
-  if ((options.applyKind === 'directory-swap' || (typeof options.currentRoot === 'string' && typeof options.stagedRoot === 'string'))
-    && typeof options.currentRoot === 'string' && typeof options.stagedRoot === 'string') {
-    return runApply(options, check, currentVersion, dependencies)
+  if ((effective.applyKind === 'directory-swap' || (typeof effective.currentRoot === 'string' && typeof effective.stagedRoot === 'string'))
+    && typeof effective.currentRoot === 'string' && typeof effective.stagedRoot === 'string') {
+    return runApply(effective, check, currentVersion, dependencies)
   }
 
   let downloaded = null
-  if (check.carrier !== null && options.stateRoot !== undefined) {
-    const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  if (check.carrier !== null) {
+    const paths = await prepareStatePaths(stateRoot)
     await mkdir(paths.downloads, { recursive: true, mode: 0o700 })
     const destination = join(paths.downloads, check.carrier.filename)
-    await writeJournal(options.stateRoot, {
+    await writeJournal(stateRoot, {
       phase: 'downloading',
       channel: check.channel,
       fromVersion: currentVersion,
@@ -581,29 +677,29 @@ export async function updateApplication(options = {}, dependencies = {}) {
     })
     downloaded = await downloadApplicationCarrier(check, {
       destination,
-      fetch: options.fetch,
-      signal: options.signal,
+      fetch: effective.fetch,
+      signal: effective.signal,
       expectedSha256: check.carrier.sha256 ?? null,
     })
-    await writeJournal(options.stateRoot, {
+    await writeJournal(stateRoot, {
       phase: 'downloaded',
       channel: check.channel,
       fromVersion: currentVersion,
       toVersion: check.availableVersion,
       carrierPath: downloaded.path,
     })
-  } else if (check.carrier !== null && options.destination !== undefined) {
+  } else if (check.carrier !== null && effective.destination !== undefined) {
     downloaded = await downloadApplicationCarrier(check, {
-      destination: options.destination,
-      fetch: options.fetch,
-      signal: options.signal,
+      destination: effective.destination,
+      fetch: effective.fetch,
+      signal: effective.signal,
       expectedSha256: check.carrier.sha256 ?? null,
     })
   }
 
   const downloadedRecord = downloaded === null ? null : { path: downloaded.path, sha256: downloaded.sha256, bytes: downloaded.bytes }
 
-  if (options.downloadOnly === true) {
+  if (effective.downloadOnly === true) {
     return {
       ...check,
       applied: false,
@@ -615,12 +711,12 @@ export async function updateApplication(options = {}, dependencies = {}) {
     }
   }
 
-  const currentRoot = options.currentRoot ?? installed?.root
-  if (downloaded !== null && typeof currentRoot === 'string' && options.stateRoot !== undefined) {
-    const paths = await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  const currentRoot = effective.currentRoot ?? installed?.root
+  if (downloaded !== null && typeof currentRoot === 'string') {
+    const paths = await prepareStatePaths(stateRoot)
     const stagingHome = join(paths.downloads, `staged-${check.availableVersion}`)
     try {
-      await writeJournal(options.stateRoot, {
+      await writeJournal(stateRoot, {
         phase: 'staging',
         channel: check.channel,
         fromVersion: currentVersion,
@@ -636,7 +732,7 @@ export async function updateApplication(options = {}, dependencies = {}) {
       })
       return {
         ...await runApply({
-          ...options,
+          ...effective,
           applyKind: 'directory-swap',
           currentRoot,
           stagedRoot,
