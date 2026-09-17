@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { inspectSourceStatus } from './source-status.mjs'
 import { inspectToolUpdates, checkRegisteredTool, installGitHubTool, updateGitHubTool, updateAvailability } from './tool-updates.mjs'
 import { browseRecommendedTools } from './github-project.mjs'
-import { checkApplicationUpdate, recoverApplicationUpdate, updateApplication } from './application-update.mjs'
+import { checkApplicationUpdate, packageJsonApplicationVersion, recoverApplicationUpdate, resolveInstalledApplicationVersion, updateApplication } from './application-update.mjs'
 import { inspectAgentAppUpdates } from './agent-app-updates.mjs'
 import { readUpdatePreferences, setUpdatePreferences } from './update-preferences.mjs'
 import { executeAutoUpdates } from './auto-update.mjs'
@@ -44,7 +44,11 @@ export async function updatesStatus(options = {}, dependencies = {}) {
   const source = await inspectSourceStatus(options, dependencies).catch((error) => ({ status: 'error', error }))
   const stateRoot = resolveStateRoot(options.stateRoot)
   const state = await loadState(await readStatePaths(stateRoot))
-  const currentVersion = source?.application?.version ?? await packageVersion()
+  const resolved = await resolveInstalledApplicationVersion(options, dependencies)
+  const currentVersion = options.currentVersion
+    ?? resolved.version
+    ?? source?.application?.version
+    ?? await packageJsonApplicationVersion().catch(() => packageVersion())
   const application = await checkApplicationUpdate({
     fetch: options.fetch,
     signal: options.signal,

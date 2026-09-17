@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Recognize Host-managed `downloads/tool-updates/**` and `downloads/staged-*` trees in storage safety checks so autodownload no longer breaks status/cleanup/Manager snapshot (review F1).
+- Hold one application-update lifecycle lease across journal/stage/swap/verify/relaunch and refuse concurrent mutations that would overwrite a live recovery journal (review F2).
+- Bind GitHub tool updates to the requested component id and reject identity drift instead of installing a different tool (review F3).
+- Read the installed application payload version from the selected carrier root, re-check under lock, and refuse replace when unreadable — never substitute the runner entry `package.json` (review F4).
+- On lost tool-update cache, verify upstream digest and rebind the local wrap digest; make Host wraps deterministic when GNU tar options are available (review F5).
+- Share application version resolution for app check/status and updates status; unknown current version is `version-unknown`, not a definite update (review F6).
+- Explicit `autoCheck`/`autoDownload` off cascades dependent prefs (or rejects same-patch conflicts) under the preferences lease — never silently reverse the user (review F7).
+
 - Resolve the default state root for `app update` so CLI/Manager downloads work without `--state-root` (F1).
 - Verify replaced applications from payload version metadata and relaunch Manager separately from CLI help (F2).
 - Keep concurrently adopted tool packages when a racing install fails under the lifecycle lock (F3).

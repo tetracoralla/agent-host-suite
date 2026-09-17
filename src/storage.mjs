@@ -9,6 +9,7 @@ import { runFile } from './process.mjs'
 import { loadRollbackState, loadState, prepareStatePaths, readStatePaths, statePaths } from './state.mjs'
 import { readProcessInventory } from './process-inventory.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
+import { readUpdateCandidates } from './update-candidates.mjs'
 
 function allocatedBytes(info) {
   return Number.isFinite(info.blocks) ? Number(info.blocks) * 512 : Number(info.size)
@@ -245,18 +246,113 @@ async function packagePlan(paths, current, rollback, runner) {
   return { states, retained: retainedEntries, removable }
 }
 
+function isHostManagedDownloadDirectory(name) {
+  return name === 'tool-updates' || name.startsWith('staged-')
+}
+
+async function referencedDownloadPaths(paths) {
+  const referenced = new Set()
+  const remember = async (candidate) => {
+    if (typeof candidate !== 'string' || candidate.length === 0) return
+    try {
+      referenced.add(await realpath(candidate))
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+      referenced.add(resolve(candidate))
+    }
+  }
+  const candidates = await readUpdateCandidates(paths.root).catch(() => null)
+  for (const tool of Object.values(candidates?.tools ?? {})) {
+    await remember(tool?.downloadedPath)
+  }
+  const journal = await readJson(join(paths.root, 'application-update.json')).catch(() => null)
+  await remember(journal?.carrierPath)
+  await remember(journal?.stagedRoot)
+  return referenced
+}
+
+async function planManagedDownloadTree(root, {
+  downloadsRoot,
+  removable,
+  retained,
+  referenced,
+  cutoffMs,
+  reasonPrefix,
+}) {
+  const resolvedRoot = await realpath(root).catch((error) => {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  })
+  if (resolvedRoot === null) return
+  if (!contained(downloadsRoot, resolvedRoot)) {
+    throw new AgentHostError('STORAGE_PATH_UNSAFE', `Download storage escaped the downloads root: ${root}`)
+  }
+  const stack = [root]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    const info = await lstat(current)
+    if (info.isSymbolicLink()) {
+      throw new AgentHostError('STORAGE_PATH_UNSAFE', `Download storage contains an unsafe entry: ${current}`)
+    }
+    if (info.isDirectory()) {
+      for (const name of await readdir(current)) stack.push(join(current, name))
+      continue
+    }
+    if (!info.isFile()) {
+      throw new AgentHostError('STORAGE_PATH_UNSAFE', `Download storage contains an unsafe entry: ${current}`)
+    }
+    const resolved = await realpath(current)
+    if (referenced.has(resolved) || info.mtimeMs >= cutoffMs || basename(current).includes('.tmp-')) {
+      retained.push({
+        path: current,
+        reason: referenced.has(resolved) ? `${reasonPrefix}-referenced` : 'recent-or-in-progress',
+      })
+      continue
+    }
+    removable.push({
+      path: current,
+      usage: await treeUsage(current),
+      identity: { dev: Number(info.dev), ino: Number(info.ino), mtimeMs: Number(info.mtimeMs) },
+    })
+  }
+}
+
 async function downloadPlan(paths, current) {
   const cutoffMs = releaseActivationMs(current)
   const removable = []
   const retained = []
+  const downloadsRoot = await realpath(paths.downloads)
+  const referenced = await referencedDownloadPaths(paths)
   for (const name of await readdir(paths.downloads)) {
     const path = join(paths.downloads, name)
     const info = await lstat(path)
-    if (info.isSymbolicLink() || !info.isFile()) {
+    if (info.isSymbolicLink()) {
       throw new AgentHostError('STORAGE_PATH_UNSAFE', `Download storage contains an unsafe entry: ${path}`)
     }
-    if (name.includes('.tmp-') || info.mtimeMs >= cutoffMs) {
-      retained.push({ path, reason: 'recent-or-in-progress' })
+    if (info.isDirectory()) {
+      if (!isHostManagedDownloadDirectory(name)) {
+        throw new AgentHostError('STORAGE_PATH_UNSAFE', `Download storage contains an unsafe entry: ${path}`)
+      }
+      // Host-managed tool-update caches and application staged-* trees only.
+      await planManagedDownloadTree(path, {
+        downloadsRoot,
+        removable,
+        retained,
+        referenced,
+        cutoffMs,
+        reasonPrefix: name === 'tool-updates' ? 'tool-update-cache' : 'application-staging',
+      })
+      continue
+    }
+    if (!info.isFile()) {
+      throw new AgentHostError('STORAGE_PATH_UNSAFE', `Download storage contains an unsafe entry: ${path}`)
+    }
+    const resolved = await realpath(path)
+    if (referenced.has(resolved) || name.includes('.tmp-') || info.mtimeMs >= cutoffMs) {
+      retained.push({
+        path,
+        reason: referenced.has(resolved) ? 'update-candidate-referenced' : 'recent-or-in-progress',
+      })
       continue
     }
     removable.push({

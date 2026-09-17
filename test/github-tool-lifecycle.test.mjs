@@ -351,7 +351,7 @@ test('auto-install reuses the lifecycle lease instead of deadlocking', async (t)
     fetch: githubFetch({ repository: 'review/alpha', version: '1.0.0', archive: alpha.archive, sha256: alpha.sha256, bytes: alpha.bytes }),
     probe: false,
   }, dependencies)
-  await setUpdatePreferences(stateRoot, { autoCheck: true, autoDownload: false, autoInstall: true })
+  await setUpdatePreferences(stateRoot, { autoInstall: true })
   const result = await executeAutoUpdates(stateRoot, {
     force: true,
     probe: false,

@@ -669,6 +669,16 @@ export async function installGitHubTool(options, dependencies = {}) {
       }
     }
   }
+  if (typeof options.expectedComponentId === 'string'
+    && options.expectedComponentId.length > 0
+    && wrapped.descriptor?.id !== options.expectedComponentId) {
+    fail('GITHUB_TOOL_IDENTITY_DRIFT', `Update target ${options.expectedComponentId} does not match component id ${wrapped.descriptor?.id}`, {
+      target: options.expectedComponentId,
+      componentId: wrapped.descriptor?.id ?? null,
+      repository: wrapped.origin?.repository ?? null,
+      tag: wrapped.origin?.tag ?? null,
+    })
+  }
   if (options.dryRun === true || state === null) {
     return {
       schemaVersion: TOOL_UPDATE_SCHEMA,
@@ -845,6 +855,14 @@ export async function downloadGitHubToolUpdate(options, dependencies = {}) {
     signal: options.signal,
     probe: false,
   })
+  if (wrapped.descriptor?.id !== options.target) {
+    fail('GITHUB_TOOL_IDENTITY_DRIFT', `Update target ${options.target} does not match component id ${wrapped.descriptor?.id}`, {
+      target: options.target,
+      componentId: wrapped.descriptor?.id ?? null,
+      repository,
+      tag: wrapped.origin?.tag ?? null,
+    })
+  }
   const cache = await persistVerifiedToolCache(options.stateRoot, {
     id: options.target,
     platform,
@@ -947,17 +965,20 @@ export async function updateGitHubTool(options, dependencies = {}) {
     }
   }
   const cached = await reuseCachedToolArchive(options.stateRoot, expected)
-  const wrappedDigest = expected?.wrappedDigest ?? null
+  const historicalWrappedDigest = expected?.wrappedDigest ?? null
   const upstreamDigest = expected?.upstreamDigest
-    ?? (wrappedDigest === null ? (expected?.digest ?? null) : null)
+    ?? (historicalWrappedDigest === null ? (expected?.digest ?? null) : null)
+  // Cache hit: enforce the stored Host wrap digest. Cache miss / re-acquire: verify
+  // upstreamDigest only, then accept the fresh local wrap (wrap may be non-deterministic).
   return installGitHubTool({
     ...options,
     github: `https://github.com/${repository}`,
     tag,
     activate: options.activate,
-    expectedDigest: wrappedDigest,
+    expectedDigest: cached?.path ? (cached.wrappedDigest ?? historicalWrappedDigest) : null,
     expectedUpstreamDigest: upstreamDigest,
     expectedAssetName: expected?.assetName ?? null,
+    expectedComponentId: options.target,
     wrappedArchivePath: cached?.path,
   }, dependencies)
 }

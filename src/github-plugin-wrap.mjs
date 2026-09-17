@@ -293,9 +293,20 @@ export async function wrapGitHubPluginArchive({
     await mkdir(dirname(descriptorPath), { recursive: true })
     await writeFile(descriptorPath, descriptorText, { mode: 0o600 })
     const stagedArchive = join(parent, `${contract.id}-${contract.version}-host-component.tar.gz`)
-    await execFileAsync(tarCommand(), ['-czf', stagedArchive, '-C', stage, '.'], {
-      env: { ...process.env, COPYFILE_DISABLE: '1' },
-    })
+    // Prefer a reproducible wrap so lost-cache re-acquires match historical digests when possible.
+    // Upstream identity remains the release asset digest; local wrap digest is rebound on cache miss.
+    const deterministicArgs = process.platform === 'win32'
+      ? ['-czf', stagedArchive, '-C', stage, '.']
+      : ['--mtime=1970-01-01T00:00:00Z', '--owner=0', '--group=0', '--numeric-owner', '--sort=name', '-czf', stagedArchive, '-C', stage, '.']
+    try {
+      await execFileAsync(tarCommand(), deterministicArgs, {
+        env: { ...process.env, COPYFILE_DISABLE: '1', TAR_OPTIONS: '' },
+      })
+    } catch {
+      await execFileAsync(tarCommand(), ['-czf', stagedArchive, '-C', stage, '.'], {
+        env: { ...process.env, COPYFILE_DISABLE: '1' },
+      })
+    }
     const wrappedPath = outputPath ?? join(await mkdtemp(join(tmpdir(), 'agent-host-github-component-')), basename(stagedArchive))
     await mkdir(dirname(wrappedPath), { recursive: true, mode: 0o700 })
     await rename(stagedArchive, wrappedPath)

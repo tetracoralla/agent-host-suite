@@ -144,7 +144,7 @@ export async function checkApplicationUpdate({
   let availability = 'current'
   if (platform === null) availability = 'no-platform-asset'
   else if (asset === null) availability = 'no-platform-asset'
-  else if (currentVersion === undefined || currentVersion === null) availability = 'update-available'
+  else if (currentVersion === undefined || currentVersion === null) availability = 'version-unknown'
   else if (compareSemVer(currentVersion, version) < 0) availability = 'update-available'
   return {
     schemaVersion: APPLICATION_UPDATE_SCHEMA,
@@ -318,6 +318,33 @@ export async function readReplacedApplicationVersion(root) {
     if (error?.code !== 'ENOENT') throw error
   }
   return null
+}
+
+export async function resolveInstalledApplicationVersion(options = {}, dependencies = {}) {
+  if (typeof options.currentVersion === 'string' && options.currentVersion.length > 0) {
+    return { version: options.currentVersion, source: 'explicit', carrier: null }
+  }
+  // Prefer the payload already selected for replacement (works on non-darwin fixtures too).
+  if (typeof options.currentRoot === 'string' && options.currentRoot.length > 0) {
+    const recorded = await readReplacedApplicationVersion(options.currentRoot)
+    if (recorded !== null) {
+      return { version: recorded.version, source: recorded.source, carrier: null }
+    }
+  }
+  const installed = await (dependencies.resolver ?? resolveApplicationCarrier)(options)
+  if (installed?.root) {
+    const recorded = await readReplacedApplicationVersion(installed.root)
+    if (recorded !== null) {
+      return { version: recorded.version, source: recorded.source, carrier: installed }
+    }
+    return { version: null, source: 'unreadable', carrier: installed }
+  }
+  return { version: null, source: 'unavailable', carrier: null }
+}
+
+export async function packageJsonApplicationVersion() {
+  const text = await readFile(new URL('../package.json', import.meta.url), 'utf8')
+  return JSON.parse(text).version
 }
 
 export async function verifyReplacedApplication({
@@ -563,10 +590,26 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
   const currentRoot = options.currentRoot
   const stagedRoot = options.stagedRoot
   const previousRoot = options.previousRoot ?? `${currentRoot}.previous`
+  const payload = await readReplacedApplicationVersion(currentRoot)
+  if (payload === null) {
+    fail('APPLICATION_UPDATE_VERSION_UNREADABLE', 'Refusing application replace because the installed payload version is unreadable', {
+      currentRoot,
+    })
+  }
+  const fromVersion = typeof currentVersion === 'string' ? currentVersion : payload.version
+  if (typeof check.availableVersion === 'string' && compareSemVer(payload.version, check.availableVersion) > 0) {
+    return {
+      ...check,
+      applied: false,
+      availability: 'current',
+      currentVersion: payload.version,
+      note: 'Installed application payload is newer than the selected channel candidate; refusing downgrade.',
+    }
+  }
   const journal = await writeJournal(options.stateRoot, {
     phase: 'replacing',
     channel: check.channel,
-    fromVersion: currentVersion,
+    fromVersion,
     toVersion: check.availableVersion,
     currentRoot,
     stagedRoot,
@@ -701,47 +744,18 @@ async function runApply(options, check, currentVersion, dependencies) {
   ))
 }
 
-export async function updateApplication(options = {}, dependencies = {}) {
-  const platform = options.platform ?? supportedReleasePlatform()
-  // Public CLI / Manager omit --state-root; resolve the same default used by other state APIs.
-  const stateRoot = resolveStateRoot(options.stateRoot)
-  const effective = { ...options, stateRoot }
-  if (effective.skipRecovery !== true) {
-    await recoverApplicationUpdate(stateRoot, dependencies).catch(() => {})
-  }
-  const installed = await (dependencies.resolver ?? resolveApplicationCarrier)(effective)
-  const currentVersion = effective.currentVersion
-    ?? installed?.version
-    ?? (await readFile(new URL('../package.json', import.meta.url), 'utf8').then((text) => JSON.parse(text).version))
-  const preferences = await readUpdatePreferences(stateRoot).catch(() => ({ channel: 'stable' }))
-  const channel = effective.channel ?? preferences.channel ?? 'stable'
-  const check = await checkApplicationUpdate({
-    fetch: effective.fetch,
-    signal: effective.signal,
-    channel,
-    currentVersion,
-    platform,
-  })
-  if (effective.dryRun === true) {
-    return { ...check, dryRun: true, applied: false, downloaded: null, note: `${check.note} This is a preview; files were not replaced.` }
-  }
-  if (check.availability === 'current') return { ...check, applied: false }
-  if (check.availability === 'check-failed') return check
-  // Plain update never downgrades; explicit rollback/recovery is a separate path.
-  if (typeof currentVersion === 'string' && typeof check.availableVersion === 'string'
-    && compareSemVer(currentVersion, check.availableVersion) > 0) {
-    return { ...check, applied: false, availability: 'current', note: 'Installed application is newer than the selected channel candidate; refusing downgrade.' }
-  }
-
+async function mutateApplicationUpdate(effective, check, currentVersion, installed, dependencies) {
+  const stateRoot = effective.stateRoot
   if ((effective.applyKind === 'directory-swap' || (typeof effective.currentRoot === 'string' && typeof effective.stagedRoot === 'string'))
     && typeof effective.currentRoot === 'string' && typeof effective.stagedRoot === 'string') {
-    return runApply(effective, check, currentVersion, dependencies)
+    return applyStagedReplacement(effective, check, currentVersion, dependencies)
   }
 
   let downloaded = null
   if (check.carrier !== null) {
     const paths = await prepareStatePaths(stateRoot)
     await mkdir(paths.downloads, { recursive: true, mode: 0o700 })
+    // Isolate download filenames under the lease; never clear another txn's recovery fields.
     const destination = join(paths.downloads, check.carrier.filename)
     await writeJournal(stateRoot, {
       phase: 'downloading',
@@ -749,6 +763,9 @@ export async function updateApplication(options = {}, dependencies = {}) {
       fromVersion: currentVersion,
       toVersion: check.availableVersion,
       carrierPath: destination,
+      currentRoot: null,
+      previousRoot: null,
+      stagedRoot: null,
     })
     downloaded = await downloadApplicationCarrier(check, {
       destination,
@@ -762,6 +779,9 @@ export async function updateApplication(options = {}, dependencies = {}) {
       fromVersion: currentVersion,
       toVersion: check.availableVersion,
       carrierPath: downloaded.path,
+      currentRoot: null,
+      previousRoot: null,
+      stagedRoot: null,
     })
   } else if (check.carrier !== null && effective.destination !== undefined) {
     downloaded = await downloadApplicationCarrier(check, {
@@ -799,6 +819,7 @@ export async function updateApplication(options = {}, dependencies = {}) {
         carrierPath: downloaded.path,
         currentRoot,
         stagedRoot: stagingHome,
+        previousRoot: null,
       })
       const stagedRoot = await stageApplicationCarrier({
         carrierPath: downloaded.path,
@@ -806,7 +827,7 @@ export async function updateApplication(options = {}, dependencies = {}) {
         runner: dependencies.runner ?? runFile,
       })
       return {
-        ...await runApply({
+        ...await applyStagedReplacement({
           ...effective,
           applyKind: 'directory-swap',
           currentRoot,
@@ -843,5 +864,105 @@ export async function updateApplication(options = {}, dependencies = {}) {
     note: downloaded === null
       ? 'This environment cannot replace a macOS app or Windows install. Candidate metadata is returned instead of a mocked system replacement.'
       : 'Installer downloaded and verified. Replacement runs when Agent Host is installed as a macOS app or Windows payload.',
+  }
+}
+
+export async function updateApplication(options = {}, dependencies = {}) {
+  const platform = options.platform ?? supportedReleasePlatform()
+  // Public CLI / Manager omit --state-root; resolve the same default used by other state APIs.
+  const stateRoot = resolveStateRoot(options.stateRoot)
+  const effective = { ...options, stateRoot }
+  if (effective.skipRecovery !== true) {
+    const recovery = await recoverApplicationUpdate(stateRoot, dependencies).catch(() => null)
+    // Only treat an in-flight journal as blocking. A busy lock with an idle journal is
+    // handled when this mutation tries to acquire its own lifecycle lease.
+    if (recovery?.live === true && LIVE_PHASES.has(recovery.phase)) {
+      fail('APPLICATION_UPDATE_BUSY', 'Another application update is in progress; refusing to overwrite the recovery journal', {
+        phase: recovery.phase ?? null,
+        pid: recovery.pid ?? null,
+      })
+    }
+  }
+  const resolved = await resolveInstalledApplicationVersion(effective, dependencies)
+  const installed = resolved.carrier ?? await (dependencies.resolver ?? resolveApplicationCarrier)(effective)
+  // Never substitute the runner entry package.json for an installed payload version (F4).
+  let currentVersion = effective.currentVersion ?? resolved.version ?? null
+  const preferences = await readUpdatePreferences(stateRoot).catch(() => ({ channel: 'stable' }))
+  const channel = effective.channel ?? preferences.channel ?? 'stable'
+  const check = await checkApplicationUpdate({
+    fetch: effective.fetch,
+    signal: effective.signal,
+    channel,
+    currentVersion,
+    platform,
+  })
+  if (effective.dryRun === true) {
+    return { ...check, dryRun: true, applied: false, downloaded: null, note: `${check.note} This is a preview; files were not replaced.` }
+  }
+  if (check.availability === 'current') return { ...check, applied: false }
+  if (check.availability === 'check-failed') return check
+  if (check.availability === 'version-unknown') {
+    // Still allow download-only metadata flows, but never replace without a readable payload version.
+    if (effective.downloadOnly !== true
+      && (effective.applyKind === 'directory-swap'
+        || (typeof effective.currentRoot === 'string' && typeof effective.stagedRoot === 'string')
+        || installed?.root !== undefined)) {
+      fail('APPLICATION_UPDATE_VERSION_UNREADABLE', 'Refusing application replace because the installed payload version is unreadable')
+    }
+  }
+  // Plain update never downgrades; explicit rollback/recovery is a separate path.
+  if (typeof currentVersion === 'string' && typeof check.availableVersion === 'string'
+    && compareSemVer(currentVersion, check.availableVersion) > 0) {
+    return { ...check, applied: false, availability: 'current', note: 'Installed application is newer than the selected channel candidate; refusing downgrade.' }
+  }
+
+  const willMutate = check.carrier !== null
+    || (typeof effective.currentRoot === 'string' && typeof effective.stagedRoot === 'string')
+    || effective.applyKind === 'directory-swap'
+  if (!willMutate) {
+    return {
+      ...check,
+      applied: false,
+      downloaded: null,
+      availability: check.carrier === null ? 'no-platform-asset' : check.availability,
+      candidate: check.carrier,
+      verification: {
+        command: 'node scripts/verify-application-update.mjs --fixture',
+        macos: 'Download the DMG, compare SHA-256, Control-click Open, then agent-host app update on that Mac.',
+        windows: 'Download the ZIP, compare SHA-256, extract, then run the installer. SmartScreen may warn.',
+      },
+      note: 'This environment cannot replace a macOS app or Windows install. Candidate metadata is returned instead of a mocked system replacement.',
+    }
+  }
+
+  const paths = statePaths(stateRoot)
+  try {
+    return await withLifecycleMutation(paths, 'application.update', dependencies, async (locked) => {
+      // Re-validate payload version under the lifecycle lease before journal/stage/swap.
+      const lockedResolved = await resolveInstalledApplicationVersion(effective, locked)
+      const liveVersion = effective.currentVersion ?? lockedResolved.version
+      if (liveVersion === null
+        && effective.downloadOnly !== true
+        && (typeof effective.currentRoot === 'string' || lockedResolved.carrier?.root !== undefined || installed?.root !== undefined)) {
+        fail('APPLICATION_UPDATE_VERSION_UNREADABLE', 'Refusing application replace because the installed payload version is unreadable under lock')
+      }
+      if (typeof liveVersion === 'string' && typeof check.availableVersion === 'string'
+        && compareSemVer(liveVersion, check.availableVersion) > 0) {
+        return {
+          ...check,
+          currentVersion: liveVersion,
+          applied: false,
+          availability: 'current',
+          note: 'Installed application is newer than the selected channel candidate; refusing downgrade.',
+        }
+      }
+      const liveInstalled = lockedResolved.carrier ?? installed
+      return mutateApplicationUpdate(effective, { ...check, currentVersion: liveVersion ?? check.currentVersion }, liveVersion, liveInstalled, locked)
+    })
+  } catch (error) {
+    if (error instanceof AgentHostError && error.code === 'LIFECYCLE_BUSY') {
+      fail('APPLICATION_UPDATE_BUSY', 'Another application update is in progress; refusing to overwrite the recovery journal')
+    }
+    throw error
   }
 }

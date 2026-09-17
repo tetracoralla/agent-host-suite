@@ -39,8 +39,23 @@ export async function readUpdatePreferences(stateRoot) {
   return { ...value, source: 'saved' }
 }
 
-export async function setUpdatePreferences(stateRoot, patch) {
-  const current = await readUpdatePreferences(stateRoot)
+function assertNoPreferenceConflict(patch) {
+  if (patch.autoInstall === true && (patch.autoDownload === false || patch.autoCheck === false)) {
+    throw new AgentHostError(
+      'UPDATE_PREFERENCES_CONFLICT',
+      'autoInstall requires autoDownload and autoCheck; omit the conflicting off flags or turn those on first',
+    )
+  }
+  if (patch.autoDownload === true && patch.autoCheck === false) {
+    throw new AgentHostError(
+      'UPDATE_PREFERENCES_CONFLICT',
+      'autoDownload requires autoCheck; omit the conflicting off flag or turn autoCheck on first',
+    )
+  }
+}
+
+function applyPreferencePatch(current, patch) {
+  assertNoPreferenceConflict(patch)
   const next = {
     schemaVersion: UPDATE_PREFERENCES_SCHEMA,
     channel: patch.channel ?? current.channel,
@@ -48,16 +63,27 @@ export async function setUpdatePreferences(stateRoot, patch) {
     autoDownload: patch.autoDownload ?? current.autoDownload,
     autoInstall: patch.autoInstall ?? current.autoInstall,
   }
-  if (next.autoInstall === true && next.autoDownload !== true) {
-    next.autoDownload = true
-  }
-  if (next.autoDownload === true && next.autoCheck !== true) {
-    next.autoCheck = true
+  // Explicit off must cascade to dependent actions — never succeed while silently
+  // reversing the user's off switch via autoInstall/autoDownload inheritance.
+  if (patch.autoCheck === false) {
+    next.autoDownload = false
+    next.autoInstall = false
+  } else if (patch.autoDownload === false) {
+    next.autoInstall = false
+  } else {
+    if (next.autoInstall === true && next.autoDownload !== true) next.autoDownload = true
+    if (next.autoDownload === true && next.autoCheck !== true) next.autoCheck = true
   }
   if (!valid(next)) throw new AgentHostError('UPDATE_PREFERENCES_INVALID', 'Update preferences are not valid')
+  return next
+}
+
+export async function setUpdatePreferences(stateRoot, patch) {
   const paths = statePaths(resolveStateRoot(stateRoot))
   return await withLifecycleMutation(paths, 'updates.preferences', {}, async () => {
     await prepareStatePaths(resolveStateRoot(stateRoot))
+    const current = await readUpdatePreferences(stateRoot)
+    const next = applyPreferencePatch(current, patch ?? {})
     await writePrivateJson(pathFor(stateRoot), next)
     return { ...next, source: 'saved' }
   })

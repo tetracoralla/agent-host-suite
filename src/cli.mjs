@@ -24,7 +24,7 @@ import {
   updatesInstall,
   updatesStatus,
 } from './updates.mjs'
-import { checkApplicationUpdate, updateApplication } from './application-update.mjs'
+import { checkApplicationUpdate, packageJsonApplicationVersion, resolveInstalledApplicationVersion, updateApplication } from './application-update.mjs'
 import { readUpdatePreferences } from './update-preferences.mjs'
 import { executeAutoUpdates } from './auto-update.mjs'
 import { FEATURED_READINESS_SCHEMA, inspectFeaturedReadiness } from './featured-readiness.mjs'
@@ -693,9 +693,14 @@ async function run(options, dependencies = {}) {
   if (options.command === 'app') {
     if (options.action === 'status' || options.action === 'check') {
       const preferences = await readUpdatePreferences(options.stateRoot)
+      const resolved = await resolveInstalledApplicationVersion(options, dependencies)
+      const currentVersion = options.currentVersion
+        ?? resolved.version
+        ?? await packageJsonApplicationVersion().catch(() => null)
       return checkApplicationUpdate({
         ...options,
         channel: options.channel ?? preferences.channel,
+        currentVersion,
       })
     }
     if (options.action === 'update') return updateApplication(options, dependencies)
