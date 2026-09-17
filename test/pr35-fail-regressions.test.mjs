@@ -641,16 +641,17 @@ test('R1 / F2 long-running Manager relaunch detaches and survives updater handof
   await write(join(staged, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
   // Platform-native long-running Manager: spaced .cmd on win32
   // (cmd.exe /d /s /c call … — outer cmd stays alive), Contents/MacOS elsewhere.
-  // readyFile is additive confirmation; child.pid liveness also proves handoff.
+  // readyFile/probe is required when provided (no child.pid fallback).
   if (process.platform === 'win32') {
-    const managerScript = join(staged, 'manager-keepalive.mjs')
+    // Colocate keepalive next to the .cmd so directory-swap cannot break %~dp0..\
+    const managerScript = join(staged, 'bin', 'manager-keepalive.mjs')
     await write(managerScript, `import { writeFileSync } from 'node:fs'
 writeFileSync(process.argv[1], String(process.pid))
 setInterval(() => {}, 1000)
 `)
     await write(
       join(staged, 'bin', 'Agent Host.cmd'),
-      `@echo off\r\n"${process.execPath}" "%~dp0..\\manager-keepalive.mjs" "${pidPath}"\r\n`,
+      `@echo off\r\n"${process.execPath}" "%~dp0manager-keepalive.mjs" "${pidPath}"\r\n`,
     )
   } else {
     const manager = join(staged, 'Contents', 'MacOS', 'AgentHostManager')
@@ -669,8 +670,8 @@ while true; do sleep 1; done
     applyKind: 'directory-swap',
     currentRoot: app,
     stagedRoot: staged,
-    // win32 cold start can exceed 1.5s; root fix is `call` launch semantics.
-    relaunchConfirmMs: process.platform === 'win32' ? 2_500 : 2_000,
+    // win32 cold runners need a longer readyFile window for Node+cmd handoff.
+    relaunchConfirmMs: process.platform === 'win32' ? 10_000 : 2_000,
     relaunchReadyFile: pidPath,
     fetch: async () => jsonResponse({
       tag_name: 'v0.2.1',

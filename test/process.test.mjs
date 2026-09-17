@@ -158,14 +158,14 @@ setInterval(() => {}, 1000)
     `@echo off\r\n"${process.execPath}" "${script}" "${pidPath}"\r\n`,
   )
   // cmd.exe /d /s /c call "Agent Host.cmd" — outer cmd stays alive under `call`
-  // (no start /b). readyFile is additive; child.pid liveness also confirms.
+  // (no start /b). readyFile/probe is required when provided (no pid fallback).
   const started = await startDetachedProcess(batch, [], {
     confirmMs: 2_500,
     readyFile: pidPath,
   })
   assert.equal(started.detached, true)
   assert.equal(started.shell, true)
-  assert.equal(['probe', 'pid'].includes(started.ready), true, `ready=${started.ready}`)
+  assert.equal(started.ready, 'probe', `ready=${started.ready}`)
   assert.equal(Number.isInteger(started.pid) && started.pid > 0, true)
   process.kill(started.pid, 0)
   let keepalivePid = null

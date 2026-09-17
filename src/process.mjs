@@ -258,7 +258,8 @@ export async function startDetachedProcess(command, args = [], options = {}) {
       exitSignal = signal
       if (settled) return
       // With `call`, early exit means the batch ended before confirmation.
-      // readyFile may still prove Manager up if it was written; confirm() decides.
+      // When readyProbe/readyFile is set, confirm() still waits for the probe
+      // (Manager may outlive a short-lived wrapper). Without a probe, fail now.
       if (readyProbe !== null) return
       settleFailure(
         'HOST_COMMAND_FAILED',
@@ -269,8 +270,9 @@ export async function startDetachedProcess(command, args = [], options = {}) {
 
     const startedAt = Date.now()
     const confirm = async () => {
-      // Poll optional readyFile/probe early; otherwise wait confirmMs then
-      // accept child.pid liveness (outer cmd stays alive under `call`).
+      // When readyFile/probe is provided, require it — never fall back to
+      // outer child.pid (cmd.exe can stay alive while Manager never wrote
+      // the ready file). Pid liveness is the confirm path only when no probe.
       while (!settled && Date.now() - startedAt < confirmMs) {
         if (readyProbe !== null) {
           try {
@@ -292,12 +294,21 @@ export async function startDetachedProcess(command, args = [], options = {}) {
             return
           }
         } catch {
-          // Fall through to pid liveness / failure.
+          // Probe failed; fail closed below.
         }
+        settleFailure(
+          'HOST_COMMAND_FAILED',
+          `${command} ${args.join(' ')} exited before startup was confirmed`,
+          {
+            status: exitStatus,
+            signal: exitSignal,
+            ready: 'timeout',
+          },
+        )
+        return
       }
-      // readyFile is additive: succeed when either probe or child.pid proves up.
       if (!shellExited && childPidAlive(child)) {
-        finishOk(readyProbe !== null ? { ready: 'pid' } : {})
+        finishOk({})
         return
       }
       settleFailure(
@@ -306,7 +317,6 @@ export async function startDetachedProcess(command, args = [], options = {}) {
         {
           status: exitStatus,
           signal: exitSignal,
-          ...(readyProbe !== null ? { ready: 'timeout' } : {}),
         },
       )
     }
