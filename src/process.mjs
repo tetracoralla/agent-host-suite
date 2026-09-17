@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { posix, win32 } from 'node:path'
 import { AgentHostError } from './errors.mjs'
@@ -118,23 +119,85 @@ function windowsBatchCommand(command) {
   return platform() === 'win32' && /\.(cmd|bat)$/iu.test(String(command))
 }
 
+function quoteWindowsCmdArg(value) {
+  const text = String(value)
+  if (text.length === 0) return '""'
+  // Quote when whitespace or cmd metacharacters are present so paths like
+  // `Agent Host.cmd` survive `cmd.exe /d /s /c` without shell:true wrapping.
+  if (!/[\s"&<>|^()%!]/u.test(text)) return text
+  return `"${text.replace(/"/gu, '""')}"`
+}
+
+function windowsBatchCommandLine(command, args = []) {
+  return [command, ...args].map(quoteWindowsCmdArg).join(' ')
+}
+
+function windowsComSpec() {
+  if (typeof process.env.ComSpec === 'string' && process.env.ComSpec.length > 0) {
+    return process.env.ComSpec
+  }
+  return win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe')
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function readyFileProbe(readyFile) {
+  try {
+    const text = await readFile(readyFile, 'utf8')
+    const pid = Number(String(text).trim().split(/\s+/u)[0])
+    if (!Number.isInteger(pid) || pid <= 0) return false
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function startDetachedProcess(command, args = [], options = {}) {
   const confirmMs = options.confirmMs ?? 1_500
+  const useWindowsBatch = windowsBatchCommand(command)
+  const readyProbe = typeof options.readyProbe === 'function'
+    ? options.readyProbe
+    : (typeof options.readyFile === 'string' && options.readyFile.length > 0
+      ? () => readyFileProbe(options.readyFile)
+      : null)
+  // When a ready probe exists, launch via `start "" /b` so the intermediate
+  // cmd.exe can exit while the long-running Manager stays detached.
+  const useWindowsStart = useWindowsBatch && readyProbe !== null
+
   return new Promise((resolve, reject) => {
     let settled = false
     let child
-    // Windows CreateProcess cannot launch .cmd/.bat without a shell (EINVAL).
-    // Keep DETACHED + windowsHide so Manager survives updater handoff.
-    const useWindowsShell = windowsBatchCommand(command)
+    let shellExited = false
+    let exitStatus = null
+    let exitSignal = null
+
     try {
-      child = spawn(command, args, {
-        cwd: options.cwd,
-        env: options.env ?? process.env,
-        stdio: options.stdio ?? 'ignore',
-        detached: true,
-        windowsHide: true,
-        shell: useWindowsShell,
-      })
+      if (useWindowsBatch) {
+        const commandLine = useWindowsStart
+          ? `start "" /b ${windowsBatchCommandLine(command, args)}`
+          : windowsBatchCommandLine(command, args)
+        child = spawn(windowsComSpec(), ['/d', '/s', '/c', commandLine], {
+          cwd: options.cwd,
+          env: options.env ?? process.env,
+          stdio: options.stdio ?? 'ignore',
+          detached: true,
+          windowsHide: true,
+          shell: false,
+          windowsVerbatimArguments: true,
+        })
+      } else {
+        child = spawn(command, args, {
+          cwd: options.cwd,
+          env: options.env ?? process.env,
+          stdio: options.stdio ?? 'ignore',
+          detached: true,
+          windowsHide: true,
+          shell: false,
+        })
+      }
     } catch (error) {
       reject(new AgentHostError(
         'HOST_COMMAND_FAILED',
@@ -146,13 +209,32 @@ export async function startDetachedProcess(command, args = [], options = {}) {
     const settleFailure = (code, message, details) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
       try {
         if (child.pid !== undefined) child.kill()
       } catch {
         // Best-effort only; ownership was never handed off.
       }
       reject(new AgentHostError(code, message, details))
+    }
+
+    const finishOk = (extra = {}) => {
+      if (settled) return
+      settled = true
+      // Hand off ownership: updater must not reap this long-running Manager.
+      try {
+        child.unref()
+      } catch {
+        // Already detached / closed.
+      }
+      resolve({
+        pid: child.pid,
+        command,
+        args,
+        detached: true,
+        confirmedAfterMs: confirmMs,
+        shell: useWindowsBatch,
+        ...extra,
+      })
     }
 
     child.once('error', (error) => {
@@ -163,6 +245,11 @@ export async function startDetachedProcess(command, args = [], options = {}) {
       )
     })
     child.once('exit', (status, signal) => {
+      shellExited = true
+      exitStatus = status
+      exitSignal = signal
+      // Intermediate cmd exit is expected with `start /b` + readyProbe.
+      if (readyProbe !== null || settled) return
       settleFailure(
         'HOST_COMMAND_FAILED',
         `${command} ${args.join(' ')} exited before startup was confirmed`,
@@ -170,13 +257,39 @@ export async function startDetachedProcess(command, args = [], options = {}) {
       )
     })
 
-    const timer = setTimeout(() => {
+    const startedAt = Date.now()
+    const confirm = async () => {
+      while (!settled && Date.now() - startedAt < confirmMs) {
+        if (readyProbe !== null) {
+          try {
+            if (await readyProbe()) {
+              finishOk({ ready: 'probe' })
+              return
+            }
+          } catch {
+            // Keep polling until confirmMs.
+          }
+          await delay(50)
+          continue
+        }
+        const remaining = confirmMs - (Date.now() - startedAt)
+        if (remaining > 0) await delay(remaining)
+        break
+      }
       if (settled) return
-      // Readiness probe: refuse false success if the handle is already gone.
-      if (child.pid === undefined) {
+      if (readyProbe !== null) {
         settleFailure(
           'HOST_COMMAND_FAILED',
-          `${command} ${args.join(' ')} started without a process id`,
+          `${command} ${args.join(' ')} exited before startup was confirmed`,
+          { status: exitStatus, signal: exitSignal, ready: 'timeout' },
+        )
+        return
+      }
+      if (shellExited || child.pid === undefined) {
+        settleFailure(
+          'HOST_COMMAND_FAILED',
+          `${command} ${args.join(' ')} exited before startup was confirmed`,
+          { status: exitStatus, signal: exitSignal },
         )
         return
       }
@@ -190,18 +303,9 @@ export async function startDetachedProcess(command, args = [], options = {}) {
         )
         return
       }
-      settled = true
-      // Hand off ownership: updater must not reap this long-running Manager.
-      child.unref()
-      resolve({
-        pid: child.pid,
-        command,
-        args,
-        detached: true,
-        confirmedAfterMs: confirmMs,
-        shell: useWindowsShell,
-      })
-    }, confirmMs)
+      finishOk()
+    }
+    void confirm()
   })
 }
 

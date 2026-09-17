@@ -639,7 +639,7 @@ test('R1 / F2 long-running Manager relaunch detaches and survives updater handof
   const pidPath = join(root, 'manager.pid')
   await write(join(app, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.0' }, null, 2)}\n`)
   await write(join(staged, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
-  // Platform-native long-running Manager: .cmd on win32 (CreateProcess + shell),
+  // Platform-native long-running Manager: spaced .cmd on win32 (cmd.exe /d /s /c),
   // Contents/MacOS shell script elsewhere. PID file proves survival after handoff.
   if (process.platform === 'win32') {
     const managerScript = join(staged, 'manager-keepalive.mjs')
@@ -668,7 +668,10 @@ while true; do sleep 1; done
     applyKind: 'directory-swap',
     currentRoot: app,
     stagedRoot: staged,
-    relaunchConfirmMs: 400,
+    relaunchConfirmMs: 2_000,
+    // Confirm via Manager PID file so Windows `cmd /c start /b` handoff is not
+    // mistaken for relaunch failure when the intermediate shell exits.
+    relaunchReadyFile: pidPath,
     fetch: async () => jsonResponse({
       tag_name: 'v0.2.1',
       html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',

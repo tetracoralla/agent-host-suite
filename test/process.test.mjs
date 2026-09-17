@@ -140,3 +140,34 @@ test('startDetachedProcess rejects a non-executable entry', async (t) => {
     )
   }
 })
+
+test('startDetachedProcess launches a spaced Windows .cmd via cmd.exe and readyFile', {
+  skip: process.platform !== 'win32',
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-detached-cmd-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const pidPath = join(root, 'alive.pid')
+  const script = join(root, 'keepalive.mjs')
+  await writeFile(script, `import { writeFileSync } from 'node:fs'
+writeFileSync(process.argv[1], String(process.pid))
+setInterval(() => {}, 1000)
+`)
+  const batch = join(root, 'Agent Host.cmd')
+  await writeFile(
+    batch,
+    `@echo off\r\n"${process.execPath}" "${script}" "${pidPath}"\r\n`,
+  )
+  const started = await startDetachedProcess(batch, [], {
+    confirmMs: 2_000,
+    readyFile: pidPath,
+  })
+  assert.equal(started.detached, true)
+  assert.equal(started.shell, true)
+  assert.equal(started.ready, 'probe')
+  const pid = Number(await readFile(pidPath, 'utf8'))
+  assert.equal(Number.isInteger(pid) && pid > 0, true)
+  process.kill(pid, 0)
+  t.after(() => {
+    try { process.kill(pid, 'SIGTERM') } catch { /* gone */ }
+  })
+})

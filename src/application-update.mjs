@@ -379,9 +379,23 @@ export async function resolveManagerRelaunchLaunch({ root, command, args = [], p
     }
   }
   if (platformName === 'win32') {
+    // Prefer bundled node + CLI over fragile .cmd shims when the payload ships both.
+    const windowsNode = join(root, 'runtime', 'node.exe')
+    const windowsCli = join(root, 'app', 'bin', 'agent-host.mjs')
+    if (await pathExists(windowsNode) && await pathExists(windowsCli)) {
+      return {
+        command: windowsNode,
+        args: [windowsCli, 'manager', ...args],
+        kind: 'windows-manager-node',
+      }
+    }
     const windowsManager = join(root, 'bin', 'Agent Host.cmd')
     if (await pathExists(windowsManager)) {
       return { command: windowsManager, args, kind: 'windows-manager' }
+    }
+    const windowsManagerNoSpace = join(root, 'bin', 'AgentHost.cmd')
+    if (await pathExists(windowsManagerNoSpace)) {
+      return { command: windowsManagerNoSpace, args, kind: 'windows-manager' }
     }
     const windowsManagerAlt = join(root, 'bin', 'AgentHostManager.exe')
     if (await pathExists(windowsManagerAlt)) {
@@ -400,6 +414,8 @@ export async function relaunchReplacedApplication({
   command,
   args,
   confirmMs = 1_500,
+  readyFile,
+  readyProbe,
 } = {}) {
   const launch = await resolveManagerRelaunchLaunch({
     root,
@@ -436,7 +452,12 @@ export async function relaunchReplacedApplication({
       : startDetachedProcess
   )
   try {
-    const started = await start(launch.command, launch.args, { cwd: root, confirmMs })
+    const started = await start(launch.command, launch.args, {
+      cwd: root,
+      confirmMs,
+      readyFile,
+      readyProbe,
+    })
     return {
       command: launch.command,
       args: launch.args,
@@ -444,6 +465,7 @@ export async function relaunchReplacedApplication({
       status: started.status,
       kind: launch.kind,
       detached: started.detached === true,
+      ready: started.ready,
     }
   } catch (error) {
     fail('APPLICATION_UPDATE_RELAUNCH_FAILED', 'The replaced application could not be restarted', {
@@ -577,6 +599,8 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
         command: options.relaunchCommand,
         args: options.relaunchArgs,
         confirmMs: options.relaunchConfirmMs,
+        readyFile: options.relaunchReadyFile,
+        readyProbe: options.relaunchReadyProbe,
       })
     await clearUpdateTransactionMarker(applied.currentRoot)
     await writeJournal(options.stateRoot, { ...active, phase: 'complete', restored: false })
