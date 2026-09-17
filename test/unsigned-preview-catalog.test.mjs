@@ -176,7 +176,7 @@ test('R5 unsigned catalog builds a complete default profile from explicit SOURCE
   }
 
   const execFileAsync = promisify(execFile)
-  process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT = '/workspace/openadam-procedure-reuse/repos/capability-contracts'
+  process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT = fileURLToPath(new URL('./fixtures/capability-contracts', import.meta.url))
   const mathRoot = await seedProfile('math-anchor', 'runtime/math-anchor-runtime/math-anchor-runtime', '0.7.1')
   const timeRoot = await seedProfile('migratory-time', 'server/index.mjs', '2.0.0+codex.20260830163923')
 
@@ -409,7 +409,7 @@ test('D1 win32 builder keeps Migratory Time .mjs and requires Math Anchor .exe',
     return sourceRoot
   }
 
-  process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT = '/workspace/openadam-procedure-reuse/repos/capability-contracts'
+  process.env.AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT = fileURLToPath(new URL('./fixtures/capability-contracts', import.meta.url))
   const mathRoot = await seedProfile(
     'math-anchor',
     'runtime/math-anchor-runtime/math-anchor-runtime',

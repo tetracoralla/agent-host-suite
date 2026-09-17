@@ -4,9 +4,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { executeAutoUpdates } from '../src/auto-update.mjs'
+import { supportedReleasePlatform } from '../src/github-project.mjs'
 import { setUpdatePreferences } from '../src/update-preferences.mjs'
 import { githubOrigin, writeToolSources } from '../src/tool-sources.mjs'
 import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
+
+
+function fixtureReleaseAssetToken() {
+  const platform = supportedReleasePlatform()
+  if (platform === null) return 'any'
+  return platform.replace(/^darwin-/, 'macos-').replace(/^win32-/, 'windows-')
+}
 
 function jsonResponse(value) {
   return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
@@ -51,8 +59,8 @@ test('auto-update executor checks persisted third-party tools when autoCheck is 
         prerelease: false,
         draft: false,
         assets: [{
-          name: 'glyphmark-1.1.0-macos-arm64.tar.gz',
-          browser_download_url: 'https://github.com/north-pier/glyphmark/releases/download/v1.1.0/glyphmark-1.1.0-macos-arm64.tar.gz',
+          name: `glyphmark-1.1.0-${fixtureReleaseAssetToken()}.tar.gz`,
+          browser_download_url: `https://github.com/north-pier/glyphmark/releases/download/v1.1.0/glyphmark-1.1.0-${fixtureReleaseAssetToken()}.tar.gz`,
           size: 100,
           digest: 'sha256:' + 'a'.repeat(64),
         }],

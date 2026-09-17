@@ -10,7 +10,7 @@ import { parseGitHubResource, parseSha256File } from '../src/github-api.mjs'
 import { sanitizeSvg, presentationFromPackageMetadata } from '../src/tool-presentation.mjs'
 import { inferArchiveRoot, inspectGitHubPluginRoot } from '../src/github-plugin-contract.mjs'
 import { wrapGitHubPluginArchive } from '../src/github-plugin-wrap.mjs'
-import { admitGitHubRelease, previewGitHubProject } from '../src/github-project.mjs'
+import { admitGitHubRelease, previewGitHubProject, supportedReleasePlatform } from '../src/github-project.mjs'
 import { inspectToolUpdates, updateAvailability, updateGitHubTool } from '../src/tool-updates.mjs'
 import { MAX_COMPONENT_DESCRIPTOR_BYTES } from '../src/release-artifacts.mjs'
 import {
@@ -343,8 +343,15 @@ function jsonResponse(value) {
   return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
 }
 
+
+function fixtureReleaseAssetToken() {
+  const platform = supportedReleasePlatform()
+  if (platform === null) return 'any'
+  return platform.replace(/^darwin-/, 'macos-').replace(/^win32-/, 'windows-')
+}
+
 function releasePayload(version, { digest, bytes = 100 } = {}) {
-  const name = `glyphmark-${version}-macos-arm64.tar.gz`
+  const name = `glyphmark-${version}-${fixtureReleaseAssetToken()}.tar.gz`
   return {
     tag_name: `v${version}`,
     html_url: `https://github.com/north-pier/glyphmark/releases/tag/v${version}`,
@@ -382,7 +389,7 @@ test('unregistered GitHub preview does not throw and does not download the packa
   assert.equal(preview.registered, false)
   assert.equal(preview.downloadedPackage, false)
   assert.equal(preview.origin.repository, 'north-pier/glyphmark')
-  assert.equal(calls.some((url) => url.includes('glyphmark-1.1.0-macos-arm64.tar.gz')), false)
+  assert.equal(calls.some((url) => url.includes(`glyphmark-1.1.0-${fixtureReleaseAssetToken()}.tar.gz`)), false)
 })
 
 test('third-party admit uses the GitHub asset digest and requests the archive', async (t) => {

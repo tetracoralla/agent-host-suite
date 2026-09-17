@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openadam:capability:time-zone.convert:output:v0.2",
+  "title": "Canonical global time-zone conversion result",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source", "context", "instant", "results"],
+      "properties": {
+        "status": { "const": "converted" },
+        "source": { "$ref": "#/$defs/source" },
+        "context": { "$ref": "#/$defs/context" },
+        "instant": { "$ref": "#/$defs/instant" },
+        "results": { "$ref": "#/$defs/results" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source", "context", "candidates"],
+      "properties": {
+        "status": { "const": "ambiguous" },
+        "source": { "$ref": "#/$defs/source" },
+        "context": { "$ref": "#/$defs/context" },
+        "candidates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/candidate" }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source", "context"],
+      "properties": {
+        "status": { "const": "nonexistent" },
+        "source": { "$ref": "#/$defs/source" },
+        "context": { "$ref": "#/$defs/context" }
+      }
+    }
+  ],
+  "$defs": {
+    "localDateTime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$"
+    },
+    "timeZone": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^(?:UTC|[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)+)$"
+    },
+    "instant": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "offset": {
+      "type": "string",
+      "pattern": "^[+-](?:0[0-9]|1[0-4]):[0-5][0-9]$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["localDateTime", "timeZone"],
+      "properties": {
+        "localDateTime": { "$ref": "#/$defs/localDateTime" },
+        "timeZone": { "$ref": "#/$defs/timeZone" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calendar", "timeZoneDatabase"],
+      "properties": {
+        "calendar": { "const": "iso8601" },
+        "timeZoneDatabase": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "The IANA time-zone data version used by the provider."
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeZone", "localDateTime", "offset"],
+      "properties": {
+        "timeZone": { "$ref": "#/$defs/timeZone" },
+        "localDateTime": { "$ref": "#/$defs/localDateTime" },
+        "offset": { "$ref": "#/$defs/offset" }
+      }
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/result" }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["choice", "instant", "sourceOffset", "results"],
+      "properties": {
+        "choice": { "enum": ["earlier", "later"] },
+        "instant": { "$ref": "#/$defs/instant" },
+        "sourceOffset": { "$ref": "#/$defs/offset" },
+        "results": { "$ref": "#/$defs/results" }
+      }
+    }
+  }
+}
