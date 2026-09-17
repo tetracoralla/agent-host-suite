@@ -157,17 +157,30 @@ setInterval(() => {}, 1000)
     batch,
     `@echo off\r\n"${process.execPath}" "${script}" "${pidPath}"\r\n`,
   )
+  // cmd.exe /d /s /c call "Agent Host.cmd" — outer cmd stays alive under `call`
+  // (no start /b). readyFile is additive; child.pid liveness also confirms.
   const started = await startDetachedProcess(batch, [], {
-    confirmMs: 2_000,
+    confirmMs: 2_500,
     readyFile: pidPath,
   })
   assert.equal(started.detached, true)
   assert.equal(started.shell, true)
-  assert.equal(started.ready, 'probe')
-  const pid = Number(await readFile(pidPath, 'utf8'))
-  assert.equal(Number.isInteger(pid) && pid > 0, true)
-  process.kill(pid, 0)
+  assert.equal(['probe', 'pid'].includes(started.ready), true, `ready=${started.ready}`)
+  assert.equal(Number.isInteger(started.pid) && started.pid > 0, true)
+  process.kill(started.pid, 0)
+  let keepalivePid = null
+  try {
+    keepalivePid = Number(await readFile(pidPath, 'utf8'))
+  } catch {
+    keepalivePid = null
+  }
+  if (Number.isInteger(keepalivePid) && keepalivePid > 0) {
+    process.kill(keepalivePid, 0)
+  }
   t.after(() => {
-    try { process.kill(pid, 'SIGTERM') } catch { /* gone */ }
+    for (const pid of [keepalivePid, started.pid]) {
+      if (!Number.isInteger(pid) || pid <= 0) continue
+      try { process.kill(pid, 'SIGTERM') } catch { /* gone */ }
+    }
   })
 })

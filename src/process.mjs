@@ -155,6 +155,16 @@ async function readyFileProbe(readyFile) {
   }
 }
 
+function childPidAlive(child) {
+  if (child?.pid === undefined) return false
+  try {
+    process.kill(child.pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function startDetachedProcess(command, args = [], options = {}) {
   const confirmMs = options.confirmMs ?? 1_500
   const useWindowsBatch = windowsBatchCommand(command)
@@ -163,9 +173,9 @@ export async function startDetachedProcess(command, args = [], options = {}) {
     : (typeof options.readyFile === 'string' && options.readyFile.length > 0
       ? () => readyFileProbe(options.readyFile)
       : null)
-  // When a ready probe exists, launch via `start "" /b` so the intermediate
-  // cmd.exe can exit while the long-running Manager stays detached.
-  const useWindowsStart = useWindowsBatch && readyProbe !== null
+  // Windows .cmd/.bat: keep outer cmd.exe alive with `call` so the batch's
+  // foreground node/Manager stays under child.pid. Do not use `start /b`
+  // (GitHub windows-latest never confirms that handoff reliably).
 
   return new Promise((resolve, reject) => {
     let settled = false
@@ -176,9 +186,7 @@ export async function startDetachedProcess(command, args = [], options = {}) {
 
     try {
       if (useWindowsBatch) {
-        const commandLine = useWindowsStart
-          ? `start "" /b ${windowsBatchCommandLine(command, args)}`
-          : windowsBatchCommandLine(command, args)
+        const commandLine = `call ${windowsBatchCommandLine(command, args)}`
         child = spawn(windowsComSpec(), ['/d', '/s', '/c', commandLine], {
           cwd: options.cwd,
           env: options.env ?? process.env,
@@ -248,8 +256,10 @@ export async function startDetachedProcess(command, args = [], options = {}) {
       shellExited = true
       exitStatus = status
       exitSignal = signal
-      // Intermediate cmd exit is expected with `start /b` + readyProbe.
-      if (readyProbe !== null || settled) return
+      if (settled) return
+      // With `call`, early exit means the batch ended before confirmation.
+      // readyFile may still prove Manager up if it was written; confirm() decides.
+      if (readyProbe !== null) return
       settleFailure(
         'HOST_COMMAND_FAILED',
         `${command} ${args.join(' ')} exited before startup was confirmed`,
@@ -259,6 +269,8 @@ export async function startDetachedProcess(command, args = [], options = {}) {
 
     const startedAt = Date.now()
     const confirm = async () => {
+      // Poll optional readyFile/probe early; otherwise wait confirmMs then
+      // accept child.pid liveness (outer cmd stays alive under `call`).
       while (!settled && Date.now() - startedAt < confirmMs) {
         if (readyProbe !== null) {
           try {
@@ -269,41 +281,34 @@ export async function startDetachedProcess(command, args = [], options = {}) {
           } catch {
             // Keep polling until confirmMs.
           }
-          await delay(50)
-          continue
         }
-        const remaining = confirmMs - (Date.now() - startedAt)
-        if (remaining > 0) await delay(remaining)
-        break
+        await delay(50)
       }
       if (settled) return
       if (readyProbe !== null) {
-        settleFailure(
-          'HOST_COMMAND_FAILED',
-          `${command} ${args.join(' ')} exited before startup was confirmed`,
-          { status: exitStatus, signal: exitSignal, ready: 'timeout' },
-        )
+        try {
+          if (await readyProbe()) {
+            finishOk({ ready: 'probe' })
+            return
+          }
+        } catch {
+          // Fall through to pid liveness / failure.
+        }
+      }
+      // readyFile is additive: succeed when either probe or child.pid proves up.
+      if (!shellExited && childPidAlive(child)) {
+        finishOk(readyProbe !== null ? { ready: 'pid' } : {})
         return
       }
-      if (shellExited || child.pid === undefined) {
-        settleFailure(
-          'HOST_COMMAND_FAILED',
-          `${command} ${args.join(' ')} exited before startup was confirmed`,
-          { status: exitStatus, signal: exitSignal },
-        )
-        return
-      }
-      try {
-        process.kill(child.pid, 0)
-      } catch (error) {
-        settleFailure(
-          'HOST_COMMAND_FAILED',
-          `${command} ${args.join(' ')} exited before startup was confirmed`,
-          { cause: error instanceof Error ? error.message : String(error) },
-        )
-        return
-      }
-      finishOk()
+      settleFailure(
+        'HOST_COMMAND_FAILED',
+        `${command} ${args.join(' ')} exited before startup was confirmed`,
+        {
+          status: exitStatus,
+          signal: exitSignal,
+          ...(readyProbe !== null ? { ready: 'timeout' } : {}),
+        },
+      )
     }
     void confirm()
   })

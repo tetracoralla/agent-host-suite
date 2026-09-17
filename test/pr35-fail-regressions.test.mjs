@@ -639,8 +639,9 @@ test('R1 / F2 long-running Manager relaunch detaches and survives updater handof
   const pidPath = join(root, 'manager.pid')
   await write(join(app, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.0' }, null, 2)}\n`)
   await write(join(staged, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
-  // Platform-native long-running Manager: spaced .cmd on win32 (cmd.exe /d /s /c),
-  // Contents/MacOS shell script elsewhere. PID file proves survival after handoff.
+  // Platform-native long-running Manager: spaced .cmd on win32
+  // (cmd.exe /d /s /c call … — outer cmd stays alive), Contents/MacOS elsewhere.
+  // readyFile is additive confirmation; child.pid liveness also proves handoff.
   if (process.platform === 'win32') {
     const managerScript = join(staged, 'manager-keepalive.mjs')
     await write(managerScript, `import { writeFileSync } from 'node:fs'
@@ -668,9 +669,8 @@ while true; do sleep 1; done
     applyKind: 'directory-swap',
     currentRoot: app,
     stagedRoot: staged,
-    relaunchConfirmMs: 2_000,
-    // Confirm via Manager PID file so Windows `cmd /c start /b` handoff is not
-    // mistaken for relaunch failure when the intermediate shell exits.
+    // win32 cold start can exceed 1.5s; root fix is `call` launch semantics.
+    relaunchConfirmMs: process.platform === 'win32' ? 2_500 : 2_000,
     relaunchReadyFile: pidPath,
     fetch: async () => jsonResponse({
       tag_name: 'v0.2.1',
