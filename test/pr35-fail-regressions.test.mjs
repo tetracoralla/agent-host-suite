@@ -34,6 +34,39 @@ import { compatibleApplicationState, healthyCatalogPreflight } from './helpers.m
 const execFileAsync = promisify(execFile)
 const tar = process.platform === 'win32' ? 'tar.exe' : '/usr/bin/tar'
 
+
+const TRANSIENT_RM_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'])
+
+async function forceKillPid(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return
+  if (process.platform === 'win32') {
+    try {
+      await execFileAsync('taskkill', ['/PID', String(pid), '/F', '/T'], {
+        timeout: 10_000,
+        windowsHide: true,
+      })
+    } catch {
+      // Best-effort: process may already be gone.
+    }
+    return
+  }
+  try { process.kill(pid, 'SIGTERM') } catch { /* gone */ }
+}
+
+async function rmWithRetry(target, { attempts = 5, baseDelayMs = 80 } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (error?.code === 'ENOENT') return
+      if (attempt + 1 >= attempts || !TRANSIENT_RM_CODES.has(error?.code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)))
+    }
+  }
+}
+
+
 async function write(path, contents, mode = 0o600) {
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, contents, { mode })
@@ -632,7 +665,14 @@ test('F5 registered Armorial can migrate from compat release onto GitHub-managed
 
 test('R1 / F2 long-running Manager relaunch detaches and survives updater handoff', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-r1-relaunch-'))
-  t.after(() => rm(root, { recursive: true, force: true }))
+  let managerPid = null
+  // Kill Manager before rm: on win32 the detached child holds a cwd lock under
+  // `current`, so a bare t.after(rm) races with EBUSY even after assertions pass.
+  t.after(async () => {
+    await forceKillPid(managerPid)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await rmWithRetry(root)
+  })
   const app = join(root, 'current')
   const staged = join(root, 'staged')
   const stateRoot = join(root, 'state')
@@ -703,9 +743,7 @@ while true; do sleep 1; done
   const pid = Number(await readFile(pidPath, 'utf8'))
   assert.equal(Number.isInteger(pid) && pid > 0, true)
   process.kill(pid, 0)
-  t.after(() => {
-    try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
-  })
+  managerPid = pid
 })
 
 test('R1 / F2 non-executable Manager entry fails relaunch and recovers previous app', async (t) => {

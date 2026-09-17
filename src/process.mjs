@@ -119,6 +119,19 @@ function windowsBatchCommand(command) {
   return platform() === 'win32' && /\.(cmd|bat)$/iu.test(String(command))
 }
 
+/** Quote for cmd.exe when windowsVerbatimArguments:true (Node will not quote). */
+function quoteWindowsVerbatimArg(value) {
+  const text = String(value)
+  return `"${text.replace(/"/gu, '""')}"`
+}
+
+function windowsComSpec() {
+  if (typeof process.env.ComSpec === 'string' && process.env.ComSpec.length > 0) {
+    return process.env.ComSpec
+  }
+  return win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe')
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -159,10 +172,10 @@ export async function startDetachedProcess(command, args = [], options = {}) {
     : (typeof options.readyFile === 'string' && options.readyFile.length > 0
       ? () => readyFileProbe(options.readyFile)
       : null)
-  // Windows .cmd/.bat: spawn with shell:true so Node/cmd.exe quote spaced
-  // paths (e.g. `Agent Host.cmd`). Prefer this over ComSpec + call argv —
-  // detached children often yield EPERM on kill(0), which readyFileProbe
-  // must treat as alive. Do not use start /b or windowsVerbatimArguments.
+  // Windows .cmd/.bat: spawn ComSpec with /d /c and a quoted command path
+  // (windowsVerbatimArguments so spaced paths like `Agent Host.cmd` survive).
+  // shell:true does not reliably produce readyFile on windows-latest. Keep
+  // readyFile/probe required when set; processExists treats EPERM as alive.
 
   return new Promise((resolve, reject) => {
     let settled = false
@@ -172,14 +185,28 @@ export async function startDetachedProcess(command, args = [], options = {}) {
     let exitSignal = null
 
     try {
-      child = spawn(command, args, {
-        cwd: options.cwd,
-        env: options.env ?? process.env,
-        stdio: options.stdio ?? 'ignore',
-        detached: true,
-        windowsHide: true,
-        shell: useWindowsBatch,
-      })
+      if (useWindowsBatch) {
+        const quotedCommand = quoteWindowsVerbatimArg(command)
+        const quotedArgs = args.map(quoteWindowsVerbatimArg)
+        child = spawn(windowsComSpec(), ['/d', '/c', quotedCommand, ...quotedArgs], {
+          cwd: options.cwd,
+          env: options.env ?? process.env,
+          stdio: options.stdio ?? 'ignore',
+          detached: true,
+          windowsHide: true,
+          shell: false,
+          windowsVerbatimArguments: true,
+        })
+      } else {
+        child = spawn(command, args, {
+          cwd: options.cwd,
+          env: options.env ?? process.env,
+          stdio: options.stdio ?? 'ignore',
+          detached: true,
+          windowsHide: true,
+          shell: false,
+        })
+      }
     } catch (error) {
       reject(new AgentHostError(
         'HOST_COMMAND_FAILED',
@@ -214,7 +241,8 @@ export async function startDetachedProcess(command, args = [], options = {}) {
         args,
         detached: true,
         confirmedAfterMs: confirmMs,
-        shell: useWindowsBatch,
+        shell: false,
+        windowsBatch: useWindowsBatch,
         ...extra,
       })
     }

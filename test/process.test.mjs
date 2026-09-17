@@ -1,9 +1,44 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
+import { promisify } from 'node:util'
 import test from 'node:test'
 import { resolveExecutable, runFile, startDetachedProcess, toolSearchPath } from '../src/process.mjs'
+
+const execFileAsync = promisify(execFile)
+const TRANSIENT_RM_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'])
+
+async function forceKillPid(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return
+  if (process.platform === 'win32') {
+    try {
+      await execFileAsync('taskkill', ['/PID', String(pid), '/F', '/T'], {
+        timeout: 10_000,
+        windowsHide: true,
+      })
+    } catch {
+      // Best-effort: process may already be gone.
+    }
+    return
+  }
+  try { process.kill(pid, 'SIGTERM') } catch { /* gone */ }
+}
+
+async function rmWithRetry(target, { attempts = 5, baseDelayMs = 80 } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (error?.code === 'ENOENT') return
+      if (attempt + 1 >= attempts || !TRANSIENT_RM_CODES.has(error?.code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)))
+    }
+  }
+}
+
 
 test('process runner sends bounded stdin to child commands', async () => {
   const script = "let value='';process.stdin.on('data',c=>value+=c);process.stdin.on('end',()=>process.stdout.write(value.toUpperCase()))"
@@ -145,7 +180,14 @@ test('startDetachedProcess launches a spaced Windows .cmd via cmd.exe and readyF
   skip: process.platform !== 'win32',
 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-detached-cmd-'))
-  t.after(() => rm(root, { recursive: true, force: true }))
+  let keepalivePid = null
+  let startedPid = null
+  t.after(async () => {
+    await forceKillPid(keepalivePid)
+    await forceKillPid(startedPid)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await rmWithRetry(root)
+  })
   const pidPath = join(root, 'alive.pid')
   const script = join(root, 'keepalive.mjs')
   await writeFile(script, `import { writeFileSync } from 'node:fs'
@@ -158,25 +200,20 @@ setInterval(() => {}, 1000)
     batch,
     `@echo off\r\n"${process.execPath}" "${script}" "${pidPath}"\r\n`,
   )
-  // shell:true — Node/cmd quotes spaced .cmd paths.
-  // readyFile/probe is required when provided (no pid fallback).
+  // ComSpec /d /c + quoted path (windowsVerbatimArguments); readyFile required.
   const started = await startDetachedProcess(batch, [], {
     confirmMs: 10_000,
     readyFile: pidPath,
   })
   assert.equal(started.detached, true)
-  assert.equal(started.shell, true)
+  assert.equal(started.shell, false)
+  assert.equal(started.windowsBatch, true)
   assert.equal(started.ready, 'probe', `ready=${started.ready}`)
   assert.equal(Number.isInteger(started.pid) && started.pid > 0, true)
   process.kill(started.pid, 0)
   const pidText = await readFile(pidPath, 'utf8')
-  const keepalivePid = Number(String(pidText).trim())
+  keepalivePid = Number(String(pidText).trim())
+  startedPid = started.pid
   assert.equal(Number.isInteger(keepalivePid) && keepalivePid > 0, true, `pid file missing/invalid: ${pidText}`)
   process.kill(keepalivePid, 0)
-  t.after(() => {
-    for (const pid of [keepalivePid, started.pid]) {
-      if (!Number.isInteger(pid) || pid <= 0) continue
-      try { process.kill(pid, 'SIGTERM') } catch { /* gone */ }
-    }
-  })
 })
