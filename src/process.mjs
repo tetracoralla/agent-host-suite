@@ -114,11 +114,18 @@ export async function runFile(command, args = [], options = {}) {
 }
 
 
+function windowsBatchCommand(command) {
+  return platform() === 'win32' && /\.(cmd|bat)$/iu.test(String(command))
+}
+
 export async function startDetachedProcess(command, args = [], options = {}) {
   const confirmMs = options.confirmMs ?? 1_500
   return new Promise((resolve, reject) => {
     let settled = false
     let child
+    // Windows CreateProcess cannot launch .cmd/.bat without a shell (EINVAL).
+    // Keep DETACHED + windowsHide so Manager survives updater handoff.
+    const useWindowsShell = windowsBatchCommand(command)
     try {
       child = spawn(command, args, {
         cwd: options.cwd,
@@ -126,6 +133,7 @@ export async function startDetachedProcess(command, args = [], options = {}) {
         stdio: options.stdio ?? 'ignore',
         detached: true,
         windowsHide: true,
+        shell: useWindowsShell,
       })
     } catch (error) {
       reject(new AgentHostError(
@@ -140,7 +148,7 @@ export async function startDetachedProcess(command, args = [], options = {}) {
       settled = true
       clearTimeout(timer)
       try {
-        if (child.pid !== undefined) child.kill('SIGTERM')
+        if (child.pid !== undefined) child.kill()
       } catch {
         // Best-effort only; ownership was never handed off.
       }
@@ -164,6 +172,24 @@ export async function startDetachedProcess(command, args = [], options = {}) {
 
     const timer = setTimeout(() => {
       if (settled) return
+      // Readiness probe: refuse false success if the handle is already gone.
+      if (child.pid === undefined) {
+        settleFailure(
+          'HOST_COMMAND_FAILED',
+          `${command} ${args.join(' ')} started without a process id`,
+        )
+        return
+      }
+      try {
+        process.kill(child.pid, 0)
+      } catch (error) {
+        settleFailure(
+          'HOST_COMMAND_FAILED',
+          `${command} ${args.join(' ')} exited before startup was confirmed`,
+          { cause: error instanceof Error ? error.message : String(error) },
+        )
+        return
+      }
       settled = true
       // Hand off ownership: updater must not reap this long-running Manager.
       child.unref()
@@ -173,6 +199,7 @@ export async function startDetachedProcess(command, args = [], options = {}) {
         args,
         detached: true,
         confirmedAfterMs: confirmMs,
+        shell: useWindowsShell,
       })
     }, confirmMs)
   })

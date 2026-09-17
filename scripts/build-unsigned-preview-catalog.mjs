@@ -656,7 +656,7 @@ async function assertPinnedVersion(id, sourceRoot, pluginRelative, pins) {
   }
 }
 
-export { buildWorkspacePackage, importGithubTools, buildRequiredProfileTool, resolveProfileSource, resolveProfileArtifact, readSourcePins, REQUIRED_RELEASE_COMPONENTS, installProductionDependencies, removeLinks }
+export { buildWorkspacePackage, importGithubTools, buildRequiredProfileTool, resolveProfileSource, resolveProfileArtifact, readSourcePins, REQUIRED_RELEASE_COMPONENTS, installProductionDependencies, removeLinks, resolveNpmCli }
 
 export async function main() {
 const output = resolve(argument('--output', join(suiteRoot, '.build/unsigned-catalog')))

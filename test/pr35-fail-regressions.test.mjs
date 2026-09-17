@@ -229,11 +229,12 @@ test('F2 verify uses payload package.json; formal CLI rejects --version; relaunc
   await write(join(root, 'bin', 'Agent Host.cmd'), '@echo off\r\nexit /b 0\r\n')
   await write(join(root, 'Contents', 'MacOS', 'AgentHostManager'), '#!/bin/sh\nexit 0\n', 0o755)
   const relaunch = await resolveManagerRelaunchLaunch({ root })
-  assert.equal(
-    relaunch.kind === 'macos-manager' || relaunch.kind === 'windows-manager' || relaunch.kind === 'cli-manager',
-    true,
-    relaunch.kind,
-  )
+  if (process.platform === 'win32') {
+    assert.equal(relaunch.kind, 'windows-manager', relaunch.kind)
+    assert.match(relaunch.command, /Agent Host\.cmd$/u)
+  } else {
+    assert.equal(relaunch.kind, 'macos-manager', relaunch.kind)
+  }
 })
 
 test('F9 updateApplication honors saved preview channel preference', async (t) => {
@@ -638,11 +639,25 @@ test('R1 / F2 long-running Manager relaunch detaches and survives updater handof
   const pidPath = join(root, 'manager.pid')
   await write(join(app, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.0' }, null, 2)}\n`)
   await write(join(staged, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
-  const manager = join(staged, 'Contents', 'MacOS', 'AgentHostManager')
-  await write(manager, `#!/bin/sh
+  // Platform-native long-running Manager: .cmd on win32 (CreateProcess + shell),
+  // Contents/MacOS shell script elsewhere. PID file proves survival after handoff.
+  if (process.platform === 'win32') {
+    const managerScript = join(staged, 'manager-keepalive.mjs')
+    await write(managerScript, `import { writeFileSync } from 'node:fs'
+writeFileSync(process.argv[1], String(process.pid))
+setInterval(() => {}, 1000)
+`)
+    await write(
+      join(staged, 'bin', 'Agent Host.cmd'),
+      `@echo off\r\n"${process.execPath}" "%~dp0..\\manager-keepalive.mjs" "${pidPath}"\r\n`,
+    )
+  } else {
+    const manager = join(staged, 'Contents', 'MacOS', 'AgentHostManager')
+    await write(manager, `#!/bin/sh
 echo $$ > "${pidPath}"
 while true; do sleep 1; done
 `, 0o755)
+  }
   // Also keep a CLI so resolve paths stay valid on all platforms.
   await write(join(staged, 'app', 'bin', 'agent-host.mjs'), 'console.log("0.2.1")\n')
   await write(join(app, 'app', 'bin', 'agent-host.mjs'), 'console.log("0.2.0")\n')
@@ -688,8 +703,13 @@ test('R1 / F2 non-executable Manager entry fails relaunch and recovers previous 
   await write(join(staged, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
   await write(join(app, 'marker'), 'working-old')
   await write(join(staged, 'marker'), 'broken-new')
-  const manager = join(staged, 'Contents', 'MacOS', 'AgentHostManager')
-  await write(manager, '#!/bin/sh\necho should-not-run\n', 0o644)
+  if (process.platform === 'win32') {
+    // Garbage PE at the Windows Manager path: CreateProcess must fail closed.
+    await write(join(staged, 'bin', 'AgentHostManager.exe'), 'not-a-windows-image\n')
+  } else {
+    const manager = join(staged, 'Contents', 'MacOS', 'AgentHostManager')
+    await write(manager, '#!/bin/sh\necho should-not-run\n', 0o644)
+  }
   let failure
   try {
     await updateApplication({

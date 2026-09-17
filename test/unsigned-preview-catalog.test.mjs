@@ -16,6 +16,7 @@ import {
   profileRuntimeEntrypoint,
   readSourcePins,
   removeLinks,
+  resolveNpmCli,
 } from '../scripts/build-unsigned-preview-catalog.mjs'
 
 test('unsigned preview catalogs keep the default profile component set', async () => {
@@ -495,14 +496,23 @@ test('R3 / F4 installProductionDependencies strips node_modules bin links', asyn
     dependencies: { which: '4.0.0' },
   }, null, 2)}\n`)
   const execFileAsync = promisify(execFile)
-  const npmCli = process.env.npm_execpath
-  if (typeof npmCli === 'string' && npmCli.length > 0) {
-    await execFileAsync(process.execPath, [npmCli, 'install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], {
+  // Same Windows-safe npm invocation as installProductionDependencies (node --test has no npm_execpath).
+  const npmCli = await resolveNpmCli()
+  const lockArgs = ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund']
+  if (npmCli !== null) {
+    await execFileAsync(process.execPath, [npmCli, ...lockArgs], {
       cwd: root,
       env: { ...process.env, npm_config_update_notifier: 'false' },
     })
+  } else if (process.platform === 'win32') {
+    await execFileAsync('npm.cmd', lockArgs, {
+      cwd: root,
+      env: { ...process.env, npm_config_update_notifier: 'false' },
+      shell: true,
+      windowsHide: true,
+    })
   } else {
-    await execFileAsync('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], {
+    await execFileAsync('npm', lockArgs, {
       cwd: root,
       env: { ...process.env, npm_config_update_notifier: 'false' },
     })

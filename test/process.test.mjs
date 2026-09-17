@@ -115,13 +115,28 @@ test('startDetachedProcess keeps a long-running child alive after handoff', asyn
   })
 })
 
-test('startDetachedProcess rejects a non-executable entry', { skip: process.platform === 'win32' }, async (t) => {
+test('startDetachedProcess rejects a non-executable entry', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-detached-nonexec-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  const script = join(root, 'blocked.sh')
-  await writeFile(script, '#!/bin/sh\necho no\n', { mode: 0o644 })
-  await assert.rejects(
-    () => startDetachedProcess(script, [], { confirmMs: 300 }),
-    (error) => error.code === 'HOST_COMMAND_FAILED',
-  )
+  if (process.platform === 'win32') {
+    const bogus = join(root, 'blocked.exe')
+    await writeFile(bogus, 'not-a-windows-image\n')
+    await assert.rejects(
+      () => startDetachedProcess(bogus, [], { confirmMs: 300 }),
+      (error) => error.code === 'HOST_COMMAND_FAILED',
+    )
+    const dead = join(root, 'dead.cmd')
+    await writeFile(dead, '@echo off\r\nexit /b 1\r\n')
+    await assert.rejects(
+      () => startDetachedProcess(dead, [], { confirmMs: 300 }),
+      (error) => error.code === 'HOST_COMMAND_FAILED',
+    )
+  } else {
+    const script = join(root, 'blocked.sh')
+    await writeFile(script, '#!/bin/sh\necho no\n', { mode: 0o644 })
+    await assert.rejects(
+      () => startDetachedProcess(script, [], { confirmMs: 300 }),
+      (error) => error.code === 'HOST_COMMAND_FAILED',
+    )
+  }
 })

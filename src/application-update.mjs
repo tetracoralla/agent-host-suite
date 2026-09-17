@@ -1,4 +1,5 @@
 import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { platform as osPlatform } from 'node:os'
 import { basename, join } from 'node:path'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
 import { statePaths } from './state.mjs'
@@ -367,19 +368,25 @@ export async function verifyReplacedApplication({
   return { version: expectedVersion, output }
 }
 
-export async function resolveManagerRelaunchLaunch({ root, command, args = [] } = {}) {
+export async function resolveManagerRelaunchLaunch({ root, command, args = [], platformName = osPlatform() } = {}) {
   if (typeof command === 'string' && command.length > 0) return { command, args, kind: 'explicit' }
-  const macosManager = join(root, 'Contents', 'MacOS', 'AgentHostManager')
-  if (await pathExists(macosManager)) {
-    return { command: macosManager, args, kind: 'macos-manager' }
+  // Prefer the Manager entry that matches the running OS. A foreign-layout fixture
+  // (for example Contents/MacOS on win32) must not win over the native launcher.
+  if (platformName !== 'win32') {
+    const macosManager = join(root, 'Contents', 'MacOS', 'AgentHostManager')
+    if (await pathExists(macosManager)) {
+      return { command: macosManager, args, kind: 'macos-manager' }
+    }
   }
-  const windowsManager = join(root, 'bin', 'Agent Host.cmd')
-  if (await pathExists(windowsManager)) {
-    return { command: windowsManager, args, kind: 'windows-manager' }
-  }
-  const windowsManagerAlt = join(root, 'bin', 'AgentHostManager.exe')
-  if (await pathExists(windowsManagerAlt)) {
-    return { command: windowsManagerAlt, args, kind: 'windows-manager' }
+  if (platformName === 'win32') {
+    const windowsManager = join(root, 'bin', 'Agent Host.cmd')
+    if (await pathExists(windowsManager)) {
+      return { command: windowsManager, args, kind: 'windows-manager' }
+    }
+    const windowsManagerAlt = join(root, 'bin', 'AgentHostManager.exe')
+    if (await pathExists(windowsManagerAlt)) {
+      return { command: windowsManagerAlt, args, kind: 'windows-manager' }
+    }
   }
   // Fall back to CLI "manager" for directory / Windows payloads that ship the CLI only.
   const cliLaunch = await resolveReplacedApplicationLaunch({ root, args: ['manager'] })
