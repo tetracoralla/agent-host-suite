@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
-import { githubAssetMatchesPlatform, officialNodeBinaryPath, buildWorkspacePackage, profileRuntimeEntrypoint } from '../scripts/build-unsigned-preview-catalog.mjs'
+import {
+  REQUIRED_RELEASE_COMPONENTS,
+  buildRequiredProfileTool,
+  buildWorkspacePackage,
+  githubAssetMatchesPlatform,
+  installProductionDependencies,
+  officialNodeBinaryPath,
+  profileRuntimeEntrypoint,
+  readSourcePins,
+  removeLinks,
+} from '../scripts/build-unsigned-preview-catalog.mjs'
 
 test('unsigned preview catalogs keep the default profile component set', async () => {
   const source = await readFile(new URL('../src/release-manifest.mjs', import.meta.url), 'utf8')
@@ -472,4 +482,57 @@ test('D1 win32 builder keeps Migratory Time .mjs and requires Math Anchor .exe',
     }),
     /migratory-time is required|SOURCE_ROOT|ARTIFACT/u,
   )
+})
+
+
+test('R3 / F4 installProductionDependencies strips node_modules bin links', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r3-links-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(join(root, 'package.json'), `${JSON.stringify({
+    name: 'link-probe',
+    version: '1.0.0',
+    private: true,
+    dependencies: { which: '4.0.0' },
+  }, null, 2)}\n`)
+  const execFileAsync = promisify(execFile)
+  const npmCli = process.env.npm_execpath
+  if (typeof npmCli === 'string' && npmCli.length > 0) {
+    await execFileAsync(process.execPath, [npmCli, 'install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], {
+      cwd: root,
+      env: { ...process.env, npm_config_update_notifier: 'false' },
+    })
+  } else {
+    await execFileAsync('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], {
+      cwd: root,
+      env: { ...process.env, npm_config_update_notifier: 'false' },
+    })
+  }
+  assert.equal(await stat(join(root, 'package-lock.json')).then(() => true, () => false), true)
+  await installProductionDependencies(root)
+  const bin = join(root, 'node_modules', '.bin')
+  if (await stat(bin).then(() => true, () => false)) {
+    const { readdir } = await import('node:fs/promises')
+    for (const name of await readdir(bin)) {
+      const info = await lstat(join(bin, name))
+      assert.equal(info.isSymbolicLink(), false, `link remained: ${name}`)
+    }
+  }
+  const modules = join(root, 'node_modules')
+  await mkdir(join(modules, '.bin'), { recursive: true })
+  const { symlink } = await import('node:fs/promises')
+  const linkPath = join(modules, '.bin', 'synthetic-link')
+  await writeFile(join(modules, 'which-target'), 'x\n')
+  await symlink('../which-target', linkPath)
+  await removeLinks(modules)
+  await assert.rejects(() => lstat(linkPath), (error) => error.code === 'ENOENT')
+})
+
+test('R4 / F4 unsigned preview pins and workflow declare capability-contracts', async () => {
+  const pins = await readSourcePins()
+  assert.equal(typeof pins.sources['capability-contracts']?.revision, 'string')
+  assert.match(pins.sources['capability-contracts'].revision, /^[0-9a-f]{40}$/u)
+  const workflow = await readFile(new URL('../docs/unsigned-preview-release.yml', import.meta.url), 'utf8')
+  assert.match(workflow, /capability-contracts/u)
+  assert.match(workflow, /AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT/u)
+  assert.match(workflow, /ef51ab875c7c6f99f6777bc066fe1929d5b136d0/u)
 })

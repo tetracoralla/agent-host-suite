@@ -6,7 +6,7 @@
 # The notarized .github/workflows/release.yml remains a separate signed path
 # and requires Apple secrets. This unsigned preview must not request them.
 # Each platform job admits GitHub tools for that runner and obtains version-
-# pinned Math Anchor / Migratory Time inputs. Math Anchor needs the PyInstaller
+# pinned Math Anchor / Migratory Time / capability-contracts inputs. Math Anchor needs the PyInstaller
 # runtime from script/package_runtime.sh (macOS) or a verified platform ARTIFACT
 # (Windows). `swift build` does not produce the Host entrypoint. ARTIFACT wins
 # over SOURCE_ROOT when both are set. Catalog builder comment: ARTIFACT wins over SOURCE_ROOT.
@@ -41,6 +41,12 @@ jobs:
           repository: tetracoralla/migratory-time
           ref: 0355fd34c99cd9c51a0eeecf20f20ef6369cdd54
           path: .build/profile-sources/migratory-time
+      - name: Check out pinned capability-contracts source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/capability-contracts
+          ref: ef51ab875c7c6f99f6777bc066fe1929d5b136d0
+          path: .build/profile-sources/capability-contracts
       - name: Build Math Anchor PyInstaller runtime for this macOS runner
         working-directory: .build/profile-sources/math-anchor
         run: |
@@ -68,12 +74,13 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Admit GitHub tools for this macOS runner
-        run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
+        run: node scripts/admit-github-plugin.mjs --registry --catalog catalog/github-releases/current.json --output .build/github-tools
       - name: Package unsigned macOS app from verified Host internals and admitted GitHub tools
         env:
           AGENT_HOST_PROFILE_SOURCES_ROOT: ${{ github.workspace }}/.build/profile-sources
           AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/math-anchor
           AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/migratory-time
+          AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/capability-contracts
           # Optional: set repository variable AGENT_HOST_MATH_ANCHOR_ARTIFACT to a
           # runner-local path, or export it in an earlier step. When set, catalog
           # build prefers ARTIFACT over the pinned SOURCE_ROOT checkout.
@@ -128,6 +135,12 @@ jobs:
           repository: tetracoralla/migratory-time
           ref: 0355fd34c99cd9c51a0eeecf20f20ef6369cdd54
           path: .build/profile-sources/migratory-time
+      - name: Check out pinned capability-contracts source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/capability-contracts
+          ref: ef51ab875c7c6f99f6777bc066fe1929d5b136d0
+          path: .build/profile-sources/capability-contracts
       - name: Obtain Math Anchor Windows platform artifact or fail closed
         shell: pwsh
         env:
@@ -163,7 +176,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Admit GitHub tools for this Windows runner
-        run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
+        run: node scripts/admit-github-plugin.mjs --registry --catalog catalog/github-releases/current.json --output .build/github-tools
       - name: Package unsigned Windows ZIP
         shell: pwsh
         env:
@@ -171,6 +184,7 @@ jobs:
           AGENT_HOST_PROFILE_SOURCES_ROOT: ${{ github.workspace }}/.build/profile-sources
           AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/math-anchor
           AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/migratory-time
+          AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/capability-contracts
           AGENT_HOST_MATH_ANCHOR_ARTIFACT: ${{ env.AGENT_HOST_MATH_ANCHOR_ARTIFACT }}
           AGENT_HOST_MATH_ANCHOR_VERSION: "0.7.1"
         run: |

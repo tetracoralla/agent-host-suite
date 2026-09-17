@@ -62,19 +62,40 @@ function packageIsReferenced(state, packageRoot) {
   return false
 }
 
-async function cleanupUnadoptedPackage(prepared, preparedPaths = null) {
-  if (prepared?.installed?.created !== true) return
-  const installedRoot = prepared.installed.root
-  if (preparedPaths !== null) {
-    const state = await loadState(preparedPaths).catch(() => null)
-    if (packageIsReferenced(state, installedRoot)) return
-  }
+async function deletePackageTree(installedRoot) {
   const packageRoot = dirname(installedRoot)
   await rm(installedRoot, { recursive: true, force: true })
   try {
     await rmdir(packageRoot)
   } catch (error) {
     if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error
+  }
+}
+
+async function cleanupUnadoptedPackage(prepared, preparedPaths = null) {
+  if (prepared?.installed?.created !== true) return
+  const installedRoot = prepared.installed.root
+  // Serialize with commit: another install may be adopting this shared package
+  // before its new state refs are written. Without the lifecycle lock, reclaim
+  // would delete mid-commit. When the lock is busy, retain reclaimable packages.
+  if (preparedPaths === null) {
+    await deletePackageTree(installedRoot)
+    return
+  }
+  try {
+    await withLifecycleMutation(
+      statePaths(preparedPaths.root),
+      'tool.package-cleanup',
+      {},
+      async (_dependencies, lockedPaths) => {
+        const state = await loadState(lockedPaths).catch(() => null)
+        if (packageIsReferenced(state, installedRoot)) return
+        await deletePackageTree(installedRoot)
+      },
+    )
+  } catch (error) {
+    if (error instanceof AgentHostError && error.code === 'LIFECYCLE_BUSY') return
+    throw error
   }
 }
 

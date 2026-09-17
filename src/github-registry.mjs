@@ -104,7 +104,26 @@ export async function fetchPublishedGitHubCatalog({ fetch = globalThis.fetch, si
   }
 }
 
+export async function loadGitHubToolCatalogFromPath(catalogPath) {
+  if (typeof catalogPath !== 'string' || catalogPath.length === 0) {
+    fail('GITHUB_CATALOG_UNAVAILABLE', 'GitHub tool catalog path is missing')
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(await readFile(catalogPath, 'utf8'))
+  } catch (error) {
+    fail('GITHUB_CATALOG_UNAVAILABLE', `GitHub tool catalog is unavailable at ${catalogPath}`, {
+      cause: error instanceof Error ? error.message : String(error),
+    })
+  }
+  return parseGitHubToolCatalog(parsed)
+}
+
 export async function loadGitHubToolCatalog(options = {}) {
+  if (typeof options.catalogPath === 'string' && options.catalogPath.length > 0) {
+    // Explicit candidate file wins: never replace with a live published catalog.
+    return loadGitHubToolCatalogFromPath(options.catalogPath)
+  }
   const bundled = await loadBundledGitHubToolCatalog()
   if (options.bundledOnly === true) return bundled
   try {

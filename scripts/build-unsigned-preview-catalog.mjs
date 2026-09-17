@@ -464,19 +464,11 @@ async function buildRequiredProfileTool({ id, kind, sourceRoot, pluginRelative, 
         throw new Error(`${id} requires capability-contracts at ${capabilityRoot} (${fromRelative}); set AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT`)
       }
     }
+    // Reuse the cross-platform npm launcher + removeLinks path. Default npm ci
+    // leaves node_modules/.bin symlinks that finalize/inventory rejects.
+    // Dependency failure must abort the build (do not swallow install errors).
     if (await pathExists(join(root, 'package-lock.json')) === true) {
-      const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-      try {
-        await execFileAsync(npm, ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
-          cwd: root,
-          env: { ...process.env, npm_config_update_notifier: 'false' },
-        })
-      } catch {
-        await execFileAsync(npm, ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
-          cwd: root,
-          env: { ...process.env, npm_config_update_notifier: 'false' },
-        }).catch(() => {})
-      }
+      await installProductionDependencies(root)
     }
   }
 
@@ -664,7 +656,7 @@ async function assertPinnedVersion(id, sourceRoot, pluginRelative, pins) {
   }
 }
 
-export { buildWorkspacePackage, importGithubTools, buildRequiredProfileTool, resolveProfileSource, resolveProfileArtifact, readSourcePins, REQUIRED_RELEASE_COMPONENTS }
+export { buildWorkspacePackage, importGithubTools, buildRequiredProfileTool, resolveProfileSource, resolveProfileArtifact, readSourcePins, REQUIRED_RELEASE_COMPONENTS, installProductionDependencies, removeLinks }
 
 export async function main() {
 const output = resolve(argument('--output', join(suiteRoot, '.build/unsigned-catalog')))

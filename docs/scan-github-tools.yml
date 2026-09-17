@@ -43,7 +43,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Admit pinned tools on a supported release platform
-        run: node scripts/admit-github-plugin.mjs --registry --output .build/github-tools
+        run: node scripts/admit-github-plugin.mjs --registry --catalog catalog/github-releases/current.json --output .build/github-tools
       - name: Open or update the catalog PR
         env:
           GH_TOKEN: ${{ github.token }}

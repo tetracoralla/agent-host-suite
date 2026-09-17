@@ -11,11 +11,14 @@ import { selectReleaseAsset } from '../src/github-api.mjs'
 import { compareSemVer } from '../src/semver.mjs'
 import {
   checkApplicationUpdate,
+  readApplicationUpdateJournal,
   readReplacedApplicationVersion,
+  relaunchReplacedApplication,
   resolveManagerRelaunchLaunch,
   updateApplication,
   verifyReplacedApplication,
 } from '../src/application-update.mjs'
+import { loadGitHubToolCatalog } from '../src/github-registry.mjs'
 import { setUpdatePreferences } from '../src/update-preferences.mjs'
 import { prepareStatePaths, saveState, STATE_SCHEMA, loadState } from '../src/state.mjs'
 import { installGitHubTool, updateAvailability, updateGitHubTool } from '../src/tool-updates.mjs'
@@ -623,4 +626,233 @@ test('F5 registered Armorial can migrate from compat release onto GitHub-managed
   const after = await loadState(await prepareStatePaths(stateRoot))
   assert.equal(after.components.armorial.version, '0.8.0')
   assert.equal(after.privateComponents.armorial.rollback.component.version, '0.7.0')
+})
+
+
+test('R1 / F2 long-running Manager relaunch detaches and survives updater handoff', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r1-relaunch-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const app = join(root, 'current')
+  const staged = join(root, 'staged')
+  const stateRoot = join(root, 'state')
+  const pidPath = join(root, 'manager.pid')
+  await write(join(app, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.0' }, null, 2)}\n`)
+  await write(join(staged, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
+  const manager = join(staged, 'Contents', 'MacOS', 'AgentHostManager')
+  await write(manager, `#!/bin/sh
+echo $$ > "${pidPath}"
+while true; do sleep 1; done
+`, 0o755)
+  // Also keep a CLI so resolve paths stay valid on all platforms.
+  await write(join(staged, 'app', 'bin', 'agent-host.mjs'), 'console.log("0.2.1")\n')
+  await write(join(app, 'app', 'bin', 'agent-host.mjs'), 'console.log("0.2.0")\n')
+
+  const result = await updateApplication({
+    stateRoot,
+    currentVersion: '0.2.0',
+    applyKind: 'directory-swap',
+    currentRoot: app,
+    stagedRoot: staged,
+    relaunchConfirmMs: 400,
+    fetch: async () => jsonResponse({
+      tag_name: 'v0.2.1',
+      html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',
+      prerelease: false,
+      draft: false,
+      assets: [{
+        name: 'Agent-Host-0.2.1-directory.tar.gz',
+        browser_download_url: 'https://example.invalid/Agent-Host-0.2.1-directory.tar.gz',
+        size: 100,
+        digest: 'sha256:' + 'a'.repeat(64),
+      }],
+    }),
+  }, { resolver: async () => null })
+  assert.equal(result.applied, true)
+  assert.equal(result.journal, 'complete')
+  assert.equal(result.relaunched?.detached, true)
+  const pid = Number(await readFile(pidPath, 'utf8'))
+  assert.equal(Number.isInteger(pid) && pid > 0, true)
+  process.kill(pid, 0)
+  t.after(() => {
+    try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
+  })
+})
+
+test('R1 / F2 non-executable Manager entry fails relaunch and recovers previous app', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r1-nonexec-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const app = join(root, 'current')
+  const staged = join(root, 'staged')
+  const stateRoot = join(root, 'state')
+  await write(join(app, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.0' }, null, 2)}\n`)
+  await write(join(staged, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
+  await write(join(app, 'marker'), 'working-old')
+  await write(join(staged, 'marker'), 'broken-new')
+  const manager = join(staged, 'Contents', 'MacOS', 'AgentHostManager')
+  await write(manager, '#!/bin/sh\necho should-not-run\n', 0o644)
+  let failure
+  try {
+    await updateApplication({
+      stateRoot,
+      currentVersion: '0.2.0',
+      applyKind: 'directory-swap',
+      currentRoot: app,
+      stagedRoot: staged,
+      relaunchConfirmMs: 400,
+      fetch: async () => jsonResponse({
+        tag_name: 'v0.2.1',
+        html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',
+        prerelease: false,
+        draft: false,
+        assets: [{
+          name: 'Agent-Host-0.2.1-directory.tar.gz',
+          browser_download_url: 'https://example.invalid/Agent-Host-0.2.1-directory.tar.gz',
+          size: 100,
+          digest: 'sha256:' + 'a'.repeat(64),
+        }],
+      }),
+    }, { resolver: async () => null })
+  } catch (error) {
+    failure = error.code
+  }
+  assert.equal(failure, 'APPLICATION_UPDATE_RELAUNCH_FAILED')
+  assert.equal(await readFile(join(app, 'marker'), 'utf8'), 'working-old')
+  const journal = await readApplicationUpdateJournal(stateRoot)
+  assert.equal(journal.phase === 'recovered' || journal.restored === true, true, JSON.stringify(journal))
+})
+
+test('R1 / F2 runner shim treats status null as relaunch failure', async () => {
+  await assert.rejects(
+    () => relaunchReplacedApplication({
+      root: tmpdir(),
+      command: process.execPath,
+      args: ['-e', 'process.exit(0)'],
+      runner: async () => ({ status: null, stdout: '', stderr: 'spawn failed', timedOut: false }),
+    }),
+    (error) => error.code === 'APPLICATION_UPDATE_RELAUNCH_FAILED',
+  )
+})
+
+test('R2 / F3 cleanup retains package while another install is mid-commit before save', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r2-precommit-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const stateRoot = join(root, 'state')
+  const { dependencies, paths } = await installedEnvironment(stateRoot)
+  const fixture = await createPluginArchive(root, { id: 'review-race', version: '1.0.0' })
+  const wrapped = await wrapGitHubPluginArchive({
+    archivePath: fixture.archive,
+    expectedSha256: fixture.sha256,
+    probe: false,
+    origin: githubOrigin({
+      repository: 'review/race',
+      tag: 'v1.0.0',
+      assetName: 'race-1.0.0.tar.gz',
+      assetUrl: 'https://github.com/review/race/releases/download/v1.0.0/race-1.0.0.tar.gz',
+      assetSha256: fixture.sha256,
+      assetBytes: fixture.bytes,
+    }),
+  })
+
+  let releaseSave
+  const saveGate = new Promise((resolve) => { releaseSave = resolve })
+  let saveReached = false
+  const gatedSave = async (...args) => {
+    saveReached = true
+    await saveGate
+    return saveState(...args)
+  }
+
+  const common = {
+    stateRoot,
+    github: 'https://github.com/review/race',
+    tag: 'v1.0.0',
+    wrappedArchivePath: wrapped.wrapped.path,
+    expectedDigest: wrapped.wrapped.sha256,
+    expectedUpstreamDigest: fixture.sha256,
+    expectedAssetName: 'race-1.0.0.tar.gz',
+  }
+
+  const pendingB = installGitHubTool({
+    ...common,
+    probe: false,
+  }, { ...dependencies, saveState: gatedSave })
+
+  for (let i = 0; i < 200 && !saveReached; i += 1) await new Promise((r) => setTimeout(r, 20))
+  assert.equal(saveReached, true)
+
+  // A tries to commit while B holds the lifecycle lock mid-commit.
+  await assert.rejects(
+    () => installGitHubTool({ ...common, probe: false }, dependencies),
+    (error) => error.code === 'LIFECYCLE_BUSY',
+  )
+
+  releaseSave()
+  const installedB = await pendingB
+  assert.equal(installedB.status, 'ok')
+  const packageRoot = (await loadState(paths)).components['review-race'].root
+  assert.equal(typeof packageRoot, 'string')
+  assert.equal(await stat(packageRoot).then(() => true, () => false), true)
+})
+
+test('R5 / F11 loadGitHubToolCatalog(catalogPath) ignores live published catalog', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-r5-catalog-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const candidate = join(root, 'candidate.json')
+  await write(candidate, `${JSON.stringify({
+    schemaVersion: 'openadam.agent-host-github-catalog.v0.1',
+    catalogId: 'local-0.8-candidate',
+    createdAt: '2026-09-17T00:00:00.000Z',
+    channel: 'stable',
+    incompletePlatforms: [],
+    tools: [{
+      id: 'armorial',
+      version: '0.8.0',
+      repository: 'tetracoralla/armorial',
+      tag: 'v0.8.0',
+      releaseUrl: 'https://github.com/tetracoralla/armorial/releases/tag/v0.8.0',
+      featured: true,
+      platforms: {
+        'darwin-arm64': {
+          assetName: 'armorial-0.8.0-codex-plugin-macos-arm64.tar.gz',
+          url: 'https://example.invalid/armorial-0.8.0.tar.gz',
+          sha256: 'sha256:' + 'b'.repeat(64),
+          bytes: 12,
+        },
+        'linux-x64': {
+          assetName: 'armorial-0.8.0-codex-plugin-linux-x64.tar.gz',
+          url: 'https://example.invalid/armorial-0.8.0-linux.tar.gz',
+          sha256: 'sha256:' + 'c'.repeat(64),
+          bytes: 12,
+        },
+      },
+    }],
+  }, null, 2)}\n`)
+
+  let fetchedLive = false
+  const catalog = await loadGitHubToolCatalog({
+    catalogPath: candidate,
+    fetch: async () => {
+      fetchedLive = true
+      return jsonResponse({
+        schemaVersion: 'openadam.agent-host-github-catalog.v0.1',
+        catalogId: 'live-0.7',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        channel: 'stable',
+        incompletePlatforms: ['darwin-arm64'],
+        tools: [{
+          id: 'armorial',
+          version: '0.7.0',
+          repository: 'tetracoralla/armorial',
+          tag: 'v0.7.0',
+          releaseUrl: 'https://github.com/tetracoralla/armorial/releases/tag/v0.7.0',
+          featured: true,
+          platforms: {},
+        }],
+      })
+    },
+  })
+  assert.equal(fetchedLive, false)
+  assert.equal(catalog.tools[0].version, '0.8.0')
+  assert.equal(catalog.catalogId, 'local-0.8-candidate')
+  assert.equal(typeof catalog.tools[0].platforms['darwin-arm64'], 'object')
 })

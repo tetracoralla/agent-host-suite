@@ -11,7 +11,7 @@ import { resolveStateRoot } from './paths.mjs'
 import { prepareStatePaths } from './state.mjs'
 import { loadGitHubToolRegistry } from './github-registry.mjs'
 import { supportedReleasePlatform } from './github-project.mjs'
-import { runFile } from './process.mjs'
+import { runFile, startDetachedProcess } from './process.mjs'
 import { compareSemVer } from './semver.mjs'
 import { readUpdatePreferences } from './update-preferences.mjs'
 
@@ -386,25 +386,67 @@ export async function resolveManagerRelaunchLaunch({ root, command, args = [] } 
   return { ...cliLaunch, kind: 'cli-manager' }
 }
 
-export async function relaunchReplacedApplication({ root, runner = runFile, command, args } = {}) {
+export async function relaunchReplacedApplication({
+  root,
+  starter,
+  runner,
+  command,
+  args,
+  confirmMs = 1_500,
+} = {}) {
   const launch = await resolveManagerRelaunchLaunch({
     root,
     command,
     args: args ?? [],
   })
-  const result = await runner(launch.command, launch.args, {
-    allowFailure: true,
-    timeoutMs: 15_000,
-    cwd: root,
-    maxBuffer: 64 * 1024,
-  })
-  if (result.status !== 0 && result.status !== null) {
-    fail('APPLICATION_UPDATE_RELAUNCH_FAILED', 'The replaced application could not be restarted', {
-      output: [result.stderr, result.stdout].filter(Boolean).join('\n').slice(0, 2048),
+  // Long-running Manager must be detached: runFile waits for exit and kills the tree at timeout.
+  // Injected `runner` remains a test shim; production uses startDetachedProcess.
+  const start = starter ?? (
+    typeof runner === 'function'
+      ? async (cmd, cmdArgs, options) => {
+        const result = await runner(cmd, cmdArgs, {
+          allowFailure: true,
+          timeoutMs: options?.confirmMs ?? confirmMs,
+          cwd: options?.cwd ?? root,
+          maxBuffer: 64 * 1024,
+        })
+        if (result.timedOut === true) {
+          throw new AgentHostError('HOST_COMMAND_TIMEOUT', `${cmd} startup timed out`)
+        }
+        // Spawn failure / killed tree previously returned status null and was treated as success.
+        if (result.status !== 0) {
+          throw new AgentHostError(
+            'HOST_COMMAND_FAILED',
+            `${cmd} failed to stay running`,
+            {
+              status: result.status,
+              output: [result.stderr, result.stdout].filter(Boolean).join('\n').slice(0, 2048),
+            },
+          )
+        }
+        return { pid: null, command: cmd, args: cmdArgs, detached: false, status: result.status }
+      }
+      : startDetachedProcess
+  )
+  try {
+    const started = await start(launch.command, launch.args, { cwd: root, confirmMs })
+    return {
+      command: launch.command,
+      args: launch.args,
+      pid: started.pid ?? null,
+      status: started.status,
       kind: launch.kind,
+      detached: started.detached === true,
+    }
+  } catch (error) {
+    fail('APPLICATION_UPDATE_RELAUNCH_FAILED', 'The replaced application could not be restarted', {
+      output: error instanceof AgentHostError
+        ? (error.details?.output ?? error.message)
+        : (error instanceof Error ? error.message : String(error)),
+      kind: launch.kind,
+      cause: error instanceof AgentHostError ? error.code : undefined,
     })
   }
-  return { command: launch.command, args: launch.args, status: result.status, kind: launch.kind }
 }
 
 export async function restorePreviousApplication({ currentRoot, previousRoot }) {
@@ -523,9 +565,11 @@ async function applyStagedReplacement(options, check, currentVersion, dependenci
       ? { skipped: true }
       : await relaunchReplacedApplication({
         root: applied.currentRoot,
+        starter: dependencies.starter,
         runner: dependencies.runner,
         command: options.relaunchCommand,
         args: options.relaunchArgs,
+        confirmMs: options.relaunchConfirmMs,
       })
     await clearUpdateTransactionMarker(applied.currentRoot)
     await writeJournal(options.stateRoot, { ...active, phase: 'complete', restored: false })

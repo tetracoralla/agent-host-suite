@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { homedir, tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
 import test from 'node:test'
-import { resolveExecutable, runFile, toolSearchPath } from '../src/process.mjs'
+import { resolveExecutable, runFile, startDetachedProcess, toolSearchPath } from '../src/process.mjs'
 
 test('process runner sends bounded stdin to child commands', async () => {
   const script = "let value='';process.stdin.on('data',c=>value+=c);process.stdin.on('end',()=>process.stdout.write(value.toUpperCase()))"
@@ -102,5 +102,26 @@ test('resolveExecutable probes which with an augmented environment', { skip: pro
     capturedOptions.env.PATH.split(':').includes('/opt/homebrew/bin'),
     true,
     'which must run against a PATH that includes Homebrew locations',
+  )
+})
+
+test('startDetachedProcess keeps a long-running child alive after handoff', async (t) => {
+  const started = await startDetachedProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { confirmMs: 200 })
+  assert.equal(started.detached, true)
+  assert.equal(Number.isInteger(started.pid) && started.pid > 0, true)
+  process.kill(started.pid, 0)
+  t.after(() => {
+    try { process.kill(started.pid, 'SIGTERM') } catch { /* gone */ }
+  })
+})
+
+test('startDetachedProcess rejects a non-executable entry', { skip: process.platform === 'win32' }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-detached-nonexec-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const script = join(root, 'blocked.sh')
+  await writeFile(script, '#!/bin/sh\necho no\n', { mode: 0o644 })
+  await assert.rejects(
+    () => startDetachedProcess(script, [], { confirmMs: 300 }),
+    (error) => error.code === 'HOST_COMMAND_FAILED',
   )
 })

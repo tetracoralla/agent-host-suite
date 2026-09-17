@@ -154,11 +154,14 @@ const sourcePins = JSON.parse(await readFile(join(root, 'catalog/unsigned-previe
 if (sourcePins.schemaVersion !== 'openadam.agent-host-unsigned-preview-source-pins.v0.1') {
   throw new Error('unsigned preview source pins schema is invalid')
 }
-for (const id of ['math-anchor', 'migratory-time']) {
+for (const id of ['math-anchor', 'migratory-time', 'capability-contracts']) {
   const pin = sourcePins.sources?.[id]
   if (typeof pin?.repository !== 'string' || typeof pin?.revision !== 'string' || !/^[0-9a-f]{40}$/u.test(pin.revision)) {
     throw new Error(`unsigned preview source pin for ${id} must name repository and a 40-char revision`)
   }
+}
+if (!unsignedWorkflow.includes('capability-contracts') || !unsignedWorkflow.includes('AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT')) {
+  throw new Error('unsigned preview workflow draft must checkout capability-contracts and set AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT')
 }
 const readme = await readFile(join(root, 'README.md'), 'utf8')
 if (!readme.includes('not Apple-notarized') && !readme.includes('No notarization')) {

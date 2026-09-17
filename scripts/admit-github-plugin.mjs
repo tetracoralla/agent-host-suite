@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { admitGitHubRelease, browseRecommendedTools } from '../src/github-project.mjs'
 import { loadGitHubToolCatalog, loadGitHubToolRegistry } from '../src/github-registry.mjs'
 import { supportedReleasePlatform } from '../src/github-project.mjs'
@@ -14,11 +15,17 @@ const output = resolve(arg('--output', '.build/github-tools'))
 const registryMode = process.argv.includes('--registry')
 const github = arg('--github')
 const id = arg('--id')
+const defaultCatalogPath = fileURLToPath(new URL('../catalog/github-releases/current.json', import.meta.url))
+const catalogArgument = arg('--catalog', defaultCatalogPath)
+const catalogPath = catalogArgument === true ? defaultCatalogPath : resolve(String(catalogArgument))
 await mkdir(output, { recursive: true, mode: 0o700 })
 
 const results = []
 if (registryMode) {
-  const catalog = await loadGitHubToolCatalog()
+  // Bind admission to the refresh-generated candidate file. Do not load the live
+  // published catalog, which can skip a newer local candidate (for example 0.8
+  // locally while live still serves 0.7 without this platform).
+  const catalog = await loadGitHubToolCatalog({ catalogPath })
   const registry = await loadGitHubToolRegistry()
   const platform = supportedReleasePlatform()
   if (platform === null) {
@@ -45,6 +52,12 @@ if (registryMode) {
       id: tool.id,
       status: 'admitted',
       version: admitted.descriptor.version,
+      catalogPath,
+      catalogVersion: pinned.version,
+      catalogTag: pinned.tag,
+      catalogReleaseUrl: pinned.releaseUrl,
+      catalogDigest: asset.sha256 ?? null,
+      platform,
       origin: admitted.origin,
       upstream: admitted.upstream,
       wrapped: { sha256: admitted.wrapped.sha256, bytes: admitted.wrapped.bytes, path: admitted.wrapped.path },
@@ -54,7 +67,7 @@ if (registryMode) {
   }
 } else {
   const url = github ?? (id === 'armorial' ? 'https://github.com/tetracoralla/armorial/releases/tag/v0.8.0' : null)
-  if (url === null) throw new Error('Usage: node scripts/admit-github-plugin.mjs --registry|--github URL [--output DIR]')
+  if (url === null) throw new Error('Usage: node scripts/admit-github-plugin.mjs --registry|--github URL [--catalog PATH] [--output DIR]')
   const admitted = await admitGitHubRelease({
     url,
     outputPath: resolve(output, 'host-component.tar.gz'),
@@ -75,6 +88,7 @@ if (registryMode) {
 const report = {
   schemaVersion: 'openadam.agent-host-github-admit.v0.1',
   generatedAt: new Date().toISOString(),
+  catalogPath: registryMode ? catalogPath : null,
   recommended: await browseRecommendedTools(),
   results,
 }

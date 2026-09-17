@@ -113,6 +113,71 @@ export async function runFile(command, args = [], options = {}) {
   })
 }
 
+
+export async function startDetachedProcess(command, args = [], options = {}) {
+  const confirmMs = options.confirmMs ?? 1_500
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let child
+    try {
+      child = spawn(command, args, {
+        cwd: options.cwd,
+        env: options.env ?? process.env,
+        stdio: options.stdio ?? 'ignore',
+        detached: true,
+        windowsHide: true,
+      })
+    } catch (error) {
+      reject(new AgentHostError(
+        'HOST_COMMAND_FAILED',
+        `${command} ${args.join(' ')} failed to spawn: ${error instanceof Error ? error.message : String(error)}`,
+      ))
+      return
+    }
+
+    const settleFailure = (code, message, details) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try {
+        if (child.pid !== undefined) child.kill('SIGTERM')
+      } catch {
+        // Best-effort only; ownership was never handed off.
+      }
+      reject(new AgentHostError(code, message, details))
+    }
+
+    child.once('error', (error) => {
+      settleFailure(
+        'HOST_COMMAND_FAILED',
+        `${command} ${args.join(' ')} failed to start: ${error.message}`,
+        { cause: error.message },
+      )
+    })
+    child.once('exit', (status, signal) => {
+      settleFailure(
+        'HOST_COMMAND_FAILED',
+        `${command} ${args.join(' ')} exited before startup was confirmed`,
+        { status, signal },
+      )
+    })
+
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      // Hand off ownership: updater must not reap this long-running Manager.
+      child.unref()
+      resolve({
+        pid: child.pid,
+        command,
+        args,
+        detached: true,
+        confirmedAfterMs: confirmMs,
+      })
+    }, confirmMs)
+  })
+}
+
 const STANDARD_TOOL_DIRECTORIES = [
   '/opt/homebrew/bin',
   '/opt/homebrew/sbin',
