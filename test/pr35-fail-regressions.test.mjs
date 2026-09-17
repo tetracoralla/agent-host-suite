@@ -639,16 +639,17 @@ test('R1 / F2 long-running Manager relaunch detaches and survives updater handof
   const pidPath = join(root, 'manager.pid')
   await write(join(app, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.0' }, null, 2)}\n`)
   await write(join(staged, 'app', 'package.json'), `${JSON.stringify({ name: 'agent-host-suite', version: '0.2.1' }, null, 2)}\n`)
-  // Platform-native long-running Manager: spaced .cmd on win32
-  // (cmd.exe /d /s /c call … — outer cmd stays alive), Contents/MacOS elsewhere.
+  // Platform-native long-running Manager: Contents/MacOS elsewhere; on win32
+  // keep a spaced .cmd for layout realism but relaunch via explicit node so
+  // the contract under test is detach+readyFile (not cmd quoting).
   // readyFile/probe is required when provided (no child.pid fallback).
   if (process.platform === 'win32') {
-    // Colocate keepalive next to the .cmd so directory-swap cannot break %~dp0..\
     const managerScript = join(staged, 'bin', 'manager-keepalive.mjs')
     await write(managerScript, `import { writeFileSync } from 'node:fs'
 writeFileSync(process.argv[1], String(process.pid))
 setInterval(() => {}, 1000)
 `)
+    // Layout realism only — relaunch uses explicit node below.
     await write(
       join(staged, 'bin', 'Agent Host.cmd'),
       `@echo off\r\n"${process.execPath}" "%~dp0manager-keepalive.mjs" "${pidPath}"\r\n`,
@@ -664,15 +665,24 @@ while true; do sleep 1; done
   await write(join(staged, 'app', 'bin', 'agent-host.mjs'), 'console.log("0.2.1")\n')
   await write(join(app, 'app', 'bin', 'agent-host.mjs'), 'console.log("0.2.0")\n')
 
+  const win32Relaunch = process.platform === 'win32'
+    ? {
+      // After directory-swap, staged lands at `app` (currentRoot).
+      relaunchCommand: process.execPath,
+      relaunchArgs: [join(app, 'bin', 'manager-keepalive.mjs'), pidPath],
+    }
+    : {}
+
   const result = await updateApplication({
     stateRoot,
     currentVersion: '0.2.0',
     applyKind: 'directory-swap',
     currentRoot: app,
     stagedRoot: staged,
-    // win32 cold runners need a longer readyFile window for Node+cmd handoff.
+    // win32 cold runners need a longer readyFile window for Node handoff.
     relaunchConfirmMs: process.platform === 'win32' ? 10_000 : 2_000,
     relaunchReadyFile: pidPath,
+    ...win32Relaunch,
     fetch: async () => jsonResponse({
       tag_name: 'v0.2.1',
       html_url: 'https://github.com/tetracoralla/agent-host-suite/releases/tag/v0.2.1',

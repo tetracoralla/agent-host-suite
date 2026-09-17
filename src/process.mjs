@@ -119,19 +119,6 @@ function windowsBatchCommand(command) {
   return platform() === 'win32' && /\.(cmd|bat)$/iu.test(String(command))
 }
 
-function quoteWindowsCmdArg(value) {
-  const text = String(value)
-  if (text.length === 0) return '""'
-  // Quote when whitespace or cmd metacharacters are present so paths like
-  // `Agent Host.cmd` survive `cmd.exe /d /s /c` without shell:true wrapping.
-  if (!/[\s"&<>|^()%!]/u.test(text)) return text
-  return `"${text.replace(/"/gu, '""')}"`
-}
-
-function windowsBatchCommandLine(command, args = []) {
-  return [command, ...args].map(quoteWindowsCmdArg).join(' ')
-}
-
 function windowsComSpec() {
   if (typeof process.env.ComSpec === 'string' && process.env.ComSpec.length > 0) {
     return process.env.ComSpec
@@ -173,9 +160,11 @@ export async function startDetachedProcess(command, args = [], options = {}) {
     : (typeof options.readyFile === 'string' && options.readyFile.length > 0
       ? () => readyFileProbe(options.readyFile)
       : null)
-  // Windows .cmd/.bat: keep outer cmd.exe alive with `call` so the batch's
-  // foreground node/Manager stays under child.pid. Do not use `start /b`
-  // (GitHub windows-latest never confirms that handoff reliably).
+  // Windows .cmd/.bat: spawn cmd.exe with separate argv so Node quotes each
+  // argument (paths with spaces like `Agent Host.cmd`). Use `call` so the
+  // batch's foreground node/Manager stays under the outer cmd. Do not pack a
+  // single `/s /c` string with windowsVerbatimArguments: true — that path
+  // never started the batch on windows-latest. Do not use `start /b`.
 
   return new Promise((resolve, reject) => {
     let settled = false
@@ -186,15 +175,14 @@ export async function startDetachedProcess(command, args = [], options = {}) {
 
     try {
       if (useWindowsBatch) {
-        const commandLine = `call ${windowsBatchCommandLine(command, args)}`
-        child = spawn(windowsComSpec(), ['/d', '/s', '/c', commandLine], {
+        child = spawn(windowsComSpec(), ['/d', '/c', 'call', command, ...args], {
           cwd: options.cwd,
           env: options.env ?? process.env,
           stdio: options.stdio ?? 'ignore',
           detached: true,
           windowsHide: true,
           shell: false,
-          windowsVerbatimArguments: true,
+          // default windowsVerbatimArguments: false — Node quotes each argv.
         })
       } else {
         child = spawn(command, args, {
