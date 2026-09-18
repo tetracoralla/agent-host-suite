@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "openadam.capability-profile.v0.3",
+  "id": "org.openadam.time-zone.convert",
+  "version": "0.2.0",
+  "title": "Convert local times between time zones",
+  "summary": "Convert one exact local wall-clock date and time between named IANA zones without guessing across daylight-saving gaps or repeated times.",
+  "lifecycle": "experimental",
+  "operations": [
+    {
+      "id": "convert",
+      "title": "Convert time zones",
+      "description": "Resolve an ISO 8601 local wall-clock date and minute in a named IANA source zone, then return the corresponding instant and ordered target-zone local times. A repeated time must return candidates or follow an explicit disambiguation choice; a nonexistent time must not be silently shifted. The result identifies the runtime time-zone database because rule updates can change historical or future mappings.",
+      "semantics": {
+        "resultVariability": "deterministic",
+        "contextSources": ["runtime"],
+        "stateAccess": "none",
+        "idempotency": "idempotent",
+        "openWorld": false,
+        "ambiguity": "return-candidates",
+        "provenance": "required"
+      },
+      "inputSchema": {
+        "$ref": "./schemas/time-zone.convert.v0.2.input.schema.json"
+      },
+      "outputSchema": {
+        "$ref": "./schemas/time-zone.convert.v0.2.output.schema.json"
+      },
+      "errors": [
+        {
+          "code": "INVALID_INPUT",
+          "description": "The canonical request shape, local date-time text, target collection, or disambiguation choice is outside the supported contract.",
+          "retryable": false
+        },
+        {
+          "code": "UNKNOWN_TIME_ZONE",
+          "description": "A syntactically valid named zone is not present in the provider's current IANA time-zone data.",
+          "retryable": false
+        },
+        {
+          "code": "UNSUPPORTED_YEAR",
+          "description": "The provider cannot resolve the requested civil-time year within its declared runtime range.",
+          "retryable": false
+        },
+        {
+          "code": "UNSUPPORTED_PRECISION",
+          "description": "The resolved historical offset contains sub-minute precision that this minute-level Profile must not round.",
+          "retryable": false
+        }
+      ]
+    }
+  ]
+}

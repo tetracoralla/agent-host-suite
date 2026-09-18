@@ -1,9 +1,44 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
+import { promisify } from 'node:util'
 import test from 'node:test'
-import { resolveExecutable, runFile, toolSearchPath } from '../src/process.mjs'
+import { resolveExecutable, runFile, startDetachedProcess, toolSearchPath } from '../src/process.mjs'
+
+const execFileAsync = promisify(execFile)
+const TRANSIENT_RM_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'])
+
+async function forceKillPid(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return
+  if (process.platform === 'win32') {
+    try {
+      await execFileAsync('taskkill', ['/PID', String(pid), '/F', '/T'], {
+        timeout: 10_000,
+        windowsHide: true,
+      })
+    } catch {
+      // Best-effort: process may already be gone.
+    }
+    return
+  }
+  try { process.kill(pid, 'SIGTERM') } catch { /* gone */ }
+}
+
+async function rmWithRetry(target, { attempts = 5, baseDelayMs = 80 } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (error?.code === 'ENOENT') return
+      if (attempt + 1 >= attempts || !TRANSIENT_RM_CODES.has(error?.code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)))
+    }
+  }
+}
+
 
 test('process runner sends bounded stdin to child commands', async () => {
   const script = "let value='';process.stdin.on('data',c=>value+=c);process.stdin.on('end',()=>process.stdout.write(value.toUpperCase()))"
@@ -103,4 +138,82 @@ test('resolveExecutable probes which with an augmented environment', { skip: pro
     true,
     'which must run against a PATH that includes Homebrew locations',
   )
+})
+
+test('startDetachedProcess keeps a long-running child alive after handoff', async (t) => {
+  const started = await startDetachedProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { confirmMs: 200 })
+  assert.equal(started.detached, true)
+  assert.equal(Number.isInteger(started.pid) && started.pid > 0, true)
+  process.kill(started.pid, 0)
+  t.after(() => {
+    try { process.kill(started.pid, 'SIGTERM') } catch { /* gone */ }
+  })
+})
+
+test('startDetachedProcess rejects a non-executable entry', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-detached-nonexec-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  if (process.platform === 'win32') {
+    const bogus = join(root, 'blocked.exe')
+    await writeFile(bogus, 'not-a-windows-image\n')
+    await assert.rejects(
+      () => startDetachedProcess(bogus, [], { confirmMs: 300 }),
+      (error) => error.code === 'HOST_COMMAND_FAILED',
+    )
+    const dead = join(root, 'dead.cmd')
+    await writeFile(dead, '@echo off\r\nexit /b 1\r\n')
+    await assert.rejects(
+      () => startDetachedProcess(dead, [], { confirmMs: 300 }),
+      (error) => error.code === 'HOST_COMMAND_FAILED',
+    )
+  } else {
+    const script = join(root, 'blocked.sh')
+    await writeFile(script, '#!/bin/sh\necho no\n', { mode: 0o644 })
+    await assert.rejects(
+      () => startDetachedProcess(script, [], { confirmMs: 300 }),
+      (error) => error.code === 'HOST_COMMAND_FAILED',
+    )
+  }
+})
+
+test('startDetachedProcess launches a spaced Windows .cmd via cmd.exe and readyFile', {
+  skip: process.platform !== 'win32',
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-detached-cmd-'))
+  let keepalivePid = null
+  let startedPid = null
+  t.after(async () => {
+    await forceKillPid(keepalivePid)
+    await forceKillPid(startedPid)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await rmWithRetry(root)
+  })
+  const pidPath = join(root, 'alive.pid')
+  const script = join(root, 'keepalive.mjs')
+  await writeFile(script, `import { writeFileSync } from 'node:fs'
+// argv[2] is pidPath when invoked as node script.mjs <pidPath>
+writeFileSync(process.argv[2], String(process.pid))
+setInterval(() => {}, 1000)
+`)
+  const batch = join(root, 'Agent Host.cmd')
+  await writeFile(
+    batch,
+    `@echo off\r\n"${process.execPath}" "${script}" "${pidPath}"\r\n`,
+  )
+  // ComSpec /d /c + quoted path (windowsVerbatimArguments); readyFile required.
+  const started = await startDetachedProcess(batch, [], {
+    confirmMs: 10_000,
+    readyFile: pidPath,
+  })
+  assert.equal(started.detached, true)
+  assert.equal(started.shell, false)
+  assert.equal(started.windowsBatch, true)
+  assert.equal(started.ready, 'probe', `ready=${started.ready}`)
+  assert.equal(Number.isInteger(started.pid) && started.pid > 0, true)
+  process.kill(started.pid, 0)
+  const pidText = await readFile(pidPath, 'utf8')
+  keepalivePid = Number(String(pidText).trim())
+  startedPid = started.pid
+  assert.equal(Number.isInteger(keepalivePid) && keepalivePid > 0, true, `pid file missing/invalid: ${pidText}`)
+  process.kill(keepalivePid, 0)
 })

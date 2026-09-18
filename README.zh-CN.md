@@ -13,7 +13,9 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
 安装包（所有者发布资产之后）；在此之前 Host 会明确说「尚未配置公开下载」。macOS
 需按住 Control 点击 → 打开。设置 `AGENT_HOST_FEATURED_CATALOG_URL` 后，Host 可拉取
 绑定 catalog 并安装工具。见
-[未公证预览下载](docs/UNSIGNED_PREVIEW.md)。Host 工作集里的「已选中」不能证明正在
+[未公证预览下载](docs/UNSIGNED_PREVIEW.md)。安装 Host 之后，可浏览推荐工具或添加
+GitHub 项目/Release，不必改 Host 源码；见 [GitHub 更新](docs/UPDATES.md)。
+`profiles fetch --carrier` 只下载安装包，不会替换正在运行的应用。Host 工作集里的「已选中」不能证明正在
 打开的 Agent 会话已经载入这些工具。
 
 ## 范围与事实来源

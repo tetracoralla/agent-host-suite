@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-github-catalog.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalogId", "createdAt", "channel", "tools"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-github-catalog.v0.1" },
+    "catalogId": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "channel": { "enum": ["stable", "preview"] },
+    "incompletePlatforms": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["darwin-arm64", "darwin-x86_64", "win32-x64", "win32-arm64"] }
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "version", "repository", "tag", "releaseUrl", "featured", "platforms"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "version": { "type": "string", "minLength": 1 },
+          "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+          "tag": { "type": "string", "minLength": 1 },
+          "releaseUrl": { "type": "string", "format": "uri" },
+          "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "featured": { "type": "boolean" },
+          "presentation": { "type": "object" },
+          "platforms": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "darwin-arm64": { "$ref": "#/$defs/asset" },
+              "darwin-x86_64": { "$ref": "#/$defs/asset" },
+              "win32-x64": { "$ref": "#/$defs/asset" },
+              "win32-arm64": { "$ref": "#/$defs/asset" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assetName", "url", "sha256", "bytes"],
+      "properties": {
+        "assetName": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

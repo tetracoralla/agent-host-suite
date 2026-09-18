@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### Fixed
+
+- Retry transient Windows ACL verification failures (helper throw or status=error) up to 3 times with short backoff; still fail closed on wrong-owner and permissions-unsafe (Windows CI contention flake).
+- Recognize Host-managed `downloads/tool-updates/**` and `downloads/staged-*` trees in storage safety checks so autodownload no longer breaks status/cleanup/Manager snapshot (review F1).
+- Hold one application-update lifecycle lease across journal/stage/swap/verify/relaunch and refuse concurrent mutations that would overwrite a live recovery journal (review F2).
+- Bind GitHub tool updates to the requested component id and reject identity drift instead of installing a different tool (review F3).
+- Read the installed application payload version from the selected carrier root, re-check under lock, and refuse replace when unreadable — never substitute the runner entry `package.json` (review F4).
+- On lost tool-update cache, verify upstream digest and rebind the local wrap digest; make Host wraps deterministic when GNU tar options are available (review F5).
+- Share application version resolution for app check/status and updates status; unknown current version is `version-unknown`, not a definite update (review F6).
+- Explicit `autoCheck`/`autoDownload` off cascades dependent prefs (or rejects same-patch conflicts) under the preferences lease — never silently reverse the user (review F7).
+
+- Resolve the default state root for `app update` so CLI/Manager downloads work without `--state-root` (F1).
+- Verify replaced applications from payload version metadata and relaunch Manager separately from CLI help (F2).
+- Keep concurrently adopted tool packages when a racing install fails under the lifecycle lock (F3).
+- Emit Host consumer entrypoints/integration from the unsigned preview builder for Math Anchor and Migratory Time (F4).
+- Allow registered GitHub tools to migrate off compatibility-release reserved IDs while retaining rollback (F5).
+- Refuse stale-candidate downgrades on tool update and invalidate candidates after install (F6).
+- Use SemVer precedence for tool/app version compares; refuse app downgrades on plain update (F7/F8).
+- Honor saved update channel preferences for application update/check (F9).
+- Refuse sole GitHub archives that name a different platform (F10).
+- Run GitHub tool admission on macOS in the scan workflow draft; publish uniquely named unsigned catalog assets (F11/F12).
+
+- GitHub Releases are the public update channel for Agent Host and registered
+  tools. Browse recommended tools, add a GitHub project or Release, persist
+  the update source with the installed instance, and check or install updates
+  from Manager and `agent-host updates` / `tools add --github` / `app update`.
+  `profiles fetch --carrier` remains installer download only. Unsigned preview
+  workflow no longer requires Apple notarization secrets. Armorial 0.8.0 is
+  the first pinned public sample; versions come from the GitHub catalog rather
+  than scattered 0.7.0 build constants. Installed npm/macOS/Windows payloads
+  load GitHub wrap code without a source-tree `scripts/` path. Third-party
+  GitHub projects preview and install without a central-registry entry;
+  checksums come from asset digest or `.sha256` files. Tool update checks
+  fetch persisted GitHub sources. Application update downloads the carrier
+  from the public CLI and restores the previous files if the new process
+  fails to start. Manager and the local web UI show version items, logos,
+  preview results, and install actions. Auto-check preferences have a
+  maintenance executor. Unknown licenses stay `NOASSERTION`.
+- `doctor --featured-readiness` records the working set as an experimental
+  variable. A healthy Armorial projection is not excluded because other tools
+  are installed or the profile name is `local-dogfood`.
 - Show application build, environment release, and tool versions as separate
   planes, plus catalog source and last check. Manager Settings and
   `agent-host source status|check|set|clear` can choose a local bound catalog

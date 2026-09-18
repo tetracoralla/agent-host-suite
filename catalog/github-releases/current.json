@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "openadam.agent-host-github-catalog.v0.1",
+  "catalogId": "github-tools-2026-09-15-armorial-0.8.0",
+  "createdAt": "2026-09-15T00:00:00.000Z",
+  "channel": "stable",
+  "incompletePlatforms": ["darwin-x86_64", "win32-x64", "win32-arm64"],
+  "tools": [
+    {
+      "id": "armorial",
+      "version": "0.8.0",
+      "repository": "tetracoralla/armorial",
+      "tag": "v0.8.0",
+      "releaseUrl": "https://github.com/tetracoralla/armorial/releases/tag/v0.8.0",
+      "commit": "630bd86bc6aed0bb103f129cf41bd4d2965dc07b",
+      "featured": true,
+      "platforms": {
+        "darwin-arm64": {
+          "assetName": "armorial-0.8.0-codex-plugin-macos-arm64.tar.gz",
+          "url": "https://github.com/tetracoralla/armorial/releases/download/v0.8.0/armorial-0.8.0-codex-plugin-macos-arm64.tar.gz",
+          "sha256": "sha256:db2cd4acb1b1e0ba96ece12d03f1d2d4d1fc8f5fabc1b1c6999ea3cb07b87fcd",
+          "bytes": 4997635
+        }
+      }
+    }
+  ]
+}

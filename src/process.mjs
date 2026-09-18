@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { posix, win32 } from 'node:path'
 import { AgentHostError } from './errors.mjs'
@@ -110,6 +111,218 @@ export async function runFile(command, args = [], options = {}) {
       if (error.code !== 'EPIPE') void finish(null, null, error)
     })
     child.stdin.end(options.input ?? '')
+  })
+}
+
+
+function windowsBatchCommand(command) {
+  return platform() === 'win32' && /\.(cmd|bat)$/iu.test(String(command))
+}
+
+/** Quote for cmd.exe when windowsVerbatimArguments:true (Node will not quote). */
+function quoteWindowsVerbatimArg(value) {
+  const text = String(value)
+  return `"${text.replace(/"/gu, '""')}"`
+}
+
+function windowsComSpec() {
+  if (typeof process.env.ComSpec === 'string' && process.env.ComSpec.length > 0) {
+    return process.env.ComSpec
+  }
+  return win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe')
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Same kill(0) semantics as application-update processIsAlive: EPERM = alive. */
+function processExists(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false
+    if (error?.code === 'EPERM') return true
+    throw error
+  }
+}
+
+async function readyFileProbe(readyFile) {
+  try {
+    const text = await readFile(readyFile, 'utf8')
+    const pid = Number(String(text).trim().split(/\s+/u)[0])
+    return processExists(pid)
+  } catch {
+    // Missing file / unreadable → not ready yet (or never).
+    return false
+  }
+}
+
+function childPidAlive(child) {
+  return processExists(child?.pid)
+}
+
+export async function startDetachedProcess(command, args = [], options = {}) {
+  const confirmMs = options.confirmMs ?? 1_500
+  const useWindowsBatch = windowsBatchCommand(command)
+  const readyProbe = typeof options.readyProbe === 'function'
+    ? options.readyProbe
+    : (typeof options.readyFile === 'string' && options.readyFile.length > 0
+      ? () => readyFileProbe(options.readyFile)
+      : null)
+  // Windows .cmd/.bat: spawn ComSpec with /d /c and a quoted command path
+  // (windowsVerbatimArguments so spaced paths like `Agent Host.cmd` survive).
+  // shell:true does not reliably produce readyFile on windows-latest. Keep
+  // readyFile/probe required when set; processExists treats EPERM as alive.
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let child
+    let shellExited = false
+    let exitStatus = null
+    let exitSignal = null
+
+    try {
+      if (useWindowsBatch) {
+        const quotedCommand = quoteWindowsVerbatimArg(command)
+        const quotedArgs = args.map(quoteWindowsVerbatimArg)
+        child = spawn(windowsComSpec(), ['/d', '/c', quotedCommand, ...quotedArgs], {
+          cwd: options.cwd,
+          env: options.env ?? process.env,
+          stdio: options.stdio ?? 'ignore',
+          detached: true,
+          windowsHide: true,
+          shell: false,
+          windowsVerbatimArguments: true,
+        })
+      } else {
+        child = spawn(command, args, {
+          cwd: options.cwd,
+          env: options.env ?? process.env,
+          stdio: options.stdio ?? 'ignore',
+          detached: true,
+          windowsHide: true,
+          shell: false,
+        })
+      }
+    } catch (error) {
+      reject(new AgentHostError(
+        'HOST_COMMAND_FAILED',
+        `${command} ${args.join(' ')} failed to spawn: ${error instanceof Error ? error.message : String(error)}`,
+      ))
+      return
+    }
+
+    const settleFailure = (code, message, details) => {
+      if (settled) return
+      settled = true
+      try {
+        if (child.pid !== undefined) child.kill()
+      } catch {
+        // Best-effort only; ownership was never handed off.
+      }
+      reject(new AgentHostError(code, message, details))
+    }
+
+    const finishOk = (extra = {}) => {
+      if (settled) return
+      settled = true
+      // Hand off ownership: updater must not reap this long-running Manager.
+      try {
+        child.unref()
+      } catch {
+        // Already detached / closed.
+      }
+      resolve({
+        pid: child.pid,
+        command,
+        args,
+        detached: true,
+        confirmedAfterMs: confirmMs,
+        shell: false,
+        windowsBatch: useWindowsBatch,
+        ...extra,
+      })
+    }
+
+    child.once('error', (error) => {
+      settleFailure(
+        'HOST_COMMAND_FAILED',
+        `${command} ${args.join(' ')} failed to start: ${error.message}`,
+        { cause: error.message },
+      )
+    })
+    child.once('exit', (status, signal) => {
+      shellExited = true
+      exitStatus = status
+      exitSignal = signal
+      if (settled) return
+      // Early shell/batch exit before confirmation. When readyProbe/readyFile
+      // is set, confirm() still waits for the probe (Manager may outlive a
+      // short-lived wrapper). Without a probe, fail now.
+      if (readyProbe !== null) return
+      settleFailure(
+        'HOST_COMMAND_FAILED',
+        `${command} ${args.join(' ')} exited before startup was confirmed`,
+        { status, signal },
+      )
+    })
+
+    const startedAt = Date.now()
+    const confirm = async () => {
+      // When readyFile/probe is provided, require it — never fall back to
+      // outer child.pid (cmd.exe can stay alive while Manager never wrote
+      // the ready file). Pid liveness is the confirm path only when no probe.
+      while (!settled && Date.now() - startedAt < confirmMs) {
+        if (readyProbe !== null) {
+          try {
+            if (await readyProbe()) {
+              finishOk({ ready: 'probe' })
+              return
+            }
+          } catch {
+            // Keep polling until confirmMs.
+          }
+        }
+        await delay(50)
+      }
+      if (settled) return
+      if (readyProbe !== null) {
+        try {
+          if (await readyProbe()) {
+            finishOk({ ready: 'probe' })
+            return
+          }
+        } catch {
+          // Probe failed; fail closed below.
+        }
+        settleFailure(
+          'HOST_COMMAND_FAILED',
+          `${command} ${args.join(' ')} exited before startup was confirmed`,
+          {
+            status: exitStatus,
+            signal: exitSignal,
+            ready: 'timeout',
+          },
+        )
+        return
+      }
+      if (!shellExited && childPidAlive(child)) {
+        finishOk({})
+        return
+      }
+      settleFailure(
+        'HOST_COMMAND_FAILED',
+        `${command} ${args.join(' ')} exited before startup was confirmed`,
+        {
+          status: exitStatus,
+          signal: exitSignal,
+        },
+      )
+    }
+    void confirm()
   })
 }
 

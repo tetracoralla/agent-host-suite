@@ -15,6 +15,18 @@ import { usageSummary } from './usage-summary.mjs'
 import { startWebManager } from './web-manager.mjs'
 import { defaultToolsForProfile, featuredCatalog, FEATURED_CATALOG_SCHEMA } from './profile.mjs'
 import { fetchPreviewRelease, PREVIEW_FETCH_SCHEMA } from './preview-download.mjs'
+import {
+  browseRecommendedTools,
+  installGitHubTool,
+  setUpdatePreferences,
+  updateGitHubTool,
+  updatesCheck,
+  updatesInstall,
+  updatesStatus,
+} from './updates.mjs'
+import { checkApplicationUpdate, packageJsonApplicationVersion, resolveInstalledApplicationVersion, updateApplication } from './application-update.mjs'
+import { readUpdatePreferences } from './update-preferences.mjs'
+import { executeAutoUpdates } from './auto-update.mjs'
 import { FEATURED_READINESS_SCHEMA, inspectFeaturedReadiness } from './featured-readiness.mjs'
 import {
   SOURCE_STATUS_SCHEMA,
@@ -25,7 +37,7 @@ import {
 } from './source-status.mjs'
 import { isAbsolute, join, resolve } from 'node:path'
 
-const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'service', 'profiles', 'source'])
+const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'service', 'profiles', 'source', 'updates', 'app'])
 const PROFILE_CHOICES = 'standard|featured|developer|observability|local-dogfood'
 
 const USAGE = `Usage:
@@ -49,10 +61,20 @@ const USAGE = `Usage:
   agent-host update [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--workspace-root PATH] [--release-manifest PATH] [--enable-observability] [--replace-host-conflicts] [--plan-id SHA256] [--dry-run] [--state-root PATH] [--json]
   agent-host repair [--workspace-root PATH] [--replace-host-conflicts] [--plan-id SHA256] [--dry-run] [--state-root PATH] [--json]
   agent-host tools status [--state-root PATH] [--json]
+  agent-host tools browse [--json]
+  agent-host tools add --github URL [--tag TAG] [--preview] [--activate] [--replace-source] [--dry-run] [--state-root PATH] [--json]
+  agent-host tools update [--tool COMPONENT | --all] [--dry-run] [--state-root PATH] [--json]
   agent-host tools set (--tool COMPONENT [--tool COMPONENT] | --profile PROFILE) [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools pause [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools resume [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools reset [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host updates status [--channel stable|preview] [--state-root PATH] [--json]
+  agent-host updates check [--channel stable|preview] [--state-root PATH] [--json]
+  agent-host updates install [--id ID | --all] [--github URL] [--include-app] [--dry-run] [--state-root PATH] [--json]
+  agent-host updates preferences [--channel stable|preview] [--auto-check on|off] [--auto-download on|off] [--auto-install on|off] [--state-root PATH] [--json]
+  agent-host app status [--channel stable|preview] [--state-root PATH] [--json]
+  agent-host app check [--channel stable|preview] [--state-root PATH] [--json]
+  agent-host app update [--channel stable|preview] [--dry-run] [--state-root PATH] [--json]
   agent-host component preview --artifact PATH --license-spdx EXPRESSION [--workspace-root PATH] [--path-grant NAME=PATH] [--standalone | --state-root PATH] [--json]
   agent-host component import --artifact PATH --binding PATH [--activate] [--replace] [--workspace-root PATH] [--path-grant NAME=PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host component list [--state-root PATH] [--json]
@@ -94,6 +116,9 @@ const ROUTE_ARGUMENTS = Object.freeze({
   uninstall: ['--purge-data', '--state-root', '--json'],
   maintenance: ['--state-root', '--json'],
   'tools status': ['--state-root', '--json'],
+  'tools browse': ['--json', '--state-root'],
+  'tools add': ['--github', '--tag', '--preview', '--activate', '--replace-source', '--dry-run', '--state-root', '--json'],
+  'tools update': ['--tool', '--all', '--dry-run', '--state-root', '--json'],
   'tools set': ['--tool', '--profile', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   'tools pause': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   'tools resume': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
@@ -116,6 +141,13 @@ const ROUTE_ARGUMENTS = Object.freeze({
   'host remove': ['--state-root', '--json'],
   'host status': ['--state-root', '--quick', '--json'],
   'service recover': ['--recovery', '--manifest-sha256', '--state-root', '--json'],
+  'updates status': ['--channel', '--state-root', '--json'],
+  'updates check': ['--channel', '--state-root', '--json'],
+  'updates install': ['--id', '--all', '--github', '--include-app', '--dry-run', '--state-root', '--json'],
+  'updates preferences': ['--channel', '--auto-check', '--auto-download', '--auto-install', '--state-root', '--json'],
+  'app status': ['--channel', '--state-root', '--json'],
+  'app check': ['--channel', '--state-root', '--json'],
+  'app update': ['--channel', '--dry-run', '--state-root', '--json'],
 })
 
 function routeName(options) {
@@ -153,9 +185,17 @@ function parseArgs(argv) {
     confirmSensitiveContent: false,
     carrier: false,
     adapter: undefined,
+    preview: false,
+    replaceSource: false,
+    all: false,
+    includeApp: false,
+    github: undefined,
+    tag: undefined,
+    channel: undefined,
+    id: undefined,
   }
   if (options.command === 'component' && ['status', 'remove', 'rollback'].includes(options.action) && argv[2] !== undefined && !argv[2].startsWith('--')) options.target = argv[2]
-  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--adapter', '--recovery', '--manifest-sha256', '--url', '--plan-id'])
+  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--adapter', '--recovery', '--manifest-sha256', '--url', '--plan-id', '--github', '--tag', '--channel', '--id', '--auto-check', '--auto-download', '--auto-install'])
   const booleans = new Map([
     ['--json', 'json'], ['--deep', 'deep'], ['--dry-run', 'dryRun'], ['--no-service', 'noService'], ['--no-host', 'noHost'],
     ['--enable-observability', 'enableObservability'], ['--purge-data', 'purgeData'],
@@ -165,6 +205,10 @@ function parseArgs(argv) {
     ['--quick', 'quick'], ['--standalone', 'standalone'], ['--no-open', 'noOpen'],
     ['--include-selected-content', 'includeSelectedContent'], ['--confirm-sensitive-content', 'confirmSensitiveContent'],
     ['--carrier', 'carrier'],
+    ['--preview', 'preview'],
+    ['--replace-source', 'replaceSource'],
+    ['--all', 'all'],
+    ['--include-app', 'includeApp'],
   ])
   const start = options.command === 'host' ? 3 : options.command === 'component' && options.target !== undefined ? 3 : ACTION_COMMANDS.has(options.command) ? 2 : 1
   if (ACTION_COMMANDS.has(options.command) && options.action === undefined) throw new AgentHostError('CLI_USAGE', `${options.command} requires an action`)
@@ -192,6 +236,16 @@ function parseArgs(argv) {
       else if (arg === '--release-manifest') options.releaseManifest = value
       else if (arg === '--state-root') options.stateRoot = value
       else if (arg === '--url') options.url = value
+      else if (arg === '--github') options.github = value
+      else if (arg === '--tag') options.tag = value
+      else if (arg === '--channel') {
+        if (!['stable', 'preview'].includes(value)) throw new AgentHostError('CLI_USAGE', '--channel must be stable or preview')
+        options.channel = value
+      } else if (arg === '--id') options.id = value
+      else if (arg === '--auto-check' || arg === '--auto-download' || arg === '--auto-install') {
+        if (!['on', 'off'].includes(value)) throw new AgentHostError('CLI_USAGE', `${arg} must be on or off`)
+        options[arg.slice(2).replace(/-([a-z])/gu, (_all, letter) => letter.toUpperCase())] = value === 'on'
+      }
       else if (arg === '--plan-id') {
         if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new AgentHostError('CLI_USAGE', '--plan-id requires a SHA-256 digest')
         options.planId = value
@@ -240,6 +294,12 @@ function parseArgs(argv) {
     if ((options.tools === undefined) === (options.profile === undefined)) {
       throw new AgentHostError('CLI_USAGE', 'tools set requires --tool or --profile, not both')
     }
+  }
+  if (route === 'tools add' && typeof options.github !== 'string') {
+    throw new AgentHostError('CLI_USAGE', 'tools add requires --github')
+  }
+  if (route === 'tools update' && options.all !== true && options.tools === undefined) {
+    throw new AgentHostError('CLI_USAGE', 'tools update requires --tool or --all')
   }
   if (route === 'observability trace-sources') {
     if (typeof options.provider !== 'string' || options.provider.length === 0) throw new AgentHostError('CLI_USAGE', 'observability trace-sources requires --provider')
@@ -333,6 +393,36 @@ export function human(result) {
   }
   if (result.schemaVersion === 'openadam.agent-host-local-component-preview.v0.1') {
     return `${result.component.id} ${result.component.version} · package structure and MCP catalog ready for explicit import approval`
+  }
+  if (result.schemaVersion === 'openadam.agent-host-updates.v0.1') {
+    return [
+      `Updates · channel ${result.channel ?? 'stable'} · not notarized`,
+      result.assessmentBoundary,
+      ...(result.items ?? []).map((item) => {
+        const version = [item.installedVersion, item.availableVersion].filter(Boolean).join(' → ') || 'unversioned'
+        return `${item.displayName ?? item.id} · ${item.availability} · ${version}`
+      }),
+    ].filter(Boolean).join('\n')
+  }
+  if (result.schemaVersion === 'openadam.agent-host-recommended-tools.v0.1') {
+    if (!Array.isArray(result.tools) || result.tools.length === 0) return 'No recommended GitHub tools are registered.'
+    return result.tools.map((tool) => `${tool.id} · ${tool.version ?? 'unpublished'} · ${tool.compatible === true ? 'this platform' : 'no asset for this platform'} · ${tool.homepage}`).join('\n')
+  }
+  if (result.schemaVersion === 'openadam.agent-host-github-project-preview.v0.1') {
+    return [
+      `GitHub preview · ${result.origin?.repository ?? ''} ${result.origin?.tag ?? ''}`,
+      result.presentation?.displayName,
+      result.presentation?.summary,
+      result.compatibility?.available === true ? 'compatible asset listed' : 'no package downloaded',
+      'Preview does not download the plugin archive.',
+    ].filter(Boolean).join('\n')
+  }
+  if (result.schemaVersion === 'openadam.agent-host-tool-update.v0.1') {
+    const name = result.component?.displayName ?? result.component?.id
+    return `${name} ${result.component?.version} · ${result.status}${result.restartRequired === true ? ' · start a fresh Agent task' : ''}`
+  }
+  if (result.schemaVersion === 'openadam.agent-host-application-update.v0.1') {
+    return `Application · ${result.availability} · ${result.currentVersion ?? 'unknown'} → ${result.availableVersion ?? 'none'} · not notarized`
   }
   if (result.schemaVersion === FEATURED_CATALOG_SCHEMA) {
     return [
@@ -476,6 +566,10 @@ async function status(options) {
       version: component.version,
       private: state.privateComponents?.[id]?.current?.component !== undefined,
       ...(component.displayName === undefined ? {} : { displayName: component.displayName, summary: component.summary }),
+      ...(component.author === undefined ? {} : { author: component.author }),
+      ...(component.homepage === undefined ? {} : { homepage: component.homepage }),
+      ...(component.logo === undefined ? {} : { logo: component.logo }),
+      ...(component.origin === undefined ? {} : { origin: component.origin }),
     }])),
     hosts: Object.fromEntries(Object.entries(state.hosts).map(([id, host]) => [id, {
       installed: true,
@@ -566,6 +660,12 @@ async function run(options, dependencies = {}) {
   }
   if (options.command === 'tools') {
     if (options.action === 'status') return toolSetStatus(options)
+    if (options.action === 'browse') return browseRecommendedTools()
+    if (options.action === 'add') return installGitHubTool(options, dependencies)
+    if (options.action === 'update') {
+      if (options.all === true) return updatesInstall({ ...options, all: true }, dependencies)
+      return updateGitHubTool({ ...options, target: options.tools[0] }, dependencies)
+    }
     if (options.action === 'set') {
       const selectedProfile = options.profile
       const tools = selectedProfile === undefined ? options.tools : await defaultToolsForProfile(selectedProfile)
@@ -575,6 +675,36 @@ async function run(options, dependencies = {}) {
     if (options.action === 'resume') return setActiveTools({ ...options, resumeTools: true })
     if (options.action === 'reset') return setActiveTools({ ...options, resetTools: true })
     throw new AgentHostError('CLI_USAGE', `Unknown tools action: ${options.action}`)
+  }
+  if (options.command === 'updates') {
+    if (options.action === 'status') return updatesStatus(options, dependencies)
+    if (options.action === 'check') return updatesCheck(options, dependencies)
+    if (options.action === 'install') return updatesInstall(options, dependencies)
+    if (options.action === 'preferences') {
+      return setUpdatePreferences(options.stateRoot, {
+        channel: options.channel,
+        autoCheck: options.autoCheck,
+        autoDownload: options.autoDownload,
+        autoInstall: options.autoInstall,
+      })
+    }
+    throw new AgentHostError('CLI_USAGE', `Unknown updates action: ${options.action}`)
+  }
+  if (options.command === 'app') {
+    if (options.action === 'status' || options.action === 'check') {
+      const preferences = await readUpdatePreferences(options.stateRoot)
+      const resolved = await resolveInstalledApplicationVersion(options, dependencies)
+      const currentVersion = options.currentVersion
+        ?? resolved.version
+        ?? await packageJsonApplicationVersion().catch(() => null)
+      return checkApplicationUpdate({
+        ...options,
+        channel: options.channel ?? preferences.channel,
+        currentVersion,
+      })
+    }
+    if (options.action === 'update') return updateApplication(options, dependencies)
+    throw new AgentHostError('CLI_USAGE', `Unknown app action: ${options.action}`)
   }
   if (options.command === 'update') return updateInstallation(options, dependencies)
   if (options.command === 'repair') return repairInstallation(options, dependencies)
@@ -590,7 +720,30 @@ async function run(options, dependencies = {}) {
     if (options.action === 'adapter-plan') return observabilityAdapterPlan(options)
     throw new AgentHostError('CLI_USAGE', `Unknown observability action: ${options.action}`)
   }
-  if (options.command === 'maintenance') return maintenance(options)
+  if (options.command === 'maintenance') {
+    const auto = await executeAutoUpdates(options.stateRoot, {
+      skipIfNotDue: false,
+      force: false,
+      fetch: options.fetch ?? dependencies.fetch,
+      signal: options.signal ?? dependencies.signal,
+      platform: options.platform ?? dependencies.platform,
+      currentVersion: options.currentVersion ?? dependencies.currentVersion,
+      applicationRoots: options.applicationRoots ?? dependencies.applicationRoots,
+      currentRoot: options.currentRoot ?? dependencies.currentRoot,
+    }, dependencies).catch((error) => ({
+      status: 'auto-update-failed',
+      error: { code: error.code, message: error.message },
+    }))
+    try {
+      const observability = await maintenance(options)
+      return { ...observability, auto }
+    } catch (error) {
+      if (error instanceof AgentHostError && (error.code === 'OBSERVABILITY_DISABLED' || error.code === 'NOT_INSTALLED')) {
+        return { status: 'ok', auto, observability: { skipped: true, code: error.code } }
+      }
+      throw error
+    }
+  }
   if (options.command === 'host') {
     if (options.action === 'add') return addHost(options)
     if (options.action === 'remove') return removeHost(options)

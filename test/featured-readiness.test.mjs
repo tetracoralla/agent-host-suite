@@ -76,10 +76,11 @@ test('featured readiness requires the featured working set and does not claim ad
   })
   assert.equal(standard.status, 'warning')
   assert.equal(standard.userStatus, 'warning')
-  assert.equal(standard.recipeStatus, 'warning')
+  assert.equal(standard.recipeStatus, 'ok')
   assert.equal(standard.adoptionEvidence, false)
   assert.equal(standard.checks.find((item) => item.id === 'user.tools')?.status, 'ok')
-  assert.match(standard.checks.find((item) => item.id === 'recipe.consistency').message, /profile is standard|recipe is standard/u)
+  assert.equal(standard.checks.find((item) => item.id === 'recipe.consistency')?.detail.experimentalVariable, true)
+  assert.match(standard.checks.find((item) => item.id === 'recipe.consistency').message, /experimental variable/u)
 
   const inactive = await inspectFeaturedReadiness(
     featuredState({ agentComponents: ['math-anchor', 'migratory-time'] }),
@@ -96,9 +97,10 @@ test('user-level readiness does not fail only because the profile is local-dogfo
   assert.equal(report.adoptionEvidence, false)
   assert.equal(report.userStatus, 'ok')
   assert.equal(report.status, 'ok')
-  assert.notEqual(report.recipeStatus, 'ok')
-  assert.equal(report.checks.find((item) => item.id === 'recipe.consistency')?.status, 'warning')
-  assert.match(report.checks.find((item) => item.id === 'recipe.consistency').message, /local-dogfood/u)
+  assert.equal(report.recipeStatus, 'ok')
+  assert.equal(report.checks.find((item) => item.id === 'recipe.consistency')?.status, 'ok')
+  assert.equal(report.checks.find((item) => item.id === 'recipe.consistency')?.detail.experimentalVariable, true)
+  assert.equal(report.checks.find((item) => item.id === 'recipe.consistency')?.detail.profile, 'local-dogfood')
   assert.equal(report.checks.find((item) => item.id === 'recipe.consistency')?.detail.userLevelUsesProfileName, false)
   assert.equal(report.checks.find((item) => item.id === 'user.tools')?.status, 'ok')
   assert.equal(report.checks.find((item) => item.id === 'projection.receipt.codex')?.status, 'ok')

@@ -94,7 +94,9 @@ hook: if `AGENT_HOST_FEATURED_CATALOG_URL` is set and no
 `acquireArtifact` downloads each component archive.
 
 Add `--carrier` to also download the current platform’s DMG or ZIP named by
-the index:
+the index. That file lands in Host private downloads; it does not replace or
+relaunch the running application. Application replacement is `agent-host app
+update` after digest comparison. See [`UPDATES.md`](UPDATES.md).
 
 ```text
 agent-host profiles fetch --carrier --json
@@ -148,15 +150,35 @@ Component `artifact.url` values in a remotely fetched `current.json` must be
 so `github.com/.../releases/download/...` may land on
 `objects.githubusercontent.com`; SHA-256 still binds the bytes.
 
-## Optional workflow draft
+## Unsigned preview workflow
 
-The tracked `.github/workflows/release.yml` still contains the older
-notarization job. This product does **not** use those Apple secrets. Copy
-[`unsigned-preview-release.yml`](unsigned-preview-release.yml) to
-`.github/workflows/unsigned-preview-release.yml` (or replace `release.yml`)
-with GitHub Desktop from an account that has the `workflow` scope. The draft
-uploads an unsigned prerelease, does not invoke Apple notarization tooling,
-and fails closed when a bound catalog is missing; it does not invent artifacts.
+The required unsigned pipeline draft is
+[`unsigned-preview-release.yml`](unsigned-preview-release.yml). It remains under
+`docs/` until an account with the GitHub `workflow` scope can push
+`.github/workflows/unsigned-preview-release.yml`; do **not** claim that Actions
+path is live while the file is absent from `.github/workflows/`.
+
+Each platform job must:
+
+1. Check out Host.
+2. Obtain **version-pinned** Math Anchor and Migratory Time inputs using
+   [`catalog/unsigned-preview-source-pins.json`](../catalog/unsigned-preview-source-pins.json)
+   (source checkout at the pinned revision, or
+   `AGENT_HOST_MATH_ANCHOR_ARTIFACT` /
+   `AGENT_HOST_MIGRATORY_TIME_ARTIFACT` platform archives).
+3. Admit GitHub tools for **that** runner.
+4. Run `scripts/build-unsigned-preview-catalog.mjs`, which still **refuses** an
+   incomplete default profile (`math-anchor`, `migratory-time`, and the Host
+   runtime packages).
+
+Native archives are not reused across operating systems. The draft does **not**
+request Apple secrets. The notarized
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) is a
+separate signed path and is not this preview. Copy
+[`scan-github-tools.yml`](scan-github-tools.yml) to
+`.github/workflows/scan-github-tools.yml` from an account with the GitHub
+`workflow` scope if catalog pin automation is not yet enabled. See
+[`UPDATES.md`](UPDATES.md).
 
 ## Non-goals
 

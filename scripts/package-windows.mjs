@@ -7,7 +7,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { stageBundledReleaseCatalogForProfiles } from '../src/bundled-release.mjs'
+import { stageBundledReleaseCatalogForIds, stageBundledReleaseCatalogForProfiles } from '../src/bundled-release.mjs'
 import { currentReleasePlatform, loadReleaseManifest } from '../src/release-manifest.mjs'
 import { loadBuildProvenance } from '../src/release-provenance.mjs'
 
@@ -63,6 +63,8 @@ async function run() {
   if (platform() !== 'win32') fail('package:windows must run on Windows so the payload contains a genuine Windows Node.js runtime')
   const releaseCatalog = process.env.AGENT_HOST_RELEASE_CATALOG
   if (!releaseCatalog) fail('AGENT_HOST_RELEASE_CATALOG must name one bound Windows release catalog')
+  const componentIds = (process.env.AGENT_HOST_BUNDLED_COMPONENTS ?? '')
+    .split(',').map((value) => value.trim()).filter(Boolean)
   const profiles = (process.env.AGENT_HOST_BUNDLED_PROFILES ?? 'standard,observability,developer')
     .split(',').map((value) => value.trim()).filter(Boolean)
   const targetPlatform = currentReleasePlatform()
@@ -100,7 +102,8 @@ async function run() {
   await rm(distributionRoot, { recursive: true, force: true })
   await mkdir(distributionRoot, { recursive: true })
   try {
-    await stageBundledReleaseCatalogForProfiles(sourceCatalog, stagedCatalog, profiles)
+    if (componentIds.length > 0) await stageBundledReleaseCatalogForIds(sourceCatalog, stagedCatalog, componentIds)
+    else await stageBundledReleaseCatalogForProfiles(sourceCatalog, stagedCatalog, profiles)
     const packed = await execFileAsync(process.execPath, [npmExecPath, 'pack', '--json', '--pack-destination', packRoot], {
       cwd: suiteRoot,
       maxBuffer: 8 * 1024 * 1024,

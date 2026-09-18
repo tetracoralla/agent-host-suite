@@ -17,6 +17,7 @@ import {
   REQUIRED_RELEASE_COMPONENTS,
   containedComponentPath,
   currentReleasePlatform,
+  currentReleasePlatformOrLocal,
   installDirectoryName,
   resolveArtifactUrl,
   selectedReleaseComponents,
@@ -26,6 +27,7 @@ import { runFile } from './process.mjs'
 import { isDeveloperKitIntegrationSchema } from './developer-kit-integration.mjs'
 import { isToolIntegrationSchema } from './tool-integration.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
+import { archiveListingLines, isSafeArchiveMemberPath, posixArchiveMemberPath } from './archive-member-path.mjs'
 
 function fail(code, message, details) {
   throw new AgentHostError(code, message, details)
@@ -34,7 +36,7 @@ function fail(code, message, details) {
 const MAX_LOCAL_COMPONENT_ARCHIVE_BYTES = 512 * 1024 * 1024
 const MAX_LOCAL_COMPONENT_FILES = 20_000
 const MAX_LOCAL_COMPONENT_EXPANDED_BYTES = 1024 * 1024 * 1024
-const MAX_COMPONENT_DESCRIPTOR_BYTES = 1024 * 1024
+export const MAX_COMPONENT_DESCRIPTOR_BYTES = 4 * 1024 * 1024
 const MIN_ARCHIVE_COMMAND_TIMEOUT_MS = 60_000
 const MAX_ARCHIVE_COMMAND_TIMEOUT_MS = 10 * 60_000
 const ARCHIVE_TIMEOUT_MS_PER_MIB = 2_000
@@ -365,15 +367,11 @@ export async function acquireArtifact(component, manifestPath, paths, options = 
 }
 
 function safeArchiveEntry(raw) {
-  const value = raw.replace(/^\.\//u, '').replace(/\/$/u, '')
-  if (value === '') return true
-  if (/[\u0000-\u001f\u007f]/u.test(value) || value.includes('\\') || isAbsolute(value)) return false
-  const parts = value.split('/')
-  return !parts.includes('..') && !parts.includes('')
+  return isSafeArchiveMemberPath(raw, { allowEmpty: true })
 }
 
 function archiveEntryName(raw) {
-  return raw.replace(/^\.\//u, '').replace(/\/$/u, '')
+  return posixArchiveMemberPath(raw)
 }
 
 function expectedArchiveDirectories(files) {
@@ -392,11 +390,11 @@ async function inspectArchive(path, runner) {
   const archiveInfo = await stat(path)
   const timeoutMs = archiveCommandTimeoutMs(archiveInfo.size)
   const listing = await runner(tarCommand(), ['-tzf', path], { timeoutMs })
-  const entries = listing.stdout.split(/\r?\n/u).filter(Boolean)
-  if (entries.length === 0 || !entries.some((entry) => entry.replace(/^\.\//u, '') === 'component.json')) fail('RELEASE_ARCHIVE_INVALID', 'Release archive does not contain component.json')
+  const entries = archiveListingLines(listing.stdout)
+  if (entries.length === 0 || !entries.some((entry) => posixArchiveMemberPath(entry) === 'component.json')) fail('RELEASE_ARCHIVE_INVALID', 'Release archive does not contain component.json')
   for (const entry of entries) if (!safeArchiveEntry(entry)) fail('RELEASE_ARCHIVE_UNSAFE', `Release archive contains an unsafe path: ${entry}`)
   const verbose = await runner(tarCommand(), ['-tvzf', path], { timeoutMs })
-  const verboseLines = verbose.stdout.split(/\r?\n/u).filter(Boolean)
+  const verboseLines = archiveListingLines(verbose.stdout)
   for (const line of verboseLines) {
     if (!['-', 'd'].includes(line[0])) fail('RELEASE_ARCHIVE_UNSAFE', 'Release archives cannot contain links or special files')
   }
@@ -406,7 +404,8 @@ async function inspectArchive(path, runner) {
 function localArchiveSizes(verboseLines) {
   const sizes = []
   for (const line of verboseLines.filter((value) => value[0] === '-')) {
-    const match = line.match(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+/u)
+    const match = line.match(/^[d-][rwxsStT-]{9}[+]?\s+\S+\s+(\d+)\s+/u)
+      ?? line.match(/^\S+\s+\d+\s+\S+\s+\S+\s+(\d+)\s+/u)
     if (match === null) fail('LOCAL_COMPONENT_ARCHIVE_INVALID', 'The local component archive inventory could not be bounded before extraction')
     const value = Number(match[1])
     if (!Number.isSafeInteger(value) || value < 0) fail('LOCAL_COMPONENT_ARCHIVE_INVALID', 'The local component archive contains an invalid file size')
@@ -457,7 +456,7 @@ async function localArtifactObservation(path, runner) {
   const releaseComponent = {
     id: descriptor?.id,
     version: descriptor?.version,
-    platform: 'local',
+    platform: currentReleasePlatformOrLocal(),
     artifact: {
       url: pathToFileURL(artifactPath).href,
       sha256: await digestFile(artifactPath),
@@ -562,7 +561,7 @@ function requireLocalBinding(binding, observation) {
     descriptorSha256: observation.releaseComponent.descriptorSha256,
     id: observation.descriptor.id,
     version: observation.descriptor.version,
-    platform: currentReleasePlatform(),
+    platform: currentReleasePlatformOrLocal(),
   }
   const mismatches = Object.entries(actual).filter(([key, value]) => binding[key] !== value).map(([key]) => key)
   if (!isSpdxExpressionSyntax(binding.spdx)) mismatches.push('spdx')

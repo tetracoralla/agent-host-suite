@@ -6,6 +6,13 @@ import test from 'node:test'
 import { MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
 import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 
+test('browser Updates keeps a successful GitHub preview target for Add from GitHub', async () => {
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  assert.match(page, /lastGithubTarget/u)
+  assert.match(page, /input\.value=lastGithubTarget/u)
+  assert.match(page, /github:input\.value\|\|lastGithubTarget/u)
+})
+
 test('local Manager pause and empty tool set are distinct from on-demand Skills', async (t) => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
   assert.match(page, /Pause all tools/u)
@@ -39,6 +46,10 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.match(document, /Usage & Reliability/u)
   assert.match(document, /featured/u)
   assert.match(document, /Get featured tools/u)
+  assert.match(document, /Add GitHub project/u)
+  assert.match(document, /Check for updates/u)
+  assert.match(document, /Install all updates/u)
+  assert.match(document, /updates-install/u)
   assert.match(document, /Connect later/u)
   assert.equal(document.includes(url.split('/').at(-1)), false)
 

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-github-tools.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "host", "tools"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-github-tools.v0.1" },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "stableTagPrefix", "catalogTag", "unsignedPreview"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "stableTagPrefix": { "type": "string", "minLength": 1 },
+        "catalogTag": { "type": "string", "minLength": 1 },
+        "unsignedPreview": { "type": "boolean" }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "repository", "featured", "assetName", "platforms"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+          "featured": { "type": "boolean" },
+          "assetName": { "type": "string", "minLength": 1 },
+          "checksumAssetName": { "type": "string", "minLength": 1 },
+          "platforms": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "darwin-arm64": { "type": "string", "minLength": 1 },
+              "darwin-x86_64": { "type": "string", "minLength": 1 },
+              "win32-x64": { "type": "string", "minLength": 1 },
+              "win32-arm64": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

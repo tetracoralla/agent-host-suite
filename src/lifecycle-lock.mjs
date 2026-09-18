@@ -266,8 +266,15 @@ async function inspectRecoveryClaims(claimsPath, ownToken) {
     }
   }
 
-  for (const token of tickets.keys()) {
-    if (!claims.has(token)) throw recoveryInvalid('The Agent Host lifecycle recovery directory contains an orphaned election ticket')
+  // An orphaned ticket can appear when a contender's finally hits a Windows
+  // sharing violation on the ticket then still deletes the claim, or when a
+  // claim vanishes between readdir and read. Tickets alone grant no election
+  // authority, so retire them like dead-claim garbage instead of failing closed
+  // for a transient race that contention regularly creates.
+  for (const token of [...tickets.keys()]) {
+    if (claims.has(token)) continue
+    await removeRecoveryEntry(join(claimsPath, `ticket-${token}.json`))
+    tickets.delete(token)
   }
 
   // One fresh bounded OS observation for this directory pass. Starting a
@@ -456,8 +463,23 @@ async function claimAndRetireStaleLock(existingRoot, lockPath, retained, operati
     return true
   } finally {
     if (published) {
-      await removeRecoveryEntry(ticketPath).catch(() => {})
-      await removeRecoveryEntry(claimPath).catch(() => {})
+      // Preserve claim/ticket pairing. A swallowed ticket-delete failure followed
+      // by a successful claim delete leaves an orphaned ticket; under Windows
+      // sharing that race produced LIFECYCLE_RECOVERY_INVALID during contention.
+      let ticketRemoved = false
+      try {
+        await removeRecoveryEntry(ticketPath)
+        ticketRemoved = true
+      } catch {
+        // Ticket may still exist — leave the claim for a later cleanup pass.
+      }
+      if (ticketRemoved) {
+        try {
+          await removeRecoveryEntry(claimPath)
+        } catch {
+          // Claim without ticket is safe for inspectRecoveryClaims.
+        }
+      }
     }
   }
 }
@@ -601,11 +623,24 @@ function completedMutationCleanupFailure(operation, cleanupError, roots) {
 
 export async function withLifecycleMutation(paths, operation, dependencies, callback) {
   const inherited = dependencies.lifecycleLease
-  if (liveLeases.has(inherited) && (inherited.root === paths.root || inherited.requestedRoot === paths.root)) {
+  if (liveLeases.has(inherited)) {
     // Nested callers may still use the requested spelling (for example /var
-    // versus /private/var). Keep their state access in the canonical journal
-    // namespace already owned by the outer lease.
-    return await callback(dependencies, statePaths(inherited.root))
+    // versus /private/var after prepareStatePaths realpath). Keep their state
+    // access in the canonical journal namespace already owned by the outer lease.
+    let resolvedNested = paths.root
+    try {
+      resolvedNested = await realpath(paths.root)
+    } catch {
+      // Create-root flows may not have a followable path yet.
+    }
+    if (
+      inherited.root === paths.root
+      || inherited.requestedRoot === paths.root
+      || inherited.root === resolvedNested
+      || inherited.requestedRoot === resolvedNested
+    ) {
+      return await callback(dependencies, statePaths(inherited.root))
+    }
   }
   const lease = await acquireLifecycleLease(paths, operation, dependencies)
   let preparedPaths = statePaths(lease.root)

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "openadam.agent-host-unsigned-preview-source-pins.v0.1",
+  "sources": {
+    "math-anchor": {
+      "repository": "https://github.com/tetracoralla/math-anchor.git",
+      "revision": "62562762ba60093a804a72ad917a5a3753c840c3",
+      "ref": "refs/heads/main",
+      "expectedVersion": "0.7.1",
+      "pluginRelative": "plugins/math-anchor",
+      "entrypoint": "plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime"
+    },
+    "migratory-time": {
+      "repository": "https://github.com/tetracoralla/migratory-time.git",
+      "revision": "0355fd34c99cd9c51a0eeecf20f20ef6369cdd54",
+      "ref": "refs/heads/main",
+      "expectedVersion": "2.0.0+codex.20260830163923",
+      "pluginRelative": "plugins/migratory-time",
+      "entrypoint": "plugins/migratory-time/server/index.mjs"
+    },
+    "capability-contracts": {
+      "repository": "https://github.com/tetracoralla/capability-contracts.git",
+      "revision": "ef51ab875c7c6f99f6777bc066fe1929d5b136d0",
+      "ref": "refs/heads/main"
+    }
+  }
+}

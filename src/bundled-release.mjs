@@ -56,18 +56,30 @@ export async function stageBundledReleaseCatalog(sourceRoot, destinationRoot, pr
   return stageBundledReleaseCatalogForProfiles(sourceRoot, destinationRoot, [profileId])
 }
 
+export async function stageBundledReleaseCatalogForIds(sourceRoot, destinationRoot, componentIds) {
+  if (!Array.isArray(componentIds) || componentIds.length === 0 || new Set(componentIds).size !== componentIds.length) {
+    throw new AgentHostError('BUNDLED_RELEASE_PROFILE_INVALID', 'At least one unique component id is required')
+  }
+  const selected = new Set(componentIds.includes('node-runtime') ? componentIds : ['node-runtime', ...componentIds])
+  return stageBundledReleaseCatalogSelection(sourceRoot, destinationRoot, selected, { profiles: [] })
+}
+
 export async function stageBundledReleaseCatalogForProfiles(sourceRoot, destinationRoot, profileIds) {
   if (!Array.isArray(profileIds) || profileIds.length === 0 || new Set(profileIds).size !== profileIds.length) {
     throw new AgentHostError('BUNDLED_RELEASE_PROFILE_INVALID', 'At least one unique release profile is required')
   }
-  const sourceManifest = join(resolve(sourceRoot), 'current.json')
-  const release = await loadReleaseManifest(sourceManifest)
   const profiles = await Promise.all(profileIds.map((id) => loadProfile(id)))
   const selected = new Set(profiles.flatMap((profile) => profile.components))
+  return stageBundledReleaseCatalogSelection(sourceRoot, destinationRoot, selected, { profiles: profileIds })
+}
+
+async function stageBundledReleaseCatalogSelection(sourceRoot, destinationRoot, selected, { profiles }) {
+  const sourceManifest = join(resolve(sourceRoot), 'current.json')
+  const release = await loadReleaseManifest(sourceManifest)
   const components = release.manifest.components.filter((component) => selected.has(component.id))
   const missing = [...selected].filter((id) => !components.some((component) => component.id === id))
   if (missing.length > 0) {
-    throw new AgentHostError('BUNDLED_RELEASE_PROFILE_INCOMPLETE', 'The release cannot build the requested application profiles', { profiles: profileIds, components: missing })
+    throw new AgentHostError('BUNDLED_RELEASE_PROFILE_INCOMPLETE', 'The release cannot build the requested application profiles', { profiles, components: missing })
   }
   const manifest = validateReleaseManifest({ ...release.manifest, components })
   const destination = resolve(destinationRoot)
@@ -106,7 +118,7 @@ export async function stageBundledReleaseCatalogForProfiles(sourceRoot, destinat
   }
   return {
     status: 'ok',
-    profiles: profileIds,
+    profiles,
     components: components.map((component) => component.id),
     artifactBytes,
     destination,

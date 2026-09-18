@@ -644,6 +644,38 @@ test('recovery election removes only bounded dead-claim garbage and retains a li
   assert.equal(retained.includes(`ticket-${liveToken}.json`), true)
 })
 
+test('an orphaned recovery election ticket is retired so contention can elect', async (t) => {
+  const root = await temporaryStateRoot(t)
+  const lock = join(root, '.lifecycle-lock')
+  const claims = join(lock, '.recovery-claims')
+  const targetOwnerToken = 'orphaned-ticket-target'
+  const orphanToken = '33333333-3333-4333-8333-333333333333'
+  await mkdir(lock)
+  await writeFile(join(lock, 'owner.json'), `${JSON.stringify({
+    schemaVersion: 'openadam.agent-host-lifecycle-lock.v0.1',
+    token: targetOwnerToken,
+    pid: 2_147_483_647,
+    processStartedAt: '2020-01-01T00:00:00.000Z',
+    operation: 'test.orphaned-ticket-target',
+    acquiredAt: '2020-01-01T00:00:00.000Z',
+  })}\n`)
+  await mkdir(claims)
+  // Ticket without a matching claim: the Windows contention failure mode when a
+  // finally block hits a sharing violation on the ticket then still deletes the claim.
+  await writeFile(join(claims, `ticket-${orphanToken}.json`), `${JSON.stringify({
+    schemaVersion: 'openadam.agent-host-lifecycle-recovery-ticket.v0.1',
+    token: orphanToken,
+    targetOwnerToken,
+    ticket: 1,
+  })}\n`)
+
+  await withLifecycleMutation({ root }, 'test.orphaned-ticket-recovery', {}, async () => {
+    await writeFile(join(root, 'recovered-after-orphan'), 'ok\n')
+  })
+  assert.equal(await readFile(join(root, 'recovered-after-orphan'), 'utf8'), 'ok\n')
+  await assert.rejects(() => access(lock), (error) => error.code === 'ENOENT')
+})
+
 test('oversized dead recovery garbage converges through bounded cleanup passes before election', async (t) => {
   const root = await temporaryStateRoot(t)
   const lock = join(root, '.lifecycle-lock')

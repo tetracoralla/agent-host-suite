@@ -9,6 +9,7 @@ import { isToolIntegrationSchema, validateToolIntegration } from './tool-integra
 
 export const RELEASE_SCHEMA = 'openadam.agent-host-release.v0.2'
 export const COMPONENT_SCHEMA = 'openadam.agent-host-component.v0.1'
+export const COMPONENT_SCHEMA_V2 = 'openadam.agent-host-component.v0.2'
 export const REQUIRED_RELEASE_COMPONENTS = ['node-runtime', 'direct-execution-runtime', 'math-anchor', 'migratory-time']
 export const OBSERVABILITY_RELEASE_COMPONENTS = ['agent-tool-observer', 'context-surface-analyzer']
 
@@ -92,6 +93,15 @@ export function currentReleasePlatform(platformName = platform(), architecture =
   return value === 'darwin-x64' ? 'darwin-x86_64' : value
 }
 
+export function currentReleasePlatformOrLocal(platformName = platform(), architecture = arch()) {
+  try {
+    return currentReleasePlatform(platformName, architecture)
+  } catch (error) {
+    if (error instanceof AgentHostError && error.code === 'RELEASE_PLATFORM_UNSUPPORTED') return 'local'
+    throw error
+  }
+}
+
 export function defaultReleaseManifestPath() {
   return fileURLToPath(new URL('../catalog/releases/current.json', import.meta.url))
 }
@@ -142,7 +152,7 @@ export function validateReleaseManifest(manifest) {
   if (manifest.schemaVersion !== RELEASE_SCHEMA) fail('RELEASE_SCHEMA_UNSUPPORTED', `Unsupported release schema: ${manifest.schemaVersion ?? 'missing'}`)
   requiredString(manifest.releaseId, 'release id')
   if (!SUITE_VERSION_PATTERN.test(manifest.suiteVersion ?? '')) fail('RELEASE_MANIFEST_INVALID', 'Suite version is invalid')
-  if (!['draft-unbound', 'internal-beta', 'published'].includes(manifest.status)) fail('RELEASE_MANIFEST_INVALID', 'Release status is invalid')
+  if (!['draft-unbound', 'internal-beta', 'published', 'unsigned-preview'].includes(manifest.status)) fail('RELEASE_MANIFEST_INVALID', 'Release status is invalid')
   requiredString(manifest.createdAt, 'release creation time')
   if (Number.isNaN(Date.parse(manifest.createdAt))) fail('RELEASE_MANIFEST_INVALID', 'Release creation time is invalid')
   if (!Array.isArray(manifest.platforms) || manifest.platforms.length === 0 || new Set(manifest.platforms).size !== manifest.platforms.length) fail('RELEASE_MANIFEST_INVALID', 'Release platforms are invalid')
@@ -154,12 +164,13 @@ export function validateReleaseManifest(manifest) {
   for (const component of manifest.components) validateComponent(component, manifest.status)
   const selected = manifest.components.filter((item) => item.platform === currentReleasePlatform())
   const ids = selected.map((item) => item.id).sort()
-  const missing = REQUIRED_RELEASE_COMPONENTS.filter((id) => !ids.includes(id))
+  const required = REQUIRED_RELEASE_COMPONENTS
+  const missing = required.filter((id) => !ids.includes(id))
   const invalid = ids.filter((id) => !/^[a-z][a-z0-9-]*$/u.test(id))
   const observabilityCount = OBSERVABILITY_RELEASE_COMPONENTS.filter((id) => ids.includes(id)).length
   if (new Set(ids).size !== ids.length || missing.length > 0 || invalid.length > 0 || ![0, OBSERVABILITY_RELEASE_COMPONENTS.length].includes(observabilityCount)) {
     fail('RELEASE_COMPONENT_SET_INVALID', 'The release does not contain one complete component set for this platform', {
-      required: REQUIRED_RELEASE_COMPONENTS,
+      required,
       optionalTogether: OBSERVABILITY_RELEASE_COMPONENTS,
       invalid,
       actual: ids,
@@ -205,8 +216,12 @@ function relativePath(value, label) {
 }
 
 export function validateComponentDescriptor(descriptor, releaseComponent) {
-  exactKeys(descriptor, ['schemaVersion', 'id', 'version', 'kind', 'files', 'identityFiles', 'entrypoints', 'integration', 'legal'], 'component descriptor')
-  if (descriptor.schemaVersion !== COMPONENT_SCHEMA) fail('COMPONENT_DESCRIPTOR_INVALID', `Unsupported component descriptor schema: ${descriptor.schemaVersion ?? 'missing'}`)
+  const descriptorKeys = ['schemaVersion', 'id', 'version', 'kind', 'files', 'identityFiles', 'entrypoints', 'integration', 'legal']
+  if (descriptor?.schemaVersion === COMPONENT_SCHEMA_V2) descriptorKeys.push('presentation', 'origin')
+  exactKeys(descriptor, descriptorKeys, 'component descriptor')
+  if (descriptor.schemaVersion !== COMPONENT_SCHEMA && descriptor.schemaVersion !== COMPONENT_SCHEMA_V2) {
+    fail('COMPONENT_DESCRIPTOR_INVALID', `Unsupported component descriptor schema: ${descriptor.schemaVersion ?? 'missing'}`)
+  }
   if (descriptor.id !== releaseComponent.id || descriptor.version !== releaseComponent.version) fail('COMPONENT_DESCRIPTOR_INVALID', 'Component descriptor identity differs from the release manifest')
   if (descriptor.kind !== expectedComponentKind(descriptor.id)) fail('COMPONENT_DESCRIPTOR_INVALID', `Unexpected component kind for ${descriptor.id}`)
   if (!Array.isArray(descriptor.files) || descriptor.files.length === 0) fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} has no files`)
@@ -231,6 +246,23 @@ export function validateComponentDescriptor(descriptor, releaseComponent) {
   }
   if (descriptor.kind === 'developer-kit' || isDeveloperKitIntegrationSchema(descriptor.integration?.schemaVersion)) {
     validateDeveloperKitIntegration(descriptor.integration, paths)
+  }
+  if (descriptor.presentation !== undefined) {
+    exactKeys(descriptor.presentation, ['displayName', 'summary', 'author', 'homepage', 'license', 'logo'], `${descriptor.id} presentation`)
+    requiredString(descriptor.presentation.displayName, `${descriptor.id} presentation display name`)
+    requiredString(descriptor.presentation.summary, `${descriptor.id} presentation summary`)
+    if (descriptor.presentation.logo !== undefined) {
+      exactKeys(descriptor.presentation.logo, ['path', 'sha256', 'bytes', 'mediaType'], `${descriptor.id} logo`)
+      const logoPath = relativePath(descriptor.presentation.logo.path, `${descriptor.id} logo path`)
+      if (!paths.has(logoPath)) fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} logo is not in its file inventory`)
+      if (!/^sha256:[0-9a-f]{64}$/u.test(descriptor.presentation.logo.sha256 ?? '')) fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} logo digest is invalid`)
+    }
+  }
+  if (descriptor.origin !== undefined) {
+    exactKeys(descriptor.origin, ['kind', 'repository', 'tag', 'releaseUrl', 'assetUrl', 'assetName', 'assetSha256', 'assetBytes'], `${descriptor.id} origin`)
+    if (!['github-release', 'catalog', 'local-import'].includes(descriptor.origin.kind)) {
+      fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} origin kind is unsupported`)
+    }
   }
   return descriptor
 }

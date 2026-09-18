@@ -183,6 +183,29 @@ do {
         ) == ["math-anchor", "text-integrity"],
         "an admitted private Agent tool must remain visible without a Manager code change"
     )
+    let updatesPayload = Data(#"""
+    {
+      "schemaVersion": "openadam.agent-host-updates.v0.1",
+      "status": "ok",
+      "channel": "stable",
+      "items": [{
+        "kind": "tool",
+        "id": "glyphmark",
+        "displayName": "Glyphmark",
+        "installedVersion": "1.0.0",
+        "availableVersion": "1.1.0",
+        "availability": "update-available",
+        "logo": { "mediaType": "image/svg+xml", "bytes": 12 }
+      }]
+    }
+    """#.utf8)
+    let updates = try JSONDecoder().decode(UpdatesReport.self, from: updatesPayload)
+    expect(updates.items?.first?.availability == "update-available", "update reports must keep item availability")
+    expect(updates.items?.first?.logo?.mediaType == "image/svg+xml", "update reports must keep logo metadata")
+    let summaryWithLogo = ComponentSummary(version: "1.0.0", displayName: "Glyphmark", logo: ToolLogo(path: "logo.svg", absolutePath: "/tmp/logo.svg", mediaType: "image/svg+xml", sha256: nil, bytes: 12, dataUrl: nil, source: nil))
+    expect(summaryWithLogo.logo?.absolutePath == "/tmp/logo.svg", "installed logos must expose a verified filesystem path")
+    expect(summaryWithLogo.logo?.path == "logo.svg", "component summaries must carry logo metadata")
+    expect(ManagerSection.primaryCases.contains(.updates), "Manager sidebar must include Updates")
     expect(
         ManagerToolPolicy.orderedToolIDs(
             ["text-integrity", "math-anchor"],
@@ -418,8 +441,8 @@ do {
     expect(repairPlan.changed.isEmpty && repairPlan.componentChanges.isEmpty, "repair preview must not propose tool version changes")
     expect(repairPlan.repairs.monitoring && repairPlan.repairs.hosts == ["codex"], "repair preview must name connection and monitoring recovery")
     expect(
-        ManagerSection.primaryCases.map(\.rawValue) == ["overview", "tools", "agentApps", "activity"],
-        "primary Manager destinations follow Overview → Tools → Agents → History"
+        ManagerSection.primaryCases.map(\.rawValue) == ["overview", "tools", "updates", "agentApps", "activity"],
+        "primary Manager destinations follow Overview → Tools → Updates → Agents → History"
     )
 
     let usagePayload = Data(#"""

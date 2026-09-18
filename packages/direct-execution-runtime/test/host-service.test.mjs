@@ -13,6 +13,10 @@ import { DirectExecutionRuntime } from '../src/runtime.mjs'
 import { assertSchema, createValidator, loadBundledSchema } from '../src/schema.mjs'
 import { fakeCall, fakeConfig, fakeMcpConfig, workOrder } from './helpers.mjs'
 
+// Same Windows allowance as fakeConfig.defaultTimeoutMs: cold executable copy and Job
+// guardian can exceed the library's 10s default during persistent provider preparation.
+const persistentPreparationTimeoutMs = process.platform === 'win32' ? 30_000 : 10_000
+
 async function withService(task, config = fakeConfig(), serviceOptions = {}) {
   const directory = await mkdtemp(resolve(tmpdir(), 'direct-host-service-'))
   const runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(config))
@@ -98,7 +102,7 @@ test('an explicitly prepared service finishes persistent provider startup before
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
-    mode: 'persistent-providers', totalTimeoutMs: 10000, providerIds: ['test.fake-capability'],
+    mode: 'persistent-providers', totalTimeoutMs: persistentPreparationTimeoutMs, providerIds: ['test.fake-capability'],
   }
   await withService(async ({ runtime, socketPath, ready }) => {
     assert.equal(ready.providerPreparation.status, 'completed')
@@ -124,7 +128,7 @@ test('concurrent start callers share one startup and receive readiness only afte
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
-    mode: 'persistent-providers', totalTimeoutMs: 10000, providerIds: ['test.fake-capability'],
+    mode: 'persistent-providers', totalTimeoutMs: persistentPreparationTimeoutMs, providerIds: ['test.fake-capability'],
   }
   const runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(config))
   const originalPreparation = runtime.preparePersistentProviders.bind(runtime)
@@ -160,7 +164,7 @@ test('close is single-flight with startup and leaves no falsely ready Socket or 
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
-    mode: 'persistent-providers', totalTimeoutMs: 10000, providerIds: ['test.fake-capability'],
+    mode: 'persistent-providers', totalTimeoutMs: persistentPreparationTimeoutMs, providerIds: ['test.fake-capability'],
   }
   const runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(config))
   const originalPreparation = runtime.preparePersistentProviders.bind(runtime)
@@ -212,7 +216,7 @@ test('a failed startup is terminal, leaves no residue, and a fresh service can r
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
-    mode: 'persistent-providers', totalTimeoutMs: 10000, providerIds: ['test.fake-capability'],
+    mode: 'persistent-providers', totalTimeoutMs: persistentPreparationTimeoutMs, providerIds: ['test.fake-capability'],
   }
   const runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(config))
   const originalPreparation = runtime.preparePersistentProviders.bind(runtime)
@@ -274,7 +278,7 @@ test('a pre-warmed runtime produces a valid warm readiness observation', async (
   const config = fakeConfig()
   config.schemaVersion = 'openadam.direct-provider-config.v0.3'
   config.servicePreparation = {
-    mode: 'persistent-providers', totalTimeoutMs: 10000, providerIds: ['test.fake-capability'],
+    mode: 'persistent-providers', totalTimeoutMs: persistentPreparationTimeoutMs, providerIds: ['test.fake-capability'],
   }
   const runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(config))
   const service = new DirectHostService(runtime, { socketPath })

@@ -7,6 +7,27 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const TRANSIENT_TEMP_RM_CODES = new Set(["EBUSY", "EPERM", "EACCES", "ENOTEMPTY"]);
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function rmTempTreeSync(target) {
+  const maxAttempts = process.platform === "win32" ? 10 : 1;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      if (attempt + 1 >= maxAttempts || !TRANSIENT_TEMP_RM_CODES.has(error?.code)) throw error;
+      sleepSync(50 * (attempt + 1));
+    }
+  }
+}
+
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tool-observer-smoke-"));
 const codexRoot = path.join(temporary, "codex");
 const claudeRoot = path.join(temporary, "claude");
@@ -85,5 +106,5 @@ try {
   assert.equal(status.providers.length, 3);
   process.stdout.write("smoke: ok\n");
 } finally {
-  fs.rmSync(temporary, { recursive: true, force: true });
+  rmTempTreeSync(temporary);
 }

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openadam:capability:time-zone.convert:input:v0.2",
+  "title": "Canonical global time-zone conversion input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["localDateTime", "sourceTimeZone", "targetTimeZones"],
+  "properties": {
+    "localDateTime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$",
+      "description": "An ISO 8601 local wall-clock date and minute without an offset."
+    },
+    "sourceTimeZone": {
+      "$ref": "#/$defs/timeZone"
+    },
+    "targetTimeZones": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/timeZone"
+      },
+      "description": "Canonical target zones in the required result order."
+    },
+    "disambiguation": {
+      "type": "string",
+      "enum": ["reject", "earlier", "later"],
+      "default": "reject",
+      "description": "How to resolve a repeated local time. Reject returns both candidates."
+    }
+  },
+  "$defs": {
+    "timeZone": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^(?:UTC|[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)+)$",
+      "description": "A canonical named IANA time-zone identifier."
+    }
+  }
+}

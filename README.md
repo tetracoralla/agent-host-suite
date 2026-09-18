@@ -17,8 +17,12 @@ HTTPS URL (macOS DMG / Windows ZIP) once an owner publishes those assets;
 until then Host says public download is not configured. macOS Gatekeeper
 requires Control-click → Open. Host can fetch a bound catalog and install
 tools when `AGENT_HOST_FEATURED_CATALOG_URL` is set. See
-[Unsigned preview download](docs/UNSIGNED_PREVIEW.md). A Host working-set
-selection is not proof that an open Agent session loaded those tools.
+[Unsigned preview download](docs/UNSIGNED_PREVIEW.md). After Host is
+installed, browse recommended tools or add a GitHub project/Release without
+changing Host source; see [GitHub updates](docs/UPDATES.md).
+`profiles fetch --carrier` downloads an installer and does not replace the
+running application. A Host working-set selection is not proof that an open
+Agent session loaded those tools.
 
 ## Scope
 

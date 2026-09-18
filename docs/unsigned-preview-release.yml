@@ -1,10 +1,18 @@
-# Draft workflow. A contributing bot may lack the GitHub `workflow` scope, so
-# this copy lives under docs/. Enable it with GitHub Desktop:
-# copy to .github/workflows/unsigned-preview-release.yml and commit from an
-# account that can write workflows.
-#
-# This is an unsigned preview. It must not request Apple Developer ID or
-# notary secrets. Gatekeeper (Control-click → Open) remains required.
+# Required unsigned preview pipeline draft (docs/). Copy to
+# .github/workflows/unsigned-preview-release.yml only with GitHub workflow scope;
+# that path is not enabled until the file exists under .github/workflows/.
+# Token for this checkout lacks the `workflow` scope, so this file stays a docs
+# draft and must not be described as a live Actions workflow.
+# The notarized .github/workflows/release.yml remains a separate signed path
+# and requires Apple secrets. This unsigned preview must not request them.
+# Each platform job admits GitHub tools for that runner and obtains version-
+# pinned Math Anchor / Migratory Time / capability-contracts inputs. Math Anchor needs the PyInstaller
+# runtime from script/package_runtime.sh (macOS) or a verified platform ARTIFACT
+# (Windows). `swift build` does not produce the Host entrypoint. ARTIFACT wins
+# over SOURCE_ROOT when both are set. Catalog builder comment: ARTIFACT wins over SOURCE_ROOT.
+# Do not reuse another OS archive and relabel it. This file remains a docs draft —
+# not a live .github/workflows job until copied with workflow scope. Gatekeeper
+# (Control-click → Open) remains required.
 
 name: Unsigned preview release
 
@@ -21,20 +29,68 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
+      - name: Check out pinned Math Anchor source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/math-anchor
+          ref: 62562762ba60093a804a72ad917a5a3753c840c3
+          path: .build/profile-sources/math-anchor
+      - name: Check out pinned Migratory Time source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/migratory-time
+          ref: 0355fd34c99cd9c51a0eeecf20f20ef6369cdd54
+          path: .build/profile-sources/migratory-time
+      - name: Check out pinned capability-contracts source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/capability-contracts
+          ref: ef51ab875c7c6f99f6777bc066fe1929d5b136d0
+          path: .build/profile-sources/capability-contracts
+      - name: Build Math Anchor PyInstaller runtime for this macOS runner
+        working-directory: .build/profile-sources/math-anchor
+        run: |
+          # Host requires plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime.
+          # That path is produced by script/package_runtime.sh (Python/PyInstaller), not by
+          # `swift build` (MathAnchor GUI/Core) and not by a missing scripts/build_plugin.sh.
+          if [ -n "${AGENT_HOST_MATH_ANCHOR_ARTIFACT:-}" ]; then
+            echo "Using pre-supplied Math Anchor ARTIFACT; skipping source runtime package."
+          elif [ -x script/package_runtime.sh ]; then
+            ./script/package_runtime.sh
+          elif [ -x scripts/build_plugin.sh ]; then
+            ./scripts/build_plugin.sh
+          else
+            echo "Pinned Math Anchor has no script/package_runtime.sh; set AGENT_HOST_MATH_ANCHOR_ARTIFACT to a verified platform archive." >&2
+            exit 1
+          fi
+          entry="plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime"
+          if [ -z "${AGENT_HOST_MATH_ANCHOR_ARTIFACT:-}" ] && [ ! -x "$entry" ]; then
+            echo "Math Anchor runtime entrypoint missing after package_runtime: $entry" >&2
+            exit 1
+          fi
       - uses: actions/setup-node@v7
         with:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
-      - run: npm run check
-      - name: Require a bound catalog
+      - name: Admit GitHub tools for this macOS runner
+        run: node scripts/admit-github-plugin.mjs --registry --catalog catalog/github-releases/current.json --output .build/github-tools
+      - name: Package unsigned macOS app from verified Host internals and admitted GitHub tools
+        env:
+          AGENT_HOST_PROFILE_SOURCES_ROOT: ${{ github.workspace }}/.build/profile-sources
+          AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/math-anchor
+          AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/migratory-time
+          AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/capability-contracts
+          # Optional: set repository variable AGENT_HOST_MATH_ANCHOR_ARTIFACT to a
+          # runner-local path, or export it in an earlier step. When set, catalog
+          # build prefers ARTIFACT over the pinned SOURCE_ROOT checkout.
+          AGENT_HOST_MATH_ANCHOR_ARTIFACT: ${{ vars.AGENT_HOST_MATH_ANCHOR_ARTIFACT }}
+          AGENT_HOST_MATH_ANCHOR_VERSION: "0.7.1"
         run: |
-          if [[ ! -f .build/internal-beta/release-catalog/current.json ]]; then
-            echo "::error::Bound catalog missing. Follow docs/UNSIGNED_PREVIEW.md (build the catalog, package, attach assets). This workflow does not invent GitHub Release bytes."
-            exit 1
-          fi
-      - run: ./scripts/package-macos-app.sh release
-      - name: Record runner architecture and wrap an unsigned DMG
+          node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
+          ids="$(node -e 'const m=require("./.build/unsigned-catalog/current.json"); process.stdout.write(m.components.map(c=>c.id).join(","))')"
+          AGENT_HOST_BUNDLED_COMPONENTS="$ids" AGENT_HOST_RELEASE_CATALOG="$PWD/.build/unsigned-catalog" ./scripts/package-macos-app.sh release
+      - name: Wrap an unsigned DMG
         run: |
           echo "APP_ARCH=$(uname -m)" >> "$GITHUB_ENV"
           version="$(node -e 'const pkg=require("./package.json"); process.stdout.write(pkg.version)')"
@@ -49,55 +105,130 @@ jobs:
           rm -rf "$staging"
           echo "DMG_PATH=$dmg" >> "$GITHUB_ENV"
           echo "SUITE_VERSION=$version" >> "$GITHUB_ENV"
-      - name: Write preview index and SHA256SUMS
+          (cd .build && shasum -a 256 "$(basename "$dmg")" > SHA256SUMS)
+      - name: Name unsigned catalog for unique Release assets
         run: |
-          node scripts/write-preview-distribution.mjs \
-            --output .build/preview-distribution.json \
-            --catalog "$PWD/.build/internal-beta/release-catalog/current.json" \
-            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
-            --dmg "$DMG_PATH"
-          (cd .build && shasum -a 256 "$(basename "$DMG_PATH")" preview-distribution.json > SHA256SUMS)
-      - name: Create unsigned GitHub prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows assets are attached when the Windows job succeeds.\nSee docs/UNSIGNED_PREVIEW.md.'
-          gh release create "$GITHUB_REF_NAME" \
-            "$DMG_PATH" \
-            .build/preview-distribution.json \
-            .build/SHA256SUMS \
-            .build/internal-beta/release-catalog/current.json \
-            .build/internal-beta/release-catalog/build-provenance.json \
-            --prerelease --verify-tag --title "Agent Host ${SUITE_VERSION} unsigned preview" --notes "$notes"
+          cp .build/unsigned-catalog/current.json .build/unsigned-catalog-darwin-arm64.json
+          # Keep a platform-qualified copy beside the carrier so publish never sees two basename current.json files.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-unsigned
+          path: |
+            .build/Agent-Host-*.dmg
+            .build/SHA256SUMS
+            .build/unsigned-catalog-darwin-arm64.json
 
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Check out pinned Math Anchor source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/math-anchor
+          ref: 62562762ba60093a804a72ad917a5a3753c840c3
+          path: .build/profile-sources/math-anchor
+      - name: Check out pinned Migratory Time source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/migratory-time
+          ref: 0355fd34c99cd9c51a0eeecf20f20ef6369cdd54
+          path: .build/profile-sources/migratory-time
+      - name: Check out pinned capability-contracts source
+        uses: actions/checkout@v7
+        with:
+          repository: tetracoralla/capability-contracts
+          ref: ef51ab875c7c6f99f6777bc066fe1929d5b136d0
+          path: .build/profile-sources/capability-contracts
+      - name: Obtain Math Anchor Windows platform artifact or fail closed
+        shell: pwsh
+        env:
+          AGENT_HOST_MATH_ANCHOR_ARTIFACT: ${{ vars.AGENT_HOST_MATH_ANCHOR_ARTIFACT }}
+          AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL: ${{ vars.AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL }}
+        run: |
+          # Pinned Math Anchor source does not ship a Windows PyInstaller runtime.
+          # Do not treat the checkout (or a .exe path check alone) as a build step.
+          # Prefer a verified platform ARTIFACT path or download URL; ARTIFACT then
+          # wins over SOURCE_ROOT in build-unsigned-preview-catalog.mjs.
+          $entry = ".build/profile-sources/math-anchor/plugins/math-anchor/runtime/math-anchor-runtime/math-anchor-runtime.exe"
+          if ($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT -and (Test-Path $env:AGENT_HOST_MATH_ANCHOR_ARTIFACT)) {
+            $resolved = (Resolve-Path -LiteralPath $env:AGENT_HOST_MATH_ANCHOR_ARTIFACT).Path
+            Write-Host "Using pre-supplied Math Anchor ARTIFACT at $resolved"
+            # Step env does not cross steps; export absolute path for Package unsigned Windows ZIP.
+            "AGENT_HOST_MATH_ANCHOR_ARTIFACT=$resolved" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } elseif ($env:AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL) {
+            New-Item -ItemType Directory -Force -Path .build/profile-artifacts | Out-Null
+            $dest = (Join-Path $PWD ".build/profile-artifacts/math-anchor-windows.tgz")
+            Write-Host "Downloading Math Anchor Windows ARTIFACT from configured URL"
+            Invoke-WebRequest -Uri $env:AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL -OutFile $dest
+            $resolved = (Resolve-Path -LiteralPath $dest).Path
+            "AGENT_HOST_MATH_ANCHOR_ARTIFACT=$resolved" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } elseif (Test-Path $entry) {
+            Write-Host "Math Anchor Windows runtime already present in the pinned checkout"
+          } else {
+            Write-Error "Windows unsigned preview requires repository variable AGENT_HOST_MATH_ANCHOR_ARTIFACT (path) or AGENT_HOST_MATH_ANCHOR_ARTIFACT_URL (download) pointing at a version-pinned platform archive that contains plugins/math-anchor/runtime/.../math-anchor-runtime.exe. The pinned source checkout alone does not produce that entrypoint on Windows."
+            exit 1
+          }
       - uses: actions/setup-node@v7
         with:
           node-version: 22.16.0
           cache: npm
       - run: npm ci
-      - name: Require a bound catalog
-        shell: bash
-        run: |
-          if [[ ! -f .build/internal-beta/release-catalog/current.json ]]; then
-            echo "::error::Bound catalog missing. Follow docs/UNSIGNED_PREVIEW.md."
-            exit 1
-          fi
+      - name: Admit GitHub tools for this Windows runner
+        run: node scripts/admit-github-plugin.mjs --registry --catalog catalog/github-releases/current.json --output .build/github-tools
       - name: Package unsigned Windows ZIP
         shell: pwsh
         env:
-          AGENT_HOST_RELEASE_CATALOG: ${{ github.workspace }}\.build\internal-beta\release-catalog
           AGENT_HOST_ALLOW_LOCAL_SOURCE_DISTRIBUTION: "1"
-        run: npm run package:windows
-      - name: Attach Windows ZIP to the Release
+          AGENT_HOST_PROFILE_SOURCES_ROOT: ${{ github.workspace }}/.build/profile-sources
+          AGENT_HOST_MATH_ANCHOR_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/math-anchor
+          AGENT_HOST_MIGRATORY_TIME_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/migratory-time
+          AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT: ${{ github.workspace }}/.build/profile-sources/capability-contracts
+          AGENT_HOST_MATH_ANCHOR_ARTIFACT: ${{ env.AGENT_HOST_MATH_ANCHOR_ARTIFACT }}
+          AGENT_HOST_MATH_ANCHOR_VERSION: "0.7.1"
+        run: |
+          # Catalog builder prefers ARTIFACT over SOURCE_ROOT; native win32 binaries get .exe, JS entrypoints do not.
+          node scripts/build-unsigned-preview-catalog.mjs --output .build/unsigned-catalog --github-tools .build/github-tools
+          $ids = (Get-Content -Raw .build/unsigned-catalog/current.json | ConvertFrom-Json).components.id -join ','
+          $env:AGENT_HOST_BUNDLED_COMPONENTS = $ids
+          $env:AGENT_HOST_RELEASE_CATALOG = Join-Path $PWD '.build\unsigned-catalog'
+          npm run package:windows
+      - name: Name unsigned catalog for unique Release assets
+        shell: pwsh
+        run: |
+          Copy-Item .build/unsigned-catalog/current.json .build/unsigned-catalog-win32-x64.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: |
+            .build/windows/distribution/Agent-Host-*.zip
+            .build/unsigned-catalog-win32-x64.json
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: .build/release-assets
+      - name: Create unsigned GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          archive="$(ls .build/windows/distribution/Agent-Host-*.zip | head -n 1)"
-          test -n "$archive"
-          gh release upload "$GITHUB_REF_NAME" "$archive" --clobber
+          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nEach platform job admitted GitHub tools for that runner and obtained version-pinned Math Anchor / Migratory Time inputs from catalog/unsigned-preview-source-pins.json (or AGENT_HOST_*_ARTIFACT). Native archives are not reused across operating systems.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer adapters, and GitHub tools admitted from public Releases for that platform. Incomplete manifests are refused.\n\nprofiles fetch --carrier downloads an installer. agent-host app update on a supported OS mounts or unpacks the carrier, replaces the installed application, and relaunches it after comparing digests.'
+          files=()
+          while IFS= read -r path; do files+=("$path"); done < <(find .build/release-assets -type f)
+          # GitHub Release assets are keyed by basename; refuse duplicate names before upload.
+          basenames=()
+          for path in "${files[@]}"; do basenames+=("$(basename "$path")"); done
+          duplicates=$(printf '%s\n' "${basenames[@]}" | sort | uniq -d)
+          if [[ -n "$duplicates" ]]; then
+            echo "Duplicate release asset basenames would fail GitHub upload:" >&2
+            echo "$duplicates" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+            --prerelease --verify-tag --title "Agent Host unsigned preview" --notes "$notes"
