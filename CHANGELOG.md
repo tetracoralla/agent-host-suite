@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Retry transient Windows ACL verification failures (helper throw or status=error) up to 3 times with short backoff; still fail closed on wrong-owner and permissions-unsafe (Windows CI contention flake).
 - Recognize Host-managed `downloads/tool-updates/**` and `downloads/staged-*` trees in storage safety checks so autodownload no longer breaks status/cleanup/Manager snapshot (review F1).
 - Hold one application-update lifecycle lease across journal/stage/swap/verify/relaunch and refuse concurrent mutations that would overwrite a live recovery journal (review F2).
 - Bind GitHub tool updates to the requested component id and reject identity drift instead of installing a different tool (review F3).
