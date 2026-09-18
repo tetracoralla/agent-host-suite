@@ -5,7 +5,7 @@ import { resolveStateRoot } from './paths.mjs'
 import { prepareStatePaths } from './state.mjs'
 import { readUpdatePreferences } from './update-preferences.mjs'
 import { inspectToolUpdates, updateGitHubTool, downloadGitHubToolUpdate } from './tool-updates.mjs'
-import { checkApplicationUpdate, updateApplication } from './application-update.mjs'
+import { checkApplicationUpdate, packageJsonApplicationVersion, resolveInstalledApplicationVersion, updateApplication } from './application-update.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
 import { statePaths } from './state.mjs'
 
@@ -57,19 +57,33 @@ export async function executeAutoUpdates(stateRoot, options = {}, dependencies =
   if (options.force !== true && options.skipIfNotDue === true && due(journal, now) !== true) {
     return { status: 'skipped', reason: 'recent', preferences, journal }
   }
+  const fetch = options.fetch ?? dependencies.fetch
+  const signal = options.signal ?? dependencies.signal
+  // Resolve the installed payload version once at entry so production maintenance
+  // (which does not pass currentVersion) still drives app check/download/install.
+  const resolved = await resolveInstalledApplicationVersion({
+    stateRoot,
+    currentVersion: options.currentVersion,
+    platform: options.platform,
+    applicationRoots: options.applicationRoots,
+    currentRoot: options.currentRoot,
+  }, dependencies)
+  const currentVersion = options.currentVersion
+    ?? resolved.version
+    ?? await packageJsonApplicationVersion().catch(() => null)
   const paths = statePaths(resolveStateRoot(stateRoot))
   return withLifecycleMutation(paths, 'updates.auto', dependencies, async (locked) => {
     await writeJournal(stateRoot, { phase: 'checking', lastRunAt: new Date(now).toISOString() })
     const tools = await inspectToolUpdates(stateRoot, {
-      fetch: options.fetch,
-      signal: options.signal,
+      fetch,
+      signal,
       persist: true,
     }, locked)
     const application = await checkApplicationUpdate({
-      fetch: options.fetch,
-      signal: options.signal,
+      fetch,
+      signal,
       channel: preferences.channel,
-      currentVersion: options.currentVersion,
+      currentVersion,
       platform: options.platform,
     }).catch((error) => ({
       availability: 'check-failed',
@@ -81,10 +95,10 @@ export async function executeAutoUpdates(stateRoot, options = {}, dependencies =
       if (application.availability === 'update-available') {
         installed.push(await updateApplication({
           stateRoot,
-          fetch: options.fetch,
-          signal: options.signal,
+          fetch,
+          signal,
           channel: preferences.channel,
-          currentVersion: options.currentVersion,
+          currentVersion,
           platform: options.platform,
           dryRun: false,
         }, locked))
@@ -93,8 +107,8 @@ export async function executeAutoUpdates(stateRoot, options = {}, dependencies =
         installed.push(await updateGitHubTool({
           stateRoot,
           target: tool.id,
-          fetch: options.fetch,
-          signal: options.signal,
+          fetch,
+          signal,
           probe: options.probe,
         }, locked))
       }
@@ -102,10 +116,10 @@ export async function executeAutoUpdates(stateRoot, options = {}, dependencies =
       if (application.availability === 'update-available') {
         downloaded.push(await updateApplication({
           stateRoot,
-          fetch: options.fetch,
-          signal: options.signal,
+          fetch,
+          signal,
           channel: preferences.channel,
-          currentVersion: options.currentVersion,
+          currentVersion,
           platform: options.platform,
           downloadOnly: true,
           dryRun: false,
@@ -115,8 +129,8 @@ export async function executeAutoUpdates(stateRoot, options = {}, dependencies =
         downloaded.push(await downloadGitHubToolUpdate({
           stateRoot,
           target: tool.id,
-          fetch: options.fetch,
-          signal: options.signal,
+          fetch,
+          signal,
         }, locked))
       }
     }

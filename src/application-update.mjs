@@ -22,6 +22,9 @@ export const APPLICATION_UPDATE_STATE_SCHEMA = 'openadam.agent-host-application-
 const HOST_REPO = 'tetracoralla/agent-host-suite'
 const TERMINAL_PHASES = new Set(['idle', 'complete', 'recovered'])
 const LIVE_PHASES = new Set(['downloading', 'downloaded', 'staging', 'replacing', 'verifying', 'relaunching'])
+// Pre-swap phases may be abandoned when the lease is released after a failed download.
+// Mid-swap phases with a still-alive owner must remain live so recovery does not rewind them.
+const ABANDONABLE_PHASES = new Set(['downloading', 'downloaded', 'staging'])
 
 function fail(code, message, details) {
   throw new AgentHostError(code, message, details)
@@ -521,10 +524,21 @@ export async function restorePreviousApplication({ currentRoot, previousRoot }) 
   return { currentRoot, previousRoot, restored: true }
 }
 
-async function recoverApplicationUpdateUnlocked(stateRoot) {
+async function recoverApplicationUpdateUnlocked(stateRoot, { allowReclaimAliveOwner = false } = {}) {
   const journal = await readApplicationUpdateJournal(stateRoot)
   if (TERMINAL_PHASES.has(journal.phase)) return { ...journal, recovered: false }
-  if (journalOwnerAlive(journal)) return { ...journal, recovered: false, live: true }
+  // Holding the exclusive lifecycle lock means no concurrent update can still run.
+  // An alive Manager PID with a leftover pre-swap phase (download/stage) is abandoned
+  // work after a failed transaction released the lease — reclaim so the same process
+  // can retry. Mid-swap phases stay live so recovery never rewinds an in-flight replace.
+  // Nested callers that already hold the lease keep the live-owner short-circuit.
+  if (journalOwnerAlive(journal)) {
+    if (allowReclaimAliveOwner === true && ABANDONABLE_PHASES.has(journal.phase)) {
+      // fall through and terminalize the abandoned pre-swap journal
+    } else {
+      return { ...journal, recovered: false, live: true }
+    }
+  }
   if (journal.phase === 'failed' && journal.restored === true) {
     const recovered = await writeJournal(stateRoot, {
       ...journal,
@@ -573,10 +587,14 @@ async function recoverApplicationUpdateUnlocked(stateRoot) {
 
 export async function recoverApplicationUpdate(stateRoot, dependencies = {}) {
   if (stateRoot === undefined) return { ...emptyJournal(), recovered: false }
-  if (dependencies.lifecycleLease !== undefined) return recoverApplicationUpdateUnlocked(stateRoot)
+  if (dependencies.lifecycleLease !== undefined) {
+    return recoverApplicationUpdateUnlocked(stateRoot, { allowReclaimAliveOwner: false })
+  }
   const paths = statePaths(resolveStateRoot(stateRoot))
   try {
-    return await withLifecycleMutation(paths, 'application.recover', dependencies, () => recoverApplicationUpdateUnlocked(stateRoot))
+    return await withLifecycleMutation(paths, 'application.recover', dependencies, () => (
+      recoverApplicationUpdateUnlocked(stateRoot, { allowReclaimAliveOwner: true })
+    ))
   } catch (error) {
     if (error instanceof AgentHostError && error.code === 'LIFECYCLE_BUSY') {
       const journal = await readApplicationUpdateJournal(stateRoot)
@@ -744,7 +762,38 @@ async function runApply(options, check, currentVersion, dependencies) {
   ))
 }
 
+async function markApplicationUpdateFailed(stateRoot, check, currentVersion, error) {
+  if (stateRoot === undefined) return
+  const prior = await readApplicationUpdateJournal(stateRoot).catch(() => emptyJournal())
+  // applyStagedReplacement already writes recovered/failed for swap errors — do not clobber.
+  if (!ABANDONABLE_PHASES.has(prior.phase)) return
+  await writeJournal(stateRoot, {
+    ...prior,
+    phase: 'failed',
+    channel: check?.channel ?? prior.channel ?? 'stable',
+    fromVersion: currentVersion ?? prior.fromVersion ?? null,
+    toVersion: check?.availableVersion ?? prior.toVersion ?? null,
+    restored: false,
+    error: {
+      code: error instanceof AgentHostError ? error.code : 'APPLICATION_UPDATE_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+    },
+  })
+}
+
 async function mutateApplicationUpdate(effective, check, currentVersion, installed, dependencies) {
+  const stateRoot = effective.stateRoot
+  try {
+    return await mutateApplicationUpdateBody(effective, check, currentVersion, installed, dependencies)
+  } catch (error) {
+    // Lease is still held here. Terminalize the journal so a long-lived Manager can retry
+    // after RELEASE_DOWNLOAD_FAILED (and similar) instead of seeing APPLICATION_UPDATE_BUSY.
+    await markApplicationUpdateFailed(stateRoot, check, currentVersion, error).catch(() => {})
+    throw error
+  }
+}
+
+async function mutateApplicationUpdateBody(effective, check, currentVersion, installed, dependencies) {
   const stateRoot = effective.stateRoot
   if ((effective.applyKind === 'directory-swap' || (typeof effective.currentRoot === 'string' && typeof effective.stagedRoot === 'string'))
     && typeof effective.currentRoot === 'string' && typeof effective.stagedRoot === 'string') {

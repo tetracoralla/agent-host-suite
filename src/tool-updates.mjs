@@ -651,6 +651,7 @@ export async function installGitHubTool(options, dependencies = {}) {
       signal: options.signal,
       nodeCommand: state?.components?.['node-runtime']?.command ?? process.execPath,
       probe: options.probe !== false,
+      expectedComponentId: options.expectedComponentId,
     })
     if (options.expectedDigest !== null && options.expectedDigest !== undefined
       && wrapped.wrapped.sha256 !== options.expectedDigest) {
@@ -854,6 +855,7 @@ export async function downloadGitHubToolUpdate(options, dependencies = {}) {
     fetch: options.fetch,
     signal: options.signal,
     probe: false,
+    expectedComponentId: options.target,
   })
   if (wrapped.descriptor?.id !== options.target) {
     fail('GITHUB_TOOL_IDENTITY_DRIFT', `Update target ${options.target} does not match component id ${wrapped.descriptor?.id}`, {

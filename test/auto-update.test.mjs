@@ -79,3 +79,39 @@ test('auto-update stays skipped until autoCheck is enabled', async (t) => {
   assert.equal(result.status, 'skipped')
   assert.equal(result.reason, 'auto-check-disabled')
 })
+
+test('executeAutoUpdates resolves installed application version without options.currentVersion', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-auto-version-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  await prepareStatePaths(stateRoot)
+  await setUpdatePreferences(stateRoot, { autoCheck: true, autoDownload: false, autoInstall: false })
+  const appRoot = join(stateRoot, 'payload-app')
+  const { mkdir, writeFile } = await import('node:fs/promises')
+  await mkdir(join(appRoot, 'Contents', 'Resources', 'agent-host-suite'), { recursive: true })
+  await writeFile(join(appRoot, 'Contents', 'Resources', 'agent-host-suite', 'package.json'), JSON.stringify({ version: '0.2.0' }))
+  const result = await executeAutoUpdates(stateRoot, {
+    force: true,
+    platform: 'darwin-arm64',
+    fetch: async () => jsonResponse({
+      tag_name: 'v0.2.1',
+      html_url: 'https://github.com/review/host/releases/tag/v0.2.1',
+      assets: [{
+        name: 'Agent-Host-0.2.1-darwin-arm64.dmg',
+        browser_download_url: 'https://github.com/review/host/app.dmg',
+        size: 100,
+        digest: 'sha256:' + 'b'.repeat(64),
+      }],
+    }),
+  }, {
+    resolver: async () => ({
+      kind: 'macos-application',
+      root: appRoot,
+      executable: join(appRoot, 'Contents', 'MacOS', 'agent-host'),
+      prefixArguments: [],
+    }),
+  })
+  assert.equal(result.status, 'ok')
+  assert.equal(result.application.availability, 'update-available')
+  assert.equal(result.application.currentVersion, '0.2.0')
+  assert.notEqual(result.application.availability, 'version-unknown')
+})

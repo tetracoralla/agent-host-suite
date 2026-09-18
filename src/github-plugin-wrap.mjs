@@ -167,6 +167,7 @@ export async function wrapGitHubPluginArchive({
   expectedSha256,
   origin,
   expectedTools,
+  expectedComponentId,
   nodeCommand,
   probe = true,
   runner = runFile,
@@ -198,6 +199,16 @@ export async function wrapGitHubPluginArchive({
       targetFilesystem: 'portable-case-sensitive',
     })
     const contract = await inspectGitHubPluginRoot(extracted.extractedRoot)
+    if (typeof expectedComponentId === 'string'
+      && expectedComponentId.length > 0
+      && contract.id !== expectedComponentId) {
+      fail('GITHUB_TOOL_IDENTITY_DRIFT', `Update target ${expectedComponentId} does not match component id ${contract.id}`, {
+        target: expectedComponentId,
+        componentId: contract.id,
+        repository: origin?.repository ?? null,
+        tag: origin?.tag ?? null,
+      })
+    }
     let tools = expectedTools ?? contract.expectedTools
     let health = null
     if (probe === true || tools.length === 0) {

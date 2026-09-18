@@ -183,6 +183,7 @@ export async function admitGitHubRelease({
   platform = supportedReleasePlatform(),
   nodeCommand,
   probe = true,
+  expectedComponentId,
   outputPath,
   workRoot,
 }) {
@@ -262,6 +263,7 @@ export async function admitGitHubRelease({
       archivePath: downloaded.path,
       expectedSha256: downloaded.sha256,
       origin,
+      expectedComponentId,
       nodeCommand,
       probe,
       outputPath,

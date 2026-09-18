@@ -721,7 +721,16 @@ async function run(options, dependencies = {}) {
     throw new AgentHostError('CLI_USAGE', `Unknown observability action: ${options.action}`)
   }
   if (options.command === 'maintenance') {
-    const auto = await executeAutoUpdates(options.stateRoot, { skipIfNotDue: false, force: false }, dependencies).catch((error) => ({
+    const auto = await executeAutoUpdates(options.stateRoot, {
+      skipIfNotDue: false,
+      force: false,
+      fetch: options.fetch ?? dependencies.fetch,
+      signal: options.signal ?? dependencies.signal,
+      platform: options.platform ?? dependencies.platform,
+      currentVersion: options.currentVersion ?? dependencies.currentVersion,
+      applicationRoots: options.applicationRoots ?? dependencies.applicationRoots,
+      currentRoot: options.currentRoot ?? dependencies.currentRoot,
+    }, dependencies).catch((error) => ({
       status: 'auto-update-failed',
       error: { code: error.code, message: error.message },
     }))
