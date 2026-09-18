@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -7,7 +8,9 @@ import { executeAutoUpdates } from '../src/auto-update.mjs'
 import { supportedReleasePlatform } from '../src/github-project.mjs'
 import { setUpdatePreferences } from '../src/update-preferences.mjs'
 import { githubOrigin, writeToolSources } from '../src/tool-sources.mjs'
-import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
+import { prepareStatePaths, saveState, STATE_SCHEMA, statePaths } from '../src/state.mjs'
+import { readApplicationUpdateJournal, updateApplication } from '../src/application-update.mjs'
+import { withLifecycleMutation } from '../src/lifecycle-lock.mjs'
 
 
 function fixtureReleaseAssetToken() {
@@ -114,4 +117,55 @@ test('executeAutoUpdates resolves installed application version without options.
   assert.equal(result.application.availability, 'update-available')
   assert.equal(result.application.currentVersion, '0.2.0')
   assert.notEqual(result.application.availability, 'version-unknown')
+})
+
+test('successful download-only then autoDownload maintenance does not see APPLICATION_UPDATE_BUSY', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-auto-dl-alive-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  await prepareStatePaths(stateRoot)
+  const data = Buffer.from('auto-download-alive-owner')
+  const digest = `sha256:${createHash('sha256').update(data).digest('hex')}`
+  const name = 'Agent-Host-0.2.1-darwin-arm64.dmg'
+  const fetch = async (url) => {
+    const href = String(url)
+    if (href.includes('/releases/latest') || href.includes('/releases/tags/')) {
+      return jsonResponse({
+        tag_name: 'v0.2.1',
+        html_url: 'https://github.com/review/host/releases/tag/v0.2.1',
+        prerelease: false,
+        draft: false,
+        assets: [{
+          name,
+          browser_download_url: `https://github.com/review/fixture/${name}`,
+          size: data.length,
+          digest,
+        }],
+      })
+    }
+    return new Response(data)
+  }
+  const downloaded = await updateApplication({
+    stateRoot,
+    downloadOnly: true,
+    currentVersion: '0.2.0',
+    platform: 'darwin-arm64',
+    fetch,
+  }, { resolver: async () => null })
+  assert.equal(downloaded.downloaded?.sha256, digest)
+  const journal = await readApplicationUpdateJournal(stateRoot)
+  assert.equal(journal.phase, 'complete')
+  assert.equal(journal.pid, process.pid)
+  let leaseFree = false
+  await withLifecycleMutation(statePaths(stateRoot), 'probe', {}, async () => { leaseFree = true })
+  assert.equal(leaseFree, true)
+  await setUpdatePreferences(stateRoot, { autoCheck: true, autoDownload: true, autoInstall: false })
+  const result = await executeAutoUpdates(stateRoot, {
+    force: true,
+    currentVersion: '0.2.0',
+    platform: 'darwin-arm64',
+    fetch,
+  }, { resolver: async () => null })
+  assert.equal(result.status, 'ok', JSON.stringify(result))
+  assert.equal(result.downloaded?.length >= 1, true)
+  assert.equal(result.downloaded[0].downloaded?.sha256, digest)
 })

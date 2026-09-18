@@ -581,6 +581,12 @@ async function recoverApplicationUpdateUnlocked(stateRoot, { allowReclaimAliveOw
     })
     return { ...recovered, recovered: true }
   }
+  // Successful download-only left phase=downloaded with cache facts; finalize to a
+  // terminal phase so later maintenance does not treat it as an in-flight update.
+  if (journal.phase === 'downloaded') {
+    const completed = await writeJournal(stateRoot, { ...journal, phase: 'complete', restored: false })
+    return { ...completed, recovered: false }
+  }
   const failed = await writeJournal(stateRoot, { ...journal, phase: 'failed', restored: false })
   return { ...failed, recovered: false }
 }
@@ -588,7 +594,10 @@ async function recoverApplicationUpdateUnlocked(stateRoot, { allowReclaimAliveOw
 export async function recoverApplicationUpdate(stateRoot, dependencies = {}) {
   if (stateRoot === undefined) return { ...emptyJournal(), recovered: false }
   if (dependencies.lifecycleLease !== undefined) {
-    return recoverApplicationUpdateUnlocked(stateRoot, { allowReclaimAliveOwner: false })
+    // Exclusive inherited lease ⇒ no concurrent updater. Reclaim abandoned pre-swap
+    // journals (download-only leftovers, failed mid-download) even if the prior owner
+    // PID is still the long-lived Manager. Mid-swap phases stay protected.
+    return recoverApplicationUpdateUnlocked(stateRoot, { allowReclaimAliveOwner: true })
   }
   const paths = statePaths(resolveStateRoot(stateRoot))
   try {
@@ -844,6 +853,20 @@ async function mutateApplicationUpdateBody(effective, check, currentVersion, ins
   const downloadedRecord = downloaded === null ? null : { path: downloaded.path, sha256: downloaded.sha256, bytes: downloaded.bytes }
 
   if (effective.downloadOnly === true) {
+    if (downloaded !== null) {
+      // Leave the transaction terminal/idle-compatible: keep carrier refs, clear live ownership semantics.
+      await writeJournal(stateRoot, {
+        phase: 'complete',
+        channel: check.channel,
+        fromVersion: currentVersion,
+        toVersion: check.availableVersion,
+        carrierPath: downloaded.path,
+        currentRoot: null,
+        previousRoot: null,
+        stagedRoot: null,
+        restored: false,
+      })
+    }
     return {
       ...check,
       applied: false,
@@ -887,6 +910,17 @@ async function mutateApplicationUpdateBody(effective, check, currentVersion, ins
       }
     } catch (error) {
       if (error instanceof AgentHostError && error.code === 'APPLICATION_UPDATE_STAGE_UNAVAILABLE') {
+        await writeJournal(stateRoot, {
+          phase: 'complete',
+          channel: check.channel,
+          fromVersion: currentVersion,
+          toVersion: check.availableVersion,
+          carrierPath: downloaded.path,
+          currentRoot: null,
+          previousRoot: null,
+          stagedRoot: null,
+          restored: false,
+        })
         return {
           ...check,
           applied: false,
@@ -899,6 +933,19 @@ async function mutateApplicationUpdateBody(effective, check, currentVersion, ins
     }
   }
 
+  if (downloaded !== null) {
+    await writeJournal(stateRoot, {
+      phase: 'complete',
+      channel: check.channel,
+      fromVersion: currentVersion,
+      toVersion: check.availableVersion,
+      carrierPath: downloaded.path,
+      currentRoot: null,
+      previousRoot: null,
+      stagedRoot: null,
+      restored: false,
+    })
+  }
   return {
     ...check,
     applied: false,

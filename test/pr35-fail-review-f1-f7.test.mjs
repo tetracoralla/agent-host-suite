@@ -14,6 +14,7 @@ import {
 } from '../src/tool-updates.mjs'
 import { loadState, prepareStatePaths, saveState, STATE_SCHEMA, statePaths } from '../src/state.mjs'
 import { setUpdatePreferences } from '../src/update-preferences.mjs'
+import { executeAutoUpdates } from '../src/auto-update.mjs'
 import { compatibleApplicationState, healthyCatalogPreflight } from './helpers.mjs'
 import { storageStatus, cleanupStorage } from '../src/storage.mjs'
 import { operationsSnapshot } from '../src/operations-snapshot.mjs'
@@ -531,4 +532,95 @@ test('R3 / F6 maintenance entry resolves installed version and auto-downloads', 
   assert.equal(payload.auto?.application?.availability, 'update-available')
   assert.equal(payload.auto?.application?.currentVersion, '0.2.0')
   assert.equal(payload.auto?.downloaded?.length >= 1, true)
+})
+
+test('P2 successful download-only then nested auto maintenance is not APPLICATION_UPDATE_BUSY', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'pr35-p2-dl-alive-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const stateRoot = join(root, 'state')
+  await prepareStatePaths(stateRoot)
+  const data = Buffer.from('p2-download-then-auto-carrier')
+  const digest = `sha256:${createHash('sha256').update(data).digest('hex')}`
+  const name = 'Agent-Host-0.2.1-darwin-arm64.dmg'
+  const fakeFetch = async (url) => {
+    const href = String(url)
+    if (href.includes('/releases/latest') || href.includes('/releases/tags/')) {
+      return jsonResponse({
+        tag_name: 'v0.2.1',
+        html_url: 'https://github.com/review/host/releases/tag/v0.2.1',
+        prerelease: false,
+        draft: false,
+        assets: [{
+          name,
+          browser_download_url: `https://github.com/review/fixture/${name}`,
+          size: data.length,
+          digest,
+        }],
+      })
+    }
+    return new Response(data)
+  }
+  const first = await updateApplication({
+    stateRoot,
+    downloadOnly: true,
+    currentVersion: '0.2.0',
+    platform: 'darwin-arm64',
+    fetch: fakeFetch,
+  }, { resolver: async () => null })
+  assert.equal(first.downloaded?.sha256, digest)
+  const afterDownload = await readApplicationUpdateJournal(stateRoot)
+  assert.equal(afterDownload.phase, 'complete', JSON.stringify(afterDownload))
+  assert.equal(typeof afterDownload.carrierPath, 'string')
+  assert.equal(afterDownload.pid, process.pid)
+  let leaseFree = false
+  await withLifecycleMutation(statePaths(stateRoot), 'application.update', {}, async () => {
+    leaseFree = true
+  })
+  assert.equal(leaseFree, true)
+
+  // Independent nested maintenance (same alive Manager PID) must not treat the
+  // finalized download-only journal as an in-flight update.
+  await setUpdatePreferences(stateRoot, { autoCheck: true, autoDownload: true, autoInstall: false })
+  const autoDownload = await executeAutoUpdates(stateRoot, {
+    force: true,
+    currentVersion: '0.2.0',
+    platform: 'darwin-arm64',
+    fetch: fakeFetch,
+  }, { resolver: async () => null })
+  assert.equal(autoDownload.status, 'ok', JSON.stringify(autoDownload))
+  assert.equal(autoDownload.downloaded?.length >= 1, true)
+  assert.equal(autoDownload.downloaded[0].downloaded?.sha256, digest)
+
+  // Pre-fix leftover: phase=downloaded with alive owner + free lease, then nested
+  // updateApplication under an inherited exclusive lease (autoInstall path shape).
+  await writeFile(join(stateRoot, 'application-update.json'), JSON.stringify({
+    schemaVersion: 'openadam.agent-host-application-update-state.v0.1',
+    phase: 'downloaded',
+    channel: 'stable',
+    fromVersion: '0.2.0',
+    toVersion: '0.2.1',
+    carrierPath: afterDownload.carrierPath,
+    currentRoot: null,
+    previousRoot: null,
+    stagedRoot: null,
+    restored: false,
+    error: null,
+    pid: process.pid,
+    processStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+    updatedAt: new Date().toISOString(),
+  }))
+  await setUpdatePreferences(stateRoot, { autoCheck: true, autoDownload: true, autoInstall: true })
+  const nested = await withLifecycleMutation(statePaths(stateRoot), 'updates.auto', {}, async (locked) => (
+    updateApplication({
+      stateRoot,
+      downloadOnly: true,
+      currentVersion: '0.2.0',
+      platform: 'darwin-arm64',
+      fetch: fakeFetch,
+    }, { ...locked, resolver: async () => null })
+  ))
+  assert.equal(nested.downloaded?.sha256, digest)
+  assert.notEqual(nested.code, 'APPLICATION_UPDATE_BUSY')
+  const afterNested = await readApplicationUpdateJournal(stateRoot)
+  assert.equal(afterNested.phase, 'complete')
 })
