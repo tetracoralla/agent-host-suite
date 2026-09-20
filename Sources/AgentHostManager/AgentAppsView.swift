@@ -30,11 +30,9 @@ struct AgentAppsView: View {
 
                 NoticeView(
                     title: store.toolSetNeedsFreshTask
-                        ? "Open a new Agent task to start work"
-                        : "Start a fresh task after changes",
-                    message: store.toolSetNeedsFreshTask
-                        ? "Already-open tasks keep the tools they started with. A new task is the path into real work."
-                        : "New tasks pick up tool changes.",
+                        ? "Start a new task in the app"
+                        : "New tasks pick up changes",
+                    message: "",
                     systemImage: "arrow.clockwise.circle",
                     color: .blue
                 )

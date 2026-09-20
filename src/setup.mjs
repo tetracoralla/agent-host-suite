@@ -345,10 +345,35 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     if (profile.requiresConsent) {
       const enabled = await enableObservability({ stateRoot: paths.root }, { ...dependencies, runner })
       warnings.push(...(enabled.warnings ?? []))
-      const installedWithObservability = { status: 'installed', stateRoot: paths.root, profile: enabled.profile, hosts: Object.keys(installedHosts), service: serviceState, observability: enabled.observability, componentWarmup, catalogPreflight, restartRequired: hosts.length > 0, ...(warnings.length === 0 ? {} : { warnings }) }
+      const installedWithObservability = {
+        status: 'installed',
+        stateRoot: paths.root,
+        profile: enabled.profile,
+        hosts: Object.keys(installedHosts),
+        service: serviceState,
+        observability: enabled.observability,
+        componentWarmup,
+        catalogPreflight,
+        restartRequired: hosts.length > 0,
+        availableAgentComponents: state.availableAgentComponents,
+        agentComponents: state.agentComponents,
+        ...(warnings.length === 0 ? {} : { warnings }),
+      }
       return { ...installedWithObservability, guidance: guidanceFromSetupResult(installedWithObservability) }
     }
-    const installed = { status: 'installed', stateRoot: paths.root, profile: state.profile, hosts: Object.keys(installedHosts), service: serviceState, componentWarmup, catalogPreflight, restartRequired: hosts.length > 0, ...(warnings.length === 0 ? {} : { warnings }) }
+    const installed = {
+      status: 'installed',
+      stateRoot: paths.root,
+      profile: state.profile,
+      hosts: Object.keys(installedHosts),
+      service: serviceState,
+      componentWarmup,
+      catalogPreflight,
+      restartRequired: hosts.length > 0,
+      availableAgentComponents: state.availableAgentComponents,
+      agentComponents: state.agentComponents,
+      ...(warnings.length === 0 ? {} : { warnings }),
+    }
     return { ...installed, guidance: guidanceFromSetupResult(installed) }
   } catch (error) {
     const rollback = []

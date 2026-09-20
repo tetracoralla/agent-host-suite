@@ -5,7 +5,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { platform, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { asPublicError, AgentHostError } from './errors.mjs'
-import { addHost, hostStatus, removeHost, rollbackInstallation, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation } from './lifecycle.mjs'
+import { addHost, hostStatus, removeHost, repairInstallation, rollbackInstallation, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation } from './lifecycle.mjs'
+import { doctor as runDoctorChecks } from './doctor.mjs'
+import { resolveExecutable, startDetachedProcess } from './process.mjs'
+import { resolveZcodeExecutable } from './hosts/zcode.mjs'
 import { disableObservability, enableObservability, exportObservabilityTrace, observabilityTraceSources, readCurrentObservability } from './observability.mjs'
 import { operationsSnapshot } from './operations-snapshot.mjs'
 import { resolveStateRoot } from './paths.mjs'
@@ -145,6 +148,7 @@ function buildDashboardGuidance(snapshot, tools, hosts) {
   const activeToolCount = tools?.paused === true
     ? 0
     : (Array.isArray(tools?.activeAgentComponents) ? tools.activeAgentComponents.length : (Array.isArray(env.agentComponents) ? env.agentComponents.length : 0))
+  const primaryHostId = connectedHosts[0] || null
   return buildPostSetupGuidance({
     configured,
     connectedHosts: connectedHosts.map((id) => hostNames[id] || id),
@@ -154,9 +158,39 @@ function buildDashboardGuidance(snapshot, tools, hosts) {
     needsFreshTask: false,
     agentAppsVerified: null,
     justInstalled: false,
-    primaryHostName: connectedHosts[0] ? (hostNames[connectedHosts[0]] || connectedHosts[0]) : null,
+    primaryHostName: primaryHostId ? (hostNames[primaryHostId] || primaryHostId) : null,
+    primaryHostId,
     doctorBlockingErrors: [],
   })
+}
+
+async function openConnectedAgentApp(hostId, stateRoot) {
+  if (!HOSTS.has(hostId)) throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a supported Agent app to open')
+  const paths = await readStatePaths(resolveStateRoot(stateRoot))
+  const state = await loadState(paths)
+  if (state?.hosts?.[hostId] === undefined) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Connect an Agent app before opening it')
+  }
+  const executable = hostId === 'zcode'
+    ? await resolveZcodeExecutable()
+    : await resolveExecutable(hostId)
+  if (executable === null) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'That Agent app is not installed on this machine')
+  }
+  // Honest open: launch the resolved app/CLI. Host cannot create an Agent task.
+  if (platform() === 'darwin' && /\.app$/u.test(executable)) {
+    await startDetachedProcess('/usr/bin/open', ['-a', executable], { confirmMs: 500 })
+  } else {
+    await startDetachedProcess(executable, [], { confirmMs: 500 })
+  }
+  return { status: 'opened', host: hostId, launched: executable }
+}
+
+async function doctorAction(stateRoot) {
+  const paths = await readStatePaths(resolveStateRoot(stateRoot))
+  const state = await loadState(paths)
+  if (state === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
+  return runDoctorChecks(state, { deep: true, inspectAgentApps: true, stateRoot: paths.root })
 }
 
 async function dashboard(stateRoot) {
@@ -281,6 +315,17 @@ async function action(value, stateRoot) {
       includeApp: value.includeApp === true,
       github: value.github,
     })
+  }
+  if (value.action === 'open-app') {
+    const host = typeof value.host === 'string' ? value.host : null
+    if (host === null) throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a supported Agent app to open')
+    return openConnectedAgentApp(host, stateRoot)
+  }
+  if (value.action === 'doctor') {
+    return doctorAction(stateRoot)
+  }
+  if (value.action === 'repair') {
+    return repairInstallation({ stateRoot, dryRun: false })
   }
   throw new AgentHostError('MANAGER_REQUEST_INVALID', `Unsupported Manager action: ${value.action}`)
 }
@@ -431,7 +476,7 @@ function managerDocument() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agent Host</title><style>
-:root{color-scheme:light dark;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f6f8;color:#15171a}*{box-sizing:border-box}body{margin:0}button,select{font:inherit}.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}.side{padding:28px 18px;background:#111318;color:#f7f7f8}.brand{font-size:20px;font-weight:700;margin:0 10px 28px}.nav{display:grid;gap:6px}.nav button,.side-footer button{border:0;background:transparent;color:#aeb4bf;text-align:left;padding:10px 12px;border-radius:9px}.nav button[aria-current=true]{background:#292d35;color:white}.nav button:focus-visible,.side-footer button:focus-visible,button.action:focus-visible,select:focus-visible{outline:3px solid #75a9ff;outline-offset:2px}.side-footer{position:fixed;bottom:16px;margin-left:10px;display:grid;gap:2px}.side-footer button{padding:4px 0;font-size:12px}.version{color:#777f8c;font-size:12px}.main{padding:36px;max-width:1080px;width:100%}h1{font-size:30px;margin:0}h2{font-size:17px;margin:0 0 14px}.sub{color:#69707b;margin:4px 0 26px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}.card{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px #00000008}.metric{font-size:25px;font-weight:700}.muted{color:#747b86}.row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #eceef1}.tool-logo{width:28px;height:28px;border-radius:6px;object-fit:cover;background:#e8eaee}.logo-fallback{width:28px;height:28px;border-radius:6px;background:#d9e5f7;display:inline-block}.row:first-of-type{border-top:0}.row .grow{flex:1}.pill{font-size:12px;padding:3px 8px;border-radius:20px;background:#edf5ee;color:#26733a}.pill.warn{background:#fff2de;color:#995500}button.action{border:1px solid #cfd4da;background:#fff;color:#17191c;padding:8px 12px;border-radius:9px}button.primary{background:#1769e0;border-color:#1769e0;color:#fff}button.danger{color:#b42318}button:disabled{opacity:.5}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions select{min-width:180px;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit}.hidden{display:none!important}.notice{padding:12px 14px;border-radius:10px;background:#fff4df;color:#7a4c00;margin-bottom:16px}.empty{padding:70px 20px;text-align:center;color:#737a84}.check{display:flex;gap:8px;align-items:center}.tool-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 18px}.heat{display:grid;grid-template-columns:repeat(30,minmax(5px,1fr));gap:4px;margin:12px 0 4px}.heat i{display:block;aspect-ratio:1;border-radius:3px;background:#d9e5f7}.heat i.on{background:#1769e0}dialog{width:min(420px,calc(100% - 32px));border:1px solid #d9dde3;border-radius:14px;padding:20px;background:#fff;color:#17191c}dialog::backdrop{background:#11131888}.setting-row{display:grid;gap:7px;margin:20px 0}.setting-row select,.setting-row input,dialog input{width:100%;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit;margin:6px 0}.busy{position:fixed;inset:0;background:#ffffffaa;display:grid;place-items:center;backdrop-filter:blur(2px)}.busy div{background:#111318;color:white;padding:14px 20px;border-radius:12px}@media(max-width:760px){.shell{grid-template-columns:1fr;grid-template-rows:auto 1fr}.side{padding:15px}.brand{margin-bottom:12px}.nav{grid-template-columns:repeat(5,1fr)}.nav button{text-align:center;padding:8px 4px;font-size:12px}.side-footer{position:absolute;right:14px;top:11px;bottom:auto;margin:0}.side-footer button{padding:4px 8px}.version{display:none}.main{padding:22px}.heat{grid-template-columns:repeat(15,minmax(7px,1fr))}}
+:root{color-scheme:light dark;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f6f8;color:#15171a}*{box-sizing:border-box}body{margin:0}button,select{font:inherit}.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}.side{padding:28px 18px;background:#111318;color:#f7f7f8}.brand{font-size:20px;font-weight:700;margin:0 10px 28px}.nav{display:grid;gap:6px}.nav button,.side-footer button{border:0;background:transparent;color:#aeb4bf;text-align:left;padding:10px 12px;border-radius:9px}.nav button[aria-current=true]{background:#292d35;color:white}.nav button:focus-visible,.side-footer button:focus-visible,button.action:focus-visible,select:focus-visible{outline:3px solid #75a9ff;outline-offset:2px}.side-footer{position:fixed;bottom:16px;margin-left:10px;display:grid;gap:2px}.side-footer button{padding:4px 0;font-size:12px}.version{color:#777f8c;font-size:12px}.main{padding:36px;max-width:1080px;width:100%}h1{font-size:30px;margin:0}h2{font-size:17px;margin:0 0 14px}.sub{color:#69707b;margin:4px 0 26px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}.card{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px #00000008}.metric{font-size:25px;font-weight:700}.muted{color:#747b86}.row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #eceef1}.tool-logo{width:28px;height:28px;border-radius:6px;object-fit:cover;background:#e8eaee}.logo-fallback{width:28px;height:28px;border-radius:6px;background:#d9e5f7;display:inline-block}.row:first-of-type{border-top:0}.row .grow{flex:1}.pill{font-size:12px;padding:3px 8px;border-radius:20px;background:#edf5ee;color:#26733a}.pill.warn{background:#fff2de;color:#995500}button.action{border:1px solid #cfd4da;background:#fff;color:#17191c;padding:8px 12px;border-radius:9px}button.primary{background:#1769e0;border-color:#1769e0;color:#fff}button.danger{color:#b42318}button:disabled{opacity:.5}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions select{min-width:180px;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit}.hidden{display:none!important}.notice{padding:12px 14px;border-radius:10px;background:#fff4df;color:#7a4c00;margin-bottom:16px}.empty{padding:70px 20px;text-align:center;color:#737a84}.check{display:flex;gap:8px;align-items:center}.tool-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 18px}.heat{display:grid;grid-template-columns:repeat(30,minmax(5px,1fr));gap:4px;margin:12px 0 4px}.heat i{display:block;aspect-ratio:1;border-radius:3px;background:#d9e5f7}.heat i.on{background:#1769e0}dialog{width:min(420px,calc(100% - 32px));border:1px solid #d9dde3;border-radius:14px;padding:20px;background:#fff;color:#17191c}dialog::backdrop{background:#11131888}.setting-row{display:grid;gap:7px;margin:20px 0}.setting-row select,.setting-row input,dialog input{width:100%;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit;margin:6px 0}.busy{position:fixed;inset:0;background:#ffffffaa;display:grid;place-items:center;backdrop-filter:blur(2px)}.busy div{background:#111318;color:white;padding:14px 20px;border-radius:12px}.start-work{padding:20px 18px}.start-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.start-status{font-size:22px;font-weight:700}.start-status[data-tone=ready]{color:#1769e0}.start-status[data-tone=paused]{color:#995500}.start-status[data-tone=fault]{color:#b42318}.start-status[data-tone=action]{color:#15171a}.start-hint{margin:8px 0 0}.start-work details,.main>details{margin-top:12px}.start-work summary,.main>details>summary{cursor:pointer;color:#747b86;font-size:13px}.start-details{margin-top:8px;display:grid;gap:4px}@media(max-width:760px){.shell{grid-template-columns:1fr;grid-template-rows:auto 1fr}.side{padding:15px}.brand{margin-bottom:12px}.nav{grid-template-columns:repeat(5,1fr)}.nav button{text-align:center;padding:8px 4px;font-size:12px}.side-footer{position:absolute;right:14px;top:11px;bottom:auto;margin:0}.side-footer button{padding:4px 8px}.version{display:none}.main{padding:22px}.heat{grid-template-columns:repeat(15,minmax(7px,1fr))}}
 @media(prefers-color-scheme:dark){:root{background:#0d0f12;color:#f1f2f4}.side{background:#08090b}.card,dialog{background:#17191e;border-color:#2b2f36;color:#f1f2f4}.row{border-color:#2b2f36}button.action,.setting-row select{background:#202329;border-color:#3a3f48;color:#f1f2f4}.muted,.sub{color:#9da4af}.busy{background:#0d0f12aa}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand">Agent Host</div><nav class="nav" id="nav"><button data-page="environment" aria-current="true"></button><button data-page="tools"></button><button data-page="updates"></button><button data-page="activity"></button><button data-page="usage"></button></nav><div class="side-footer"><button id="refreshButton"></button><button id="settingsButton"></button><div class="version" id="version"></div></div></aside><main class="main"><div id="error" class="notice hidden" role="alert"></div><section id="environment"></section><section id="tools" class="hidden"></section><section id="updates" class="hidden"></section><section id="usage" class="hidden"></section><section id="activity" class="hidden"></section></main></div><dialog id="settingsDialog"><h2 id="settingsTitle"></h2><label class="setting-row"><span id="languageLabel"></span><select id="languageSelect"></select></label><div id="versionPlanes"></div><div id="sourceSettings"></div><div class="actions"><button class="action primary" id="settingsDone"></button></div></dialog><div id="busy" class="busy hidden" role="status" aria-live="polite"><div id="busyText"></div></div>
 <script>
@@ -465,7 +510,7 @@ const zh={
   'Overview':'总览','Environment':'环境','Tools':'工具','Updates':'更新','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…','Browse recommended tools':'浏览推荐工具','Add GitHub project':'添加 GitHub 项目','GitHub repository or Release URL':'GitHub 仓库或 Release 地址','Preview GitHub project':'预览 GitHub 项目','Add from GitHub':'从 GitHub 添加','Previewing GitHub project…':'正在预览 GitHub 项目…','Adding GitHub tool…':'正在添加 GitHub 工具…','Check for updates':'检查更新','Checking updates…':'正在检查更新…','This platform':'当前平台','No asset for this platform':'当前平台无安装包','profiles fetch --carrier downloads an installer. It does not replace Agent Host.':'profiles fetch --carrier 只下载安装包，不会替换或重启 Agent Host。',
   'Versions':'版本','Application':'应用','Environment release':'环境兼容版本','Catalog source':'目录来源','Catalog assets are unpublished.':'目录资产尚未发布。','Not Apple-notarized. Not a store.':'未经 Apple 公证，也不是应用商店。','Check source':'检查来源','Checking source…':'正在检查来源…','Use local catalog':'使用本地目录','Set HTTPS catalog':'设置 HTTPS 目录','Clear source':'清除来源','Last check':'最近检查','Retry':'重试','HTTPS catalog URL':'HTTPS 目录 URL','Local catalog path':'本地目录路径','not installed':'未安装','source-checkout':'源码 checkout','The Manager application and the installed Agent environment can share this product name with different payloads. Application build, environment release, and tool versions are separate.':'管理器应用与已安装的 Agent 环境可以同名但载荷不同。应用 build、环境兼容版本和工具版本是分开的。','Install update':'安装更新','Install all updates':'安装全部更新','update available':'可更新','Check for updates to load current and available versions.':'请检查更新以查看当前版本和可用版本。','compatible after Host update':'需先更新 Host','official upgrade':'官方升级','installed, version unread':'已安装，未能读取版本','check failed':'检查失败',
 
-  'Agent environment':'Agent 环境','Installed locally on this PC':'已安装在这台电脑上','Set up a compatible local tool environment':'设置兼容的本地工具环境','Set up tools':'设置工具','Standard tools':'标准工具','Featured tools':'精选工具','Developer Kit':'开发者 Kit','Standard + monitoring':'标准工具 + 监控','Set up':'设置','Setting up tools…':'正在设置工具…','Check again':'重新检测','Connect later':'稍后连接','Detected on this PC':'已在这台电脑上检测到','Math Anchor':'Math Anchor','Migratory Time':'Migratory Time','Armorial':'Armorial','Exact and scientific calculation':'精确与科学计算','Reliable worldwide time conversion':'可靠的全球时区转换','Choose project-aware icons without redrawing them':'按项目选用图标，无需重绘','Skill-only kit; this profile adds no Agent MCP tools':'仅 Skill；此配置不添加 Agent MCP 工具','Choose a tool set, then install.':'先选择工具集并安装 Agent Host；受支持的 Agent 应用可以现在连接，也可以稍后连接。','':'精选配置会从已绑定的兼容版本安装目录库存（含 Armorial）。这不是应用市场。','':'此源码 checkout 没有公开 GitHub Release。除非安装包已带绑定目录，否则设置需要一份绑定目录。','Install now; connect later.':'安装时可以不连接 Agent 应用。若未检测到受支持应用，可先安装 Agent Host，稍后再从“Agent 应用”连接。','Install complete — start work':'安装完成 — 可以开始工作','Ready to start work':'可以开始工作','Ready — start work in a new Agent task':'已就绪 — 请在新的 Agent 任务中开始工作','Install finished — connect an Agent to start work':'安装已完成 — 请连接 Agent 以开始工作','Open a new Agent task to start work':'打开新的 Agent 任务以开始工作','Connect an Agent app':'连接 Agent 应用','Review Repair':'查看修复','What Host confirmed':'Host 已确认的内容','Still open':'仍需注意','Next step':'下一步','Recovery path':'继续路径','Problem class':'问题类别','not-connected':'未连接','stale-session':'旧会话','permission':'权限','tool-fault':'工具故障','unverified':'尚未核验','Health details':'健康详情','Start work':'开始工作','Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.':'Host 已确认它能观察到的本地环境。下一步是打开新的 Agent 任务开始真实工作，而不是停留在状态清单。','Host cannot confirm that an already-open Agent task has loaded these tools.':'Host 无法确认已经打开的 Agent 任务已载入这些工具。','Tools are on this machine, but no Agent app is connected yet.':'工具已在本机，但尚未连接 Agent 应用。','Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.':'打开「Agent 应用」→ 连接受支持的应用 → 在该应用中启动新任务。旧任务不会自动获得这些工具。','Public download is not configured.':'尚未配置公开下载。此 checkout 没有发布 GitHub Release 资产。所有者发布 Release 或 HTTPS 清单后，将 AGENT_HOST_FEATURED_CATALOG_URL 设为该 preview-distribution.json（或绑定的 current.json）。这不是应用商店。','Featured catalog download':'精选目录下载','Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview.':'未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请按住 Control 点击 Agent Host.app（或 DMG 中的应用），选择“打开”，再确认 Gatekeeper 提示。该提示是此预览的预期步骤。','Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.':'未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。',
+  'Agent environment':'Agent 环境','Installed locally on this PC':'已安装在这台电脑上','Set up a compatible local tool environment':'设置兼容的本地工具环境','Set up tools':'设置工具','Standard tools':'标准工具','Featured tools':'精选工具','Developer Kit':'开发者 Kit','Standard + monitoring':'标准工具 + 监控','Set up':'设置','Setting up tools…':'正在设置工具…','Check again':'重新检测','Connect later':'稍后连接','Detected on this PC':'已在这台电脑上检测到','Math Anchor':'Math Anchor','Migratory Time':'Migratory Time','Armorial':'Armorial','Exact and scientific calculation':'精确与科学计算','Reliable worldwide time conversion':'可靠的全球时区转换','Choose project-aware icons without redrawing them':'按项目选用图标，无需重绘','Skill-only kit; this profile adds no Agent MCP tools':'仅 Skill；此配置不添加 Agent MCP 工具','Choose a tool set, then install.':'先选择工具集并安装 Agent Host；受支持的 Agent 应用可以现在连接，也可以稍后连接。','':'精选配置会从已绑定的兼容版本安装目录库存（含 Armorial）。这不是应用市场。','':'此源码 checkout 没有公开 GitHub Release。除非安装包已带绑定目录，否则设置需要一份绑定目录。','Install now; connect later.':'安装时可以不连接 Agent 应用。若未检测到受支持应用，可先安装 Agent Host，稍后再从“Agent 应用”连接。','Install complete — start work':'安装完成 — 可以开始工作','Ready to start work':'可以开始工作','Ready — start work in a new Agent task':'已就绪 — 请在新的 Agent 任务中开始工作','Install finished — connect an Agent to start work':'安装已完成 — 请连接 Agent 以开始工作','Open a new Agent task to start work':'打开新的 Agent 任务以开始工作','Connect an Agent app':'连接 Agent 应用','Review Repair':'查看修复','What Host confirmed':'Host 已确认的内容','Still open':'仍需注意','Next step':'下一步','Recovery path':'继续路径','Problem class':'问题类别','not-connected':'未连接','stale-session':'旧会话','permission':'权限','tool-fault':'工具故障','tools-paused':'工具已暂停','unverified':'尚未核验','Health details':'健康详情','Start work':'开始工作','Details':'详情','Ready':'就绪','Connect Agent to use':'连接 Agent 后即可使用','Tools paused':'工具已暂停','No tools selected':'尚未选择工具','Needs repair':'需要修复','Needs check':'需要检查','Permission blocked':'权限受阻','Bindings need repair':'绑定需要修复','Connect':'连接','Resume':'恢复','Repair':'修复','Check':'检查','Fix access':'修复访问','Open Agent':'打开 Agent','Open Codex':'打开 Codex','Open ZCode':'打开 ZCode','Open Claude Code':'打开 Claude Code','Start a new task in the app':'在应用中开始新任务','Opening…':'正在打开…','Repairing…':'正在修复…','Checking…':'正在检查…','Set up':'设置','Set up tools':'设置工具','Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.':'Host 已确认它能观察到的本地环境。下一步是打开新的 Agent 任务开始真实工作，而不是停留在状态清单。','Host cannot confirm that an already-open Agent task has loaded these tools.':'Host 无法确认已经打开的 Agent 任务已载入这些工具。','Tools are on this machine, but no Agent app is connected yet.':'工具已在本机，但尚未连接 Agent 应用。','Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.':'打开「Agent 应用」→ 连接受支持的应用 → 在该应用中启动新任务。旧任务不会自动获得这些工具。','Public download is not configured.':'尚未配置公开下载。此 checkout 没有发布 GitHub Release 资产。所有者发布 Release 或 HTTPS 清单后，将 AGENT_HOST_FEATURED_CATALOG_URL 设为该 preview-distribution.json（或绑定的 current.json）。这不是应用商店。','Featured catalog download':'精选目录下载','Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview.':'未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请按住 Control 点击 Agent Host.app（或 DMG 中的应用），选择“打开”，再确认 Gatekeeper 提示。该提示是此预览的预期步骤。','Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.':'未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。',
   'Installed components':'已安装组件','Connected Agent apps':'已连接的 Agent 应用','Allocated bytes':'占用空间（字节）','Local monitoring':'本地监控','On':'已开启','Off':'已关闭','Agent apps':'Agent 应用','Not installed':'未安装','Connected':'已连接','Available':'可连接','Disconnect':'断开连接','Connect':'连接','Disconnecting…':'正在断开连接…','Connecting…':'正在连接…',
   'Tool environment actions':'工具环境操作','Update tools':'更新工具','Restore previous tools':'恢复上一版工具','Clean old packages':'清理旧软件包','Disconnect, keep data':'断开并保留数据','Disconnect, remove Host data':'断开并移除 Host 数据','Updating tools…':'正在更新工具…','Restoring tools…':'正在恢复工具…','Cleaning storage…':'正在清理存储…','Disconnecting tools…':'正在断开工具…','Disconnect tools and remove Agent Host private Suite data? Observer history remains separately owned.':'断开工具并移除 Agent Host 私有数据？Observer 历史记录仍由其独立保留。','On Windows, application restore and uninstall are also available in the openAdam Start menu folder.':'在 Windows 上，也可从“开始”菜单的 openAdam 文件夹恢复或卸载应用。',
   '':'选择新 Agent 任务可以使用哪些已安装工具。','Working set for new tasks':'新任务的工作集','Get featured tools':'获取精选工具','Getting featured tools…':'正在获取精选工具…','Installed':'已安装','Not installed in this environment':'此环境尚未安装','':'“获取”会安装精选目录库存。复选框只启用已经安装的工具工作集。tools set --profile 不会安装尚未入库的工具。','Featured':'所有者精选的工具；不是应用市场、商店、排行或付费目录。','No Agent environment is installed.':'尚未安装 Agent 环境。','Available tools':'可用工具','Changes take effect in a fresh Agent task.':'更改会在新的 Agent 任务中生效。','Apply tool set':'应用工具集',
@@ -649,69 +694,73 @@ function renderSetup(root){
   }
   root.append(c);
 }
+function navigatePage(page){
+  const nav=document.querySelector('#nav button[data-page="'+page+'"]');
+  if(nav){nav.click();return true}
+  setPage(page);return false;
+}
 function renderPostSetupGuidance(root, guidance){
   if(!guidance)return;
-  const c=card(guidance.readyToWork?'Start work':'Next step');
-  c.append(el('h2',t(guidance.title||'Ready to start work')));
-  c.append(el('p',t(guidance.summary||''),'muted'));
-  if(guidance.problemClass){
-    c.append(el('p',t('Problem class')+': '+t(guidance.problemClass),'notice'));
-  }
-  const observed=el('div');observed.append(el('div',t('What Host confirmed'),'muted'));
-  for(const line of guidance.observed||[])observed.append(el('div','• '+t(line)));
-  c.append(observed);
-  if((guidance.gaps||[]).length){
-    const gaps=el('div');gaps.append(el('div',t('Still open'),'muted'));
-    for(const line of guidance.gaps)gaps.append(el('div','• '+t(line)));
-    c.append(gaps);
-  }
-  const actions=el('div',undefined,'actions');
+  const tone=guidance.statusTone||(guidance.readyToWork?'ready':'action');
+  const c=el('div',undefined,'card start-work');
+  c.dataset.tone=tone;
+  const row=el('div',undefined,'start-row');
+  const status=el('div',t(guidance.statusLine||guidance.title||'Ready'),'start-status');
+  status.dataset.tone=tone;
+  row.append(status);
   const action=guidance.primaryAction||{};
+  const hostId=guidance.primaryHostId||Object.keys(data.snapshot?.environment?.hosts||{}).find(id=>data.snapshot.environment.hosts[id])||null;
+  const availableHost=((data.hosts||[]).find(h=>h.appInstalled===true&&!(data.snapshot?.environment?.hosts||{})[h.host])||{}).host;
   const runPrimary=()=>{
-    if(action.id==='connect-agent'||action.id==='start-new-agent-task'){
-      const link=document.querySelector('a[href="#agent-apps"],button[data-section="agent-apps"],[data-nav="agent-apps"]');
-      if(link)link.click();
-      else notice(t(action.detail||action.label||'Open a new Agent task to start work'));
+    if(action.id==='open-tools'){navigatePage('tools');return}
+    if(action.id==='connect-agent'){
+      if(availableHost){call({action:'host',host:availableHost,connected:true},t('Connecting…'));return}
+      setPage('environment');
+      const target=$('#agent-apps');
+      if(target)target.scrollIntoView({behavior:'smooth',block:'start'});
       return;
     }
-    if(action.id==='review-repair'||action.id==='run-full-check'){
-      notice(t(action.detail||guidance.recoveryPath||'Run Full Check'));
-      refresh();
+    if(action.id==='resume-tools'){call({action:'tools',resume:true},t('Resuming tools…'));return}
+    if(action.id==='review-repair'){call({action:'repair'},t('Repairing…'));return}
+    if(action.id==='run-full-check'||action.id==='grant-workspace'){call({action:'doctor'},t('Checking…'));return}
+    if(action.id==='open-app'||action.id==='start-new-agent-task'){
+      if(!hostId){notice(t('Connect Agent to use'));return}
+      call({action:'open-app',host:hostId},t('Opening…'));
       return;
     }
-    if(action.id==='open-tools'){
-      const link=document.querySelector('a[href="#tools"],button[data-section="tools"],[data-nav="tools"]');
-      if(link)link.click();
-      else notice(t(action.detail||'Open Tools to enable a working set'));
-      return;
-    }
-    notice(t(action.detail||action.label||'Open a new Agent task to start work'));
+    if(action.id==='run-setup'){navigatePage('environment');return}
+    notice(t(action.label||'Ready'));
   };
-  if(action.label)actions.append(button(action.label,runPrimary,'action primary'));
-  if(guidance.recoveryPath)c.append(el('p',t('Recovery path')+': '+t(guidance.recoveryPath),'muted'));
-  c.append(actions);
+  if(action.label){
+    const b=button(action.label,runPrimary,'action primary');
+    b.dataset.testid='post-setup-primary-cta';
+    b.dataset.actionId=action.id||'';
+    row.append(b);
+  }
+  c.append(row);
+  if(guidance.hint&&(action.id==='open-app'||action.id==='start-new-agent-task')){
+    c.append(el('p',t(guidance.hint),'muted start-hint'));
+  }
+  const details=el('details');
+  details.append(el('summary',t('Details')));
+  const body=el('div',undefined,'start-details');
+  if(guidance.problemClass)body.append(el('div',t(guidance.problemClass),'muted'));
+  for(const line of guidance.observed||[])body.append(el('div','• '+t(line),'muted'));
+  for(const line of guidance.gaps||[])body.append(el('div','• '+t(line),'muted'));
+  if(guidance.recoveryPath)body.append(el('div',t(guidance.recoveryPath),'muted'));
+  details.append(body);
+  c.append(details);
   root.append(c);
 }
 function renderEnvironment(s,u){
   const root=$('#environment');root.replaceChildren();
-  root.append(el('h1',t('Overview')),el('p',t(s.configured?'Installed locally on this PC':'Set up a compatible local tool environment'),'sub'));
-  if(!s.configured){renderSetup(root);renderSourceSettings(data.source||{});return}
-  renderPostSetupGuidance(root, data.guidance);
-  const source=data.source||{},app=source.application||{},env=source.environment||s.environment||{},loc=source.source||{};
-  const versions=card('Versions');
-  versions.append(row(t('Application'),(app.version||'—')+(app.build?' ('+app.build+')':'')));
-  versions.append(row(t('Environment release'),(env.suiteVersion||s.environment?.suiteVersion||'—')+(env.profile?' · '+env.profile:'')));
-  versions.append(row(t('Catalog source'), loc.unpublished?t('Catalog assets are unpublished.'):(loc.url||loc.path||t('Catalog source'))));
-  if(loc.lastCheck)versions.append(row(t('Last check'),loc.lastCheck.status+(loc.lastCheck.code?' · '+loc.lastCheck.code:'')));
-  root.append(versions);
-  const details=card('Health details');
-  const grid=el('div',undefined,'grid');
-  for(const[value,label]of[[(s.environment.availableAgentComponents||[]).length,'Installed tools'],[Object.keys(s.environment.hosts).length,'Connected Agent apps'],[s.storage?.allocatedBytes,'Allocated bytes'],[u.enabled?t('On'):t('Off'),'Local monitoring']]){
-    const c=card(label);c.append(el('div',number(value),'metric'));grid.append(c)
+  root.append(el('h1',t('Overview')));
+  if(!s.configured){
+    root.append(el('p',t('Set up a compatible local tool environment'),'sub'));
+    renderSetup(root);renderSourceSettings(data.source||{});return
   }
-  details.append(grid);
-  root.append(details);
-  const hc=card('Agent apps');
+  renderPostSetupGuidance(root, data.guidance);
+  const hc=el('div',undefined,'card');hc.id='agent-apps';hc.append(el('h2',t('Agent apps')));
   for(const h of data.hosts){
     const connected=Boolean(s.environment.hosts[h.host]);
     const r=row(names[h.host],t(h.appInstalled===false?'Not installed':connected?'Connected':'Available'));
@@ -719,17 +768,27 @@ function renderEnvironment(s,u){
     hc.append(r)
   }
   root.append(hc);
-  const ops=card('Tool environment actions');
-  const a=el('div',undefined,'actions');
-  a.append(
+  const source=data.source||{},app=source.application||{},env=source.environment||s.environment||{},loc=source.source||{};
+  const more=el('details');more.append(el('summary',t('Details')));
+  const moreBody=el('div');
+  moreBody.append(row(t('Application'),(app.version||'—')+(app.build?' ('+app.build+')':'')));
+  moreBody.append(row(t('Environment release'),(env.suiteVersion||s.environment?.suiteVersion||'—')+(env.profile?' · '+env.profile:'')));
+  moreBody.append(row(t('Catalog source'), loc.unpublished?t('Catalog assets are unpublished.'):(loc.url||loc.path||t('Catalog source'))));
+  if(loc.lastCheck)moreBody.append(row(t('Last check'),loc.lastCheck.status+(loc.lastCheck.code?' · '+loc.lastCheck.code:'')));
+  moreBody.append(row(t('Installed tools'),number((s.environment.availableAgentComponents||[]).length)));
+  moreBody.append(row(t('Connected Agent apps'),number(Object.keys(s.environment.hosts).length)));
+  moreBody.append(row(t('Local monitoring'),u.enabled?t('On'):t('Off')));
+  const ops=el('div',undefined,'actions');
+  ops.append(
     button('Update tools',()=>call({action:'update'},t('Updating tools…'))),
     button('Restore previous tools',()=>call({action:'rollback'},t('Restoring tools…'))),
     button('Clean old packages',()=>call({action:'cleanup'},t('Cleaning storage…'))),
     button('Disconnect, keep data',()=>call({action:'uninstall',purgeData:false},t('Disconnecting tools…')),'action danger'),
     button('Disconnect, remove Host data',()=>{if(confirm(t('Disconnect tools and remove Agent Host private Suite data? Observer history remains separately owned.')))call({action:'uninstall',purgeData:true},t('Disconnecting tools…'))},'action danger')
   );
-  ops.append(a,el('p',t('On Windows, application restore and uninstall are also available in the openAdam Start menu folder.'),'muted'));
-  root.append(ops)
+  moreBody.append(ops);
+  more.append(moreBody);
+  root.append(more);
 }
 function renderTools(value){
   const root=$('#tools');root.replaceChildren(el('h1',t('Tools')),el('p',t(''),'sub'));

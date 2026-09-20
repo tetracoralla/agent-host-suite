@@ -1,7 +1,7 @@
 /**
  * Post-setup / success handoff: install complete → start work.
- * Host only reports what it can observe. It never claims an open Agent
- * session already loaded tools, and never leaves only "not guaranteed".
+ * Host only reports what it can observe. Main UI is one status line + one
+ * primary action; observed/gaps/recovery stay for on-demand details only.
  */
 
 export const POST_SETUP_GUIDANCE_SCHEMA = 'openadam.agent-host-post-setup-guidance.v0.1'
@@ -11,15 +11,20 @@ export const PROBLEM_CLASSES = Object.freeze({
   STALE_SESSION: 'stale-session',
   PERMISSION: 'permission',
   TOOL_FAULT: 'tool-fault',
+  TOOLS_PAUSED: 'tools-paused',
   UNVERIFIED: 'unverified',
 })
 
 export const PRIMARY_ACTIONS = Object.freeze({
+  OPEN_APP: 'open-app',
+  /** @deprecated prefer OPEN_APP; kept for callers that still emit the old id */
   START_NEW_TASK: 'start-new-agent-task',
   CONNECT_AGENT: 'connect-agent',
   REVIEW_REPAIR: 'review-repair',
   RUN_FULL_CHECK: 'run-full-check',
   GRANT_WORKSPACE: 'grant-workspace',
+  RESUME_TOOLS: 'resume-tools',
+  OPEN_TOOLS: 'open-tools',
 })
 
 function unique(values) {
@@ -40,7 +45,8 @@ function classifyDoctorFault(errors) {
     return {
       problemClass: PROBLEM_CLASSES.PERMISSION,
       primaryActionId: PRIMARY_ACTIONS.GRANT_WORKSPACE,
-      title: 'Permission or workspace access is blocking work',
+      statusLine: shortReason(permission.message, 'Permission blocked'),
+      title: 'Permission blocked',
       summary: permission.message || 'Host observed a permission or workspace problem.',
       recoveryPath: 'Fix the permission or grant the project folder, run Full Check, then open a new Agent task.',
     }
@@ -56,16 +62,18 @@ function classifyDoctorFault(errors) {
     return {
       problemClass: PROBLEM_CLASSES.TOOL_FAULT,
       primaryActionId: PRIMARY_ACTIONS.REVIEW_REPAIR,
-      title: 'A tool or local service needs repair before work',
+      statusLine: shortReason(tool.message, 'Needs repair'),
+      title: 'Needs repair',
       summary: tool.message || 'Host observed a tool or runtime fault.',
-      recoveryPath: 'Review Repair (or Run Full Check), fix the named fault, then open a new Agent task. Do not keep working in an old task.',
+      recoveryPath: 'Review Repair (or Run Full Check), fix the named fault, then open a new Agent task.',
     }
   }
   if (errors.length > 0) {
     return {
       problemClass: PROBLEM_CLASSES.TOOL_FAULT,
       primaryActionId: PRIMARY_ACTIONS.RUN_FULL_CHECK,
-      title: 'Environment checks need attention before work',
+      statusLine: shortReason(errors[0].message, 'Needs check'),
+      title: 'Needs check',
       summary: errors[0].message || 'Host observed a blocking environment check.',
       recoveryPath: 'Run Full Check, follow the recovery for the named check, then open a new Agent task.',
     }
@@ -73,55 +81,47 @@ function classifyDoctorFault(errors) {
   return null
 }
 
+function shortReason(message, fallback) {
+  if (typeof message !== 'string' || message.trim() === '') return fallback
+  const one = message.trim().split(/[\r\n]/u)[0]
+  return one.length > 72 ? `${one.slice(0, 69)}…` : one
+}
+
 function actionFor(id, appName) {
   switch (id) {
     case PRIMARY_ACTIONS.CONNECT_AGENT:
-      return {
-        id,
-        label: 'Connect an Agent app',
-        detail: 'Open Agents, connect one supported app, then start a new task there.',
-      }
+      return { id, label: 'Connect' }
     case PRIMARY_ACTIONS.REVIEW_REPAIR:
-      return {
-        id,
-        label: 'Review Repair',
-        detail: 'Repair restores Host-observed faults. It does not invent success for things Host cannot see.',
-      }
+      return { id, label: 'Repair' }
     case PRIMARY_ACTIONS.RUN_FULL_CHECK:
-      return {
-        id,
-        label: 'Run Full Check',
-        detail: 'Confirm current bindings and tool readiness before starting work.',
-      }
+      return { id, label: 'Check' }
     case PRIMARY_ACTIONS.GRANT_WORKSPACE:
-      return {
-        id,
-        label: 'Fix permission / grant workspace',
-        detail: 'Grant the project folder the tool needs, then open a new Agent task.',
-      }
+      return { id, label: 'Fix access' }
+    case PRIMARY_ACTIONS.RESUME_TOOLS:
+      return { id, label: 'Resume' }
+    case PRIMARY_ACTIONS.OPEN_TOOLS:
+      return { id, label: 'Tools' }
+    case PRIMARY_ACTIONS.OPEN_APP:
     case PRIMARY_ACTIONS.START_NEW_TASK:
     default:
       return {
-        id: PRIMARY_ACTIONS.START_NEW_TASK,
-        label: appName ? `Open a new ${appName} task to start work` : 'Open a new Agent task to start work',
-        detail: 'Already-open tasks keep the tools they started with. A new task is the path into real work.',
+        id: PRIMARY_ACTIONS.OPEN_APP,
+        label: appName ? `Open ${appName}` : 'Open Agent',
       }
+  }
+}
+
+function pack(base) {
+  return {
+    schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
+    destinationIsWork: true,
+    hint: null,
+    ...base,
   }
 }
 
 /**
  * @param {object} input
- * @param {boolean} [input.configured]
- * @param {string[]} [input.connectedHosts]
- * @param {number} [input.installedToolCount]
- * @param {number} [input.activeToolCount]
- * @param {boolean} [input.agentToolsPaused]
- * @param {boolean} [input.needsFreshTask]
- * @param {boolean|null} [input.agentAppsVerified] null = not checked yet
- * @param {Array<{id:string,message?:string}>} [input.doctorBlockingErrors]
- * @param {boolean} [input.justInstalled]
- * @param {string|null} [input.primaryHostName]
- * @param {boolean} [input.workspaceGranted]
  */
 export function buildPostSetupGuidance(input = {}) {
   const configured = input.configured === true
@@ -136,26 +136,25 @@ export function buildPostSetupGuidance(input = {}) {
   const primaryHostName = typeof input.primaryHostName === 'string' && input.primaryHostName.length > 0
     ? input.primaryHostName
     : (connectedHosts[0] ?? null)
+  const primaryHostId = typeof input.primaryHostId === 'string' && input.primaryHostId.length > 0
+    ? input.primaryHostId
+    : null
   const workspaceGranted = input.workspaceGranted
 
   if (!configured) {
-    return {
-      schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
+    return pack({
       phase: 'setup',
       readyToWork: false,
       problemClass: null,
-      title: 'Set up tools before starting work',
-      summary: 'Install a tool set first. Success is starting work afterward, not a green checklist.',
+      statusLine: 'Set up tools',
+      statusTone: 'action',
+      title: 'Set up tools',
+      summary: 'Install a tool set first.',
       observed: [],
       gaps: ['No Agent environment is installed yet.'],
-      primaryAction: {
-        id: 'run-setup',
-        label: 'Set up tools',
-        detail: 'Choose a tool set, optionally connect an Agent app, then install.',
-      },
+      primaryAction: { id: 'run-setup', label: 'Set up' },
       recoveryPath: null,
-      destinationIsWork: true,
-    }
+    })
   }
 
   const observed = []
@@ -186,132 +185,118 @@ export function buildPostSetupGuidance(input = {}) {
   if (workspaceGranted === true) observed.push('A workspace path is granted.')
   if (workspaceGranted === false) observed.push('No workspace path is granted yet.')
 
-  const gaps = []
-  // Always honest about session loading — Host cannot observe an open task's catalog.
-  gaps.push('Host cannot confirm that an already-open Agent task has loaded these tools.')
+  const gaps = ['Host cannot confirm that an already-open Agent task has loaded these tools.']
 
   const fault = classifyDoctorFault(doctorBlockingErrors)
   if (fault) {
     gaps.push(fault.summary)
-    return {
-      schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
+    return pack({
       phase: 'recover',
       readyToWork: false,
       problemClass: fault.problemClass,
+      statusLine: fault.statusLine,
+      statusTone: 'fault',
       title: fault.title,
       summary: fault.summary,
       observed,
       gaps,
       primaryAction: actionFor(fault.primaryActionId, primaryHostName),
       recoveryPath: fault.recoveryPath,
-      destinationIsWork: true,
-    }
+      primaryHostId,
+    })
   }
 
   if (connectedHosts.length === 0) {
     gaps.push('Connect an Agent app before expecting tools in a session.')
-    return {
-      schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
+    return pack({
       phase: 'connect-agent',
       readyToWork: false,
       problemClass: PROBLEM_CLASSES.NOT_CONNECTED,
-      title: 'Install finished — connect an Agent to start work',
+      statusLine: 'Connect Agent to use',
+      statusTone: 'action',
+      title: 'Connect Agent to use',
       summary: 'Tools are on this machine, but no Agent app is connected yet.',
       observed,
       gaps,
       primaryAction: actionFor(PRIMARY_ACTIONS.CONNECT_AGENT, null),
       recoveryPath: 'Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.',
-      destinationIsWork: true,
-    }
+      primaryHostId,
+    })
   }
 
-  if (agentToolsPaused || (installedToolCount > 0 && activeToolCount === 0)) {
-    gaps.push('Resume or select tools for new tasks before starting work.')
-    return {
-      schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
+  if (agentToolsPaused) {
+    gaps.push('Resume tools for new tasks before starting work.')
+    return pack({
       phase: 'recover',
       readyToWork: false,
-      problemClass: PROBLEM_CLASSES.TOOL_FAULT,
-      title: 'Tools are installed but not available for new tasks',
-      summary: agentToolsPaused
-        ? 'Ordinary tools are paused. Resume them, then open a new Agent task.'
-        : 'No installed tool is selected for new tasks. Choose a working set, then open a new Agent task.',
+      problemClass: PROBLEM_CLASSES.TOOLS_PAUSED,
+      statusLine: 'Tools paused',
+      statusTone: 'paused',
+      title: 'Tools paused',
+      summary: 'Ordinary tools are paused.',
       observed,
       gaps,
-      primaryAction: {
-        id: 'open-tools',
-        label: 'Open Tools to enable a working set',
-        detail: 'Working-set changes apply to new tasks only.',
-      },
-      recoveryPath: 'In Tools, resume or select at least one installed tool, then open a new Agent task.',
-      destinationIsWork: true,
-    }
+      primaryAction: actionFor(PRIMARY_ACTIONS.RESUME_TOOLS, primaryHostName),
+      recoveryPath: 'Resume tools, then open a new Agent task.',
+      primaryHostId,
+    })
   }
 
-  if (needsFreshTask) {
-    gaps.push('A fresh Agent task is required after the latest tool or binding change.')
-    return {
-      schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
-      phase: 'fresh-task',
-      readyToWork: true,
-      problemClass: PROBLEM_CLASSES.STALE_SESSION,
-      title: 'Ready — start work in a new Agent task',
-      summary: 'Host prepared tools for new tasks. An already-open task is a stale session for this change.',
+  if (installedToolCount > 0 && activeToolCount === 0) {
+    gaps.push('Select tools for new tasks before starting work.')
+    return pack({
+      phase: 'recover',
+      readyToWork: false,
+      problemClass: PROBLEM_CLASSES.TOOLS_PAUSED,
+      statusLine: 'No tools selected',
+      statusTone: 'action',
+      title: 'No tools selected',
+      summary: 'Choose a working set for new tasks.',
       observed,
       gaps,
-      primaryAction: actionFor(PRIMARY_ACTIONS.START_NEW_TASK, primaryHostName),
-      recoveryPath: 'Close or ignore the old task. Open a new task in the connected Agent app and continue real work there.',
-      destinationIsWork: true,
-    }
-  }
-
-  if (agentAppsVerified === null && connectedHosts.length > 0) {
-    gaps.push('Bindings are configured; run Full Check when you want Host to verify them.')
-    return {
-      schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
-      phase: 'start-work',
-      readyToWork: true,
-      problemClass: PROBLEM_CLASSES.UNVERIFIED,
-      title: 'Ready to start work',
-      summary: 'Host installed and connected what it can see. Start a new Agent task — do not wait on a status checklist.',
-      observed,
-      gaps,
-      primaryAction: actionFor(PRIMARY_ACTIONS.START_NEW_TASK, primaryHostName),
-      recoveryPath: 'If tools are missing in the new task, run Full Check. Class the problem as not connected, stale session, permission, or tool fault, then follow that recovery.',
-      destinationIsWork: true,
-    }
+      primaryAction: actionFor(PRIMARY_ACTIONS.OPEN_TOOLS, primaryHostName),
+      recoveryPath: 'In Tools, select at least one installed tool, then open a new Agent task.',
+      primaryHostId,
+    })
   }
 
   if (agentAppsVerified === false) {
     gaps.push('Connected bindings failed verification.')
-    return {
-      schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
+    return pack({
       phase: 'recover',
       readyToWork: false,
       problemClass: PROBLEM_CLASSES.TOOL_FAULT,
-      title: 'Connected Agent bindings need repair',
-      summary: 'Host connected an Agent app, but Full Check did not verify current bindings.',
+      statusLine: 'Bindings need repair',
+      statusTone: 'fault',
+      title: 'Bindings need repair',
+      summary: 'Full Check did not verify current bindings.',
       observed,
       gaps,
       primaryAction: actionFor(PRIMARY_ACTIONS.REVIEW_REPAIR, primaryHostName),
       recoveryPath: 'Review Repair or Run Full Check, then open a new Agent task after bindings verify.',
-      destinationIsWork: true,
-    }
+      primaryHostId,
+    })
   }
 
-  return {
-    schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
-    phase: 'start-work',
+  const openAction = actionFor(PRIMARY_ACTIONS.OPEN_APP, primaryHostName)
+  const readyLine = justInstalled ? 'Ready' : (needsFreshTask ? 'Ready' : 'Ready')
+  return pack({
+    phase: needsFreshTask ? 'fresh-task' : 'start-work',
     readyToWork: true,
-    problemClass: null,
-    title: justInstalled ? 'Install complete — start work' : 'Ready to start work',
-    summary: 'Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.',
+    problemClass: needsFreshTask
+      ? PROBLEM_CLASSES.STALE_SESSION
+      : (agentAppsVerified === null ? PROBLEM_CLASSES.UNVERIFIED : null),
+    statusLine: readyLine,
+    statusTone: 'ready',
+    title: readyLine,
+    summary: 'Open the connected Agent app to start work.',
     observed,
     gaps,
-    primaryAction: actionFor(PRIMARY_ACTIONS.START_NEW_TASK, primaryHostName),
+    primaryAction: openAction,
+    hint: 'Start a new task in the app',
     recoveryPath: 'If the new task cannot see tools: decide whether it is not connected, a stale session, a permission issue, or a tool fault — then use Connect, a newer task, grant/repair, or Review Repair.',
-    destinationIsWork: true,
-  }
+    primaryHostId,
+  })
 }
 
 export function guidanceFromSetupResult(result, options = {}) {
@@ -322,15 +307,20 @@ export function guidanceFromSetupResult(result, options = {}) {
   const activeToolCount = Array.isArray(result?.agentComponents)
     ? result.agentComponents.length
     : installedToolCount
+  const hostNames = { zcode: 'ZCode', codex: 'Codex', claude: 'Claude Code' }
+  const primaryHostId = options.primaryHostId ?? hosts[0] ?? null
+  const primaryHostName = options.primaryHostName
+    ?? (primaryHostId ? (hostNames[primaryHostId] || primaryHostId) : null)
   return buildPostSetupGuidance({
     configured: result?.status === 'installed' || result?.status === 'ready',
-    connectedHosts: hosts,
+    connectedHosts: hosts.map((id) => hostNames[id] || id),
     installedToolCount,
     activeToolCount,
     needsFreshTask: result?.restartRequired === true || hosts.length > 0,
     agentAppsVerified: null,
     justInstalled: result?.status === 'installed',
-    primaryHostName: options.primaryHostName ?? hosts[0] ?? null,
+    primaryHostName,
+    primaryHostId,
     doctorBlockingErrors: [],
   })
 }

@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
-import { prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
+import { loadState, prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
+import { setup } from '../src/setup.mjs'
+import { compatibleApplicationState, createCodexRunner, createDevelopmentWorkspace, healthyCatalogPreflight } from './helpers.mjs'
 
 test('browser Updates keeps a successful GitHub preview target for Add from GitHub', async () => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
@@ -387,17 +389,251 @@ test('local Manager accepts featured setup and host-later setup without inventin
   await running
 })
 
-test('browser Overview success handoff points into starting work', async () => {
+test('browser Overview success handoff is sparse and wires real CTA paths', async () => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
   assert.match(page, /renderPostSetupGuidance/u)
-  assert.match(page, /Open a new Agent task to start work/u)
-  assert.match(page, /What Host confirmed/u)
-  assert.match(page, /Problem class/u)
-  assert.match(page, /Health details/u)
   assert.match(page, /guidance: buildDashboardGuidance/u)
+  assert.match(page, /dataset\.testid='post-setup-primary-cta'/u)
+  assert.match(page, /navigatePage\('tools'\)/u)
+  assert.match(page, /action:'open-app'/u)
+  assert.match(page, /action:'tools',resume:true/u)
+  assert.match(page, /action:'doctor'/u)
+  assert.match(page, /action:'repair'/u)
+  assert.match(page, /data-page/u)
+  assert.match(page, /t\('Details'\)/u)
+  // Main-card chrome must not dump teaching sections; keep labels only inside Details wiring.
+  const renderFn = page.match(/function renderPostSetupGuidance[\s\S]*?^function renderEnvironment/mu)?.[0] || ''
+  assert.match(renderFn, /start-status/u)
+  assert.doesNotMatch(renderFn, /What Host confirmed/u)
+  assert.doesNotMatch(renderFn, /Still open/u)
+  assert.doesNotMatch(renderFn, /Recovery path/u)
+  assert.doesNotMatch(renderFn, /Next step/u)
 })
 
+test('post-setup primary CTAs perform navigation or API side effects', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-web-cta-ws-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-cta-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  const installed = await setup(
+    { profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false },
+    {
+      runner: fake.runner,
+      codexConfiguration: fake.configuration,
+      hostSkillHome: join(stateRoot, 'host-home'),
+      catalogPreflight: healthyCatalogPreflight,
+      applicationStatePreflight: compatibleApplicationState,
+    },
+  )
+  assert.equal(installed.status, 'installed')
 
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({ stateRoot, open: false, idleTimeoutMs: 60_000, onReady: readyResolve })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+
+  const dashboard = await fetch(`${origin}/api/dashboard`, { headers: { cookie } })
+  assert.equal(dashboard.status, 200)
+  const body = await dashboard.json()
+  assert.equal(body.guidance?.statusLine, 'Ready')
+  assert.equal(body.guidance?.primaryAction?.id, 'open-app')
+  assert.match(body.guidance?.primaryAction?.label || '', /^Open /u)
+  assert.equal(body.guidance?.hint, 'Start a new task in the app')
+
+  const openAttempt = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'open-app', host: 'codex' }),
+  })
+  assert.ok([200, 400].includes(openAttempt.status), `open-app status ${openAttempt.status}`)
+  const openBody = await openAttempt.json()
+  if (openAttempt.status === 200) {
+    assert.equal(openBody.result.status, 'opened')
+    assert.equal(openBody.result.host, 'codex')
+  } else {
+    assert.equal(openBody.error?.code, 'MANAGER_REQUEST_INVALID')
+  }
+
+  const doctor = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'doctor' }),
+  })
+  assert.ok([200, 400].includes(doctor.status), `doctor status ${doctor.status}`)
+
+  // Behavioral: click open-tools CTA must activate data-page="tools" (not notice-only).
+  const source = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  const script = [...source.matchAll(/<script>([\s\S]*?)<\/script>/gui)].map((m) => m[1]).join('\n')
+  const fnMatch = script.match(/function navigatePage\(page\)\{[\s\S]*?\}\nfunction renderPostSetupGuidance\(root, guidance\)\{[\s\S]*?\n\}/u)
+  assert.ok(fnMatch, 'expected navigatePage + renderPostSetupGuidance in page script')
+  const clicks = []
+  const fetches = []
+  const buttons = []
+  const pages = { current: 'environment' }
+  const documentRef = {
+    querySelector(sel) {
+      if (sel === '#nav button[data-page="tools"]') {
+        return { click() { clicks.push('tools'); pages.current = 'tools' } }
+      }
+      if (sel === '#agent-apps') return { scrollIntoView() { clicks.push('agent-apps') } }
+      return null
+    },
+    createElement(tag) {
+      const node = {
+        tagName: tag,
+        className: '',
+        textContent: '',
+        dataset: {},
+        children: [],
+        append(...args) { this.children.push(...args) },
+        click() { this.onclick?.() },
+      }
+      Object.defineProperty(node, 'onclick', {
+        configurable: true,
+        get() { return this._onclick },
+        set(fn) { this._onclick = fn; if (typeof fn === 'function') buttons.push(node) },
+      })
+      return node
+    },
+  }
+  const harness = new Function('document', 'fetch', 't', 'call', 'setPage', 'notice', 'data', `
+    const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
+    const button=(label,run,cls='action')=>{const b=el('button',label,cls);b.onclick=run;return b};
+    const $= (s)=>document.querySelector(s);
+    ${fnMatch[0]}
+    return { navigatePage, renderPostSetupGuidance };
+  `)
+  const api = harness(
+    documentRef,
+    async (path, init) => { fetches.push({ path, body: init?.body }); return { ok: true, async json() { return { status: 'ok', result: {}, dashboard: body } } } },
+    (key) => key,
+    (action) => { fetches.push({ path: '/api/action', body: JSON.stringify(action) }) },
+    (page) => { pages.current = page; clicks.push('setPage:' + page) },
+    () => { clicks.push('notice') },
+    body,
+  )
+  const handoffRoot = documentRef.createElement('div')
+  buttons.length = 0
+  api.renderPostSetupGuidance(handoffRoot, {
+    statusLine: 'No tools selected',
+    statusTone: 'action',
+    readyToWork: false,
+    primaryAction: { id: 'open-tools', label: 'Tools' },
+    observed: [],
+    gaps: [],
+  })
+  const toolsCta = buttons.find((b) => b.dataset.testid === 'post-setup-primary-cta')
+  assert.ok(toolsCta, 'tools CTA must render')
+  toolsCta.click()
+  assert.equal(pages.current, 'tools')
+  assert.equal(clicks.includes('notice'), false)
+
+  buttons.length = 0
+  fetches.length = 0
+  const handoffRoot2 = documentRef.createElement('div')
+  api.renderPostSetupGuidance(handoffRoot2, {
+    statusLine: 'Ready',
+    statusTone: 'ready',
+    readyToWork: true,
+    primaryAction: { id: 'open-app', label: 'Open Codex' },
+    primaryHostId: 'codex',
+    hint: 'Start a new task in the app',
+    observed: [],
+    gaps: [],
+  })
+  const openCta = buttons.find((b) => b.dataset.testid === 'post-setup-primary-cta')
+  assert.ok(openCta, 'open CTA must render')
+  openCta.click()
+  assert.ok(fetches.some((f) => String(f.body).includes('"open-app"') && String(f.body).includes('codex')), 'Open CTA must invoke open-app action')
+
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
+test('paused guidance CTA resumes tools through /api/action', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-web-pause-ws-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-pause-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  await setup(
+    { profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false },
+    {
+      runner: fake.runner,
+      codexConfiguration: fake.configuration,
+      hostSkillHome: join(stateRoot, 'host-home'),
+      catalogPreflight: healthyCatalogPreflight,
+      applicationStatePreflight: compatibleApplicationState,
+    },
+  )
+  // Commit a deliberate pause into saved state (same shape setActiveTools writes).
+  const paths = await prepareStatePaths(stateRoot)
+  const state = await loadState(paths)
+  state.resumeAgentComponents = [...(state.agentComponents ?? state.availableAgentComponents)]
+  state.agentComponents = []
+  state.agentToolsPaused = true
+  await saveState(paths, state)
+
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({ stateRoot, open: false, idleTimeoutMs: 60_000, onReady: readyResolve })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+  const dashboard = await fetch(`${origin}/api/dashboard`, { headers: { cookie } })
+  assert.equal(dashboard.status, 200)
+  const body = await dashboard.json()
+  assert.equal(body.guidance?.problemClass, 'tools-paused')
+  assert.equal(body.guidance?.statusLine, 'Tools paused')
+  assert.equal(body.guidance?.primaryAction?.id, 'resume-tools')
+  assert.equal(body.guidance?.primaryAction?.label, 'Resume')
+
+  // Behavioral: Resume CTA must POST tools resume (not notice-only).
+  const source = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  const script = [...source.matchAll(/<script>([\s\S]*?)<\/script>/gui)].map((m) => m[1]).join('\n')
+  const fnMatch = script.match(/function navigatePage\(page\)\{[\s\S]*?\}\nfunction renderPostSetupGuidance\(root, guidance\)\{[\s\S]*?\n\}/u)
+  assert.ok(fnMatch)
+  const fetches = []
+  const buttons = []
+  const documentRef = {
+    querySelector() { return null },
+    createElement(tag) {
+      const node = {
+        tagName: tag, className: '', textContent: '', dataset: {}, children: [],
+        append(...args) { this.children.push(...args) },
+        click() { this.onclick?.() },
+      }
+      Object.defineProperty(node, 'onclick', {
+        configurable: true,
+        get() { return this._onclick },
+        set(fn) { this._onclick = fn; if (typeof fn === 'function') buttons.push(node) },
+      })
+      return node
+    },
+  }
+  const harness = new Function('document', 'fetch', 't', 'call', 'setPage', 'notice', 'data', `
+    const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
+    const button=(label,run,cls='action')=>{const b=el('button',label,cls);b.onclick=run;return b};
+    const $= (s)=>document.querySelector(s);
+    ${fnMatch[0]}
+    return { renderPostSetupGuidance };
+  `)
+  const api = harness(documentRef, async () => ({ ok: true, async json() { return {} } }), (k) => k, (action) => { fetches.push(action) }, () => {}, () => {}, body)
+  const handoff = documentRef.createElement('div')
+  api.renderPostSetupGuidance(handoff, body.guidance)
+  const cta = buttons.find((b) => b.dataset.testid === 'post-setup-primary-cta')
+  assert.ok(cta)
+  cta.click()
+  assert.deepEqual(fetches[0], { action: 'tools', resume: true })
+
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
 
 test('embedded Manager browser scripts parse without SyntaxError', async () => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')

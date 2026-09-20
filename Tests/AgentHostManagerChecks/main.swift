@@ -643,13 +643,16 @@ do {
         agentAppsVerified: true,
         doctorBlockingErrors: [],
         justInstalled: true,
-        primaryHostName: "Codex"
+        primaryHostName: "Codex",
+        primaryHostID: "codex"
     )
     expect(readyGuidance.readyToWork, "post-setup ready guidance must allow starting work")
     expect(readyGuidance.destinationIsWork, "post-setup destination must be work, not a checklist")
     expect(readyGuidance.problemClass == .staleSession, "fresh-task requirement is a stale-session class")
-    expect(readyGuidance.primaryActionID == .startNewAgentTask, "primary CTA must open a new Agent task")
-    expect(readyGuidance.primaryActionLabel.contains("Codex"), "primary CTA should name the connected app when known")
+    expect(readyGuidance.statusLine == "Ready", "ready surface is one short status line")
+    expect(readyGuidance.primaryActionID == .openApp, "primary CTA must open the connected Agent app")
+    expect(readyGuidance.primaryActionLabel == "Open Codex", "primary CTA should be a short Open verb")
+    expect(readyGuidance.hint == "Start a new task in the app", "honest hint when Host cannot create a task")
     expect(readyGuidance.gaps.contains(where: { $0.contains("already-open Agent task") }), "Host must not pretend open tasks loaded tools")
 
     let disconnectedGuidance = ManagerPostSetupPolicy.guidance(
@@ -665,7 +668,26 @@ do {
         primaryHostName: nil
     )
     expect(disconnectedGuidance.problemClass == .notConnected, "missing Agent connection must be classified")
+    expect(disconnectedGuidance.statusLine == "Connect Agent to use", "not-connected status must stay short")
     expect(disconnectedGuidance.primaryActionID == .connectAgent, "missing connection CTA must connect an Agent")
+    expect(disconnectedGuidance.primaryActionLabel == "Connect", "connect CTA label must be a short verb")
+
+    let pausedGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["Codex"],
+        installedToolCount: 2,
+        activeToolCount: 0,
+        agentToolsPaused: true,
+        needsFreshTask: false,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [],
+        justInstalled: false,
+        primaryHostName: "Codex"
+    )
+    expect(pausedGuidance.problemClass == .toolsPaused, "deliberate pause must not be tool-fault")
+    expect(pausedGuidance.statusLine == "Tools paused", "paused status must be short")
+    expect(pausedGuidance.primaryActionID == .resumeTools, "paused CTA must resume")
+    expect(pausedGuidance.primaryActionLabel == "Resume", "resume label must be a short verb")
 
     let faultGuidance = ManagerPostSetupPolicy.guidance(
         configured: true,
@@ -681,6 +703,7 @@ do {
     )
     expect(faultGuidance.problemClass == .toolFault, "tool faults must be classified")
     expect(faultGuidance.primaryActionID == .reviewRepair, "tool faults recover through Review Repair")
+    expect(faultGuidance.primaryActionLabel == "Repair", "repair CTA label must be a short verb")
     expect(!faultGuidance.readyToWork, "tool faults must not report ready-to-work")
 
     UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)

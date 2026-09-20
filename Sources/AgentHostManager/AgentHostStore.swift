@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum RecoveryOption: Equatable {
@@ -101,7 +102,8 @@ final class AgentHostStore: ObservableObject {
             agentAppsVerified: verified,
             doctorBlockingErrors: blocking,
             justInstalled: justCompletedSetup,
-            primaryHostName: connectedNames.first
+            primaryHostName: connectedNames.first,
+            primaryHostID: connectedIDs.first
         )
     }
 
@@ -110,14 +112,71 @@ final class AgentHostStore: ObservableObject {
         // User moved past the install ceremony toward a concrete next step.
         justCompletedSetup = false
         switch guidance.primaryActionID {
-        case .connectAgent, .startNewAgentTask:
+        case .connectAgent:
             requestedSection = .agentApps
+        case .openApp, .startNewAgentTask:
+            openConnectedAgentApp(hostID: guidance.primaryHostID ?? connectedAgentAppIDs.first)
         case .openTools:
             requestedSection = .tools
+        case .resumeTools:
+            Task { await resumeTools() }
         case .reviewRepair:
             Task { await prepareRepair() }
         case .runFullCheck, .grantWorkspace:
             Task { await runDoctor() }
+        }
+    }
+
+    private var connectedAgentAppIDs: [String] {
+        ManagerAgentApp.all.compactMap { app in
+            suite?.hosts?[app.id]?.installed == true ? app.id : nil
+        }
+    }
+
+    /// Honest open: launch the connected Agent app. Host cannot create a task inside it.
+    func openConnectedAgentApp(hostID: String?) {
+        guard let hostID, !hostID.isEmpty else {
+            requestedSection = .agentApps
+            return
+        }
+        let appName = ManagerAgentApp.named(hostID).name
+        let candidates: [URL?] = [
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier(forHost: hostID)),
+            alternateBundleIdentifier(forHost: hostID).flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) },
+            applicationURLIfPresent("/Applications/\(appName).app"),
+            applicationURLIfPresent("\(NSHomeDirectory())/Applications/\(appName).app"),
+        ]
+        if let url = candidates.compactMap({ $0 }).first {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if error != nil {
+                    DispatchQueue.main.async { self.requestedSection = .agentApps }
+                }
+            }
+            return
+        }
+        // Fallback when no GUI bundle is found: open Agents so the user can act.
+        requestedSection = .agentApps
+    }
+
+    private func applicationURLIfPresent(_ path: String) -> URL? {
+        let url = URL(fileURLWithPath: path)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func bundleIdentifier(forHost id: String) -> String {
+        switch id {
+        case "codex": return "com.openai.codex"
+        case "claude": return "com.anthropic.claudecode"
+        case "zcode": return "com.zcode.app"
+        default: return "com.openadam.\(id)"
+        }
+    }
+
+    private func alternateBundleIdentifier(forHost id: String) -> String? {
+        switch id {
+        case "codex": return "com.openai.chat"
+        case "claude": return "com.anthropic.claude"
+        default: return nil
         }
     }
 

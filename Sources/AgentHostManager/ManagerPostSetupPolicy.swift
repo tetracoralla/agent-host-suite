@@ -6,20 +6,32 @@ struct ManagerPostSetupGuidance: Equatable, Sendable {
         case staleSession = "stale-session"
         case permission = "permission"
         case toolFault = "tool-fault"
+        case toolsPaused = "tools-paused"
         case unverified = "unverified"
     }
 
     enum PrimaryActionID: String, Equatable, Sendable {
+        case openApp = "open-app"
         case startNewAgentTask = "start-new-agent-task"
         case connectAgent = "connect-agent"
         case reviewRepair = "review-repair"
         case runFullCheck = "run-full-check"
         case openTools = "open-tools"
+        case resumeTools = "resume-tools"
         case grantWorkspace = "grant-workspace"
+    }
+
+    enum StatusTone: String, Equatable, Sendable {
+        case ready
+        case action
+        case paused
+        case fault
     }
 
     let readyToWork: Bool
     let problemClass: ProblemClass?
+    let statusLine: String
+    let statusTone: StatusTone
     let title: String
     let summary: String
     let observed: [String]
@@ -27,7 +39,9 @@ struct ManagerPostSetupGuidance: Equatable, Sendable {
     let primaryActionID: PrimaryActionID
     let primaryActionLabel: String
     let primaryActionDetail: String
+    let hint: String?
     let recoveryPath: String
+    let primaryHostID: String?
     /// Destination is starting work, not a green status checklist.
     let destinationIsWork: Bool
 }
@@ -43,20 +57,25 @@ enum ManagerPostSetupPolicy {
         agentAppsVerified: Bool?,
         doctorBlockingErrors: [(id: String, message: String)],
         justInstalled: Bool,
-        primaryHostName: String?
+        primaryHostName: String?,
+        primaryHostID: String? = nil
     ) -> ManagerPostSetupGuidance {
         guard configured else {
             return ManagerPostSetupGuidance(
                 readyToWork: false,
                 problemClass: nil,
-                title: "Set up tools before starting work",
-                summary: "Install a tool set first. Success is starting work afterward, not a green checklist.",
+                statusLine: "Set up tools",
+                statusTone: .action,
+                title: "Set up tools",
+                summary: "Install a tool set first.",
                 observed: [],
                 gaps: ["No Agent environment is installed yet."],
                 primaryActionID: .runFullCheck,
-                primaryActionLabel: "Set up tools",
-                primaryActionDetail: "Choose a tool set, optionally connect an Agent app, then install.",
+                primaryActionLabel: "Set up",
+                primaryActionDetail: "",
+                hint: nil,
                 recoveryPath: "Complete setup, then return here to start work.",
+                primaryHostID: primaryHostID,
                 destinationIsWork: true
             )
         }
@@ -98,14 +117,18 @@ enum ManagerPostSetupPolicy {
             return ManagerPostSetupGuidance(
                 readyToWork: false,
                 problemClass: fault.problemClass,
+                statusLine: fault.statusLine,
+                statusTone: .fault,
                 title: fault.title,
                 summary: fault.summary,
                 observed: observed,
                 gaps: gaps,
                 primaryActionID: fault.action,
                 primaryActionLabel: label(for: fault.action, appName: app),
-                primaryActionDetail: detail(for: fault.action),
+                primaryActionDetail: "",
+                hint: nil,
                 recoveryPath: fault.recoveryPath,
+                primaryHostID: primaryHostID,
                 destinationIsWork: true
             )
         }
@@ -115,67 +138,60 @@ enum ManagerPostSetupPolicy {
             return ManagerPostSetupGuidance(
                 readyToWork: false,
                 problemClass: .notConnected,
-                title: "Install finished — connect an Agent to start work",
+                statusLine: "Connect Agent to use",
+                statusTone: .action,
+                title: "Connect Agent to use",
                 summary: "Tools are on this Mac, but no Agent app is connected yet.",
                 observed: observed,
                 gaps: gaps,
                 primaryActionID: .connectAgent,
                 primaryActionLabel: label(for: .connectAgent, appName: nil),
-                primaryActionDetail: detail(for: .connectAgent),
+                primaryActionDetail: "",
+                hint: nil,
                 recoveryPath: "Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.",
+                primaryHostID: primaryHostID,
                 destinationIsWork: true
             )
         }
 
-        if agentToolsPaused || (installedToolCount > 0 && activeToolCount == 0) {
-            gaps.append("Resume or select tools for new tasks before starting work.")
+        if agentToolsPaused {
+            gaps.append("Resume tools for new tasks before starting work.")
             return ManagerPostSetupGuidance(
                 readyToWork: false,
-                problemClass: .toolFault,
-                title: "Tools are installed but not available for new tasks",
-                summary: agentToolsPaused
-                    ? "Ordinary tools are paused. Resume them, then open a new Agent task."
-                    : "No installed tool is selected for new tasks. Choose a working set, then open a new Agent task.",
+                problemClass: .toolsPaused,
+                statusLine: "Tools paused",
+                statusTone: .paused,
+                title: "Tools paused",
+                summary: "Ordinary tools are paused.",
+                observed: observed,
+                gaps: gaps,
+                primaryActionID: .resumeTools,
+                primaryActionLabel: label(for: .resumeTools, appName: app),
+                primaryActionDetail: "",
+                hint: nil,
+                recoveryPath: "Resume tools, then open a new Agent task.",
+                primaryHostID: primaryHostID,
+                destinationIsWork: true
+            )
+        }
+
+        if installedToolCount > 0 && activeToolCount == 0 {
+            gaps.append("Select tools for new tasks before starting work.")
+            return ManagerPostSetupGuidance(
+                readyToWork: false,
+                problemClass: .toolsPaused,
+                statusLine: "No tools selected",
+                statusTone: .action,
+                title: "No tools selected",
+                summary: "Choose a working set for new tasks.",
                 observed: observed,
                 gaps: gaps,
                 primaryActionID: .openTools,
-                primaryActionLabel: "Open Tools to enable a working set",
-                primaryActionDetail: "Working-set changes apply to new tasks only.",
-                recoveryPath: "In Tools, resume or select at least one installed tool, then open a new Agent task.",
-                destinationIsWork: true
-            )
-        }
-
-        if needsFreshTask {
-            gaps.append("A fresh Agent task is required after the latest tool or binding change.")
-            return ManagerPostSetupGuidance(
-                readyToWork: true,
-                problemClass: .staleSession,
-                title: "Ready — start work in a new Agent task",
-                summary: "Host prepared tools for new tasks. An already-open task is a stale session for this change.",
-                observed: observed,
-                gaps: gaps,
-                primaryActionID: .startNewAgentTask,
-                primaryActionLabel: label(for: .startNewAgentTask, appName: app),
-                primaryActionDetail: detail(for: .startNewAgentTask),
-                recoveryPath: "Close or ignore the old task. Open a new task in the connected Agent app and continue real work there.",
-                destinationIsWork: true
-            )
-        }
-
-        if agentAppsVerified == nil {
-            gaps.append("Bindings are configured; run Full Check when you want Host to verify them.")
-            return ManagerPostSetupGuidance(
-                readyToWork: true,
-                problemClass: .unverified,
-                title: justInstalled ? "Install complete — start work" : "Ready to start work",
-                summary: "Host installed and connected what it can see. Start a new Agent task — do not wait on a status checklist.",
-                observed: observed,
-                gaps: gaps,
-                primaryActionID: .startNewAgentTask,
-                primaryActionLabel: label(for: .startNewAgentTask, appName: app),
-                primaryActionDetail: detail(for: .startNewAgentTask),
-                recoveryPath: "If tools are missing in the new task, run Full Check. Class the problem as not connected, stale session, permission, or tool fault, then follow that recovery.",
+                primaryActionLabel: label(for: .openTools, appName: app),
+                primaryActionDetail: "",
+                hint: nil,
+                recoveryPath: "In Tools, select at least one installed tool, then open a new Agent task.",
+                primaryHostID: primaryHostID,
                 destinationIsWork: true
             )
         }
@@ -185,34 +201,44 @@ enum ManagerPostSetupPolicy {
             return ManagerPostSetupGuidance(
                 readyToWork: false,
                 problemClass: .toolFault,
-                title: "Connected Agent bindings need repair",
-                summary: "Host connected an Agent app, but Full Check did not verify current bindings.",
+                statusLine: "Bindings need repair",
+                statusTone: .fault,
+                title: "Bindings need repair",
+                summary: "Full Check did not verify current bindings.",
                 observed: observed,
                 gaps: gaps,
                 primaryActionID: .reviewRepair,
                 primaryActionLabel: label(for: .reviewRepair, appName: app),
-                primaryActionDetail: detail(for: .reviewRepair),
+                primaryActionDetail: "",
+                hint: nil,
                 recoveryPath: "Review Repair or Run Full Check, then open a new Agent task after bindings verify.",
+                primaryHostID: primaryHostID,
                 destinationIsWork: true
             )
         }
 
         return ManagerPostSetupGuidance(
             readyToWork: true,
-            problemClass: nil,
-            title: justInstalled ? "Install complete — start work" : "Ready to start work",
-            summary: "Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.",
+            problemClass: needsFreshTask
+                ? .staleSession
+                : (agentAppsVerified == nil ? .unverified : nil),
+            statusLine: "Ready",
+            statusTone: .ready,
+            title: "Ready",
+            summary: "Open the connected Agent app to start work.",
             observed: observed,
             gaps: gaps,
-            primaryActionID: .startNewAgentTask,
-            primaryActionLabel: label(for: .startNewAgentTask, appName: app),
-            primaryActionDetail: detail(for: .startNewAgentTask),
+            primaryActionID: .openApp,
+            primaryActionLabel: label(for: .openApp, appName: app),
+            primaryActionDetail: "",
+            hint: "Start a new task in the app",
             recoveryPath: "If the new task cannot see tools: decide whether it is not connected, a stale session, a permission issue, or a tool fault — then use Connect, a newer task, grant/repair, or Review Repair.",
+            primaryHostID: primaryHostID,
             destinationIsWork: true
         )
     }
 
-    private static func classifyFault(_ errors: [(id: String, message: String)]) -> (problemClass: ManagerPostSetupGuidance.ProblemClass, title: String, summary: String, action: ManagerPostSetupGuidance.PrimaryActionID, recoveryPath: String)? {
+    private static func classifyFault(_ errors: [(id: String, message: String)]) -> (problemClass: ManagerPostSetupGuidance.ProblemClass, title: String, statusLine: String, summary: String, action: ManagerPostSetupGuidance.PrimaryActionID, recoveryPath: String)? {
         guard let first = errors.first else { return nil }
         let permission = errors.first {
             $0.id.localizedCaseInsensitiveContains("permission")
@@ -222,7 +248,8 @@ enum ManagerPostSetupPolicy {
         if let permission {
             return (
                 .permission,
-                "Permission or workspace access is blocking work",
+                "Permission blocked",
+                shortReason(permission.message, fallback: "Permission blocked"),
                 permission.message,
                 .grantWorkspace,
                 "Fix the permission or grant the project folder, run Full Check, then open a new Agent task."
@@ -230,42 +257,34 @@ enum ManagerPostSetupPolicy {
         }
         return (
             .toolFault,
-            "A tool or local service needs repair before work",
+            "Needs repair",
+            shortReason(first.message, fallback: "Needs repair"),
             first.message,
             .reviewRepair,
             "Review Repair (or Run Full Check), fix the named fault, then open a new Agent task. Do not keep working in an old task."
         )
     }
 
-    private static func label(for action: ManagerPostSetupGuidance.PrimaryActionID, appName: String?) -> String {
-        switch action {
-        case .connectAgent: return "Connect an Agent app"
-        case .reviewRepair: return "Review Repair"
-        case .runFullCheck: return "Run Full Check"
-        case .openTools: return "Open Tools to enable a working set"
-        case .grantWorkspace: return "Fix permission / grant workspace"
-        case .startNewAgentTask:
-            if let appName, !appName.isEmpty {
-                return "Open a new \(appName) task to start work"
-            }
-            return "Open a new Agent task to start work"
-        }
+    private static func shortReason(_ message: String, fallback: String) -> String {
+        let one = message.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if one.isEmpty { return fallback }
+        if one.count > 72 { return String(one.prefix(69)) + "…" }
+        return one
     }
 
-    private static func detail(for action: ManagerPostSetupGuidance.PrimaryActionID) -> String {
+    private static func label(for action: ManagerPostSetupGuidance.PrimaryActionID, appName: String?) -> String {
         switch action {
-        case .connectAgent:
-            return "Open Agents, connect one supported app, then start a new task there."
-        case .reviewRepair:
-            return "Repair restores Host-observed faults. It does not invent success for things Host cannot see."
-        case .runFullCheck:
-            return "Confirm current bindings and tool readiness before starting work."
-        case .openTools:
-            return "Working-set changes apply to new tasks only."
-        case .grantWorkspace:
-            return "Grant the project folder the tool needs, then open a new Agent task."
-        case .startNewAgentTask:
-            return "Already-open tasks keep the tools they started with. A new task is the path into real work."
+        case .connectAgent: return "Connect"
+        case .reviewRepair: return "Repair"
+        case .runFullCheck: return "Check"
+        case .openTools: return "Tools"
+        case .resumeTools: return "Resume"
+        case .grantWorkspace: return "Fix access"
+        case .openApp, .startNewAgentTask:
+            if let appName, !appName.isEmpty {
+                return "Open \(appName)"
+            }
+            return "Open Agent"
         }
     }
 }

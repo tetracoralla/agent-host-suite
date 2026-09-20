@@ -104,7 +104,9 @@ struct NoticeView: View {
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 3) {
                 Text(L10n.text(title)).font(.headline)
-                Text(L10n.text(message)).foregroundStyle(.secondary)
+                if !message.isEmpty {
+                    Text(L10n.text(message)).foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
