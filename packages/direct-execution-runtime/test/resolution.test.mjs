@@ -104,16 +104,27 @@ test('resolver applies exact contract and schema-budget constraints mechanically
 })
 
 test('live MCP contract digest can distinguish two providers without invoking the target tool', async () => {
-  const config = fakeMcpConfig({ limits: { defaultTimeoutMs: 10000 } })
+  // Two sequential MCP cold starts share one resolveBindings deadline. Each
+  // Windows start copies node.exe into a private launch snapshot; the library
+  // 10s default is enough on Unix but flakes on GitHub Windows runners.
+  const config = fakeMcpConfig()
   config.providers.push(fakeMcpConfig({
     providerId: 'test.fake-mcp-narrow',
     args: ['--narrow-schema'],
-    limits: { defaultTimeoutMs: 10000 },
   }).providers[0])
   const target = { kind: 'mcp-tool', toolName: 'echo' }
   await withRuntime(config, async (runtime) => {
     const initial = await runtime.resolveBindings(requirement(target))
-    assert.equal(initial.summary.eligible, 2)
+    assert.equal(
+      initial.summary.eligible,
+      2,
+      JSON.stringify(initial.candidates.map((candidate) => ({
+        id: candidate.provider.id,
+        status: candidate.status,
+        digest: candidate.observation.contractDigest,
+        error: candidate.observation.error,
+      }))),
+    )
     assert.equal(initial.candidates.every((candidate) => candidate.checks.projectionEnvelopeMatch === 'not_applicable'), true)
     assert.notEqual(
       initial.candidates[0].observation.contractDigest,
