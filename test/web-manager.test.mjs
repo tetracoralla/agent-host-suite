@@ -397,3 +397,18 @@ test('browser Overview success handoff points into starting work', async () => {
   assert.match(page, /guidance: buildDashboardGuidance/u)
 })
 
+
+
+test('embedded Manager browser scripts parse without SyntaxError', async () => {
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/gu)].map((match) => match[1])
+  assert.ok(scripts.length >= 1, 'expected at least one embedded <script> in managerDocument')
+  for (const [index, source] of scripts.entries()) {
+    try {
+      // Parse only: constructing Function validates syntax without executing browser DOM code.
+      new Function(source)
+    } catch (error) {
+      assert.fail(`embedded <script> #${index + 1} failed to parse: ${error.message}`)
+    }
+  }
+})

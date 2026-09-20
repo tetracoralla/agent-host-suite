@@ -152,7 +152,7 @@ function buildDashboardGuidance(snapshot, tools, hosts) {
     activeToolCount,
     agentToolsPaused: tools?.paused === true,
     needsFreshTask: false,
-    agentAppsVerified: connectedHosts.length === 0 ? null : null,
+    agentAppsVerified: null,
     justInstalled: false,
     primaryHostName: connectedHosts[0] ? (hostNames[connectedHosts[0]] || connectedHosts[0]) : null,
     doctorBlockingErrors: [],
@@ -701,37 +701,6 @@ function renderEnvironment(s,u){
   const versions=card('Versions');
   versions.append(row(t('Application'),(app.version||'—')+(app.build?' ('+app.build+')':'')));
   versions.append(row(t('Environment release'),(env.suiteVersion||s.environment?.suiteVersion||'—')+(env.profile?' · '+env.profile:'')));
-  versions.append(row(t('Catalog source'), loc.unpublished?t('Catalog assets are unpublished.'):(loc.url||loc.path||t('Catalog source'))));
-  if(loc.lastCheck)versions.append(row(t('Last check'),loc.lastCheck.status+(loc.lastCheck.code?' · '+loc.lastCheck.code:'')));
-  root.append(versions);
-  const details=card('Health details');
-  const grid=el('div',undefined,'grid');
-  for(const[value,label]of[[(s.environment.availableAgentComponents||[]).length,'Installed tools'],[Object.keys(s.environment.hosts).length,'Connected Agent apps'],[s.storage?.allocatedBytes,'Allocated bytes'],[u.enabled?t('On'):t('Off'),'Local monitoring']]){
-    const c=card(label);c.append(el('div',number(value),'metric'));grid.append(c)
-  }
-  details.append(grid);
-  root.append(details);
-  const hc=card('Agent apps');
-  for(const h of data.hosts){
-    const connected=Boolean(s.environment.hosts[h.host]);
-    const r=row(names[h.host],t(h.appInstalled===false?'Not installed':connected?'Connected':'Available'));
-    r.append(button(connected?'Disconnect':'Connect',()=>call({action:'host',host:h.host,connected:!connected},t(connected?'Disconnecting…':'Connecting…'))));
-    hc.append(r)
-  }
-  root.append(hc);
-  const ops=card('Tool environment actions');
-  const a=el('div',undefined,'actions');
-  a.append(
-    button('Update tools',()=>call({action:'update'},t('Updating tools…'))),
-    button('Restore previous tools',()=>call({action:'rollback'},t('Restoring tools…'))),
-    button('Clean old packages',()=>call({action:'cleanup'},t('Cleaning storage…'))),
-    button('Disconnect, keep data',()=>call({action:'uninstall',purgeData:false},t('Disconnecting tools…')),'action danger'),
-    button('Disconnect, remove Host data',()=>{if(confirm(t('Disconnect tools and remove Agent Host private Suite data? Observer history remains separately owned.')))call({action:'uninstall',purgeData:true},t('Disconnecting tools…'))},'action danger')
-  );
-  ops.append(a,el('p',t('On Windows, application restore and uninstall are also available in the openAdam Start menu folder.'),'muted'));
-  root.append(ops)
-}
-nv.suiteVersion||s.environment?.suiteVersion||'—')+(env.profile?' · '+env.profile:'')));
   versions.append(row(t('Catalog source'), loc.unpublished?t('Catalog assets are unpublished.'):(loc.url||loc.path||t('Catalog source'))));
   if(loc.lastCheck)versions.append(row(t('Last check'),loc.lastCheck.status+(loc.lastCheck.code?' · '+loc.lastCheck.code:'')));
   root.append(versions);
