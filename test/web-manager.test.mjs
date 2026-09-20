@@ -401,7 +401,8 @@ test('browser Overview success handoff points into starting work', async () => {
 
 test('embedded Manager browser scripts parse without SyntaxError', async () => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
-  const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/gu)].map((match) => match[1])
+  // 大小写不敏感：CodeQL js/bad-tag-filter 要求 script 标签匹配覆盖 <SCRIPT> 等变体。
+  const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/gui)].map((match) => match[1])
   assert.ok(scripts.length >= 1, 'expected at least one embedded <script> in managerDocument')
   for (const [index, source] of scripts.entries()) {
     try {
