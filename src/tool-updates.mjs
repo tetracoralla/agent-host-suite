@@ -94,7 +94,12 @@ async function cleanupUnadoptedPackage(prepared, preparedPaths = null) {
       },
     )
   } catch (error) {
-    if (error instanceof AgentHostError && error.code === 'LIFECYCLE_BUSY') return
+    // Contended commit or recovery election: keep reclaimable packages. Deleting
+    // here would race another install mid-commit before its state refs exist.
+    if (
+      error instanceof AgentHostError
+      && (error.code === 'LIFECYCLE_BUSY' || error.code === 'LIFECYCLE_RECOVERY_BUSY')
+    ) return
     throw error
   }
 }

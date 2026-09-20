@@ -850,21 +850,37 @@ test('R2 / F3 cleanup retains package while another install is mid-commit before
     probe: false,
   }, { ...dependencies, saveState: gatedSave })
 
-  for (let i = 0; i < 200 && !saveReached; i += 1) await new Promise((r) => setTimeout(r, 20))
-  assert.equal(saveReached, true)
+  try {
+    // Wait until B hits gated saveState, or until B fails before that. Windows
+    // cold extract + ACL + lifecycle acquire often exceeds the old 4s poll.
+    const saveWaitMs = process.platform === 'win32' ? 30_000 : 10_000
+    const deadline = Date.now() + saveWaitMs
+    let pendingError = null
+    pendingB.catch((error) => { pendingError = error })
+    while (!saveReached && pendingError === null && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    if (pendingError !== null) throw pendingError
+    assert.equal(saveReached, true)
 
-  // A tries to commit while B holds the lifecycle lock mid-commit.
-  await assert.rejects(
-    () => installGitHubTool({ ...common, probe: false }, dependencies),
-    (error) => error.code === 'LIFECYCLE_BUSY',
-  )
+    // A tries to commit while B holds the lifecycle lock mid-commit. A's
+    // unadopted-package cleanup must retain bytes while the lock is busy.
+    await assert.rejects(
+      () => installGitHubTool({ ...common, probe: false }, dependencies),
+      (error) => error.code === 'LIFECYCLE_BUSY',
+    )
 
-  releaseSave()
-  const installedB = await pendingB
-  assert.equal(installedB.status, 'ok')
-  const packageRoot = (await loadState(paths)).components['review-race'].root
-  assert.equal(typeof packageRoot, 'string')
-  assert.equal(await stat(packageRoot).then(() => true, () => false), true)
+    releaseSave()
+    const installedB = await pendingB
+    assert.equal(installedB.status, 'ok')
+    const packageRoot = (await loadState(paths)).components['review-race'].root
+    assert.equal(typeof packageRoot, 'string')
+    assert.equal(await stat(packageRoot).then(() => true, () => false), true)
+  } finally {
+    // Always unblock + settle B so teardown cannot orphan the lifecycle lease.
+    releaseSave()
+    await pendingB.catch(() => {})
+  }
 })
 
 test('R5 / F11 loadGitHubToolCatalog(catalogPath) ignores live published catalog', async (t) => {
