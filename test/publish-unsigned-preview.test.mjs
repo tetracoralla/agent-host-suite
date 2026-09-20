@@ -72,7 +72,7 @@ test('prepare/publish dry-run print non-prerelease --latest and only the closed 
   const sums = await readFile(join(output, 'SHA256SUMS'), 'utf8')
   assert.doesNotMatch(sums, /old-local-debug\.log/u)
   assert.doesNotMatch(sums, /RELEASE_NOTES\.md/u)
-  assert.match(sums, new RegExp(dmgName.replace(/\./g, '\\.'), 'u'))
+  assert.ok(sums.includes(dmgName), `expected SHA256SUMS to include ${dmgName}`)
   assert.match(sums, /preview-distribution\.json/u)
 
   const manifest = JSON.parse(await readFile(join(output, ASSET_MANIFEST_NAME), 'utf8'))
@@ -92,7 +92,7 @@ test('prepare/publish dry-run print non-prerelease --latest and only the closed 
   assert.ok(ghLine, 'expected gh release create line')
   assert.doesNotMatch(ghLine, /old-local-debug\.log/u)
   assert.match(ghLine, /preview-distribution\.json/u)
-  assert.match(published.stdout, new RegExp(dmgName.replace(/\./g, '\\.'), 'u'))
+  assert.ok(published.stdout.includes(dmgName), `expected publish stdout to include ${dmgName}`)
   assert.match(published.stdout, /SHA256SUMS/u)
 
   // Discovery contract: the argv shape we emit is one GitHub would expose on
