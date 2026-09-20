@@ -24,6 +24,13 @@ changing Host source; see [GitHub updates](docs/UPDATES.md).
 running application. A Host working-set selection is not proof that an open
 Agent session loaded those tools.
 
+## Download today (non-developers)
+
+Public entry: **[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)**.
+
+- When an owner has published an unsigned preview, download `Agent-Host-*-darwin-arm64.dmg` (first deep path), verify `SHA256SUMS`, then Control-click → Open. **Not notarized. Not a marketplace.**
+- When Releases has no installer assets, Host says public download is not configured. See [Unsigned preview download](docs/UNSIGNED_PREVIEW.md).
+
 ## Scope
 
 - Capability contracts define stable typed operation meaning.

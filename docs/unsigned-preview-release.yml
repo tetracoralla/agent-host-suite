@@ -13,6 +13,10 @@
 # Do not reuse another OS archive and relabel it. This file remains a docs draft —
 # not a live .github/workflows job until copied with workflow scope. Gatekeeper
 # (Control-click → Open) remains required.
+# Draft only (docs/). Live owner publish path while GitHub workflow scope is unavailable:
+#   node scripts/publish-unsigned-preview.mjs prepare|publish
+# Copy to .github/workflows/unsigned-preview-release.yml only with workflow scope;
+# do not claim that Actions path is live while the file is absent from .github/workflows/.
 
 name: Unsigned preview release
 

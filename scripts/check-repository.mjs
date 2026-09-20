@@ -10,7 +10,7 @@ const required = [
   'windows/Install Agent Host.cmd', 'windows/Install-AgentHost.ps1', 'windows/Uninstall-AgentHost.ps1', 'scripts/package-windows.mjs',
   'docs/PRODUCT_MODEL.md', 'docs/ARCHITECTURE.md', 'docs/TERMINOLOGY.md', 'docs/TOOL_INTEGRATION.md', 'docs/BRAND.md', 'docs/RELEASE.md', 'docs/REVIEW_CONTRACT.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md',
   'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md', 'docs/ADOPTION_ACCEPTANCE.md', 'docs/UNSIGNED_PREVIEW.md', 'docs/UPDATES.md',
-  'docs/unsigned-preview-release.yml', 'docs/scan-github-tools.yml', 'scripts/write-preview-distribution.mjs', 'scripts/admit-github-plugin.mjs', 'scripts/sync-github-catalog.mjs', 'scripts/verify-application-update.mjs', 'scripts/build-unsigned-preview-catalog.mjs',
+  'docs/unsigned-preview-release.yml', 'docs/scan-github-tools.yml', 'scripts/write-preview-distribution.mjs', 'scripts/publish-unsigned-preview.mjs', 'scripts/admit-github-plugin.mjs', 'scripts/sync-github-catalog.mjs', 'scripts/verify-application-update.mjs', 'scripts/build-unsigned-preview-catalog.mjs',
   'catalog/github-tools.json', 'catalog/github-releases/current.json', 'catalog/unsigned-preview-source-pins.json',
   'schemas/agent-host-github-tools.schema.v0.1.json', 'schemas/agent-host-github-catalog.schema.v0.1.json', 'schemas/agent-host-component.schema.v0.2.json',
   'schemas/agent-host-preview-distribution.schema.v0.1.json', 'catalog/preview-distribution.json',
@@ -106,6 +106,10 @@ if (!featuredDoc.includes('experimental variable')) {
   throw new Error('featured catalog document must treat recipe consistency as an experimental variable')
 }
 const previewDoc = await readFile(join(root, 'docs/UNSIGNED_PREVIEW.md'), 'utf8')
+
+if (!previewDoc.includes('publish-unsigned-preview.mjs') || !previewDoc.includes('Where a non-developer downloads today')) {
+  throw new Error('unsigned preview document must name the owner publish script and the non-developer download entry')
+}
 if (!previewDoc.includes('Control-click') || !previewDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !previewDoc.includes('preview-distribution.json')) {
   throw new Error('unsigned preview document must name Gatekeeper, the catalog URL hook, and the index asset')
 }

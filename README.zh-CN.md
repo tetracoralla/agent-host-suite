@@ -18,6 +18,13 @@ GitHub 项目/Release，不必改 Host 源码；见 [GitHub 更新](docs/UPDATES
 `profiles fetch --carrier` 只下载安装包，不会替换正在运行的应用。Host 工作集里的「已选中」不能证明正在
 打开的 Agent 会话已经载入这些工具。
 
+## 今天如何下载（非开发者）
+
+公开入口：**[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)**。
+
+- 所有者已发布未公证预览时：下载 `Agent-Host-*-darwin-arm64.dmg`（首条深度路径），核对 `SHA256SUMS`，再按住 Control 点击 → 打开。**无公证。不是应用市场。**
+- Releases 尚无安装包资产时：Host 会明确说「尚未配置公开下载」。见 [未公证预览下载](docs/UNSIGNED_PREVIEW.md)。
+
 ## 范围与事实来源
 
 - Capability contract 定义稳定的类型化操作语义；Procedure contract 定义已经稳定的多阶段

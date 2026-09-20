@@ -12,6 +12,7 @@ import {
   GITHUB_RELEASES_URL,
   fetchBoundCatalog,
   normalizePreviewDownloadUrl,
+  probePublicPreviewIndex,
   validatePreviewDistribution,
 } from './preview-download.mjs'
 import { RELEASE_SCHEMA } from './release-manifest.mjs'
@@ -241,15 +242,16 @@ export async function inspectSourceStatus(options = {}, dependencies = {}) {
   const kind = resolvedKind(saved, env)
   const url = saved.kind === 'https' ? saved.url : (kind === 'env-url' ? envUrl(env) : null)
   const path = saved.kind === 'local' ? saved.path : (kind === 'env-manifest' ? envManifest(env) : null)
-  const unpublished = kind === 'unset'
   const lastCheck = saved.lastCheck
+  const publicReleasePublished = lastCheck?.publicReleasePublished === true
+  const unpublished = kind === 'unset' && !publicReleasePublished
   const recovery = catalogFetchRecovery(lastCheck?.code ?? (unpublished ? 'PREVIEW_DOWNLOAD_UNPUBLISHED' : null), { lastCatalogPath })
   return {
     schemaVersion: SOURCE_STATUS_SCHEMA,
     status: lastCheck?.status ?? (unpublished ? 'unpublished' : 'ok'),
     notarized: false,
     marketplace: false,
-    publicReleasePublished: false,
+    publicReleasePublished,
     application: await inspectApplicationBuild(dependencies),
     environment: state === null
       ? { configured: false, suiteVersion: null, releaseId: null, channel: null, profile: null, updatedAt: null }
@@ -273,7 +275,9 @@ export async function inspectSourceStatus(options = {}, dependencies = {}) {
       lastDownloadedCatalog: lastCatalogPath,
       lastCheck,
       unpublished,
-      message: unpublished ? UNPUBLISHED_ASSETS_NOTE : (lastCheck?.message ?? 'A catalog source is configured.'),
+      message: publicReleasePublished
+        ? (lastCheck?.message ?? 'Public unsigned preview assets are published on GitHub Releases. Not notarized. Not a store.')
+        : (unpublished ? UNPUBLISHED_ASSETS_NOTE : (lastCheck?.message ?? 'A catalog source is configured.')),
       recovery,
     },
     assessmentBoundary: 'This report names application build, environment release, and tool versions. It does not publish a GitHub Release or claim Apple notarization.',
@@ -332,7 +336,16 @@ async function inspectTrackedUnpublished() {
   }
 }
 
-function lastCheckRecord({ status, code, message, recovery, sourceUrl = null, sourcePath = null }) {
+function lastCheckRecord({
+  status,
+  code,
+  message,
+  recovery,
+  sourceUrl = null,
+  sourcePath = null,
+  publicReleasePublished = false,
+  carriers = null,
+}) {
   return {
     at: new Date().toISOString(),
     status,
@@ -340,6 +353,8 @@ function lastCheckRecord({ status, code, message, recovery, sourceUrl = null, so
     message,
     sourceUrl,
     sourcePath,
+    publicReleasePublished: publicReleasePublished === true,
+    carriers: Array.isArray(carriers) ? carriers : null,
     recovery,
   }
 }
@@ -373,14 +388,38 @@ export async function checkCatalogSource(options = {}, dependencies = {}) {
   let record
   try {
     if (candidate === '') {
-      const unpublished = await inspectTrackedUnpublished()
-      record = lastCheckRecord({
-        status: 'unpublished',
-        code: 'PREVIEW_DOWNLOAD_UNPUBLISHED',
-        message: UNPUBLISHED_ASSETS_NOTE,
-        recovery: catalogFetchRecovery('PREVIEW_DOWNLOAD_UNPUBLISHED', { lastCatalogPath }),
-        sourcePath: unpublished.path,
+      const probed = await probePublicPreviewIndex({
+        downloads: paths.downloads,
+        fetch: dependencies.fetch,
+        signal: dependencies.signal,
       })
+      if (probed.found === true) {
+        const carrierSummary = probed.index.carriers
+          .map((item) => item.platform + ' ' + item.filename)
+          .join(', ')
+        record = lastCheckRecord({
+          status: 'ok',
+          code: null,
+          message:
+            'Public unsigned preview assets are published on GitHub Releases ('
+            + carrierSummary
+            + '). Not Apple-notarized. Not a store. Download the macOS arm64 DMG from the Releases page, or set AGENT_HOST_FEATURED_CATALOG_URL to the convention index.',
+          recovery: catalogFetchRecovery(null, { lastCatalogPath }),
+          sourceUrl: probed.url,
+          publicReleasePublished: true,
+          carriers: probed.index.carriers,
+        })
+      } else {
+        const unpublished = await inspectTrackedUnpublished()
+        record = lastCheckRecord({
+          status: 'unpublished',
+          code: 'PREVIEW_DOWNLOAD_UNPUBLISHED',
+          message: UNPUBLISHED_ASSETS_NOTE,
+          recovery: catalogFetchRecovery('PREVIEW_DOWNLOAD_UNPUBLISHED', { lastCatalogPath }),
+          sourcePath: unpublished.path,
+          publicReleasePublished: false,
+        })
+      }
     } else if (/^https:\/\//iu.test(candidate)) {
       const url = normalizePreviewDownloadUrl(candidate)
       const fetched = await fetchBoundCatalog(url, {

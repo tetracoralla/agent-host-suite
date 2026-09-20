@@ -9,6 +9,15 @@ After an owner publishes a tag, the assets go on that Release (or on a
 self-hosted HTTPS index). Until then, Host says **public download is not
 configured** rather than pretending there is a store.
 
+## Where a non-developer downloads today
+
+1. Open **[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)**.
+2. If a prerelease lists `Agent-Host-*-darwin-arm64.dmg` (and `SHA256SUMS` / `preview-distribution.json`), download those assets.
+3. Compare the DMG to `SHA256SUMS`, then follow **Open an unsigned macOS DMG** below (Control-click → Open). This path is **not** notarized and **not** a marketplace.
+4. If the Releases page has **no** installer assets yet, public download is not configured — Host reports that honestly. There is no App Store / Homebrew cask stand-in in this slice.
+
+Owner publish (macOS arm64 first) uses `scripts/publish-unsigned-preview.mjs` after packaging a DMG on a Mac; see **Owner checklist** below. The Actions draft `docs/unsigned-preview-release.yml` stays under `docs/` until a token with GitHub `workflow` scope can push `.github/workflows/`.
+
 ## Where to download
 
 1. **GitHub Releases** (recommended once an owner publishes a tag):
@@ -117,6 +126,27 @@ URL to `preview-distribution.json` / `current.json`.
 
 ## Owner checklist: publish a GitHub Release
 
+Preferred owner path (no notarization; works without `workflow` scope):
+
+```text
+# On a Mac with a built unsigned DMG (for example after npm run package:internal-beta):
+node scripts/publish-unsigned-preview.mjs prepare \
+  --tag vX.Y.Z-unsigned.1 \
+  --output .build/unsigned-preview \
+  --dmg /absolute/Agent-Host-X.Y.Z-darwin-arm64.dmg \
+  --catalog /absolute/release-catalog/current.json   # optional but preferred
+node scripts/publish-unsigned-preview.mjs publish \
+  --tag vX.Y.Z-unsigned.1 \
+  --assets .build/unsigned-preview
+# Use --dry-run on publish to print the gh release create command only.
+```
+
+After assets exist, `agent-host source check` probes the Releases `latest` convention URL and flips off **public download is not configured** when carriers are published. Tracked `catalog/preview-distribution.json` remains the unpublished placeholder in git.
+
+Manual equivalent still works:
+
+
+
 Build on a machine that already has a **bound** catalog (not
 `catalog/releases/draft-unbound`). This repository does not invent Apple
 certificates.
@@ -151,6 +181,10 @@ so `github.com/.../releases/download/...` may land on
 `objects.githubusercontent.com`; SHA-256 still binds the bytes.
 
 ## Unsigned preview workflow
+
+Until GitHub `workflow` scope is available, the **live** owner publish path is `scripts/publish-unsigned-preview.mjs` (prepare + `gh release create`). Do not claim `.github/workflows/unsigned-preview-release.yml` is enabled while that file is absent.
+
+
 
 The required unsigned pipeline draft is
 [`unsigned-preview-release.yml`](unsigned-preview-release.yml). It remains under

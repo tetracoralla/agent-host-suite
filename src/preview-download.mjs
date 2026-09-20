@@ -115,9 +115,47 @@ export function featuredCatalogDownload(env = process.env) {
     windowsSmartScreenNote: WINDOWS_SMARTSCREEN_NOTE,
     message: configured
       ? 'Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.'
-      : PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE,
+      : `${PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE} Non-developers: open ${GITHUB_RELEASES_URL} once an owner publishes an unsigned macOS arm64 DMG (not notarized, not a store). Host also probes ${GITHUB_PREVIEW_INDEX_CONVENTION} on source check.`,
   }
 }
+
+
+/**
+ * Probe the public GitHub Releases convention URL for a published
+ * preview-distribution.json. Returns null when the asset is absent (404) or
+ * still the unpublished placeholder. Does not require AGENT_HOST_FEATURED_CATALOG_URL.
+ */
+export async function probePublicPreviewIndex(options = {}) {
+  const downloads = options.downloads
+  if (typeof downloads !== 'string' || downloads.length === 0) {
+    fail('PREVIEW_DOWNLOAD_FAILED', 'A private downloads directory is required to probe the public preview index')
+  }
+  try {
+    const document = await fetchPreviewDocument(GITHUB_PREVIEW_INDEX_CONVENTION, downloads, options)
+    if (!looksLikePreviewIndex(document.value)) {
+      return { found: false, reason: 'invalid', url: GITHUB_PREVIEW_INDEX_CONVENTION, index: null }
+    }
+    const index = validatePreviewDistribution(document.value)
+    if (index.status === 'unpublished' || index.publicReleasePublished !== true) {
+      return { found: false, reason: 'unpublished', url: document.url, index }
+    }
+    if (index.catalog === null && index.carriers.length === 0) {
+      return { found: false, reason: 'empty', url: document.url, index }
+    }
+    return { found: true, reason: 'published', url: document.url, index }
+  } catch (error) {
+    if (error instanceof AgentHostError) {
+      if (error.code === 'PREVIEW_DOWNLOAD_FAILED' && error.details?.status === 404) {
+        return { found: false, reason: 'missing', url: GITHUB_PREVIEW_INDEX_CONVENTION, index: null }
+      }
+      if (error.code === 'PREVIEW_DOWNLOAD_NOT_CONFIGURED' || error.code === 'PREVIEW_DOWNLOAD_INVALID') {
+        return { found: false, reason: 'invalid', url: GITHUB_PREVIEW_INDEX_CONVENTION, index: null, error }
+      }
+    }
+    throw error
+  }
+}
+
 
 function validateCarrier(carrier) {
   exactObject(carrier, ['platform', 'kind', 'filename', 'url', 'sha256', 'bytes'], 'preview carrier')
@@ -290,6 +328,9 @@ export async function fetchBoundCatalog(url, options = {}) {
   if (looksLikePreviewIndex(document.value)) {
     const index = validatePreviewDistribution(document.value)
     if (index.catalog === null) {
+      if (options.allowMissingCatalog === true && index.publicReleasePublished === true && index.carriers.length > 0) {
+        return { sourceUrl: document.url, index, manifestPath: null, provenancePath: null, manifest: null }
+      }
       fail(
         'PREVIEW_DOWNLOAD_NOT_CONFIGURED',
         'The preview index has no bound catalog yet. GitHub Release assets have not been published. This is not an app store.',
@@ -379,14 +420,30 @@ export async function resolveReleaseManifestPath(options = {}, dependencies = {}
 
 export async function fetchPreviewRelease(options = {}, dependencies = {}) {
   const env = dependencies.env ?? process.env
-  const requested = trimEnv(options.url) || trimEnv(env[FEATURED_CATALOG_DOWNLOAD_ENV])
-  if (requested === '') fail('PREVIEW_DOWNLOAD_NOT_CONFIGURED', PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE)
+  const explicit = trimEnv(options.url) || trimEnv(env[FEATURED_CATALOG_DOWNLOAD_ENV])
+  const requested = explicit || GITHUB_PREVIEW_INDEX_CONVENTION
+  if (explicit === '') {
+    // Fall through to the public convention URL; fetchBoundCatalog still fails closed when unpublished/missing.
+  }
   const downloads = dependencies.paths?.downloads
-  const fetched = await fetchBoundCatalog(requested, {
-    downloads,
-    fetch: dependencies.fetch,
-    signal: dependencies.signal,
-  })
+  let fetched
+  try {
+    fetched = await fetchBoundCatalog(requested, {
+      downloads,
+      fetch: dependencies.fetch,
+      signal: dependencies.signal,
+      allowMissingCatalog: options.carrier === true,
+    })
+  } catch (error) {
+    if (
+      explicit === ''
+      && error instanceof AgentHostError
+      && (error.code === 'PREVIEW_DOWNLOAD_FAILED' || error.code === 'PREVIEW_DOWNLOAD_NOT_CONFIGURED')
+    ) {
+      fail('PREVIEW_DOWNLOAD_NOT_CONFIGURED', PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE, { cause: error.code })
+    }
+    throw error
+  }
   let carrier = null
   if (options.carrier === true) {
     if (fetched.index === null) {
