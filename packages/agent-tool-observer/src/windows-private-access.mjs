@@ -66,7 +66,7 @@ function invocation(requests) {
   return [['-NoProfile', '-NonInteractive', '-EncodedCommand',
     Buffer.from(windowsScript, 'utf16le').toString('base64')], {
     env: { ...process.env, OPENADAM_PRIVATE_REQUESTS: JSON.stringify(requests) },
-    encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 16384,
+    encoding: 'utf8', windowsHide: true, timeout: 15000, maxBuffer: 16384,
   }]
 }
 function decode(text, count) {
@@ -90,10 +90,11 @@ export function windowsAccessListsSync(requests) {
 }
 
 async function executeAccessLists(args, options) {
-  // Retry a timed-out native helper once (at most 20s total), with exactly
-  // the same request and a fresh result instead of a cached security decision.
-  // Inspection remains read-only and ensuring an ACL is idempotent. Denied
-  // access, unsafe results and malformed output are never retry conditions.
+  // Retry a timed-out native helper once (at most 30s total), matching the
+  // Windows cold-start / packaged first-call allowance. Same request, fresh
+  // result — never a cached security decision. Inspection stays read-only and
+  // ensuring an ACL is idempotent. Denied access, unsafe results, and
+  // malformed output are never retry conditions.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try { return await execFileAsync('powershell.exe', args, options) } catch (error) {
       if (attempt !== 0 || !helperTimedOut(error)) throw error
