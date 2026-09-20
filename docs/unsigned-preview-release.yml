@@ -235,4 +235,4 @@ jobs:
             exit 1
           fi
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \
-            --prerelease --verify-tag --title "Agent Host unsigned preview" --notes "$notes"
+            --latest --verify-tag --title "Agent Host unsigned preview" --notes "$notes"
