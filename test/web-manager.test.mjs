@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
 import test from 'node:test'
@@ -876,12 +876,13 @@ test('workspace action grants an accessible project folder', async (t) => {
   })
   assert.equal(granted.status, 200)
   const body = await granted.json()
+  const grantedFolder = await realpath(folder)
   assert.equal(body.result.status, 'workspace-granted')
-  assert.equal(body.result.workspaceRoot, folder)
+  assert.equal(body.result.workspaceRoot, grantedFolder)
   assert.match(body.result.nextStep, /new Agent task/u)
   const paths = await prepareStatePaths(stateRoot)
   const state = await loadState(paths)
-  assert.equal(state.workspaceRoot, folder)
+  assert.equal(state.workspaceRoot, grantedFolder)
   await new Promise((resolve) => server.close(resolve))
   await running
 })
