@@ -529,27 +529,47 @@ test('host client accepts a service that responds before any client EOF (install
 })
 
 test('host service answers a client that keeps its write side open', async () => {
+  // Settle on the first complete response line (same framing as host-client): the
+  // product guarantee is that a newline-terminated request is answered without
+  // waiting for client EOF. Waiting only for socket `end` is flaky on win32 named
+  // pipes when the client deliberately keeps its write side open. Timeout margin
+  // matches persistentPreparationTimeoutMs (30s cold-start allowance on Windows).
+  const answerTimeoutMs = persistentPreparationTimeoutMs
   await withService(async ({ socketPath }) => {
     const response = await new Promise((resolvePromise, reject) => {
-      const chunks = []
+      let buffer = Buffer.alloc(0)
+      let settled = false
       const socket = connect({ path: socketPath })
-      const timer = setTimeout(() => {
+      const finish = (method, value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
         socket.destroy()
-        reject(new Error('service never answered a client that did not half-close'))
-      }, 5_000)
+        method(value)
+      }
+      const timer = setTimeout(() => {
+        finish(reject, new Error('service never answered a client that did not half-close'))
+      }, answerTimeoutMs)
       socket.once('connect', () => {
+        // Deliberately keep the write side open after the request line.
         socket.write(`{"schemaVersion":"${HOST_REQUEST_VERSION}","id":"no-half-close","action":"inspect"}\n`)
       })
-      socket.on('data', (chunk) => chunks.push(chunk))
+      socket.on('data', (chunk) => {
+        if (settled) return
+        buffer = Buffer.concat([buffer, chunk])
+        const newline = buffer.indexOf(0x0a)
+        if (newline === -1) return
+        try {
+          finish(resolvePromise, JSON.parse(buffer.subarray(0, newline).toString('utf8')))
+        } catch (error) {
+          finish(reject, error)
+        }
+      })
       socket.once('end', () => {
-        clearTimeout(timer)
-        socket.destroy()
-        resolvePromise(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+        if (settled) return
+        finish(reject, new Error('service never answered a client that did not half-close'))
       })
-      socket.once('error', (error) => {
-        clearTimeout(timer)
-        reject(error)
-      })
+      socket.once('error', (error) => finish(reject, error))
     })
     assert.equal(response.id, 'no-half-close')
     assert.equal(response.status, 'ok')
