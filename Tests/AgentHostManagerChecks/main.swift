@@ -632,6 +632,57 @@ do {
         "unmapped doctor errors must appear as an unhealthy environment-check facet"
     )
 
+
+    let readyGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["Codex"],
+        installedToolCount: 3,
+        activeToolCount: 3,
+        agentToolsPaused: false,
+        needsFreshTask: true,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [],
+        justInstalled: true,
+        primaryHostName: "Codex"
+    )
+    expect(readyGuidance.readyToWork, "post-setup ready guidance must allow starting work")
+    expect(readyGuidance.destinationIsWork, "post-setup destination must be work, not a checklist")
+    expect(readyGuidance.problemClass == .staleSession, "fresh-task requirement is a stale-session class")
+    expect(readyGuidance.primaryActionID == .startNewAgentTask, "primary CTA must open a new Agent task")
+    expect(readyGuidance.primaryActionLabel.contains("Codex"), "primary CTA should name the connected app when known")
+    expect(readyGuidance.gaps.contains(where: { $0.contains("already-open Agent task") }), "Host must not pretend open tasks loaded tools")
+
+    let disconnectedGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: [],
+        installedToolCount: 3,
+        activeToolCount: 3,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: nil,
+        doctorBlockingErrors: [],
+        justInstalled: true,
+        primaryHostName: nil
+    )
+    expect(disconnectedGuidance.problemClass == .notConnected, "missing Agent connection must be classified")
+    expect(disconnectedGuidance.primaryActionID == .connectAgent, "missing connection CTA must connect an Agent")
+
+    let faultGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["ZCode"],
+        installedToolCount: 2,
+        activeToolCount: 2,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [("component.armorial", "Armorial runtime probe failed")],
+        justInstalled: false,
+        primaryHostName: "ZCode"
+    )
+    expect(faultGuidance.problemClass == .toolFault, "tool faults must be classified")
+    expect(faultGuidance.primaryActionID == .reviewRepair, "tool faults recover through Review Repair")
+    expect(!faultGuidance.readyToWork, "tool faults must not report ready-to-work")
+
     UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)
     expect(L10n.text("Overview") == "总览", "overview destination must provide Simplified Chinese copy")
     expect(L10n.text("Agents") == "连接 Agent", "agents destination must provide Simplified Chinese copy")
@@ -654,7 +705,7 @@ do {
     expect(L10n.text("Usage") == "Usage", "the Manager must allow an explicit English override")
     expect(L10n.locale.identifier.hasPrefix("en"), "dates must follow the explicit English Manager language")
 
-    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup, catalog locator flatten")
+    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup, catalog locator flatten, post-setup start-work")
 } catch {
     FileHandle.standardError.write(Data("manager model check failed: \(error)\n".utf8))
     exit(1)

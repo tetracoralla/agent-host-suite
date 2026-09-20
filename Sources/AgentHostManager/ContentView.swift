@@ -74,6 +74,11 @@ struct ContentView: View {
             }
         }
         .accessibilityElement(children: .contain)
+        .onChange(of: store.requestedSection) { _, section in
+            guard let section else { return }
+            selection = section
+            store.requestedSection = nil
+        }
     }
 
     private var sidebar: some View {

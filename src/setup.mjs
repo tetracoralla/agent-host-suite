@@ -38,6 +38,7 @@ import { preflightManagedCatalog } from './context-exporter.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
 import { hasEnvironmentChange, recoverCurrentEnvironmentChange } from './environment-change.mjs'
 import { checkApplicationState } from './state-migration.mjs'
+import { guidanceFromSetupResult } from './post-setup-guidance.mjs'
 
 const HOSTS = new Set(['codex', 'claude', 'zcode'])
 const ACTIVITY_LOG_WARNING = Object.freeze({
@@ -344,9 +345,11 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     if (profile.requiresConsent) {
       const enabled = await enableObservability({ stateRoot: paths.root }, { ...dependencies, runner })
       warnings.push(...(enabled.warnings ?? []))
-      return { status: 'installed', stateRoot: paths.root, profile: enabled.profile, hosts: Object.keys(installedHosts), service: serviceState, observability: enabled.observability, componentWarmup, catalogPreflight, restartRequired: hosts.length > 0, ...(warnings.length === 0 ? {} : { warnings }) }
+      const installedWithObservability = { status: 'installed', stateRoot: paths.root, profile: enabled.profile, hosts: Object.keys(installedHosts), service: serviceState, observability: enabled.observability, componentWarmup, catalogPreflight, restartRequired: hosts.length > 0, ...(warnings.length === 0 ? {} : { warnings }) }
+      return { ...installedWithObservability, guidance: guidanceFromSetupResult(installedWithObservability) }
     }
-    return { status: 'installed', stateRoot: paths.root, profile: state.profile, hosts: Object.keys(installedHosts), service: serviceState, componentWarmup, catalogPreflight, restartRequired: hosts.length > 0, ...(warnings.length === 0 ? {} : { warnings }) }
+    const installed = { status: 'installed', stateRoot: paths.root, profile: state.profile, hosts: Object.keys(installedHosts), service: serviceState, componentWarmup, catalogPreflight, restartRequired: hosts.length > 0, ...(warnings.length === 0 ? {} : { warnings }) }
+    return { ...installed, guidance: guidanceFromSetupResult(installed) }
   } catch (error) {
     const rollback = []
     const serviceRecovered = paths !== null && (hasEnvironmentChange(paths, 'launchd-service') || hasEnvironmentChange(paths, 'windows-service'))

@@ -10,35 +10,27 @@ struct EnvironmentView: View {
                     HealthPill(health: store.health)
                 }
 
-                if case let .attention(message) = store.health {
-                    Panel {
-                        NoticeView(
-                            title: message,
-                            message: firstFailure ?? "Run a full check to identify the affected tool or Agent app.",
-                            systemImage: "exclamationmark.triangle.fill",
-                            color: .orange
-                        )
-                        HStack {
-                            Button(L10n.text("Review Repair")) { Task { await store.prepareRepair() } }
-                                .buttonStyle(.borderedProminent)
-                            Button(L10n.text("Run Full Check")) { Task { await store.runDoctor() } }
+                postSetupHandoff
+
+                if case let .attention(message) = store.health, !store.postSetupGuidance.readyToWork {
+                    // Attention already expressed in the handoff; keep a compact repair row when needed.
+                    if store.postSetupGuidance.primaryActionID != .reviewRepair {
+                        Panel {
+                            NoticeView(
+                                title: message,
+                                message: firstFailure ?? "Run a full check to identify the affected tool or Agent app.",
+                                systemImage: "exclamationmark.triangle.fill",
+                                color: .orange
+                            )
                         }
-                    }
-                } else if store.health == .ready {
-                    Panel {
-                        NoticeView(
-                            title: store.agentAppsVerified ? "Your environment is ready" : "Your local environment is ready",
-                            message: store.agentAppsVerified
-                                ? "Open a fresh task in a connected Agent app to use the installed tools."
-                                : "Run Full Check to verify bindings.",
-                            systemImage: "checkmark.circle.fill",
-                            color: .green
-                        )
                     }
                 }
 
                 Panel {
-                    Text(L10n.text("Health")).font(.headline)
+                    Text(L10n.text("Health details")).font(.headline)
+                    Text(L10n.text("Status rows are supporting detail. Starting work is the destination."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     ForEach(store.healthFacets) { facet in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Image(systemName: facet.isHealthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
@@ -94,6 +86,68 @@ struct EnvironmentView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .padding(32)
         }
+    }
+
+    @ViewBuilder
+    private var postSetupHandoff: some View {
+        let guidance = store.postSetupGuidance
+        Panel {
+            NoticeView(
+                title: L10n.text(guidance.title),
+                message: L10n.text(guidance.summary),
+                systemImage: guidance.readyToWork ? "arrow.forward.circle.fill" : "exclamationmark.triangle.fill",
+                color: guidance.readyToWork ? .blue : .orange
+            )
+
+            if let problemClass = guidance.problemClass {
+                LabeledContent(L10n.text("Problem class"), value: L10n.text(problemClass.rawValue))
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.text("What Host confirmed")).font(.subheadline.weight(.semibold))
+                ForEach(guidance.observed, id: \.self) { line in
+                    Text("• \(L10n.text(line))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !guidance.gaps.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.text("Still open")).font(.subheadline.weight(.semibold))
+                    ForEach(guidance.gaps, id: \.self) { line in
+                        Text("• \(L10n.text(line))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Text(L10n.format("Recovery path: {path}", ["path": L10n.text(guidance.recoveryPath)]))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button(L10n.text(guidance.primaryActionLabel)) {
+                    store.performPostSetupPrimaryAction()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(store.isBusy)
+                .accessibilityIdentifier("post-setup-primary-cta")
+
+                if guidance.primaryActionID != .runFullCheck {
+                    Button(L10n.text("Run Full Check")) { Task { await store.runDoctor() } }
+                        .disabled(store.isBusy)
+                }
+            }
+
+            Text(L10n.text(guidance.primaryActionDetail))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("post-setup-handoff")
     }
 
     private var firstFailure: String? {

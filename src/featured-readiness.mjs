@@ -97,10 +97,29 @@ function receiptDetail(hostId, entry, skills = undefined) {
 function nextStepsFor(checks) {
   const tools = checks.find((item) => item.id === 'user.tools')
   const connection = checks.find((item) => item.id === 'user.connection')
+  const permissions = checks.find((item) => item.id === 'user.permissions')
+  let problemClass = null
+  let recoveryPath = 'Open a new Agent task and do real work. Status checklists are not the destination.'
+  if (connection?.status === 'error') {
+    problemClass = 'not-connected'
+    recoveryPath = 'Connect an Agent app, then open a new task. Old tasks will not pick up Host bindings.'
+  } else if (tools?.status === 'error') {
+    problemClass = 'tool-fault'
+    recoveryPath = tools.message
+  } else if (permissions?.status === 'error') {
+    problemClass = 'permission'
+    recoveryPath = permissions.message
+  } else {
+    problemClass = 'stale-session'
+    recoveryPath = 'Open a fresh Agent task. Already-open tasks keep the tools they started with.'
+  }
   return {
     startFreshTask: 'Open a fresh Agent task in a connected app after the current bindings. Already-open tasks keep the tools they started with.',
     missingTools: tools?.status === 'error' ? tools.message : null,
     connectAgent: connection?.status === 'error' ? connection.message : null,
+    problemClass,
+    recoveryPath,
+    destinationIsWork: true,
     completedWork: 'Completed work is the Agent putting results into the work product on an unnamed task. doctor --featured-readiness is a Host precondition and is not adoption evidence. See docs/ADOPTION_ACCEPTANCE.md.',
   }
 }

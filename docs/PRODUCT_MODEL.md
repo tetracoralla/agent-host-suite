@@ -211,9 +211,14 @@ durable objects:
   and human labels rather than raw state-field identifiers.
 
 Before installation, the same app presents one setup path: selected standard
-tools, detected Agent app, preflight review, then installation. Recoverable
-errors use product language and one next action; raw paths and protocol detail
-remain outside the primary interface.
+tools, detected Agent app, preflight review, then installation. After
+installation, Overview leads with a start-work handoff (open a new Agent task
+or connect an Agent), Host-observed facts, remaining gaps, and classified
+recovery paths (`not-connected`, `stale-session`, `permission`, `tool-fault`).
+Green status rows are supporting detail, not the destination. Host confirms
+only what it can observe and does not pretend an already-open task loaded
+tools. Recoverable errors use product language and one next action; raw paths
+and protocol detail remain outside the primary interface.
 
 The Manager refreshes stale in-memory state on foreground return and shows when
 visible status was last checked. Automatic refresh does not launch Agent apps;

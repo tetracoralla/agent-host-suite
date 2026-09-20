@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Post-setup / Overview success handoff: after install, Manager (native + web) leads with **start work** (open a new Agent task or connect an Agent), Host-observed facts, remaining gaps, and classified recovery paths (`not-connected` / `stale-session` / `permission` / `tool-fault`). Status rows stay supporting detail, not the destination. Setup CLI results include `guidance`.
+
 ### Fixed
 
 - Retry transient Windows ACL verification failures (helper throw or status=error) up to 3 times with short backoff; still fail closed on wrong-owner and permissions-unsafe (Windows CI contention flake).

@@ -386,3 +386,14 @@ test('local Manager accepts featured setup and host-later setup without inventin
   await new Promise((resolve) => server.close(resolve))
   await running
 })
+
+test('browser Overview success handoff points into starting work', async () => {
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  assert.match(page, /renderPostSetupGuidance/u)
+  assert.match(page, /Open a new Agent task to start work/u)
+  assert.match(page, /What Host confirmed/u)
+  assert.match(page, /Problem class/u)
+  assert.match(page, /Health details/u)
+  assert.match(page, /guidance: buildDashboardGuidance/u)
+})
+

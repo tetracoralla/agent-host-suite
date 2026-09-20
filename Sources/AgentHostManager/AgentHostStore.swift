@@ -19,6 +19,8 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var setupPlan: SetupPlan?
     @Published private(set) var environmentChangePlan: EnvironmentChangePlan?
     @Published private(set) var toolSetNeedsFreshTask = false
+    @Published private(set) var justCompletedSetup = false
+    @Published var requestedSection: ManagerSection?
     @Published private(set) var isBusy = false
     @Published private(set) var isBlockingWork = false
     @Published private(set) var currentAction: String?
@@ -72,6 +74,53 @@ final class AgentHostStore: ObservableObject {
             snapshot: snapshot
         )
     }
+
+    var postSetupGuidance: ManagerPostSetupGuidance {
+        let connectedIDs = (suite?.hosts ?? [:]).filter(\.value.installed).map(\.key).sorted()
+        let connectedNames = connectedIDs.map { ManagerAgentApp.named($0).name }
+        let installedCount = suite?.availableAgentComponents?.count ?? managedTools.count
+        let activeCount: Int = {
+            if suite?.agentToolsPaused == true { return 0 }
+            return suite?.agentComponents?.count ?? 0
+        }()
+        let blocking = (doctor?.checks ?? []).filter { $0.status == "error" }.map { (id: $0.id, message: $0.message) }
+        let verified: Bool? = {
+            let managed = Set(connectedIDs)
+            guard !managed.isEmpty else { return nil }
+            let checked = managed.compactMap { doctor?.check("host.\($0)") }
+            if checked.isEmpty { return nil }
+            return checked.count == managed.count && checked.allSatisfy { $0.status == "ok" }
+        }()
+        return ManagerPostSetupPolicy.guidance(
+            configured: suite?.configured == true,
+            connectedHostNames: connectedNames,
+            installedToolCount: installedCount,
+            activeToolCount: activeCount,
+            agentToolsPaused: suite?.agentToolsPaused == true,
+            needsFreshTask: toolSetNeedsFreshTask || justCompletedSetup,
+            agentAppsVerified: verified,
+            doctorBlockingErrors: blocking,
+            justInstalled: justCompletedSetup,
+            primaryHostName: connectedNames.first
+        )
+    }
+
+    func performPostSetupPrimaryAction() {
+        let guidance = postSetupGuidance
+        // User moved past the install ceremony toward a concrete next step.
+        justCompletedSetup = false
+        switch guidance.primaryActionID {
+        case .connectAgent, .startNewAgentTask:
+            requestedSection = .agentApps
+        case .openTools:
+            requestedSection = .tools
+        case .reviewRepair:
+            Task { await prepareRepair() }
+        case .runFullCheck, .grantWorkspace:
+            Task { await runDoctor() }
+        }
+    }
+
 
     private var monitoringFacet: ManagerHealthFacet {
         ManagerHealthPolicy.monitoringFacet(observations: observations, snapshot: snapshot)
@@ -264,6 +313,8 @@ final class AgentHostStore: ObservableObject {
         isPresentingSetupPlan = false
         await work("Installing tools") {
             _ = try await self.cli.run(self.setupArguments(dryRun: false), as: GenericResult.self)
+            self.justCompletedSetup = true
+            self.toolSetNeedsFreshTask = self.connectsAgentDuringSetup
             try await self.reloadAll()
         }
     }
