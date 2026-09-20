@@ -182,7 +182,10 @@ async function prepare() {
   const command = [
     'gh', 'release', 'create', versionTag,
     ...staged.filter((path) => basename(path) !== 'RELEASE_NOTES.md').map((path) => `"${path}"`),
+    // --latest + --prerelease: Host probes releases/latest/download/...; without
+    // --latest, GitHub excludes prereleases from /latest and source check never flips.
     '--prerelease',
+    '--latest',
     '--title', `"Agent Host unsigned preview ${versionTag}"`,
     '--notes-file', `"${notesPath}"`,
   ].join(' ')
@@ -242,7 +245,9 @@ async function publish() {
   const args = [
     'release', 'create', versionTag,
     ...files,
+    // Same as prepare(): prerelease must also be marked latest for /releases/latest.
     '--prerelease',
+    '--latest',
     '--title', `Agent Host unsigned preview ${versionTag}`,
     '--notes-file', notesPath,
   ]
