@@ -5,7 +5,8 @@
  * GitHub OAuth tokens for this checkout lack the `workflow` scope, so
  * docs/unsigned-preview-release.yml cannot be promoted into
  * .github/workflows/ yet. This script is the supported owner path that:
- *   1) stages a closed Release asset set (DMG/ZIP + index + digests + optional catalog)
+ *   1) stages a closed Release asset set (DMG/ZIP + index + digests + optional
+ *      bound catalog, including every referenced component archive)
  *   2) prints or runs `gh release create` with only those assets attached
  *
  * Product semantics: the first public unsigned preview is published as a
@@ -24,6 +25,12 @@
  *     [--catalog /absolute/current.json] \
  *     [--zip /absolute/Agent-Host-0.2.0-win32-x64.zip]
  *
+ *   `--catalog` rewrites every component artifact.url to this tag's Release
+ *   download URL and attaches the exact local archives. Relative
+ *   `artifacts/*.tar.gz` catalogs (the standard builder output) are not
+ *   publishable as-is: a clean client would resolve them next to the
+ *   downloaded current.json and get ENOENT. Missing local archives fail closed.
+ *
  *   node scripts/publish-unsigned-preview.mjs publish \
  *     --tag v0.2.0-unsigned.1 \
  *     --assets .build/unsigned-preview \
@@ -41,19 +48,31 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { basename, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import { GITHUB_RELEASES_URL } from '../src/preview-download.mjs'
+import { resolveArtifactUrl } from '../src/release-manifest.mjs'
 
 const suiteRoot = fileURLToPath(new URL('..', import.meta.url))
 const writePreviewPath = join(suiteRoot, 'scripts/write-preview-distribution.mjs')
 
 export const ASSET_MANIFEST_SCHEMA = 'openadam.agent-host-unsigned-preview-assets.v0.1'
 export const ASSET_MANIFEST_NAME = 'unsigned-preview-asset-manifest.json'
+export const SAFE_RELEASE_ASSET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
 const INDEX_NAME = 'preview-distribution.json'
 const SUMS_NAME = 'SHA256SUMS'
 const NOTES_NAME = 'RELEASE_NOTES.md'
+const CATALOG_JSON_NAME = 'current.json'
+const PROVENANCE_NAME = 'build-provenance.json'
+const FIXED_ASSET_NAMES = new Set([
+  INDEX_NAME,
+  SUMS_NAME,
+  NOTES_NAME,
+  ASSET_MANIFEST_NAME,
+  CATALOG_JSON_NAME,
+  PROVENANCE_NAME,
+])
 
 function arg(name) {
   const index = process.argv.indexOf(`--${name}`)
@@ -160,6 +179,65 @@ function dirnameSafe(path) {
   return resolve(path, '..')
 }
 
+function requireContainedPath(root, target, label) {
+  const resolvedRoot = resolve(root)
+  const resolvedTarget = resolve(target)
+  const relation = relative(resolvedRoot, resolvedTarget)
+  if (relation === '..' || relation.startsWith(`..${sep}`) || isAbsolute(relation)) {
+    throw new Error(`${label} escapes the catalog directory`)
+  }
+  return resolvedTarget
+}
+
+async function findFileIfPresent(path) {
+  try {
+    const info = await stat(path)
+    if (info.isFile()) return path
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  return null
+}
+
+async function findLocalCatalogArtifact(catalogDir, assetName) {
+  const nested = await findFileIfPresent(join(catalogDir, 'artifacts', assetName))
+  if (nested != null) return nested
+  return findFileIfPresent(join(catalogDir, assetName))
+}
+
+async function localArtifactPath(catalogDir, catalogPath, component) {
+  const id = component?.id ?? 'unknown'
+  const url = component?.artifact?.url
+  if (typeof url !== 'string' || url.length === 0) {
+    throw new Error(`component ${id} is missing artifact.url`)
+  }
+  let resolved
+  try {
+    resolved = resolveArtifactUrl(catalogPath, url)
+  } catch (error) {
+    throw new Error(`component ${id} artifact URL is not publishable: ${error.message}`)
+  }
+  if (resolved.protocol === 'file:') {
+    return requireContainedPath(catalogDir, fileURLToPath(resolved), `component ${id} artifact`)
+  }
+  if (resolved.protocol === 'https:') {
+    const name = basename(resolved.pathname)
+    if (!SAFE_RELEASE_ASSET_NAME.test(name)) {
+      throw new Error(`component ${id} artifact URL does not end with a safe Release filename`)
+    }
+    const found = await findLocalCatalogArtifact(catalogDir, name)
+    if (found == null) {
+      throw new Error(
+        `component ${id} artifact ${url} is not present next to the catalog `
+        + `(looked for artifacts/${name} and ${name}). `
+        + 'Refuse publishing a catalog a clean client cannot fetch from this Release.',
+      )
+    }
+    return found
+  }
+  throw new Error(`component ${id} uses unsupported artifact protocol: ${resolved.protocol}`)
+}
+
 async function fileEntry(path, role) {
   const name = basename(path)
   const info = await stat(path)
@@ -169,6 +247,75 @@ async function fileEntry(path, role) {
     role,
     sha256: await digestFile(path),
     bytes: info.size,
+  }
+}
+
+async function attachBoundCatalog({ catalogPath, outDir, versionTag, reservedNames }) {
+  const catalogDir = dirnameSafe(catalogPath)
+  const catalog = JSON.parse(await readFile(catalogPath, 'utf8'))
+  if (catalog == null || typeof catalog !== 'object' || Array.isArray(catalog)) {
+    throw new Error('catalog current.json must be an object')
+  }
+  if (catalog.status === 'draft-unbound') {
+    throw new Error('Refusing to advertise the draft-unbound catalog')
+  }
+  if (!Array.isArray(catalog.components)) {
+    throw new Error('catalog current.json is missing a components array')
+  }
+
+  const archiveEntries = []
+  const copied = new Map()
+  const expectedPrefix = `${releaseDownloadBase(versionTag)}/`
+
+  for (const component of catalog.components) {
+    const id = component?.id ?? 'unknown'
+    const source = await requireFile(
+      await localArtifactPath(catalogDir, catalogPath, component),
+      `catalog artifact ${id}`,
+    )
+    const name = basename(source)
+    if (!SAFE_RELEASE_ASSET_NAME.test(name)) {
+      throw new Error(`component ${id} archive filename is not a safe Release asset name: ${name}`)
+    }
+    if (reservedNames.has(name)) {
+      throw new Error(`component ${id} archive filename collides with a reserved Release asset: ${name}`)
+    }
+    const expectedHex = String(component.artifact?.sha256 ?? '').replace(/^sha256:/u, '')
+    const digest = await digestFile(source)
+    const info = await stat(source)
+    if (digest !== expectedHex) {
+      throw new Error(`component ${id} archive sha256 does not match current.json`)
+    }
+    if (info.size !== component.artifact.bytes) {
+      throw new Error(`component ${id} archive size does not match current.json`)
+    }
+    const existing = copied.get(name)
+    if (existing != null) {
+      if (existing.sha256 !== digest || existing.bytes !== info.size) {
+        throw new Error(`catalog archive name ${name} is used by different files`)
+      }
+    } else {
+      const destination = join(outDir, name)
+      if (resolve(source) !== destination) await copyFile(source, destination)
+      copied.set(name, { sha256: digest, bytes: info.size })
+      archiveEntries.push(await fileEntry(destination, 'component-archive'))
+    }
+    component.artifact.url = `${expectedPrefix}${name}`
+  }
+
+  const catalogDest = join(outDir, CATALOG_JSON_NAME)
+  await writeFile(catalogDest, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o644 })
+  const provenancePath = await requireFile(join(catalogDir, PROVENANCE_NAME), PROVENANCE_NAME)
+  const provenanceDest = join(outDir, PROVENANCE_NAME)
+  if (resolve(provenancePath) !== provenanceDest) await copyFile(provenancePath, provenanceDest)
+  return {
+    catalogDest,
+    provenanceDest,
+    uploadEntries: [
+      await fileEntry(catalogDest, 'catalog'),
+      await fileEntry(provenanceDest, 'provenance'),
+      ...archiveEntries,
+    ],
   }
 }
 
@@ -276,8 +423,8 @@ export async function validateClosedAssetSet({ assetsDir, tag, index, manifest }
 
   if (index.catalog != null) {
     for (const [name, digestField, bytesField] of [
-      ['current.json', index.catalog.sha256, index.catalog.bytes],
-      ['build-provenance.json', index.catalog.provenanceSha256, null],
+      [CATALOG_JSON_NAME, index.catalog.sha256, index.catalog.bytes],
+      [PROVENANCE_NAME, index.catalog.provenanceSha256, null],
     ]) {
       const entry = uploadByName.get(name)
       if (entry == null) {
@@ -289,6 +436,36 @@ export async function validateClosedAssetSet({ assetsDir, tag, index, manifest }
       }
       if (bytesField != null && entry.bytes !== bytesField) {
         throw new Error(`catalog asset ${name} size does not match preview-distribution.json`)
+      }
+    }
+
+    const catalog = JSON.parse(await readFile(join(assetsDir, CATALOG_JSON_NAME), 'utf8'))
+    if (!Array.isArray(catalog.components)) {
+      throw new Error('bound current.json is missing a components array')
+    }
+    for (const component of catalog.components) {
+      const id = component?.id ?? 'unknown'
+      const url = component?.artifact?.url
+      if (typeof url !== 'string' || !url.startsWith(`${expectedBase}/`)) {
+        throw new Error(
+          `component ${id} artifact URL must be a downloadable Release asset under ${expectedBase}/ `
+          + `(got ${url ?? 'null'}). Refuse publishing a catalog that a clean client cannot fetch.`,
+        )
+      }
+      const name = url.slice(`${expectedBase}/`.length)
+      if (!SAFE_RELEASE_ASSET_NAME.test(name) || name.includes('/')) {
+        throw new Error(`component ${id} artifact asset name is not a safe Release filename: ${name}`)
+      }
+      const entry = uploadByName.get(name)
+      if (entry == null) {
+        throw new Error(`closed asset set is missing catalog archive ${name} referenced by ${id}`)
+      }
+      const expectedHex = String(component.artifact.sha256 ?? '').replace(/^sha256:/u, '')
+      if (entry.sha256 !== expectedHex) {
+        throw new Error(`catalog archive ${name} sha256 does not match current.json`)
+      }
+      if (entry.bytes !== component.artifact.bytes) {
+        throw new Error(`catalog archive ${name} size does not match current.json`)
       }
     }
   }
@@ -340,19 +517,19 @@ async function prepare() {
     uploadEntries.push(await fileEntry(destination, role))
   }
 
+  const reservedNames = new Set(FIXED_ASSET_NAMES)
+  for (const entry of uploadEntries) reservedNames.add(entry.name)
+
   let catalogPath = null
   if (catalogArg !== null) {
-    catalogPath = await requireFile(catalogArg, 'catalog')
-    const provenancePath = await requireFile(
-      join(dirnameSafe(catalogPath), 'build-provenance.json'),
-      'build-provenance.json',
-    )
-    const catalogDest = join(outDir, 'current.json')
-    const provenanceDest = join(outDir, 'build-provenance.json')
-    await copyFile(catalogPath, catalogDest)
-    await copyFile(provenancePath, provenanceDest)
-    uploadEntries.push(await fileEntry(catalogDest, 'catalog'))
-    uploadEntries.push(await fileEntry(provenanceDest, 'provenance'))
+    const attached = await attachBoundCatalog({
+      catalogPath: await requireFile(catalogArg, 'catalog'),
+      outDir,
+      versionTag,
+      reservedNames,
+    })
+    catalogPath = attached.catalogDest
+    uploadEntries.push(...attached.uploadEntries)
   }
 
   const baseUrl = releaseDownloadBase(versionTag)
@@ -369,7 +546,7 @@ async function prepare() {
     writeArgs.push('--zip', path)
   }
   if (catalogPath !== null) {
-    writeArgs.push('--catalog', join(outDir, 'current.json'))
+    writeArgs.push('--catalog', catalogPath)
   }
 
   const written = spawnSync(process.execPath, writeArgs, { stdio: 'inherit' })
@@ -425,7 +602,13 @@ async function prepare() {
   })
   const command = ['gh', ...releaseArgs].join(' ')
 
+  const archiveCount = uploadEntries.filter((entry) => entry.role === 'component-archive').length
   process.stdout.write(`Prepared unsigned preview assets in ${outDir}\n`)
+  if (archiveCount > 0) {
+    process.stdout.write(
+      `Included ${archiveCount} catalog archive(s) so a clean client can fetchBoundCatalog → acquireArtifact from this Release.\n`,
+    )
+  }
   process.stdout.write(
     'Owner publish command (non-prerelease --latest; attaches closed asset set only; no notarization):\n',
   )

@@ -34,6 +34,7 @@ Asset names, when published, match the packagers already in this repository:
 | Windows ARM64 | ZIP | `Agent-Host-{version}-win32-arm64.zip` |
 | Index | JSON | `preview-distribution.json` |
 | Bound catalog | JSON | `current.json` plus sibling `build-provenance.json` |
+| Component archives | tar.gz | every `current.json` `artifact.url` (flat Release asset, not `artifacts/`) |
 | Digests | text | `SHA256SUMS` |
 
 Convention for Host to fetch the index:
@@ -143,6 +144,8 @@ node scripts/publish-unsigned-preview.mjs publish \
 
 `prepare` / `publish` emit `gh release create … --latest` **without** `--prerelease`. That is intentional: the first public unsigned preview **is** the current download, and only a non-prerelease Release can occupy `/releases/latest`. `publish` validates a closed asset manifest (tag/repo/URLs, every declared asset size+sha256) and refuses wrong-tag, missing, or tampered carriers; leftover files in the output directory are never uploaded.
 
+When `--catalog` points at a bound `current.json`, `prepare` copies **every referenced component archive** into that closed set and rewrites each `artifact.url` to `…/releases/download/<tag>/<basename>`. The standard builder writes local `artifacts/*.tar.gz` paths; those are not remotely consumable. A catalog that still names a local relative URL, or whose archive is missing next to `current.json`, is refused. GitHub Release assets are flat, so the basename (not the `artifacts/` prefix) is the uploaded file. After rewrite, Host binds the index digest to the **network-facing** `current.json`.
+
 After assets exist, `agent-host source check` probes the Releases `latest` convention URL and flips off **public download is not configured** when carriers are published. Tracked `catalog/preview-distribution.json` remains the unpublished placeholder in git.
 
 Manual equivalent still works:
@@ -173,16 +176,21 @@ certificates.
 5. `shasum -a 256` every asset into `SHA256SUMS`.
 6. Create a **non-prerelease** GitHub Release for tag `vX.Y.Z`, mark it
    **latest**, and attach only the closed asset set: DMG/ZIP,
-   `preview-distribution.json`, `current.json`, `build-provenance.json`, and
-   `SHA256SUMS` (do not upload leftover logs from the output directory). Release
-   notes must say the build is **not Apple-notarized** and must include the
-   Gatekeeper steps above. Do not use `--prerelease`: GitHub REST cannot make a
+   `preview-distribution.json`, `current.json`, `build-provenance.json`,
+   every component archive named by that `current.json`, and `SHA256SUMS`
+   (do not upload leftover logs from the output directory). Prefer
+   `publish-unsigned-preview.mjs prepare --catalog` so relative `artifacts/`
+   URLs are rewritten before the index digest is bound. Release notes must
+   say the build is **not Apple-notarized** and must include the Gatekeeper
+   steps above. Do not use `--prerelease`: GitHub REST cannot make a
    prerelease latest, and Host probes `/releases/latest/download/preview-distribution.json`.
 7. Point Host at the index with `AGENT_HOST_FEATURED_CATALOG_URL`.
 
 Component `artifact.url` values in a remotely fetched `current.json` must be
-**HTTPS** (GitHub Release asset URLs are fine). Host follows HTTPS redirects
-so `github.com/.../releases/download/...` may land on
+**HTTPS** (GitHub Release asset URLs are fine). `prepare --catalog` writes
+those URLs and attaches the archives; do not publish a builder catalog whose
+URLs still point at a local `artifacts/` directory. Host follows HTTPS
+redirects so `github.com/.../releases/download/...` may land on
 `objects.githubusercontent.com`; SHA-256 still binds the bytes.
 
 ## Unsigned preview workflow
