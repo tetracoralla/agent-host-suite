@@ -72,12 +72,14 @@ async function deletePackageTree(installedRoot) {
   }
 }
 
-async function cleanupUnadoptedPackage(prepared, preparedPaths = null) {
+async function cleanupUnadoptedPackage(prepared, preparedPaths = null, dependencies = {}) {
   if (prepared?.installed?.created !== true) return
   const installedRoot = prepared.installed.root
   // Serialize with commit: another install may be adopting this shared package
   // before its new state refs are written. Without the lifecycle lock, reclaim
-  // would delete mid-commit. When the lock is busy, retain reclaimable packages.
+  // would delete mid-commit. Nested cleanup under our own lease must still
+  // delete. Retain only when a *different* operation holds the lock or
+  // recovery election (true cross-install contention / R2/F3).
   if (preparedPaths === null) {
     await deletePackageTree(installedRoot)
     return
@@ -86,7 +88,7 @@ async function cleanupUnadoptedPackage(prepared, preparedPaths = null) {
     await withLifecycleMutation(
       statePaths(preparedPaths.root),
       'tool.package-cleanup',
-      {},
+      dependencies,
       async (_dependencies, lockedPaths) => {
         const state = await loadState(lockedPaths).catch(() => null)
         if (packageIsReferenced(state, installedRoot)) return
@@ -94,11 +96,13 @@ async function cleanupUnadoptedPackage(prepared, preparedPaths = null) {
       },
     )
   } catch (error) {
-    // Contended commit or recovery election: keep reclaimable packages. Deleting
-    // here would race another install mid-commit before its state refs exist.
+    // Contended commit or recovery election by another operation: keep
+    // reclaimable packages. Deleting here would race another install
+    // mid-commit before its state refs exist.
     if (
       error instanceof AgentHostError
       && (error.code === 'LIFECYCLE_BUSY' || error.code === 'LIFECYCLE_RECOVERY_BUSY')
+      && dependencies.lifecycleLease === undefined
     ) return
     throw error
   }
@@ -737,7 +741,7 @@ export async function installGitHubTool(options, dependencies = {}) {
     await clearUpdateCandidate(stateRoot, binding.id).catch(() => {})
     return result
   } finally {
-    if (!inventoryAdopted) await cleanupUnadoptedPackage(prepared, paths).catch(() => {})
+    if (!inventoryAdopted) await cleanupUnadoptedPackage(prepared, paths, dependencies).catch(() => {})
   }
 }
 
