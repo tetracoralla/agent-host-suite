@@ -12,7 +12,7 @@ configured** rather than pretending there is a store.
 ## Where a non-developer downloads today
 
 1. Open **[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)**.
-2. If a prerelease lists `Agent-Host-*-darwin-arm64.dmg` (and `SHA256SUMS` / `preview-distribution.json`), download those assets.
+2. If the **latest** Release lists `Agent-Host-*-darwin-arm64.dmg` (and `SHA256SUMS` / `preview-distribution.json`), download those assets. The unsigned preview publishes as a **non-prerelease** Release marked latest so `/releases/latest` can resolve it (GitHub excludes prereleases from latest).
 3. Compare the DMG to `SHA256SUMS`, then follow **Open an unsigned macOS DMG** below (Control-click → Open). This path is **not** notarized and **not** a marketplace.
 4. If the Releases page has **no** installer assets yet, public download is not configured — Host reports that honestly. There is no App Store / Homebrew cask stand-in in this slice.
 
@@ -141,6 +141,8 @@ node scripts/publish-unsigned-preview.mjs publish \
 # Use --dry-run on publish to print the gh release create command only.
 ```
 
+`prepare` / `publish` emit `gh release create … --latest` **without** `--prerelease`. That is intentional: the first public unsigned preview **is** the current download, and only a non-prerelease Release can occupy `/releases/latest`. `publish` validates a closed asset manifest (tag/repo/URLs, every declared asset size+sha256) and refuses wrong-tag, missing, or tampered carriers; leftover files in the output directory are never uploaded.
+
 After assets exist, `agent-host source check` probes the Releases `latest` convention URL and flips off **public download is not configured** when carriers are published. Tracked `catalog/preview-distribution.json` remains the unpublished placeholder in git.
 
 Manual equivalent still works:
@@ -169,10 +171,13 @@ certificates.
    ```
 
 5. `shasum -a 256` every asset into `SHA256SUMS`.
-6. Create a **prerelease** GitHub Release for tag `vX.Y.Z` and attach the
-   DMG/ZIP, `preview-distribution.json`, `current.json`,
-   `build-provenance.json`, and `SHA256SUMS`. Release notes must say the build
-   is **not Apple-notarized** and must include the Gatekeeper steps above.
+6. Create a **non-prerelease** GitHub Release for tag `vX.Y.Z`, mark it
+   **latest**, and attach only the closed asset set: DMG/ZIP,
+   `preview-distribution.json`, `current.json`, `build-provenance.json`, and
+   `SHA256SUMS` (do not upload leftover logs from the output directory). Release
+   notes must say the build is **not Apple-notarized** and must include the
+   Gatekeeper steps above. Do not use `--prerelease`: GitHub REST cannot make a
+   prerelease latest, and Host probes `/releases/latest/download/preview-distribution.json`.
 7. Point Host at the index with `AGENT_HOST_FEATURED_CATALOG_URL`.
 
 Component `artifact.url` values in a remotely fetched `current.json` must be

@@ -5,8 +5,14 @@
  * GitHub OAuth tokens for this checkout lack the `workflow` scope, so
  * docs/unsigned-preview-release.yml cannot be promoted into
  * .github/workflows/ yet. This script is the supported owner path that:
- *   1) stages Release assets (DMG/ZIP + index + digests + optional catalog)
- *   2) prints or runs `gh release create` with those assets attached
+ *   1) stages a closed Release asset set (DMG/ZIP + index + digests + optional catalog)
+ *   2) prints or runs `gh release create` with only those assets attached
+ *
+ * Product semantics: the first public unsigned preview is published as a
+ * **non-prerelease** Release with `--latest`, so Host's
+ * `/releases/latest/download/preview-distribution.json` probe can find it.
+ * GitHub REST refuses make_latest on prereleases; `--prerelease --latest`
+ * does not work.
  *
  * It never requests Apple notarization secrets.
  *
@@ -43,6 +49,12 @@ import { GITHUB_RELEASES_URL } from '../src/preview-download.mjs'
 const suiteRoot = fileURLToPath(new URL('..', import.meta.url))
 const writePreviewPath = join(suiteRoot, 'scripts/write-preview-distribution.mjs')
 
+export const ASSET_MANIFEST_SCHEMA = 'openadam.agent-host-unsigned-preview-assets.v0.1'
+export const ASSET_MANIFEST_NAME = 'unsigned-preview-asset-manifest.json'
+const INDEX_NAME = 'preview-distribution.json'
+const SUMS_NAME = 'SHA256SUMS'
+const NOTES_NAME = 'RELEASE_NOTES.md'
+
 function arg(name) {
   const index = process.argv.indexOf(`--${name}`)
   if (index === -1) return null
@@ -77,9 +89,50 @@ async function digestFile(path) {
 
 async function requireFile(path, label) {
   const absolute = resolve(path)
-  const info = await stat(absolute)
+  let info
+  try {
+    info = await stat(absolute)
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new Error(`${label} is missing (not a regular file): ${absolute}`)
+    }
+    throw error
+  }
   if (!info.isFile()) throw new Error(`${label} is not a regular file: ${absolute}`)
   return absolute
+}
+
+function normalizeTag(tag) {
+  return tag.startsWith('v') ? tag : `v${tag}`
+}
+
+function releaseDownloadBase(tag) {
+  return `${GITHUB_RELEASES_URL}/download/${tag}`
+}
+
+/**
+ * GitHub `/releases/latest` excludes prereleases and REST make_latest rejects
+ * them. Unsigned preview must publish as a non-prerelease latest Release.
+ */
+export function buildReleaseCreateArgs({ tag, assetPaths, notesPath, title }) {
+  return [
+    'release', 'create', tag,
+    ...assetPaths,
+    '--latest',
+    '--title', title,
+    '--notes-file', notesPath,
+  ]
+}
+
+/**
+ * Model GitHub latest semantics for tests: only non-prerelease, non-draft
+ * releases can occupy /releases/latest.
+ */
+export function githubLatestWouldResolve(release) {
+  if (release == null || typeof release !== 'object') return false
+  if (release.draft === true) return false
+  if (release.prerelease === true) return false
+  return true
 }
 
 function releaseNotes(tag) {
@@ -88,6 +141,8 @@ function releaseNotes(tag) {
     '',
     'This build is **not** Apple-notarized and is **not** an App Store or marketplace listing.',
     'It is an owner-published GitHub Release preview for external download.',
+    'This Release is a **non-prerelease** marked latest so Host can probe',
+    '`/releases/latest/download/preview-distribution.json`.',
     '',
     '## macOS (Apple silicon first)',
     '1. Download `Agent-Host-*-darwin-arm64.dmg` and `SHA256SUMS`.',
@@ -99,6 +154,158 @@ function releaseNotes(tag) {
     'Host probes `preview-distribution.json` at the Release `latest` convention URL.',
     'Tracked `catalog/preview-distribution.json` in git remains the unpublished placeholder until assets exist.',
   ].join('\n')
+}
+
+function dirnameSafe(path) {
+  return resolve(path, '..')
+}
+
+async function fileEntry(path, role) {
+  const name = basename(path)
+  const info = await stat(path)
+  if (!info.isFile()) throw new Error(`asset is not a regular file: ${path}`)
+  return {
+    name,
+    role,
+    sha256: await digestFile(path),
+    bytes: info.size,
+  }
+}
+
+function urlMatchesTag(url, tag, label) {
+  const expectedPrefix = `${releaseDownloadBase(tag)}/`
+  if (typeof url !== 'string' || !url.startsWith(expectedPrefix)) {
+    throw new Error(
+      `${label} URL must live under ${expectedPrefix} (got ${url ?? 'null'}). `
+      + 'Refuse publishing an index that points at a different tag.',
+    )
+  }
+}
+
+export async function validateClosedAssetSet({ assetsDir, tag, index, manifest }) {
+  const versionTag = normalizeTag(tag)
+  if (manifest.schemaVersion !== ASSET_MANIFEST_SCHEMA) {
+    throw new Error(`unsupported asset manifest schema: ${manifest.schemaVersion}`)
+  }
+  if (manifest.tag !== versionTag) {
+    throw new Error(
+      `asset manifest tag ${manifest.tag} does not match publish --tag ${versionTag}`,
+    )
+  }
+  if (manifest.githubReleasesUrl !== GITHUB_RELEASES_URL) {
+    throw new Error(
+      `asset manifest githubReleasesUrl must be ${GITHUB_RELEASES_URL}`,
+    )
+  }
+  if (!Array.isArray(manifest.upload) || manifest.upload.length === 0) {
+    throw new Error('asset manifest upload list is empty')
+  }
+
+  if (index.publicReleasePublished !== true) {
+    throw new Error('preview-distribution.json is not marked publicReleasePublished')
+  }
+  if (!Array.isArray(index.carriers) || index.carriers.length === 0) {
+    throw new Error('preview-distribution.json has no carriers')
+  }
+  if (index.githubReleasesUrl !== GITHUB_RELEASES_URL) {
+    throw new Error(`preview-distribution.json githubReleasesUrl must be ${GITHUB_RELEASES_URL}`)
+  }
+
+  const expectedBase = releaseDownloadBase(versionTag)
+  for (const carrier of index.carriers) {
+    urlMatchesTag(carrier.url, versionTag, `carrier ${carrier.filename}`)
+    if (carrier.url !== `${expectedBase}/${carrier.filename}`) {
+      throw new Error(`carrier ${carrier.filename} URL basename mismatch`)
+    }
+  }
+  if (index.catalog != null) {
+    urlMatchesTag(index.catalog.url, versionTag, 'catalog')
+    urlMatchesTag(index.catalog.provenanceUrl, versionTag, 'catalog provenance')
+  }
+  if (index.selfHostedIndexUrl != null) {
+    const expectedIndexUrl = `${expectedBase}/${INDEX_NAME}`
+    if (index.selfHostedIndexUrl !== expectedIndexUrl) {
+      throw new Error(
+        `selfHostedIndexUrl must be ${expectedIndexUrl} (got ${index.selfHostedIndexUrl})`,
+      )
+    }
+  }
+
+  const uploadByName = new Map()
+  for (const entry of manifest.upload) {
+    if (uploadByName.has(entry.name)) {
+      throw new Error(`asset manifest repeats upload name ${entry.name}`)
+    }
+    uploadByName.set(entry.name, entry)
+    const path = join(assetsDir, entry.name)
+    await requireFile(path, entry.name)
+    const info = await stat(path)
+    if (info.size !== entry.bytes) {
+      throw new Error(
+        `asset ${entry.name} size mismatch: manifest ${entry.bytes}, disk ${info.size}`,
+      )
+    }
+    const digest = await digestFile(path)
+    if (digest !== entry.sha256) {
+      throw new Error(
+        `asset ${entry.name} sha256 mismatch: manifest ${entry.sha256}, disk ${digest}`,
+      )
+    }
+  }
+
+  if (!uploadByName.has(INDEX_NAME)) {
+    throw new Error('closed asset set must include preview-distribution.json')
+  }
+  if (!uploadByName.has(SUMS_NAME)) {
+    throw new Error('closed asset set must include SHA256SUMS')
+  }
+
+  for (const carrier of index.carriers) {
+    const entry = uploadByName.get(carrier.filename)
+    if (entry == null) {
+      throw new Error(`closed asset set is missing declared carrier ${carrier.filename}`)
+    }
+    const expectedHex = String(carrier.sha256).replace(/^sha256:/u, '')
+    if (entry.bytes !== carrier.bytes || entry.sha256 !== expectedHex) {
+      throw new Error(
+        `carrier ${carrier.filename} bytes/sha256 do not match preview-distribution.json `
+        + '(refusing missing or tampered installer)',
+      )
+    }
+  }
+
+  if (index.catalog != null) {
+    for (const [name, digestField, bytesField] of [
+      ['current.json', index.catalog.sha256, index.catalog.bytes],
+      ['build-provenance.json', index.catalog.provenanceSha256, null],
+    ]) {
+      const entry = uploadByName.get(name)
+      if (entry == null) {
+        throw new Error(`closed asset set is missing declared catalog asset ${name}`)
+      }
+      const expectedHex = String(digestField).replace(/^sha256:/u, '')
+      if (entry.sha256 !== expectedHex) {
+        throw new Error(`catalog asset ${name} sha256 does not match preview-distribution.json`)
+      }
+      if (bytesField != null && entry.bytes !== bytesField) {
+        throw new Error(`catalog asset ${name} size does not match preview-distribution.json`)
+      }
+    }
+  }
+
+  const uploadNames = new Set(manifest.upload.map((entry) => entry.name))
+  const leftovers = []
+  for (const name of await readdir(assetsDir)) {
+    if (name === NOTES_NAME || name === ASSET_MANIFEST_NAME) continue
+    const path = join(assetsDir, name)
+    if (!(await stat(path)).isFile()) continue
+    if (!uploadNames.has(name)) leftovers.push(name)
+  }
+
+  return {
+    uploadPaths: manifest.upload.map((entry) => join(assetsDir, entry.name)),
+    leftovers,
+  }
 }
 
 async function prepare() {
@@ -117,41 +324,48 @@ async function prepare() {
     throw new Error('prepare requires at least one --dmg or --zip')
   }
 
+  const versionTag = normalizeTag(tag)
   const outDir = resolve(output)
   await mkdir(outDir, { recursive: true, mode: 0o755 })
 
-  const staged = []
+  const uploadEntries = []
+  const carrierPaths = []
   for (const path of [...dmgPaths, ...zipPaths]) {
     const absolute = await requireFile(path, 'carrier')
     const name = basename(absolute)
     const destination = join(outDir, name)
     await copyFile(absolute, destination)
-    staged.push(destination)
+    carrierPaths.push(destination)
+    const role = name.endsWith('.dmg') || name.endsWith('.zip') ? 'carrier' : 'asset'
+    uploadEntries.push(await fileEntry(destination, role))
   }
 
   let catalogPath = null
-  let provenancePath = null
   if (catalogArg !== null) {
     catalogPath = await requireFile(catalogArg, 'catalog')
-    provenancePath = await requireFile(join(dirnameSafe(catalogPath), 'build-provenance.json'), 'build-provenance.json')
-    await copyFile(catalogPath, join(outDir, 'current.json'))
-    await copyFile(provenancePath, join(outDir, 'build-provenance.json'))
-    staged.push(join(outDir, 'current.json'), join(outDir, 'build-provenance.json'))
+    const provenancePath = await requireFile(
+      join(dirnameSafe(catalogPath), 'build-provenance.json'),
+      'build-provenance.json',
+    )
+    const catalogDest = join(outDir, 'current.json')
+    const provenanceDest = join(outDir, 'build-provenance.json')
+    await copyFile(catalogPath, catalogDest)
+    await copyFile(provenancePath, provenanceDest)
+    uploadEntries.push(await fileEntry(catalogDest, 'catalog'))
+    uploadEntries.push(await fileEntry(provenanceDest, 'provenance'))
   }
 
-  const versionTag = tag.startsWith('v') ? tag : `v${tag}`
-  const baseUrl = `${GITHUB_RELEASES_URL}/download/${versionTag}`
-  const indexPath = join(outDir, 'preview-distribution.json')
-
+  const baseUrl = releaseDownloadBase(versionTag)
+  const indexPath = join(outDir, INDEX_NAME)
   const writeArgs = [
     writePreviewPath,
     '--output', indexPath,
     '--base-url', baseUrl,
   ]
-  for (const path of staged.filter((item) => item.endsWith('.dmg'))) {
+  for (const path of carrierPaths.filter((item) => item.endsWith('.dmg'))) {
     writeArgs.push('--dmg', path)
   }
-  for (const path of staged.filter((item) => item.endsWith('.zip'))) {
+  for (const path of carrierPaths.filter((item) => item.endsWith('.zip'))) {
     writeArgs.push('--zip', path)
   }
   if (catalogPath !== null) {
@@ -162,43 +376,62 @@ async function prepare() {
   if (written.status !== 0) {
     throw new Error('write-preview-distribution.mjs failed')
   }
-  staged.push(indexPath)
+  uploadEntries.push(await fileEntry(indexPath, 'index'))
 
-  const sums = []
-  for (const name of await readdir(outDir)) {
-    const path = join(outDir, name)
-    const info = await stat(path)
-    if (!info.isFile() || name === 'SHA256SUMS') continue
-    sums.push(`${await digestFile(path)}  ${name}`)
-  }
-  sums.sort()
-  const sumsPath = join(outDir, 'SHA256SUMS')
-  await writeFile(sumsPath, `${sums.join('\n')}\n`, { mode: 0o644 })
-  staged.push(sumsPath)
-
-  const notesPath = join(outDir, 'RELEASE_NOTES.md')
+  // Notes are not a Release asset upload; write them before SHA256SUMS so a
+  // reused output dir cannot leave a stale notes digest in the checksum table.
+  const notesPath = join(outDir, NOTES_NAME)
   await writeFile(notesPath, `${releaseNotes(versionTag)}\n`, { mode: 0o644 })
 
-  const command = [
-    'gh', 'release', 'create', versionTag,
-    ...staged.filter((path) => basename(path) !== 'RELEASE_NOTES.md').map((path) => `"${path}"`),
-    // --latest + --prerelease: Host probes releases/latest/download/...; without
-    // --latest, GitHub excludes prereleases from /latest and source check never flips.
-    '--prerelease',
-    '--latest',
-    '--title', `"Agent Host unsigned preview ${versionTag}"`,
-    '--notes-file', `"${notesPath}"`,
-  ].join(' ')
+  // Closed set only — never hash leftover logs or prior run debris.
+  const sumsLines = []
+  for (const entry of uploadEntries) {
+    sumsLines.push(`${entry.sha256}  ${entry.name}`)
+  }
+  sumsLines.sort()
+  const sumsPath = join(outDir, SUMS_NAME)
+  await writeFile(sumsPath, `${sumsLines.join('\n')}\n`, { mode: 0o644 })
+  uploadEntries.push(await fileEntry(sumsPath, 'digests'))
+
+  const manifest = {
+    schemaVersion: ASSET_MANIFEST_SCHEMA,
+    tag: versionTag,
+    githubReleasesUrl: GITHUB_RELEASES_URL,
+    indexFile: INDEX_NAME,
+    notesFile: NOTES_NAME,
+    upload: uploadEntries,
+  }
+  const manifestPath = join(outDir, ASSET_MANIFEST_NAME)
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o644 })
+
+  const index = JSON.parse(await readFile(indexPath, 'utf8'))
+  const validated = await validateClosedAssetSet({
+    assetsDir: outDir,
+    tag: versionTag,
+    index,
+    manifest,
+  })
+  if (validated.leftovers.length > 0) {
+    process.stdout.write(
+      `note: ignoring non-manifest files in ${outDir}: ${validated.leftovers.join(', ')}\n`,
+    )
+  }
+
+  const releaseArgs = buildReleaseCreateArgs({
+    tag: versionTag,
+    assetPaths: validated.uploadPaths.map((path) => `"${path}"`),
+    notesPath: `"${notesPath}"`,
+    title: `"Agent Host unsigned preview ${versionTag}"`,
+  })
+  const command = ['gh', ...releaseArgs].join(' ')
 
   process.stdout.write(`Prepared unsigned preview assets in ${outDir}\n`)
-  process.stdout.write('Owner publish command (attaches assets; no notarization):\n')
+  process.stdout.write(
+    'Owner publish command (non-prerelease --latest; attaches closed asset set only; no notarization):\n',
+  )
   process.stdout.write(`${command}\n`)
   process.stdout.write('Or run: node scripts/publish-unsigned-preview.mjs publish '
     + `--tag ${versionTag} --assets ${outDir}\n`)
-}
-
-function dirnameSafe(path) {
-  return resolve(path, '..')
 }
 
 async function publish() {
@@ -207,50 +440,44 @@ async function publish() {
   if (tag === null || assets === null) {
     throw new Error('publish requires --tag and --assets')
   }
-  const versionTag = tag.startsWith('v') ? tag : `v${tag}`
+  const versionTag = normalizeTag(tag)
   const assetsDir = resolve(assets)
   const info = await stat(assetsDir)
   if (!info.isDirectory()) throw new Error(`--assets must be a directory: ${assetsDir}`)
 
-  const indexPath = join(assetsDir, 'preview-distribution.json')
-  await requireFile(indexPath, 'preview-distribution.json')
-  const index = JSON.parse(await readFile(indexPath, 'utf8'))
-  if (index.publicReleasePublished !== true) {
-    throw new Error('preview-distribution.json is not marked publicReleasePublished')
-  }
-  if (!Array.isArray(index.carriers) || index.carriers.length === 0) {
-    throw new Error('preview-distribution.json has no carriers')
-  }
+  const manifestPath = join(assetsDir, ASSET_MANIFEST_NAME)
+  await requireFile(manifestPath, ASSET_MANIFEST_NAME)
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
 
-  const notesPath = join(assetsDir, 'RELEASE_NOTES.md')
+  const indexPath = join(assetsDir, INDEX_NAME)
+  await requireFile(indexPath, INDEX_NAME)
+  const index = JSON.parse(await readFile(indexPath, 'utf8'))
+
+  const notesPath = join(assetsDir, NOTES_NAME)
   try {
-    await requireFile(notesPath, 'RELEASE_NOTES.md')
+    await requireFile(notesPath, NOTES_NAME)
   } catch {
     await writeFile(notesPath, `${releaseNotes(versionTag)}\n`, { mode: 0o644 })
   }
 
-  const files = []
-  for (const name of await readdir(assetsDir)) {
-    if (name === 'RELEASE_NOTES.md') continue
-    const path = join(assetsDir, name)
-    if ((await stat(path)).isFile()) files.push(path)
-  }
-  if (!files.some((path) => basename(path) === 'preview-distribution.json')) {
-    throw new Error('assets directory must include preview-distribution.json')
-  }
-  if (!files.some((path) => basename(path) === 'SHA256SUMS')) {
-    throw new Error('assets directory must include SHA256SUMS')
+  const validated = await validateClosedAssetSet({
+    assetsDir,
+    tag: versionTag,
+    index,
+    manifest,
+  })
+  if (validated.leftovers.length > 0) {
+    process.stdout.write(
+      `note: refusing to upload non-manifest leftovers: ${validated.leftovers.join(', ')}\n`,
+    )
   }
 
-  const args = [
-    'release', 'create', versionTag,
-    ...files,
-    // Same as prepare(): prerelease must also be marked latest for /releases/latest.
-    '--prerelease',
-    '--latest',
-    '--title', `Agent Host unsigned preview ${versionTag}`,
-    '--notes-file', notesPath,
-  ]
+  const args = buildReleaseCreateArgs({
+    tag: versionTag,
+    assetPaths: validated.uploadPaths,
+    notesPath,
+    title: `Agent Host unsigned preview ${versionTag}`,
+  })
   process.stdout.write(`gh ${args.map((part) => (/\s/u.test(part) ? `"${part}"` : part)).join(' ')}\n`)
   if (flag('dry-run')) {
     process.stdout.write('dry-run: not calling gh\n')
@@ -260,18 +487,26 @@ async function publish() {
   if (result.status !== 0) {
     throw new Error('gh release create failed')
   }
-  process.stdout.write(`Published ${versionTag}. Host source check can now see public carriers via the latest convention URL.\n`)
+  process.stdout.write(
+    `Published ${versionTag} as non-prerelease latest. `
+    + 'Host source check can probe carriers via /releases/latest/download/preview-distribution.json.\n',
+  )
 }
 
-const action = process.argv[2]
-if (action === 'prepare') {
-  await prepare()
-} else if (action === 'publish') {
-  await publish()
-} else {
-  process.stderr.write(`Usage:
+const isMain = process.argv[1] != null
+  && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+
+if (isMain) {
+  const action = process.argv[2]
+  if (action === 'prepare') {
+    await prepare()
+  } else if (action === 'publish') {
+    await publish()
+  } else {
+    process.stderr.write(`Usage:
   node scripts/publish-unsigned-preview.mjs prepare --tag vX.Y.Z --output DIR --dmg FILE [--catalog current.json] [--zip FILE]
   node scripts/publish-unsigned-preview.mjs publish --tag vX.Y.Z --assets DIR [--dry-run]
 `)
-  process.exitCode = 2
+    process.exitCode = 2
+  }
 }
