@@ -850,21 +850,32 @@ test('R2 / F3 cleanup retains package while another install is mid-commit before
     probe: false,
   }, { ...dependencies, saveState: gatedSave })
 
-  for (let i = 0; i < 200 && !saveReached; i += 1) await new Promise((r) => setTimeout(r, 20))
-  assert.equal(saveReached, true)
+  try {
+    // Windows cold extract + lifecycle acquire can exceed 4s; align with the 30s
+    // cold-start allowance so mid-commit gating is observed before A races in.
+    const saveWaitAttempts = process.platform === 'win32' ? 1500 : 500
+    for (let i = 0; i < saveWaitAttempts && !saveReached; i += 1) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    assert.equal(saveReached, true)
 
-  // A tries to commit while B holds the lifecycle lock mid-commit.
-  await assert.rejects(
-    () => installGitHubTool({ ...common, probe: false }, dependencies),
-    (error) => error.code === 'LIFECYCLE_BUSY',
-  )
+    // A tries to commit while B holds the lifecycle lock mid-commit. A's
+    // unadopted-package cleanup must retain bytes while the lock is busy.
+    await assert.rejects(
+      () => installGitHubTool({ ...common, probe: false }, dependencies),
+      (error) => error.code === 'LIFECYCLE_BUSY',
+    )
 
-  releaseSave()
-  const installedB = await pendingB
-  assert.equal(installedB.status, 'ok')
-  const packageRoot = (await loadState(paths)).components['review-race'].root
-  assert.equal(typeof packageRoot, 'string')
-  assert.equal(await stat(packageRoot).then(() => true, () => false), true)
+    releaseSave()
+    const installedB = await pendingB
+    assert.equal(installedB.status, 'ok')
+    const packageRoot = (await loadState(paths)).components['review-race'].root
+    assert.equal(typeof packageRoot, 'string')
+    assert.equal(await stat(packageRoot).then(() => true, () => false), true)
+  } finally {
+    releaseSave()
+    await pendingB.catch(() => {})
+  }
 })
 
 test('R5 / F11 loadGitHubToolCatalog(catalogPath) ignores live published catalog', async (t) => {
