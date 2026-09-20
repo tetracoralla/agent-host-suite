@@ -13,6 +13,7 @@ export const PROBLEM_CLASSES = Object.freeze({
   TOOL_FAULT: 'tool-fault',
   TOOLS_PAUSED: 'tools-paused',
   UNVERIFIED: 'unverified',
+  APP_MISSING: 'app-missing',
 })
 
 export const PRIMARY_ACTIONS = Object.freeze({
@@ -35,6 +36,12 @@ function blockingDoctor(errors) {
   return Array.isArray(errors) ? errors.filter((item) => item && typeof item.id === 'string') : []
 }
 
+function isWorkspacePermission(item) {
+  return item.id.includes('permission')
+    || item.id.includes('workspace')
+    || /workspace|project folder|grant/iu.test(item.message ?? '')
+}
+
 function classifyDoctorFault(errors) {
   const permission = errors.find((item) => (
     item.id.includes('permission')
@@ -42,13 +49,18 @@ function classifyDoctorFault(errors) {
     || /permission|workspace|grant|access denied|EACCES|EPERM/iu.test(item.message ?? '')
   ))
   if (permission) {
+    const workspace = isWorkspacePermission(permission)
     return {
       problemClass: PROBLEM_CLASSES.PERMISSION,
-      primaryActionId: PRIMARY_ACTIONS.GRANT_WORKSPACE,
-      statusLine: shortReason(permission.message, 'Permission blocked'),
-      title: 'Permission blocked',
+      primaryActionId: workspace ? PRIMARY_ACTIONS.GRANT_WORKSPACE : PRIMARY_ACTIONS.RUN_FULL_CHECK,
+      statusLine: workspace ? 'Need a project folder' : 'Permission blocked',
+      title: workspace ? 'Need a project folder' : 'Permission blocked',
       summary: permission.message || 'Host observed a permission or workspace problem.',
-      recoveryPath: 'Fix the permission or grant the project folder, run Full Check, then open a new Agent task.',
+      recoveryPath: workspace
+        ? 'Choose a project folder Host can grant to tools, then start a new Agent task.'
+        : 'Check shows the named permission fault. Fix it in system settings, then Check again.',
+      blockingCode: permission.id,
+      blockingMessage: permission.message,
     }
   }
   const tool = errors.find((item) => (
@@ -66,6 +78,8 @@ function classifyDoctorFault(errors) {
       title: 'Needs repair',
       summary: tool.message || 'Host observed a tool or runtime fault.',
       recoveryPath: 'Review Repair (or Run Full Check), fix the named fault, then open a new Agent task.',
+      blockingCode: tool.id,
+      blockingMessage: tool.message,
     }
   }
   if (errors.length > 0) {
@@ -76,6 +90,8 @@ function classifyDoctorFault(errors) {
       title: 'Needs check',
       summary: errors[0].message || 'Host observed a blocking environment check.',
       recoveryPath: 'Run Full Check, follow the recovery for the named check, then open a new Agent task.',
+      blockingCode: errors[0].id,
+      blockingMessage: errors[0].message,
     }
   }
   return null
@@ -87,16 +103,20 @@ function shortReason(message, fallback) {
   return one.length > 72 ? `${one.slice(0, 69)}…` : one
 }
 
-function actionFor(id, appName) {
+function actionFor(id, appName, extras = {}) {
   switch (id) {
     case PRIMARY_ACTIONS.CONNECT_AGENT:
-      return { id, label: 'Connect' }
+      return {
+        id,
+        label: extras.connectName ? `Connect ${extras.connectName}` : 'Connect',
+        ...(extras.connectHostId ? { hostId: extras.connectHostId } : {}),
+      }
     case PRIMARY_ACTIONS.REVIEW_REPAIR:
       return { id, label: 'Repair' }
     case PRIMARY_ACTIONS.RUN_FULL_CHECK:
       return { id, label: 'Check' }
     case PRIMARY_ACTIONS.GRANT_WORKSPACE:
-      return { id, label: 'Fix access' }
+      return { id, label: 'Choose folder' }
     case PRIMARY_ACTIONS.RESUME_TOOLS:
       return { id, label: 'Resume' }
     case PRIMARY_ACTIONS.OPEN_TOOLS:
@@ -107,6 +127,7 @@ function actionFor(id, appName) {
       return {
         id: PRIMARY_ACTIONS.OPEN_APP,
         label: appName ? `Open ${appName}` : 'Open Agent',
+        ...(extras.openHostId ? { hostId: extras.openHostId } : {}),
       }
   }
 }
@@ -116,8 +137,30 @@ function pack(base) {
     schemaVersion: POST_SETUP_GUIDANCE_SCHEMA,
     destinationIsWork: true,
     hint: null,
+    connectHostId: null,
+    blockingCode: null,
+    blockingMessage: null,
     ...base,
   }
+}
+
+const HOST_DISPLAY_NAMES = Object.freeze({ zcode: 'ZCode', codex: 'Codex', claude: 'Claude Code' })
+
+function displayHostName(id, fallback) {
+  if (typeof fallback === 'string' && fallback.length > 0) return fallback
+  return HOST_DISPLAY_NAMES[id] || id
+}
+
+function normalizeHostRecords(input) {
+  if (!Array.isArray(input.hostRecords)) return null
+  return input.hostRecords
+    .map((row) => ({
+      id: row.id || row.host,
+      name: displayHostName(row.id || row.host, row.name),
+      connected: row.connected === true,
+      appInstalled: row.appInstalled,
+    }))
+    .filter((row) => typeof row.id === 'string' && row.id.length > 0)
 }
 
 /**
@@ -125,6 +168,7 @@ function pack(base) {
  */
 export function buildPostSetupGuidance(input = {}) {
   const configured = input.configured === true
+  const hostRecords = normalizeHostRecords(input)
   const connectedHosts = unique(input.connectedHosts ?? [])
   const installedToolCount = Number.isFinite(input.installedToolCount) ? input.installedToolCount : 0
   const activeToolCount = Number.isFinite(input.activeToolCount) ? input.activeToolCount : 0
@@ -133,12 +177,35 @@ export function buildPostSetupGuidance(input = {}) {
   const agentAppsVerified = input.agentAppsVerified === undefined ? null : input.agentAppsVerified
   const doctorBlockingErrors = blockingDoctor(input.doctorBlockingErrors)
   const justInstalled = input.justInstalled === true
-  const primaryHostName = typeof input.primaryHostName === 'string' && input.primaryHostName.length > 0
-    ? input.primaryHostName
-    : (connectedHosts[0] ?? null)
-  const primaryHostId = typeof input.primaryHostId === 'string' && input.primaryHostId.length > 0
-    ? input.primaryHostId
-    : null
+  const presentConnected = hostRecords === null
+    ? connectedHosts.map((name, index) => ({
+      id: index === 0 ? (input.primaryHostId ?? null) : null,
+      name,
+    }))
+    : hostRecords.filter((row) => row.connected && row.appInstalled !== false)
+  const missingConnected = hostRecords === null
+    ? []
+    : hostRecords.filter((row) => row.connected && row.appInstalled === false)
+  const availableUnconnected = hostRecords === null
+    ? []
+    : hostRecords.filter((row) => row.connected !== true && row.appInstalled === true)
+  const connectedNames = presentConnected.length > 0
+    ? presentConnected.map((row) => row.name)
+    : (missingConnected.length > 0 ? missingConnected.map((row) => row.name) : connectedHosts)
+  const primaryPresent = presentConnected[0] ?? null
+  const primaryHostName = primaryPresent?.name
+    ?? (typeof input.primaryHostName === 'string' && input.primaryHostName.length > 0
+      ? input.primaryHostName
+      : (connectedNames[0] ?? null))
+  const primaryHostId = primaryPresent?.id
+    ?? (typeof input.primaryHostId === 'string' && input.primaryHostId.length > 0
+      ? input.primaryHostId
+      : null)
+  const uniqueConnect = availableUnconnected.length === 1 ? availableUnconnected[0] : null
+  const connectAction = actionFor(PRIMARY_ACTIONS.CONNECT_AGENT, null, {
+    connectName: uniqueConnect?.name,
+    connectHostId: uniqueConnect?.id,
+  })
   const workspaceGranted = input.workspaceGranted
 
   if (!configured) {
@@ -172,14 +239,17 @@ export function buildPostSetupGuidance(input = {}) {
   } else if (installedToolCount > 0) {
     observed.push('Tools are installed, but none are selected for new Agent tasks.')
   }
-  if (connectedHosts.length > 0) {
-    observed.push(`Connected Agent app${connectedHosts.length === 1 ? '' : 's'}: ${connectedHosts.join(', ')}.`)
+  if (connectedNames.length > 0) {
+    observed.push(`Connected Agent app${connectedNames.length === 1 ? '' : 's'}: ${connectedNames.join(', ')}.`)
   } else {
     observed.push('No Agent app is connected yet.')
   }
+  for (const missing of missingConnected) {
+    observed.push(`${missing.name} is recorded as connected, but it is not installed.`)
+  }
   if (agentAppsVerified === true) {
     observed.push('Full Check verified current Agent-app bindings.')
-  } else if (agentAppsVerified === false && connectedHosts.length > 0) {
+  } else if (agentAppsVerified === false && connectedNames.length > 0) {
     observed.push('Connected Agent-app bindings need attention.')
   }
   if (workspaceGranted === true) observed.push('A workspace path is granted.')
@@ -203,10 +273,36 @@ export function buildPostSetupGuidance(input = {}) {
       primaryAction: actionFor(fault.primaryActionId, primaryHostName),
       recoveryPath: fault.recoveryPath,
       primaryHostId,
+      blockingCode: fault.blockingCode ?? null,
+      blockingMessage: fault.blockingMessage ?? null,
     })
   }
 
-  if (connectedHosts.length === 0) {
+  if (presentConnected.length === 0 && missingConnected.length > 0) {
+    const missingName = missingConnected[0].name
+    gaps.push(`${missingName} is not installed.`)
+    return pack({
+      phase: 'recover',
+      readyToWork: false,
+      problemClass: PROBLEM_CLASSES.APP_MISSING,
+      statusLine: `${missingName} is not installed`,
+      statusTone: 'fault',
+      title: `${missingName} is not installed`,
+      summary: `The connected Agent app is not installed on this machine.`,
+      observed,
+      gaps,
+      primaryAction: uniqueConnect
+        ? connectAction
+        : actionFor(PRIMARY_ACTIONS.CONNECT_AGENT, null),
+      recoveryPath: uniqueConnect
+        ? `Install ${missingName}, or connect ${uniqueConnect.name}.`
+        : `Install ${missingName}, or connect a different installed app.`,
+      primaryHostId: uniqueConnect?.id ?? null,
+      connectHostId: uniqueConnect?.id ?? null,
+    })
+  }
+
+  if (presentConnected.length === 0 && connectedHosts.length === 0) {
     gaps.push('Connect an Agent app before expecting tools in a session.')
     return pack({
       phase: 'connect-agent',
@@ -218,9 +314,12 @@ export function buildPostSetupGuidance(input = {}) {
       summary: 'Tools are on this machine, but no Agent app is connected yet.',
       observed,
       gaps,
-      primaryAction: actionFor(PRIMARY_ACTIONS.CONNECT_AGENT, null),
-      recoveryPath: 'Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.',
-      primaryHostId,
+      primaryAction: connectAction,
+      recoveryPath: uniqueConnect
+        ? `Connect ${uniqueConnect.name}, then start a new task in that app. Old tasks will not pick this up.`
+        : 'Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.',
+      primaryHostId: uniqueConnect?.id ?? null,
+      connectHostId: uniqueConnect?.id ?? null,
     })
   }
 
@@ -278,7 +377,7 @@ export function buildPostSetupGuidance(input = {}) {
     })
   }
 
-  const openAction = actionFor(PRIMARY_ACTIONS.OPEN_APP, primaryHostName)
+  const openAction = actionFor(PRIMARY_ACTIONS.OPEN_APP, primaryHostName, { openHostId: primaryHostId })
   const readyLine = justInstalled ? 'Ready' : (needsFreshTask ? 'Ready' : 'Ready')
   return pack({
     phase: needsFreshTask ? 'fresh-task' : 'start-work',

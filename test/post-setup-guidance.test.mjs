@@ -97,8 +97,78 @@ test('post-setup guidance classifies permission faults', () => {
     ],
   })
   assert.equal(guidance.problemClass, PROBLEM_CLASSES.PERMISSION)
+  assert.equal(guidance.primaryAction.id, PRIMARY_ACTIONS.RUN_FULL_CHECK)
+  assert.equal(guidance.primaryAction.label, 'Check')
+  assert.equal(guidance.statusLine, 'Permission blocked')
+  assert.equal(guidance.blockingCode, 'runtime.service')
+})
+
+test('project-folder permission grants a folder instead of repeating doctor', () => {
+  const guidance = buildPostSetupGuidance({
+    configured: true,
+    connectedHosts: ['Codex'],
+    installedToolCount: 1,
+    activeToolCount: 1,
+    doctorBlockingErrors: [
+      { id: 'user.permissions', message: 'EACCES: access denied to project folder' },
+    ],
+  })
+  assert.equal(guidance.problemClass, PROBLEM_CLASSES.PERMISSION)
   assert.equal(guidance.primaryAction.id, PRIMARY_ACTIONS.GRANT_WORKSPACE)
-  assert.equal(guidance.primaryAction.label, 'Fix access')
+  assert.equal(guidance.primaryAction.label, 'Choose folder')
+  assert.equal(guidance.statusLine, 'Need a project folder')
+  assert.equal(guidance.blockingCode, 'user.permissions')
+  assert.match(guidance.blockingMessage, /EACCES/u)
+})
+
+test('missing connected Agent app is not ready and offers install or reselect', () => {
+  const guidance = buildPostSetupGuidance({
+    configured: true,
+    connectedHosts: ['Codex'],
+    installedToolCount: 2,
+    activeToolCount: 2,
+    agentAppsVerified: true,
+    primaryHostName: 'Codex',
+    primaryHostId: 'codex',
+    hostRecords: [
+      { id: 'codex', name: 'Codex', connected: true, appInstalled: false },
+      { id: 'zcode', name: 'ZCode', connected: false, appInstalled: true },
+    ],
+  })
+  assert.equal(guidance.readyToWork, false)
+  assert.equal(guidance.problemClass, PROBLEM_CLASSES.APP_MISSING)
+  assert.equal(guidance.statusLine, 'Codex is not installed')
+  assert.equal(guidance.primaryAction.id, PRIMARY_ACTIONS.CONNECT_AGENT)
+  assert.equal(guidance.primaryAction.label, 'Connect ZCode')
+  assert.equal(guidance.connectHostId, 'zcode')
+})
+
+test('connect names the only available app and does not pick the first of many', () => {
+  const unique = buildPostSetupGuidance({
+    configured: true,
+    connectedHosts: [],
+    installedToolCount: 2,
+    activeToolCount: 2,
+    hostRecords: [
+      { id: 'codex', name: 'Codex', connected: false, appInstalled: true },
+      { id: 'zcode', name: 'ZCode', connected: false, appInstalled: false },
+    ],
+  })
+  assert.equal(unique.primaryAction.label, 'Connect Codex')
+  assert.equal(unique.connectHostId, 'codex')
+
+  const many = buildPostSetupGuidance({
+    configured: true,
+    connectedHosts: [],
+    installedToolCount: 2,
+    activeToolCount: 2,
+    hostRecords: [
+      { id: 'zcode', name: 'ZCode', connected: false, appInstalled: true },
+      { id: 'codex', name: 'Codex', connected: false, appInstalled: true },
+    ],
+  })
+  assert.equal(many.primaryAction.label, 'Connect')
+  assert.equal(many.connectHostId, null)
 })
 
 test('setup result guidance requires a fresh task when hosts were connected', () => {

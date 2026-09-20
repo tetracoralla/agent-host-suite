@@ -79,6 +79,15 @@ final class AgentHostStore: ObservableObject {
     var postSetupGuidance: ManagerPostSetupGuidance {
         let connectedIDs = (suite?.hosts ?? [:]).filter(\.value.installed).map(\.key).sorted()
         let connectedNames = connectedIDs.map { ManagerAgentApp.named($0).name }
+        let availability = ManagerAgentApp.all.map { app in
+            ManagerHostAvailability(
+                id: app.id,
+                name: app.name,
+                connected: suite?.hosts?[app.id]?.installed == true,
+                appInstalled: hostStatuses[app.id]?.appInstalled
+            )
+        }
+        let presentConnected = availability.filter { $0.connected && $0.appInstalled != false }
         let installedCount = suite?.availableAgentComponents?.count ?? managedTools.count
         let activeCount: Int = {
             if suite?.agentToolsPaused == true { return 0 }
@@ -86,7 +95,10 @@ final class AgentHostStore: ObservableObject {
         }()
         let blocking = (doctor?.checks ?? []).filter { $0.status == "error" }.map { (id: $0.id, message: $0.message) }
         let verified: Bool? = {
-            let managed = Set(connectedIDs)
+            if presentConnected.isEmpty && availability.contains(where: { $0.connected && $0.appInstalled == false }) {
+                return false
+            }
+            let managed = Set(presentConnected.map(\.id))
             guard !managed.isEmpty else { return nil }
             let checked = managed.compactMap { doctor?.check("host.\($0)") }
             if checked.isEmpty { return nil }
@@ -94,7 +106,7 @@ final class AgentHostStore: ObservableObject {
         }()
         return ManagerPostSetupPolicy.guidance(
             configured: suite?.configured == true,
-            connectedHostNames: connectedNames,
+            connectedHostNames: presentConnected.isEmpty ? connectedNames : presentConnected.map(\.name),
             installedToolCount: installedCount,
             activeToolCount: activeCount,
             agentToolsPaused: suite?.agentToolsPaused == true,
@@ -102,8 +114,9 @@ final class AgentHostStore: ObservableObject {
             agentAppsVerified: verified,
             doctorBlockingErrors: blocking,
             justInstalled: justCompletedSetup,
-            primaryHostName: connectedNames.first,
-            primaryHostID: connectedIDs.first
+            primaryHostName: presentConnected.first?.name ?? connectedNames.first,
+            primaryHostID: presentConnected.first?.id ?? connectedIDs.first,
+            hostAvailability: availability
         )
     }
 
@@ -113,7 +126,11 @@ final class AgentHostStore: ObservableObject {
         justCompletedSetup = false
         switch guidance.primaryActionID {
         case .connectAgent:
-            requestedSection = .agentApps
+            if let hostID = guidance.connectHostID, !hostID.isEmpty {
+                Task { await setHost(hostID, connected: true) }
+            } else {
+                requestedSection = .agentApps
+            }
         case .openApp, .startNewAgentTask:
             openConnectedAgentApp(hostID: guidance.primaryHostID ?? connectedAgentAppIDs.first)
         case .openTools:
@@ -122,9 +139,31 @@ final class AgentHostStore: ObservableObject {
             Task { await resumeTools() }
         case .reviewRepair:
             Task { await prepareRepair() }
-        case .runFullCheck, .grantWorkspace:
+        case .runFullCheck:
             Task { await runDoctor() }
+        case .grantWorkspace:
+            pickAndGrantWorkspace()
         }
+    }
+
+    func pickAndGrantWorkspace() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = L10n.text("Choose folder")
+        panel.message = L10n.text("Choose a project folder Host can grant to tools.")
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                await self?.grantWorkspace(path: url.path)
+            }
+        }
+    }
+
+    func grantWorkspace(path: String) async {
+        await action(["repair", "--workspace-root", path], label: "Granting folder")
     }
 
     private var connectedAgentAppIDs: [String] {

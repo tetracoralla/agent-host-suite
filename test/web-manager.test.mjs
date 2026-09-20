@@ -1,12 +1,25 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, delimiter } from 'node:path'
 import test from 'node:test'
-import { MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
+import { buildDashboardGuidance, MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
 import { loadState, prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 import { setup } from '../src/setup.mjs'
 import { compatibleApplicationState, createCodexRunner, createDevelopmentWorkspace, healthyCatalogPreflight } from './helpers.mjs'
+
+async function withFakeHostOnPath(t, name = 'codex') {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-host-fake-cli-'))
+  const bin = join(dir, process.platform === 'win32' ? `${name}.cmd` : name)
+  await writeFile(bin, process.platform === 'win32' ? '@echo off\r\nexit /b 0\r\n' : '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  if (process.platform !== 'win32') await chmod(bin, 0o755)
+  const previous = process.env.PATH
+  process.env.PATH = `${dir}${delimiter}${previous}`
+  t.after(async () => {
+    process.env.PATH = previous
+    await rm(dir, { recursive: true, force: true })
+  })
+}
 
 test('browser Updates keeps a successful GitHub preview target for Add from GitHub', async () => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
@@ -398,7 +411,12 @@ test('browser Overview success handoff is sparse and wires real CTA paths', asyn
   assert.match(page, /action:'open-app'/u)
   assert.match(page, /action:'tools',resume:true/u)
   assert.match(page, /action:'doctor'/u)
+  assert.match(page, /action:'workspace'/u)
   assert.match(page, /action:'repair'/u)
+  assert.doesNotMatch(page, /t\(''\)/u)
+  assert.doesNotMatch(page, /'':/u)
+  assert.match(page, /--status-action:#f1f2f4/u)
+  assert.equal(page.includes('[data-tone=action]{color:var(--status-action)}'), true)
   assert.match(page, /data-page/u)
   assert.match(page, /t\('Details'\)/u)
   // Main-card chrome must not dump teaching sections; keep labels only inside Details wiring.
@@ -411,6 +429,7 @@ test('browser Overview success handoff is sparse and wires real CTA paths', asyn
 })
 
 test('post-setup primary CTAs perform navigation or API side effects', async (t) => {
+  await withFakeHostOnPath(t, 'codex')
   const root = await mkdtemp(join(tmpdir(), 'agent-host-web-cta-ws-'))
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-cta-state-'))
   t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
@@ -454,8 +473,15 @@ test('post-setup primary CTAs perform navigation or API side effects', async (t)
   if (openAttempt.status === 200) {
     assert.equal(openBody.result.status, 'opened')
     assert.equal(openBody.result.host, 'codex')
+    assert.equal(['gui', 'terminal'].includes(openBody.result.method), true, 'open-app must launch a GUI or visible terminal')
   } else {
-    assert.equal(openBody.error?.code, 'MANAGER_REQUEST_INVALID')
+    assert.ok(
+      ['MANAGER_REQUEST_INVALID', 'AGENT_APP_OPEN_UNAVAILABLE'].includes(openBody.error?.code),
+      `unexpected open-app error ${openBody.error?.code}`,
+    )
+    if (openBody.error?.code === 'AGENT_APP_OPEN_UNAVAILABLE') {
+      assert.match(openBody.error.details?.nextStep || openBody.error.message, /Open a terminal and run/u)
+    }
   }
 
   const doctor = await fetch(`${origin}/api/action`, {
@@ -555,6 +581,7 @@ test('post-setup primary CTAs perform navigation or API side effects', async (t)
 })
 
 test('paused guidance CTA resumes tools through /api/action', async (t) => {
+  await withFakeHostOnPath(t, 'codex')
   const root = await mkdtemp(join(tmpdir(), 'agent-host-web-pause-ws-'))
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-pause-state-'))
   t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
@@ -631,6 +658,272 @@ test('paused guidance CTA resumes tools through /api/action', async (t) => {
   cta.click()
   assert.deepEqual(fetches[0], { action: 'tools', resume: true })
 
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
+test('dashboard guidance consumes missing host apps and unique connect targets', () => {
+  const snapshot = {
+    configured: true,
+    environment: {
+      hosts: { zcode: { version: '1' } },
+      availableAgentComponents: ['math-anchor'],
+      agentComponents: ['math-anchor'],
+      workspaceGranted: false,
+    },
+  }
+  const tools = { paused: false, availableAgentComponents: ['math-anchor'], activeAgentComponents: ['math-anchor'] }
+  const missing = buildDashboardGuidance(snapshot, tools, [
+    { host: 'zcode', appInstalled: false },
+    { host: 'codex', appInstalled: true },
+    { host: 'claude', appInstalled: false },
+  ])
+  assert.equal(missing.readyToWork, false)
+  assert.equal(missing.problemClass, 'app-missing')
+  assert.equal(missing.primaryAction.id, 'connect-agent')
+  assert.equal(missing.connectHostId, 'codex')
+  assert.equal(missing.primaryAction.label, 'Connect Codex')
+
+  const many = buildDashboardGuidance({
+    configured: true,
+    environment: { hosts: {}, availableAgentComponents: ['math-anchor'], agentComponents: ['math-anchor'] },
+  }, tools, [
+    { host: 'zcode', appInstalled: true },
+    { host: 'codex', appInstalled: true },
+    { host: 'claude', appInstalled: false },
+  ])
+  assert.equal(many.problemClass, 'not-connected')
+  assert.equal(many.primaryAction.label, 'Connect')
+  assert.equal(many.connectHostId, null)
+})
+
+test('Chinese tools and history pages drop empty translation keys and catalog essays', async () => {
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/gui)].map((match) => match[1])
+  const source = scripts.join('\n')
+  assert.doesNotMatch(source, /t\(''\)/u)
+  const zhMatch = source.match(/const zh=\{[\s\S]*?\n\};/u)
+  assert.ok(zhMatch, 'expected zh dictionary')
+  const zh = new Function(`${zhMatch[0]}; return zh`)()
+  assert.equal(Object.hasOwn(zh, ''), false)
+  const values = Object.values(zh).join('\n')
+  assert.equal(values.includes('tools set --profile'), false)
+  assert.equal(values.includes('AGENT_HOST_FEATURED_CATALOG_URL'), false)
+  assert.equal(zh['Public download is not configured.'], '尚未配置公开下载。')
+  assert.equal(zh['Choose folder'], '选择文件夹')
+})
+
+test('connect CTA does not silently pick the first of multiple apps', async () => {
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/gui)].map((m) => m[1]).join('\n')
+  const fnMatch = script.match(/function navigatePage\(page\)\{[\s\S]*?\}\nfunction renderPostSetupGuidance\(root, guidance\)\{[\s\S]*?\n\}/u)
+  assert.ok(fnMatch)
+  const fetches = []
+  const clicks = []
+  const buttons = []
+  const documentRef = {
+    querySelector(sel) {
+      if (sel === '#agent-apps') return { scrollIntoView() { clicks.push('agent-apps') } }
+      return null
+    },
+    createElement(tag) {
+      const node = {
+        tagName: tag, className: '', textContent: '', dataset: {}, children: [],
+        append(...args) { this.children.push(...args) },
+        click() { this.onclick?.() },
+      }
+      Object.defineProperty(node, 'onclick', {
+        configurable: true,
+        get() { return this._onclick },
+        set(fn) { this._onclick = fn; if (typeof fn === 'function') buttons.push(node) },
+      })
+      return node
+    },
+  }
+  const harness = new Function('document', 'fetch', 't', 'call', 'setPage', 'notice', 'data', `
+    const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
+    const button=(label,run,cls='action')=>{const b=el('button',label,cls);b.onclick=run;return b};
+    const $= (s)=>document.querySelector(s);
+    ${fnMatch[0]}
+    return { renderPostSetupGuidance };
+  `)
+  const api = harness(
+    documentRef,
+    async () => ({ ok: true, async json() { return {} } }),
+    (key) => key,
+    (action) => { fetches.push(action) },
+    (pageName) => { clicks.push('setPage:' + pageName) },
+    () => { clicks.push('notice') },
+    {
+      snapshot: { environment: { hosts: {} } },
+      hosts: [
+        { host: 'zcode', appInstalled: true },
+        { host: 'codex', appInstalled: true },
+      ],
+    },
+  )
+  const root = documentRef.createElement('div')
+  api.renderPostSetupGuidance(root, {
+    statusLine: 'Connect Agent to use',
+    statusTone: 'action',
+    primaryAction: { id: 'connect-agent', label: 'Connect' },
+    connectHostId: null,
+    observed: [],
+    gaps: [],
+  })
+  buttons.find((b) => b.dataset.testid === 'post-setup-primary-cta').click()
+  assert.equal(fetches.length, 0)
+  assert.equal(clicks.includes('agent-apps') || clicks.some((item) => String(item).startsWith('setPage:')), true)
+
+  buttons.length = 0
+  fetches.length = 0
+  const uniqueRoot = documentRef.createElement('div')
+  api.renderPostSetupGuidance(uniqueRoot, {
+    statusLine: 'Connect Agent to use',
+    statusTone: 'action',
+    primaryAction: { id: 'connect-agent', label: 'Connect Codex', hostId: 'codex' },
+    connectHostId: 'codex',
+    observed: [],
+    gaps: [],
+  })
+  buttons.find((b) => b.dataset.testid === 'post-setup-primary-cta').click()
+  assert.deepEqual(fetches[0], { action: 'host', host: 'codex', connected: true })
+})
+
+test('grant-workspace CTA asks for a folder instead of repeating doctor', async () => {
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/gui)].map((m) => m[1]).join('\n')
+  const fnMatch = script.match(/function navigatePage\(page\)\{[\s\S]*?\}\nfunction renderPostSetupGuidance\(root, guidance\)\{[\s\S]*?\n\}/u)
+  assert.ok(fnMatch)
+  const fetches = []
+  const buttons = []
+  const documentRef = {
+    querySelector() { return null },
+    createElement(tag) {
+      const node = {
+        tagName: tag, className: '', textContent: '', dataset: {}, children: [], value: '',
+        append(...args) { this.children.push(...args) },
+        click() { this.onclick?.() },
+        setAttribute() {},
+        focus() {},
+      }
+      Object.defineProperty(node, 'onclick', {
+        configurable: true,
+        get() { return this._onclick },
+        set(fn) { this._onclick = fn; if (typeof fn === 'function') buttons.push(node) },
+      })
+      return node
+    },
+  }
+  const harness = new Function('document', 'fetch', 't', 'call', 'setPage', 'notice', 'data', `
+    const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
+    const button=(label,run,cls='action')=>{const b=el('button',label,cls);b.onclick=run;return b};
+    const $= (s)=>document.querySelector(s);
+    ${fnMatch[0]}
+    return { renderPostSetupGuidance };
+  `)
+  const api = harness(documentRef, async () => ({ ok: true, async json() { return {} } }), (k) => k, (action) => { fetches.push(action) }, () => {}, () => {}, { snapshot: { environment: { hosts: {} } }, hosts: [] })
+  const root = documentRef.createElement('div')
+  api.renderPostSetupGuidance(root, {
+    statusLine: 'Need a project folder',
+    statusTone: 'fault',
+    primaryAction: { id: 'grant-workspace', label: 'Choose folder' },
+    blockingCode: 'user.permissions',
+    blockingMessage: 'EACCES: access denied to project folder',
+    observed: [],
+    gaps: [],
+  })
+  buttons.find((b) => b.dataset.testid === 'post-setup-primary-cta').click()
+  assert.equal(fetches.some((item) => item.action === 'doctor'), false)
+  const grant = buttons.find((b) => b.textContent === 'Grant folder')
+  assert.ok(grant, 'Choose folder must reveal a grant control')
+  const card = root.children[0]
+  const box = (card?.children || []).find((node) => node.dataset?.testid === 'grant-folder')
+  const input = (box?.children || []).find((node) => node.tagName === 'input')
+  assert.ok(input, 'grant control must include a folder path field')
+  input.value = '/tmp/project'
+  grant.click()
+  assert.deepEqual(fetches[0], { action: 'workspace', path: '/tmp/project' })
+})
+
+test('workspace action grants an accessible project folder', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-web-grant-ws-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-grant-state-'))
+  const folder = await mkdtemp(join(tmpdir(), 'agent-host-web-grant-folder-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true }), rm(folder, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  const installed = await setup(
+    { profile: 'standard', hosts: [], noHost: true, developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false },
+    {
+      runner: fake.runner,
+      catalogPreflight: healthyCatalogPreflight,
+      applicationStatePreflight: compatibleApplicationState,
+    },
+  )
+  assert.equal(installed.status, 'installed')
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({ stateRoot, open: false, idleTimeoutMs: 60_000, onReady: readyResolve })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+  const granted = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'workspace', path: folder }),
+  })
+  assert.equal(granted.status, 200)
+  const body = await granted.json()
+  assert.equal(body.result.status, 'workspace-granted')
+  assert.equal(body.result.workspaceRoot, folder)
+  assert.match(body.result.nextStep, /new Agent task/u)
+  const paths = await prepareStatePaths(stateRoot)
+  const state = await loadState(paths)
+  assert.equal(state.workspaceRoot, folder)
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
+test('open-app uses the GUI/terminal opener and reports a next step when no window exists', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-web-open-ws-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-open-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  await setup(
+    { profile: 'standard', hosts: ['codex'], developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false },
+    {
+      runner: fake.runner,
+      codexConfiguration: fake.configuration,
+      hostSkillHome: join(stateRoot, 'host-home'),
+      catalogPreflight: healthyCatalogPreflight,
+      applicationStatePreflight: compatibleApplicationState,
+    },
+  )
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({
+    stateRoot,
+    open: false,
+    idleTimeoutMs: 60_000,
+    onReady: readyResolve,
+    openAgentApp: async (host) => ({ status: 'opened', host, method: 'gui', launched: '/Applications/Codex.app' }),
+  })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+  const opened = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'open-app', host: 'codex' }),
+  })
+  assert.equal(opened.status, 200)
+  const openedBody = await opened.json()
+  assert.equal(openedBody.result.method, 'gui')
+  assert.equal(openedBody.result.launched, '/Applications/Codex.app')
   await new Promise((resolve) => server.close(resolve))
   await running
 })

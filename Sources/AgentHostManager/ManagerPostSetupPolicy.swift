@@ -8,6 +8,7 @@ struct ManagerPostSetupGuidance: Equatable, Sendable {
         case toolFault = "tool-fault"
         case toolsPaused = "tools-paused"
         case unverified = "unverified"
+        case appMissing = "app-missing"
     }
 
     enum PrimaryActionID: String, Equatable, Sendable {
@@ -42,8 +43,18 @@ struct ManagerPostSetupGuidance: Equatable, Sendable {
     let hint: String?
     let recoveryPath: String
     let primaryHostID: String?
+    let connectHostID: String?
+    let blockingCode: String?
+    let blockingMessage: String?
     /// Destination is starting work, not a green status checklist.
     let destinationIsWork: Bool
+}
+
+struct ManagerHostAvailability: Equatable, Sendable {
+    let id: String
+    let name: String
+    let connected: Bool
+    let appInstalled: Bool?
 }
 
 enum ManagerPostSetupPolicy {
@@ -58,8 +69,21 @@ enum ManagerPostSetupPolicy {
         doctorBlockingErrors: [(id: String, message: String)],
         justInstalled: Bool,
         primaryHostName: String?,
-        primaryHostID: String? = nil
+        primaryHostID: String? = nil,
+        hostAvailability: [ManagerHostAvailability] = []
     ) -> ManagerPostSetupGuidance {
+        let presentConnected = hostAvailability.filter { $0.connected && $0.appInstalled != false }
+        let missingConnected = hostAvailability.filter { $0.connected && $0.appInstalled == false }
+        let availableUnconnected = hostAvailability.filter { !$0.connected && $0.appInstalled == true }
+        let uniqueConnect = availableUnconnected.count == 1 ? availableUnconnected.first : nil
+        let presentNames = presentConnected.map(\.name)
+        let displayConnected = presentNames.isEmpty
+            ? (missingConnected.isEmpty ? connectedHostNames : missingConnected.map(\.name))
+            : presentNames
+        let presentPrimary = presentConnected.first
+        let app = presentPrimary?.name ?? primaryHostName ?? displayConnected.first
+        let resolvedPrimaryID = presentPrimary?.id ?? primaryHostID
+
         guard configured else {
             return ManagerPostSetupGuidance(
                 readyToWork: false,
@@ -75,7 +99,10 @@ enum ManagerPostSetupPolicy {
                 primaryActionDetail: "",
                 hint: nil,
                 recoveryPath: "Complete setup, then return here to start work.",
-                primaryHostID: primaryHostID,
+                primaryHostID: resolvedPrimaryID,
+                connectHostID: nil,
+                blockingCode: nil,
+                blockingMessage: nil,
                 destinationIsWork: true
             )
         }
@@ -98,19 +125,21 @@ enum ManagerPostSetupPolicy {
         } else if installedToolCount > 0 {
             observed.append("Tools are installed, but none are selected for new Agent tasks.")
         }
-        if connectedHostNames.isEmpty {
+        if displayConnected.isEmpty {
             observed.append("No Agent app is connected yet.")
         } else {
-            observed.append("Connected Agent app\(connectedHostNames.count == 1 ? "" : "s"): \(connectedHostNames.joined(separator: ", ")).")
+            observed.append("Connected Agent app\(displayConnected.count == 1 ? "" : "s"): \(displayConnected.joined(separator: ", ")).")
+        }
+        for missing in missingConnected {
+            observed.append("\(missing.name) is recorded as connected, but it is not installed.")
         }
         if agentAppsVerified == true {
             observed.append("Full Check verified current Agent-app bindings.")
-        } else if agentAppsVerified == false && !connectedHostNames.isEmpty {
+        } else if agentAppsVerified == false && !displayConnected.isEmpty {
             observed.append("Connected Agent-app bindings need attention.")
         }
 
         var gaps = ["Host cannot confirm that an already-open Agent task has loaded these tools."]
-        let app = primaryHostName ?? connectedHostNames.first
 
         if let fault = classifyFault(doctorBlockingErrors) {
             gaps.append(fault.summary)
@@ -128,12 +157,42 @@ enum ManagerPostSetupPolicy {
                 primaryActionDetail: "",
                 hint: nil,
                 recoveryPath: fault.recoveryPath,
-                primaryHostID: primaryHostID,
+                primaryHostID: resolvedPrimaryID,
+                connectHostID: nil,
+                blockingCode: fault.blockingCode,
+                blockingMessage: fault.blockingMessage,
                 destinationIsWork: true
             )
         }
 
-        if connectedHostNames.isEmpty {
+        if presentConnected.isEmpty && !missingConnected.isEmpty {
+            let missingName = missingConnected[0].name
+            gaps.append("\(missingName) is not installed.")
+            return ManagerPostSetupGuidance(
+                readyToWork: false,
+                problemClass: .appMissing,
+                statusLine: "\(missingName) is not installed",
+                statusTone: .fault,
+                title: "\(missingName) is not installed",
+                summary: "The connected Agent app is not installed on this machine.",
+                observed: observed,
+                gaps: gaps,
+                primaryActionID: .connectAgent,
+                primaryActionLabel: label(for: .connectAgent, appName: uniqueConnect?.name),
+                primaryActionDetail: "",
+                hint: nil,
+                recoveryPath: uniqueConnect == nil
+                    ? "Install \(missingName), or connect a different installed app."
+                    : "Install \(missingName), or connect \(uniqueConnect?.name ?? "a different installed app").",
+                primaryHostID: uniqueConnect?.id,
+                connectHostID: uniqueConnect?.id,
+                blockingCode: nil,
+                blockingMessage: nil,
+                destinationIsWork: true
+            )
+        }
+
+        if presentConnected.isEmpty && connectedHostNames.isEmpty {
             gaps.append("Connect an Agent app before expecting tools in a session.")
             return ManagerPostSetupGuidance(
                 readyToWork: false,
@@ -145,11 +204,16 @@ enum ManagerPostSetupPolicy {
                 observed: observed,
                 gaps: gaps,
                 primaryActionID: .connectAgent,
-                primaryActionLabel: label(for: .connectAgent, appName: nil),
+                primaryActionLabel: label(for: .connectAgent, appName: uniqueConnect?.name),
                 primaryActionDetail: "",
                 hint: nil,
-                recoveryPath: "Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.",
-                primaryHostID: primaryHostID,
+                recoveryPath: uniqueConnect == nil
+                    ? "Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up."
+                    : "Connect \(uniqueConnect?.name ?? "a supported app"), then start a new task in that app. Old tasks will not pick this up.",
+                primaryHostID: uniqueConnect?.id,
+                connectHostID: uniqueConnect?.id,
+                blockingCode: nil,
+                blockingMessage: nil,
                 destinationIsWork: true
             )
         }
@@ -170,7 +234,10 @@ enum ManagerPostSetupPolicy {
                 primaryActionDetail: "",
                 hint: nil,
                 recoveryPath: "Resume tools, then open a new Agent task.",
-                primaryHostID: primaryHostID,
+                primaryHostID: resolvedPrimaryID,
+                connectHostID: nil,
+                blockingCode: nil,
+                blockingMessage: nil,
                 destinationIsWork: true
             )
         }
@@ -191,7 +258,10 @@ enum ManagerPostSetupPolicy {
                 primaryActionDetail: "",
                 hint: nil,
                 recoveryPath: "In Tools, select at least one installed tool, then open a new Agent task.",
-                primaryHostID: primaryHostID,
+                primaryHostID: resolvedPrimaryID,
+                connectHostID: nil,
+                blockingCode: nil,
+                blockingMessage: nil,
                 destinationIsWork: true
             )
         }
@@ -212,7 +282,10 @@ enum ManagerPostSetupPolicy {
                 primaryActionDetail: "",
                 hint: nil,
                 recoveryPath: "Review Repair or Run Full Check, then open a new Agent task after bindings verify.",
-                primaryHostID: primaryHostID,
+                primaryHostID: resolvedPrimaryID,
+                connectHostID: nil,
+                blockingCode: nil,
+                blockingMessage: nil,
                 destinationIsWork: true
             )
         }
@@ -233,12 +306,15 @@ enum ManagerPostSetupPolicy {
             primaryActionDetail: "",
             hint: "Start a new task in the app",
             recoveryPath: "If the new task cannot see tools: decide whether it is not connected, a stale session, a permission issue, or a tool fault — then use Connect, a newer task, grant/repair, or Review Repair.",
-            primaryHostID: primaryHostID,
+            primaryHostID: resolvedPrimaryID,
+            connectHostID: nil,
+            blockingCode: nil,
+            blockingMessage: nil,
             destinationIsWork: true
         )
     }
 
-    private static func classifyFault(_ errors: [(id: String, message: String)]) -> (problemClass: ManagerPostSetupGuidance.ProblemClass, title: String, statusLine: String, summary: String, action: ManagerPostSetupGuidance.PrimaryActionID, recoveryPath: String)? {
+    private static func classifyFault(_ errors: [(id: String, message: String)]) -> (problemClass: ManagerPostSetupGuidance.ProblemClass, title: String, statusLine: String, summary: String, action: ManagerPostSetupGuidance.PrimaryActionID, recoveryPath: String, blockingCode: String?, blockingMessage: String?)? {
         guard let first = errors.first else { return nil }
         let permission = errors.first {
             $0.id.localizedCaseInsensitiveContains("permission")
@@ -246,13 +322,20 @@ enum ManagerPostSetupPolicy {
                 || $0.message.range(of: "permission|workspace|grant|access denied|EACCES|EPERM", options: [.regularExpression, .caseInsensitive]) != nil
         }
         if let permission {
+            let workspace = permission.id.localizedCaseInsensitiveContains("permission")
+                || permission.id.localizedCaseInsensitiveContains("workspace")
+                || permission.message.range(of: "workspace|project folder|grant", options: [.regularExpression, .caseInsensitive]) != nil
             return (
                 .permission,
-                "Permission blocked",
-                shortReason(permission.message, fallback: "Permission blocked"),
+                workspace ? "Need a project folder" : "Permission blocked",
+                workspace ? "Need a project folder" : "Permission blocked",
                 permission.message,
-                .grantWorkspace,
-                "Fix the permission or grant the project folder, run Full Check, then open a new Agent task."
+                workspace ? .grantWorkspace : .runFullCheck,
+                workspace
+                    ? "Choose a project folder Host can grant to tools, then start a new Agent task."
+                    : "Check shows the named permission fault. Fix it in system settings, then Check again.",
+                permission.id,
+                permission.message
             )
         }
         return (
@@ -261,7 +344,9 @@ enum ManagerPostSetupPolicy {
             shortReason(first.message, fallback: "Needs repair"),
             first.message,
             .reviewRepair,
-            "Review Repair (or Run Full Check), fix the named fault, then open a new Agent task. Do not keep working in an old task."
+            "Review Repair (or Run Full Check), fix the named fault, then open a new Agent task. Do not keep working in an old task.",
+            first.id,
+            first.message
         )
     }
 
@@ -274,12 +359,16 @@ enum ManagerPostSetupPolicy {
 
     private static func label(for action: ManagerPostSetupGuidance.PrimaryActionID, appName: String?) -> String {
         switch action {
-        case .connectAgent: return "Connect"
+        case .connectAgent:
+            if let appName, !appName.isEmpty {
+                return "Connect \(appName)"
+            }
+            return "Connect"
         case .reviewRepair: return "Repair"
         case .runFullCheck: return "Check"
         case .openTools: return "Tools"
         case .resumeTools: return "Resume"
-        case .grantWorkspace: return "Fix access"
+        case .grantWorkspace: return "Choose folder"
         case .openApp, .startNewAgentTask:
             if let appName, !appName.isEmpty {
                 return "Open \(appName)"

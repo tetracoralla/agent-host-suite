@@ -121,6 +121,11 @@ struct EnvironmentView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    if let code = guidance.blockingCode, !code.isEmpty {
+                        Text(code + (guidance.blockingMessage.map { " · \($0)" } ?? ""))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     ForEach(guidance.observed, id: \.self) { line in
                         Text("• \(L10n.text(line))")
                             .font(.caption)

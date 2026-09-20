@@ -1792,6 +1792,47 @@ export async function repairInstallation(options, dependencies = {}) {
     repairInstallationUnlocked(options, locked, paths))
 }
 
+async function grantWorkspaceUnlocked(options, dependencies = {}, preparedPaths = null) {
+  const runner = dependencies.runner ?? runFile
+  const paths = preparedPaths ?? await prepareStatePaths(resolveStateRoot(options.stateRoot))
+  const previous = await loadState(paths)
+  if (previous === null) throw new AgentHostError('NOT_INSTALLED', 'No Agent environment is installed')
+  const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot)
+  if (workspaceRoot === null) {
+    throw new AgentHostError('WORKSPACE_ROOT_INVALID', 'Choose a project folder')
+  }
+  const manifest = {
+    components: previous.components,
+    agentComponents: previous.agentComponents ?? availableAgentComponents(previous),
+    ...pausedManifestFields(isAgentToolsPaused(previous), previous.resumeAgentComponents ?? []),
+  }
+  await validateActiveComponentPathGrants(manifest)
+  const rebind = dependencies.rebindObservability ?? rebindObservabilityState
+  const activated = await activateState(paths, previous, manifest, runner, options, workspaceRoot, dependencies)
+  const activatedAt = new Date().toISOString()
+  const next = {
+    ...previous,
+    hosts: activated.hosts,
+    runtime: activated.runtime,
+    updatedAt: activatedAt,
+    bindingsActivatedAt: activatedAt,
+    workspaceRoot,
+  }
+  if (next.observability?.enabled === true) await rebind(next, paths, runner)
+  await (dependencies.saveState ?? saveState)(paths, next)
+  return {
+    status: 'workspace-granted',
+    workspaceRoot,
+    restartRequired: Object.keys(next.hosts).length > 0,
+    nextStep: 'Start a new Agent task so tools see the folder.',
+  }
+}
+
+export async function grantWorkspace(options, dependencies = {}) {
+  return await lockedLifecycle(options, dependencies, 'workspace.grant', (locked, paths) =>
+    grantWorkspaceUnlocked(options, locked, paths))
+}
+
 export async function rollbackInstallation(options, dependencies = {}) {
   return await lockedLifecycle(options, dependencies, 'environment.rollback', (locked, paths) =>
     rollbackInstallationUnlocked(options, locked, paths))
