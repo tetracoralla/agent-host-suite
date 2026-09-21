@@ -110,8 +110,11 @@ const previewDoc = await readFile(join(root, 'docs/UNSIGNED_PREVIEW.md'), 'utf8'
 if (!previewDoc.includes('publish-unsigned-preview.mjs') || !previewDoc.includes('Where a non-developer downloads today')) {
   throw new Error('unsigned preview document must name the owner publish script and the non-developer download entry')
 }
-if (!previewDoc.includes('Control-click') || !previewDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !previewDoc.includes('preview-distribution.json')) {
-  throw new Error('unsigned preview document must name Gatekeeper, the catalog URL hook, and the index asset')
+if (!previewDoc.includes('Open Anyway') || !previewDoc.includes('Privacy & Security') || !previewDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !previewDoc.includes('preview-distribution.json')) {
+  throw new Error('unsigned preview document must name the macOS 15+ Gatekeeper override, the catalog URL hook, and the index asset')
+}
+if (!previewDoc.includes('Sequoia') && !previewDoc.includes('macOS 15')) {
+  throw new Error('unsigned preview document must name macOS 15 Sequoia first-open rules')
 }
 if (previewDoc.includes('notarytool') || previewDoc.includes('APPLE_NOTARY')) {
   throw new Error('unsigned preview document must not instruct Apple notarization')
@@ -125,6 +128,9 @@ if (unsignedWorkflow.includes('notarytool') || unsignedWorkflow.includes('APPLE_
 }
 if (!unsignedWorkflow.includes('Unsigned preview') || !unsignedWorkflow.includes('admit-github-plugin.mjs')) {
   throw new Error('unsigned preview workflow draft must admit GitHub tools on a clean runner without Apple secrets')
+}
+if (!unsignedWorkflow.includes('Open Anyway') || !unsignedWorkflow.includes('Privacy & Security')) {
+  throw new Error('unsigned preview workflow draft must name the macOS 15+ System Settings override')
 }
 if (unsignedWorkflow.includes('needs: github-tools') || unsignedWorkflow.includes('name: github-tools')) {
   throw new Error('unsigned preview workflow must not reuse one OS GitHub-tool archive on other platforms')
@@ -184,6 +190,9 @@ if (!readmeZh.includes('无公证') || !readmeZh.includes('AGENT_HOST_FEATURED_C
 const unpublished = JSON.parse(await readFile(join(root, 'catalog/preview-distribution.json'), 'utf8'))
 if (unpublished.publicReleasePublished !== false || unpublished.notarized !== false || unpublished.catalog !== null || unpublished.carriers.length !== 0) {
   throw new Error('tracked preview-distribution.json must remain an unpublished placeholder')
+}
+if (!unpublished.gatekeeperNote.includes('Open Anyway') || !unpublished.gatekeeperNote.includes('Privacy & Security')) {
+  throw new Error('tracked preview-distribution.json gatekeeperNote must name the macOS 15+ System Settings override')
 }
 const draftWorkflow = await readFile(join(root, 'docs/unsigned-preview-release.yml'), 'utf8')
 if (draftWorkflow.includes('notarytool') || draftWorkflow.includes('APPLE_NOTARY')) {

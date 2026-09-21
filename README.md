@@ -14,8 +14,9 @@ This checkout is source and a developer preview. It does **not** ship Apple
 Developer ID signed or notarized builds, and it is **not** an App Store or
 plugin marketplace. Strangers install from a GitHub Release or a configured
 HTTPS URL (macOS DMG / Windows ZIP) once an owner publishes those assets;
-until then Host says public download is not configured. macOS Gatekeeper
-requires Control-click → Open. Host can fetch a bound catalog and install
+until then Host says public download is not configured. macOS Gatekeeper on
+15+ uses System Settings → Privacy & Security → Open Anyway after a blocked
+first open. Host can fetch a bound catalog and install
 tools when `AGENT_HOST_FEATURED_CATALOG_URL` is set. See
 [Unsigned preview download](docs/UNSIGNED_PREVIEW.md). After Host is
 installed, browse recommended tools or add a GitHub project/Release without
@@ -28,7 +29,7 @@ Agent session loaded those tools.
 
 Public entry: **[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)**.
 
-- When an owner has published an unsigned preview, download `Agent-Host-*-darwin-arm64.dmg` (first deep path), verify `SHA256SUMS`, then Control-click → Open. **Not notarized. Not a marketplace.**
+- When an owner has published an unsigned preview, download `Agent-Host-*-darwin-arm64.dmg` (first deep path), verify `SHA256SUMS`, try to open the app, then **System Settings → Privacy & Security → Open Anyway** if macOS blocks it. **Not notarized. Not a marketplace.**
 - When Releases has no installer assets, Host says public download is not configured. See [Unsigned preview download](docs/UNSIGNED_PREVIEW.md).
 
 ## Scope
@@ -188,8 +189,9 @@ today.
 
 - There is no public Agent Host marketplace and no third-party plugin store.
 - macOS preview DMGs are not Developer ID signed and not Apple-notarized.
-  Gatekeeper requires Control-click → Open. That is the supported preview path,
-  not a temporary stand-in for the App Store.
+  After a blocked first open, System Settings → Privacy & Security → Open Anyway
+  is the supported preview path on macOS 15 Sequoia and later (Control-click no
+  longer overrides Gatekeeper). That is not a temporary stand-in for the App Store.
 - Windows preview ZIPs are unsigned. SmartScreen may warn; compare SHA-256
   first. Details: [Windows distribution](docs/WINDOWS.md).
 - Host can download a bound catalog and install featured tools when

@@ -175,6 +175,13 @@ test('prepare/publish dry-run print non-prerelease --latest and only the closed 
   assert.ok(sums.includes(dmgName), `expected SHA256SUMS to include ${dmgName}`)
   assert.match(sums, /preview-distribution\.json/u)
 
+  const notes = await readFile(join(output, 'RELEASE_NOTES.md'), 'utf8')
+  assert.match(notes, /System Settings/u)
+  assert.match(notes, /Privacy & Security/u)
+  assert.match(notes, /Open Anyway/u)
+  assert.match(notes, /macOS 15 Sequoia/u)
+  assert.match(notes, /Control-click → Open no longer overrides Gatekeeper/u)
+
   const manifest = JSON.parse(await readFile(join(output, ASSET_MANIFEST_NAME), 'utf8'))
   assert.equal(manifest.tag, tag)
   assert.equal(manifest.upload.some((entry) => entry.name === 'old-local-debug.log'), false)

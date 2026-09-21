@@ -20,7 +20,9 @@ used as a substitute.
 `profiles fetch --carrier` downloads an installer into Host private
 downloads. It does **not** quit, replace, or relaunch Agent Host. Application
 replacement is `agent-host app update` on a supported OS after digest
-comparison. Unsigned macOS builds still require Control-click → Open.
+comparison. Unsigned macOS builds still require System Settings → Privacy &
+Security → Open Anyway after a blocked first open (macOS 15 Sequoia and later;
+Control-click → Open may still work on macOS 14).
 
 ## Tools
 

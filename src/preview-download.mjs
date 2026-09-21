@@ -10,7 +10,7 @@ export const PREVIEW_FETCH_SCHEMA = 'openadam.agent-host-preview-fetch.v0.1'
 export const GITHUB_RELEASES_URL = 'https://github.com/tetracoralla/agent-host-suite/releases'
 export const GITHUB_PREVIEW_INDEX_CONVENTION = `${GITHUB_RELEASES_URL}/latest/download/preview-distribution.json`
 
-export const UNSIGNED_MACOS_GATEKEEPER_NOTE = 'Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview.'
+export const UNSIGNED_MACOS_GATEKEEPER_NOTE = 'Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, try to open Agent Host.app (or the app inside the DMG). If macOS blocks it, open System Settings → Privacy & Security and choose Open Anyway. That warning is expected for this preview. On macOS 14, Control-click → Open may still work; it does not on macOS 15 Sequoia and later. Do not turn off Gatekeeper.'
 export const WINDOWS_SMARTSCREEN_NOTE = 'Unsigned Windows ZIP packages are not Authenticode-signed. Windows SmartScreen may warn on first open; that warning is expected for this preview. Compare the ZIP to SHA256SUMS before extracting.'
 export const PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE = 'Public download is not configured. This checkout does not publish GitHub Release assets. After an owner publishes a Release or an HTTPS index, set AGENT_HOST_FEATURED_CATALOG_URL to that preview-distribution.json (or a bound current.json). This is not an app store.'
 
@@ -469,6 +469,6 @@ export async function fetchPreviewRelease(options = {}, dependencies = {}) {
     index: fetched.index,
     gatekeeperNote: fetched.index?.gatekeeperNote ?? UNSIGNED_MACOS_GATEKEEPER_NOTE,
     windowsSmartScreenNote: fetched.index?.windowsSmartScreenNote ?? WINDOWS_SMARTSCREEN_NOTE,
-    message: 'Fetched an unsigned preview catalog. Compare SHA-256 values; macOS still needs Control-click → Open. This is not notarized and not an app store.',
+    message: 'Fetched an unsigned preview catalog. Compare SHA-256 values; macOS still needs System Settings → Privacy & Security → Open Anyway after a blocked first open. This is not notarized and not an app store.',
   }
 }

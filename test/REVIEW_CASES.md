@@ -481,7 +481,7 @@ live configuration changes, content export or publication.
 When a binary or installer release is in scope, install on a clean supported
 machine from the declared artifacts rather than sibling source. Verify detached
 digests, nested licenses/notices, SBOM, the recorded signing state (unsigned
-preview is expected), Gatekeeper Control-click → Open or SmartScreen, and
+preview is expected), Gatekeeper System Settings → Privacy & Security → Open Anyway (macOS 15+) or SmartScreen, and
 each claimed platform separately. Do not treat notarization as a required
 preview fact. Record intentionally absent signed or cross-platform artifacts
 rather than treating silence as parity.

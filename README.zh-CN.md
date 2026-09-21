@@ -10,8 +10,8 @@ Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工�
 
 当前源码树是开发者预览：**无公证**、无 Developer ID 签名、也不是 App Store 或插件
 市场。陌生人应从 GitHub Release 或已配置的 HTTPS 地址下载 macOS DMG / Windows
-安装包（所有者发布资产之后）；在此之前 Host 会明确说「尚未配置公开下载」。macOS
-需按住 Control 点击 → 打开。设置 `AGENT_HOST_FEATURED_CATALOG_URL` 后，Host 可拉取
+安装包（所有者发布资产之后）；在此之前 Host 会明确说「尚未配置公开下载」。macOS 15
+起请先尝试打开，若被拦截再到系统设置 → 隐私与安全性 → 仍要打开。设置 `AGENT_HOST_FEATURED_CATALOG_URL` 后，Host 可拉取
 绑定 catalog 并安装工具。见
 [未公证预览下载](docs/UNSIGNED_PREVIEW.md)。安装 Host 之后，可浏览推荐工具或添加
 GitHub 项目/Release，不必改 Host 源码；见 [GitHub 更新](docs/UPDATES.md)。
@@ -22,7 +22,7 @@ GitHub 项目/Release，不必改 Host 源码；见 [GitHub 更新](docs/UPDATES
 
 公开入口：**[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)**。
 
-- 所有者已发布未公证预览时：下载 `Agent-Host-*-darwin-arm64.dmg`（首条深度路径），核对 `SHA256SUMS`，再按住 Control 点击 → 打开。**无公证。不是应用市场。**
+- 所有者已发布未公证预览时：下载 `Agent-Host-*-darwin-arm64.dmg`（首条深度路径），核对 `SHA256SUMS`，先尝试打开；若被拦截，到系统设置 → 隐私与安全性 → 仍要打开。**无公证。不是应用市场。**
 - Releases 尚无安装包资产时：Host 会明确说「尚未配置公开下载」。见 [未公证预览下载](docs/UNSIGNED_PREVIEW.md)。
 
 ## 范围与事实来源
@@ -148,8 +148,9 @@ Agent Host 默认保留用户拥有的应用配置与数据。本机监测需要
 或自建 HTTPS 站点。本 checkout 不声称那些资产已经存在。
 
 - 不存在公开的 Agent Host 市场或第三方插件商店。
-- macOS 预览 DMG 未经 Developer ID 签名、未经 Apple 公证。Gatekeeper 需要按住
-  Control 点击 → 打开。这就是受支持的预览路径，不是「等以后上架」的权宜之计。
+- macOS 预览 DMG 未经 Developer ID 签名、未经 Apple 公证。macOS 15 Sequoia 起
+  Gatekeeper 的受支持路径是：尝试打开 → 系统设置 → 隐私与安全性 → 仍要打开。
+  按住 Control 点击不再能覆盖未签名/未公证软件。这不是「等以后上架」的权宜之计。
 - Windows 预览 ZIP 未做 Authenticode 签名。SmartScreen 可能警告；先核对 SHA-256。
   详见 [`docs/WINDOWS.zh-CN.md`](docs/WINDOWS.zh-CN.md)。
 - 设置 `AGENT_HOST_FEATURED_CATALOG_URL` 后，Host 可下载绑定 catalog 并安装精选

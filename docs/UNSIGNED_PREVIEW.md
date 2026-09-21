@@ -13,7 +13,7 @@ configured** rather than pretending there is a store.
 
 1. Open **[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)**.
 2. If the **latest** Release lists `Agent-Host-*-darwin-arm64.dmg` (and `SHA256SUMS` / `preview-distribution.json`), download those assets. The unsigned preview publishes as a **non-prerelease** Release marked latest so `/releases/latest` can resolve it (GitHub excludes prereleases from latest).
-3. Compare the DMG to `SHA256SUMS`, then follow **Open an unsigned macOS DMG** below (Control-click → Open). This path is **not** notarized and **not** a marketplace.
+3. Compare the DMG to `SHA256SUMS`, then follow **Open an unsigned macOS DMG** below (try to open → System Settings → Privacy & Security → Open Anyway). This path is **not** notarized and **not** a marketplace.
 4. If the Releases page has **no** installer assets yet, public download is not configured — Host reports that honestly. There is no App Store / Homebrew cask stand-in in this slice.
 
 Owner publish (macOS arm64 first) uses `scripts/publish-unsigned-preview.mjs` after packaging a DMG on a Mac; see **Owner checklist** below. The Actions draft `docs/unsigned-preview-release.yml` stays under `docs/` until a token with GitHub `workflow` scope can push `.github/workflows/`.
@@ -57,13 +57,23 @@ keep a retry or local-catalog recovery.
 The DMG and `Agent Host.app` are ad-hoc signed at most. They are **not**
 Apple-notarized.
 
+Apple’s current override for unsigned or unnotarized software on **macOS 15
+Sequoia and later** is System Settings → Privacy & Security → Open Anyway;
+Control-click no longer overrides Gatekeeper
+([Apple developer note](https://developer.apple.com/news/?id=saqachfa),
+[Open apps safely](https://support.apple.com/en-gb/102445)).
+
 1. Compare the DMG to `SHA256SUMS`.
 2. Open the DMG.
 3. Drag **Agent Host** to Applications if the disk image offers that, or open
    **Agent Host.app** from the mounted volume.
-4. **Control-click** (or right-click) **Agent Host.app**, choose **Open**, then
-   confirm the Gatekeeper warning. The warning is expected.
-5. Later launches can use a normal double-click after that first Open.
+4. **Try to open** the app. If macOS reports that it cannot verify the app,
+   open **System Settings → Privacy & Security**, scroll to Security, and
+   choose **Open Anyway**. Confirm the warning. This is the supported first-open
+   path on macOS 15 Sequoia and later.
+5. On **macOS 14**, Control-click (or right-click) **Agent Host.app** → **Open**
+   may still confirm the warning. That override does not work on macOS 15+.
+6. Later launches can use a normal double-click after that first Open.
 
 Do not bypass Gatekeeper by disabling system security. Do not describe this
 preview as notarized or as an App Store app.

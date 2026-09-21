@@ -163,7 +163,7 @@ export async function checkApplicationUpdate({
     carrier: asset === null ? null : { filename: asset.name, url: asset.url, bytes: asset.bytes, sha256: asset.digest ?? null },
     checksum: checksum === null ? null : { filename: checksum.name, url: checksum.url },
     notarized: false,
-    note: 'Unsigned preview. Control-click Open on macOS; SmartScreen may warn on Windows. profiles fetch --carrier is not application self-update.',
+    note: 'Unsigned preview. On macOS, try to open then System Settings → Privacy & Security → Open Anyway; SmartScreen may warn on Windows. profiles fetch --carrier is not application self-update.',
   }
 }
 
@@ -954,7 +954,7 @@ async function mutateApplicationUpdateBody(effective, check, currentVersion, ins
     candidate: check.carrier,
     verification: {
       command: 'node scripts/verify-application-update.mjs --fixture',
-      macos: 'Download the DMG, compare SHA-256, Control-click Open, then agent-host app update on that Mac.',
+      macos: 'Download the DMG, compare SHA-256, try to open, then System Settings → Privacy & Security → Open Anyway, then agent-host app update on that Mac.',
       windows: 'Download the ZIP, compare SHA-256, extract, then run the installer. SmartScreen may warn.',
     },
     note: downloaded === null
@@ -1024,7 +1024,7 @@ export async function updateApplication(options = {}, dependencies = {}) {
       candidate: check.carrier,
       verification: {
         command: 'node scripts/verify-application-update.mjs --fixture',
-        macos: 'Download the DMG, compare SHA-256, Control-click Open, then agent-host app update on that Mac.',
+        macos: 'Download the DMG, compare SHA-256, try to open, then System Settings → Privacy & Security → Open Anyway, then agent-host app update on that Mac.',
         windows: 'Download the ZIP, compare SHA-256, extract, then run the installer. SmartScreen may warn.',
       },
       note: 'This environment cannot replace a macOS app or Windows install. Candidate metadata is returned instead of a mocked system replacement.',
