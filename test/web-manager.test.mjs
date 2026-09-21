@@ -105,6 +105,25 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.equal(checkedBody.result.notarized, false)
   assert.equal(checkedBody.dashboard.source.source.lastCheck.status, 'unpublished')
   assert.match(checkedBody.dashboard.source.source.recovery.message, /local bound catalog/u)
+
+  const sourced = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'source', url: 'https://example.invalid/preview-distribution.json' }),
+  })
+  assert.equal(sourced.status, 200)
+  const sourcedBody = await sourced.json()
+  assert.equal(sourcedBody.result.status, 'error')
+  assert.equal(sourcedBody.dashboard.source.source.lastCheck.code, 'PREVIEW_DOWNLOAD_FAILED')
+  assert.equal(sourcedBody.dashboard.source.source.url, 'https://example.invalid/preview-distribution.json')
+
+  const cleared = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'source', clear: true }),
+  })
+  assert.equal(cleared.status, 200)
+  assert.equal((await cleared.json()).dashboard.source.source.kind, 'unset')
   assert.equal(value.catalog.profiles.some((profile) => profile.id === 'featured' && profile.agentComponents.includes('armorial')), true)
   assert.equal(MANAGER_SETUP_PROFILES.includes('featured'), true)
 

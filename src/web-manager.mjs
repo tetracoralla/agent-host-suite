@@ -329,7 +329,9 @@ async function action(value, stateRoot, dependencies = {}) {
   if (value.action === 'source') {
     if (value.clear === true) return clearCatalogSource({ stateRoot })
     if (value.check === true) return checkCatalogSource({ stateRoot }, { fetch: dependencies.fetch })
-    if (typeof value.url === 'string' && value.url.trim() !== '') return setCatalogSource({ stateRoot, url: value.url })
+    if (typeof value.url === 'string' && value.url.trim() !== '') {
+      return setCatalogSource({ stateRoot, url: value.url }, { fetch: dependencies.fetch })
+    }
     if (typeof value.path === 'string' && value.path.trim() !== '') {
       return setCatalogSource({ stateRoot, releaseManifest: value.path })
     }
