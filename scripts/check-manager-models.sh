@@ -14,6 +14,7 @@ swiftc \
   "$root/Sources/AgentHostManager/AgentHostModels.swift" \
   "$root/Sources/AgentHostManager/MonitoringHealth.swift" \
   "$root/Sources/AgentHostManager/ManagerHealthPolicy.swift" \
+  "$root/Sources/AgentHostManager/ManagerPostSetupPolicy.swift" \
   "$root/Tests/AgentHostManagerChecks/main.swift" \
   -o "$temporary/manager-model-check"
 "$temporary/manager-model-check"

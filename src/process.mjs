@@ -193,7 +193,7 @@ export async function startDetachedProcess(command, args = [], options = {}) {
           env: options.env ?? process.env,
           stdio: options.stdio ?? 'ignore',
           detached: true,
-          windowsHide: true,
+          windowsHide: options.windowsHide ?? true,
           shell: false,
           windowsVerbatimArguments: true,
         })
@@ -203,7 +203,7 @@ export async function startDetachedProcess(command, args = [], options = {}) {
           env: options.env ?? process.env,
           stdio: options.stdio ?? 'ignore',
           detached: true,
-          windowsHide: true,
+          windowsHide: options.windowsHide ?? true,
           shell: false,
         })
       }
@@ -261,8 +261,13 @@ export async function startDetachedProcess(command, args = [], options = {}) {
       if (settled) return
       // Early shell/batch exit before confirmation. When readyProbe/readyFile
       // is set, confirm() still waits for the probe (Manager may outlive a
-      // short-lived wrapper). Without a probe, fail now.
+      // short-lived wrapper). Without a probe, fail now unless the caller
+      // treats a clean launcher handoff (open/osascript/wt) as success.
       if (readyProbe !== null) return
+      if (options.acceptCleanExit === true && status === 0) {
+        finishOk({ handedOff: true })
+        return
+      }
       settleFailure(
         'HOST_COMMAND_FAILED',
         `${command} ${args.join(' ')} exited before startup was confirmed`,

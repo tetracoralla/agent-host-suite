@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum RecoveryOption: Equatable {
@@ -19,6 +20,8 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var setupPlan: SetupPlan?
     @Published private(set) var environmentChangePlan: EnvironmentChangePlan?
     @Published private(set) var toolSetNeedsFreshTask = false
+    @Published private(set) var justCompletedSetup = false
+    @Published var requestedSection: ManagerSection?
     @Published private(set) var isBusy = false
     @Published private(set) var isBlockingWork = false
     @Published private(set) var currentAction: String?
@@ -72,6 +75,150 @@ final class AgentHostStore: ObservableObject {
             snapshot: snapshot
         )
     }
+
+    var postSetupGuidance: ManagerPostSetupGuidance {
+        let connectedIDs = (suite?.hosts ?? [:]).filter(\.value.installed).map(\.key).sorted()
+        let connectedNames = connectedIDs.map { ManagerAgentApp.named($0).name }
+        let availability = ManagerAgentApp.all.map { app in
+            ManagerHostAvailability(
+                id: app.id,
+                name: app.name,
+                connected: suite?.hosts?[app.id]?.installed == true,
+                appInstalled: hostStatuses[app.id]?.appInstalled
+            )
+        }
+        let presentConnected = availability.filter { $0.connected && $0.appInstalled != false }
+        let installedCount = suite?.availableAgentComponents?.count ?? managedTools.count
+        let activeCount: Int = {
+            if suite?.agentToolsPaused == true { return 0 }
+            return suite?.agentComponents?.count ?? 0
+        }()
+        let blocking = (doctor?.checks ?? []).filter { $0.status == "error" }.map { (id: $0.id, message: $0.message) }
+        let verified: Bool? = {
+            if presentConnected.isEmpty && availability.contains(where: { $0.connected && $0.appInstalled == false }) {
+                return false
+            }
+            let managed = Set(presentConnected.map(\.id))
+            guard !managed.isEmpty else { return nil }
+            let checked = managed.compactMap { doctor?.check("host.\($0)") }
+            if checked.isEmpty { return nil }
+            return checked.count == managed.count && checked.allSatisfy { $0.status == "ok" }
+        }()
+        return ManagerPostSetupPolicy.guidance(
+            configured: suite?.configured == true,
+            connectedHostNames: presentConnected.isEmpty ? connectedNames : presentConnected.map(\.name),
+            installedToolCount: installedCount,
+            activeToolCount: activeCount,
+            agentToolsPaused: suite?.agentToolsPaused == true,
+            needsFreshTask: toolSetNeedsFreshTask || justCompletedSetup,
+            agentAppsVerified: verified,
+            doctorBlockingErrors: blocking,
+            justInstalled: justCompletedSetup,
+            primaryHostName: presentConnected.first?.name ?? connectedNames.first,
+            primaryHostID: presentConnected.first?.id ?? connectedIDs.first,
+            hostAvailability: availability
+        )
+    }
+
+    func performPostSetupPrimaryAction() {
+        let guidance = postSetupGuidance
+        // User moved past the install ceremony toward a concrete next step.
+        justCompletedSetup = false
+        switch guidance.primaryActionID {
+        case .connectAgent:
+            if let hostID = guidance.connectHostID, !hostID.isEmpty {
+                Task { await setHost(hostID, connected: true) }
+            } else {
+                requestedSection = .agentApps
+            }
+        case .openApp, .startNewAgentTask:
+            openConnectedAgentApp(hostID: guidance.primaryHostID ?? connectedAgentAppIDs.first)
+        case .openTools:
+            requestedSection = .tools
+        case .resumeTools:
+            Task { await resumeTools() }
+        case .reviewRepair:
+            Task { await prepareRepair() }
+        case .runFullCheck:
+            Task { await runDoctor() }
+        case .grantWorkspace:
+            pickAndGrantWorkspace()
+        }
+    }
+
+    func pickAndGrantWorkspace() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = L10n.text("Choose folder")
+        panel.message = L10n.text("Choose a project folder Host can grant to tools.")
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                await self?.grantWorkspace(path: url.path)
+            }
+        }
+    }
+
+    func grantWorkspace(path: String) async {
+        await action(["repair", "--workspace-root", path], label: "Granting folder")
+    }
+
+    private var connectedAgentAppIDs: [String] {
+        ManagerAgentApp.all.compactMap { app in
+            suite?.hosts?[app.id]?.installed == true ? app.id : nil
+        }
+    }
+
+    /// Honest open: launch the connected Agent app. Host cannot create a task inside it.
+    func openConnectedAgentApp(hostID: String?) {
+        guard let hostID, !hostID.isEmpty else {
+            requestedSection = .agentApps
+            return
+        }
+        let appName = ManagerAgentApp.named(hostID).name
+        let candidates: [URL?] = [
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier(forHost: hostID)),
+            alternateBundleIdentifier(forHost: hostID).flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) },
+            applicationURLIfPresent("/Applications/\(appName).app"),
+            applicationURLIfPresent("\(NSHomeDirectory())/Applications/\(appName).app"),
+        ]
+        if let url = candidates.compactMap({ $0 }).first {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if error != nil {
+                    DispatchQueue.main.async { self.requestedSection = .agentApps }
+                }
+            }
+            return
+        }
+        // Fallback when no GUI bundle is found: open Agents so the user can act.
+        requestedSection = .agentApps
+    }
+
+    private func applicationURLIfPresent(_ path: String) -> URL? {
+        let url = URL(fileURLWithPath: path)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func bundleIdentifier(forHost id: String) -> String {
+        switch id {
+        case "codex": return "com.openai.codex"
+        case "claude": return "com.anthropic.claudecode"
+        case "zcode": return "com.zcode.app"
+        default: return "com.openadam.\(id)"
+        }
+    }
+
+    private func alternateBundleIdentifier(forHost id: String) -> String? {
+        switch id {
+        case "codex": return "com.openai.chat"
+        case "claude": return "com.anthropic.claude"
+        default: return nil
+        }
+    }
+
 
     private var monitoringFacet: ManagerHealthFacet {
         ManagerHealthPolicy.monitoringFacet(observations: observations, snapshot: snapshot)
@@ -264,6 +411,8 @@ final class AgentHostStore: ObservableObject {
         isPresentingSetupPlan = false
         await work("Installing tools") {
             _ = try await self.cli.run(self.setupArguments(dryRun: false), as: GenericResult.self)
+            self.justCompletedSetup = true
+            self.toolSetNeedsFreshTask = self.connectsAgentDuringSetup
             try await self.reloadAll()
         }
     }

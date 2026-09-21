@@ -641,6 +641,158 @@ do {
         "unmapped doctor errors must appear as an unhealthy environment-check facet"
     )
 
+
+    let readyGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["Codex"],
+        installedToolCount: 3,
+        activeToolCount: 3,
+        agentToolsPaused: false,
+        needsFreshTask: true,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [],
+        justInstalled: true,
+        primaryHostName: "Codex",
+        primaryHostID: "codex"
+    )
+    expect(readyGuidance.readyToWork, "post-setup ready guidance must allow starting work")
+    expect(readyGuidance.destinationIsWork, "post-setup destination must be work, not a checklist")
+    expect(readyGuidance.problemClass == .staleSession, "fresh-task requirement is a stale-session class")
+    expect(readyGuidance.statusLine == "Ready", "ready surface is one short status line")
+    expect(readyGuidance.primaryActionID == .openApp, "primary CTA must open the connected Agent app")
+    expect(readyGuidance.primaryActionLabel == "Open Codex", "primary CTA should be a short Open verb")
+    expect(readyGuidance.hint == "Start a new task in the app", "honest hint when Host cannot create a task")
+    expect(readyGuidance.gaps.contains(where: { $0.contains("already-open Agent task") }), "Host must not pretend open tasks loaded tools")
+
+    let disconnectedGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: [],
+        installedToolCount: 3,
+        activeToolCount: 3,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: nil,
+        doctorBlockingErrors: [],
+        justInstalled: true,
+        primaryHostName: nil
+    )
+    expect(disconnectedGuidance.problemClass == .notConnected, "missing Agent connection must be classified")
+    expect(disconnectedGuidance.statusLine == "Connect Agent to use", "not-connected status must stay short")
+    expect(disconnectedGuidance.primaryActionID == .connectAgent, "missing connection CTA must connect an Agent")
+    expect(disconnectedGuidance.primaryActionLabel == "Connect", "connect CTA label must be a short verb")
+    expect(disconnectedGuidance.connectHostID == nil, "multiple or unknown apps must not silently pick a connect target")
+
+    let uniqueConnectGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: [],
+        installedToolCount: 3,
+        activeToolCount: 3,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: nil,
+        doctorBlockingErrors: [],
+        justInstalled: true,
+        primaryHostName: nil,
+        hostAvailability: [
+            ManagerHostAvailability(id: "codex", name: "Codex", connected: false, appInstalled: true),
+            ManagerHostAvailability(id: "zcode", name: "ZCode", connected: false, appInstalled: false),
+            ManagerHostAvailability(id: "claude", name: "Claude Code", connected: false, appInstalled: false),
+        ]
+    )
+    expect(uniqueConnectGuidance.primaryActionID == .connectAgent, "unique available app still connects")
+    expect(uniqueConnectGuidance.primaryActionLabel == "Connect Codex", "unique connect must name the app")
+    expect(uniqueConnectGuidance.connectHostID == "codex", "unique connect must target the only installed app")
+
+    let missingAppGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["Codex"],
+        installedToolCount: 3,
+        activeToolCount: 3,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [],
+        justInstalled: false,
+        primaryHostName: "Codex",
+        primaryHostID: "codex",
+        hostAvailability: [
+            ManagerHostAvailability(id: "codex", name: "Codex", connected: true, appInstalled: false),
+            ManagerHostAvailability(id: "zcode", name: "ZCode", connected: false, appInstalled: true),
+        ]
+    )
+    expect(!missingAppGuidance.readyToWork, "a missing connected app must not report ready")
+    expect(missingAppGuidance.problemClass == .appMissing, "missing connected app is its own class")
+    expect(missingAppGuidance.statusLine.contains("not installed"), "missing app status must say it is not installed")
+    expect(missingAppGuidance.primaryActionID == .connectAgent, "missing app recovers through connect/reselect")
+    expect(missingAppGuidance.connectHostID == "zcode", "missing app with one alternative must offer that alternative")
+    expect(missingAppGuidance.primaryActionLabel == "Connect ZCode", "missing app alternative must name the target")
+
+    let workspacePermissionGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["Codex"],
+        installedToolCount: 1,
+        activeToolCount: 1,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [("user.permissions", "EACCES: access denied to project folder")],
+        justInstalled: false,
+        primaryHostName: "Codex"
+    )
+    expect(workspacePermissionGuidance.primaryActionID == .grantWorkspace, "project-folder access must grant a folder")
+    expect(workspacePermissionGuidance.primaryActionLabel == "Choose folder", "workspace grant label must be honest")
+    expect(workspacePermissionGuidance.statusLine == "Need a project folder", "workspace status must not dump the raw errno")
+    expect(workspacePermissionGuidance.blockingCode == "user.permissions", "original check id stays in details")
+
+    let launchAgentPermission = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["Claude Code"],
+        installedToolCount: 1,
+        activeToolCount: 1,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [("runtime.service", "EACCES writing launch agent")],
+        justInstalled: false,
+        primaryHostName: "Claude Code"
+    )
+    expect(launchAgentPermission.primaryActionID == .runFullCheck, "non-folder permission must not pretend to grant a folder")
+    expect(launchAgentPermission.primaryActionLabel == "Check", "non-folder permission label must be Check")
+
+    let pausedGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["Codex"],
+        installedToolCount: 2,
+        activeToolCount: 0,
+        agentToolsPaused: true,
+        needsFreshTask: false,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [],
+        justInstalled: false,
+        primaryHostName: "Codex"
+    )
+    expect(pausedGuidance.problemClass == .toolsPaused, "deliberate pause must not be tool-fault")
+    expect(pausedGuidance.statusLine == "Tools paused", "paused status must be short")
+    expect(pausedGuidance.primaryActionID == .resumeTools, "paused CTA must resume")
+    expect(pausedGuidance.primaryActionLabel == "Resume", "resume label must be a short verb")
+
+    let faultGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["ZCode"],
+        installedToolCount: 2,
+        activeToolCount: 2,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [("component.armorial", "Armorial runtime probe failed")],
+        justInstalled: false,
+        primaryHostName: "ZCode"
+    )
+    expect(faultGuidance.problemClass == .toolFault, "tool faults must be classified")
+    expect(faultGuidance.primaryActionID == .reviewRepair, "tool faults recover through Review Repair")
+    expect(faultGuidance.primaryActionLabel == "Repair", "repair CTA label must be a short verb")
+    expect(!faultGuidance.readyToWork, "tool faults must not report ready-to-work")
+
     UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)
     expect(L10n.text("Overview") == "总览", "overview destination must provide Simplified Chinese copy")
     expect(L10n.text("Agents") == "连接 Agent", "agents destination must provide Simplified Chinese copy")
@@ -663,7 +815,7 @@ do {
     expect(L10n.text("Usage") == "Usage", "the Manager must allow an explicit English override")
     expect(L10n.locale.identifier.hasPrefix("en"), "dates must follow the explicit English Manager language")
 
-    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup, catalog locator flatten")
+    print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup, catalog locator flatten, post-setup start-work")
 } catch {
     FileHandle.standardError.write(Data("manager model check failed: \(error)\n".utf8))
     exit(1)

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { testSocketPath, assertEndpointAbsent } from '../test/ipc-helpers.mjs'
+import { ownedPidsStillLive } from '../test/pid-occupancy.mjs'
 import { execFile, spawn } from 'node:child_process'
 import { lstat, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -67,15 +68,44 @@ async function forceKillWindowsTree(pid) {
   }
 }
 
+async function windowsConfirmLivePids(pids) {
+  const requested = [...new Set(pids)].filter((pid) => Number.isInteger(pid) && pid > 0)
+  if (requested.length === 0) return []
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command', [
+        "$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')",
+        "$rows = @(foreach ($processId in (ConvertFrom-Json -InputObject $env:OPENADAM_CHECK_PIDS)) { try { (Get-Process -Id $processId -ErrorAction Stop).Id } catch {} })",
+        'ConvertTo-Json -InputObject $rows -Compress',
+      ].join('; '),
+    ], {
+      timeout: 5000, maxBuffer: 32768, windowsHide: true,
+      env: { ...process.env, OPENADAM_CHECK_PIDS: JSON.stringify(requested) },
+    })
+    const parsed = JSON.parse(String(stdout).replace(/^\uFEFF/u, '').trim() || '[]')
+    if (parsed == null) return []
+    const listed = new Set((Array.isArray(parsed) ? parsed : [parsed])
+      .map(Number)
+      .filter((pid) => requested.includes(pid)))
+    return requested.filter((pid) => listed.has(pid))
+  } catch {
+    // Get-Process flake: keep the kill(0) occupancy view (EPERM = still occupied).
+    return requested
+  }
+}
+
 async function assertProcessesExited(pids) {
   const deadline = Date.now() + 15000
   for (;;) {
-    const live = pids.filter((pid) => {
-      try { process.kill(pid, 0); return true } catch (error) { if (error.code === 'ESRCH') return false; throw error }
+    const live = await ownedPidsStillLive(pids, {
+      confirmUncertainPids: process.platform === 'win32' ? windowsConfirmLivePids : undefined,
     })
     if (live.length === 0) return
     if (Date.now() >= deadline) throw new Error(`packaged Host left owned processes running: ${live.join(', ')}`)
-    await new Promise((done) => setTimeout(done, 20))
+    if (process.platform === 'win32') {
+      for (const pid of live) await forceKillWindowsTree(pid)
+    }
+    await new Promise((done) => setTimeout(done, process.platform === 'win32' ? 50 : 20))
   }
 }
 

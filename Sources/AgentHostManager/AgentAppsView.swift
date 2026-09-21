@@ -29,8 +29,10 @@ struct AgentAppsView: View {
                 }
 
                 NoticeView(
-                    title: "Start a fresh task after changes",
-                    message: "New tasks pick up tool changes.",
+                    title: store.toolSetNeedsFreshTask
+                        ? "Start a new task in the app"
+                        : "New tasks pick up changes",
+                    message: "",
                     systemImage: "arrow.clockwise.circle",
                     color: .blue
                 )
