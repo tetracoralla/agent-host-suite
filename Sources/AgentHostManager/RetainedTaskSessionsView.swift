@@ -9,6 +9,7 @@ struct RetainedTaskSessionsView: View {
     @State private var document: JSONExportDocument?
     @State private var filename = "agent-host-task-activity.json"
     @State private var isPresentingExporter = false
+    @State private var loadError: String?
 
     var body: some View {
         let providers = providerIDs
@@ -20,6 +21,11 @@ struct RetainedTaskSessionsView: View {
                     .foregroundStyle(.secondary)
             } else {
                 sourceControls(providers)
+                if let loadError {
+                    Text(L10n.text(loadError))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
                 if let catalog { sourceList(catalog) }
             }
             Text(L10n.text("Direct calls are observed execution. Static references are not. Exported details contain metadata only and no Host verdict."))
@@ -49,7 +55,10 @@ struct RetainedTaskSessionsView: View {
             .labelsHidden()
             .frame(maxWidth: 220)
             Button(L10n.text("Show recent tasks")) {
-                Task { await store.loadTaskSources(provider: provider) }
+                Task {
+                    loadError = nil
+                    loadError = await store.loadTaskSources(provider: provider)
+                }
             }
             .buttonStyle(.borderedProminent)
             .disabled(store.isBusy)
@@ -61,6 +70,7 @@ struct RetainedTaskSessionsView: View {
         .onAppear {
             if !providers.contains(provider), let first = providers.first { provider = first }
         }
+        .onChange(of: provider) { _, _ in loadError = nil }
     }
 
     @ViewBuilder private func sourceList(_ catalog: TaskSourceCatalog) -> some View {

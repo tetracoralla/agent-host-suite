@@ -19,6 +19,8 @@
 - Native and browser Managers now surface task activity as a glanceable card:
   direct calls, errors, and static references appear before an optional
   metadata-only detail export, without a Host score or adoption verdict.
+  An unavailable or older monitoring component now fails inside this optional
+  card instead of interrupting the native Manager with a global alert.
 
 - Unsigned macOS first-open copy now follows Apple’s macOS 15 Sequoia rule:
   try to open → System Settings → Privacy & Security → Open Anyway. Control-click

@@ -553,9 +553,18 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
-    func loadTaskSources(provider: String) async {
-        await work("Loading task activity", blocksInterface: false) {
-            self.taskSourceCatalog = nil
+    func loadTaskSources(provider: String) async -> String? {
+        guard !isBusy else { return nil }
+        isBusy = true
+        isBlockingWork = false
+        currentAction = "Loading task activity"
+        taskSourceCatalog = nil
+        defer {
+            isBusy = false
+            isBlockingWork = false
+            currentAction = nil
+        }
+        do {
             let catalog = try await self.cli.run(
                 ["observability", "task-sources", "--provider", provider, "--limit", "25"],
                 as: TaskSourceCatalog.self
@@ -567,6 +576,9 @@ final class AgentHostStore: ObservableObject {
                 )
             }
             self.taskSourceCatalog = catalog
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 
