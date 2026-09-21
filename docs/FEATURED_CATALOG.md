@@ -60,9 +60,11 @@ agent-host source set --release-manifest /absolute/current.json
 ```
 
 Unsigned macOS downloads are not Apple-notarized, and this product does not
-ship Developer ID signed or App Store builds. Control-click the app, choose
-Open, then confirm the Gatekeeper warning. That warning is expected for this
-preview. Configure Host with `AGENT_HOST_FEATURED_CATALOG_URL` pointing at
+ship Developer ID signed or App Store builds. Try to open the app; if Gatekeeper
+blocks it, open System Settings → Privacy & Security and choose Open Anyway.
+That warning is expected for this preview. On macOS 14, Control-click → Open
+may still work; it does not on macOS 15 Sequoia and later. Configure Host with
+`AGENT_HOST_FEATURED_CATALOG_URL` pointing at
 `preview-distribution.json` or a bound `current.json`; this checkout does not
 claim that URL is live.
 

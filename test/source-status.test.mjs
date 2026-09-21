@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { human } from '../src/cli.mjs'
-import { FEATURED_CATALOG_DOWNLOAD_ENV, GITHUB_RELEASES_URL } from '../src/preview-download.mjs'
+import { FEATURED_CATALOG_DOWNLOAD_ENV, GITHUB_PREVIEW_INDEX_CONVENTION, GITHUB_RELEASES_URL, PREVIEW_DISTRIBUTION_SCHEMA } from '../src/preview-download.mjs'
 import {
   APPLICATION_ENVIRONMENT_NOTE,
   SOURCE_STATUS_SCHEMA,
@@ -82,7 +82,11 @@ test('source status reports unpublished assets without claiming a Release', asyn
 
 test('source check records unpublished recovery without publishing assets', async (t) => {
   const isolated = await createIsolatedCli(t)
-  const checked = await checkCatalogSource({ stateRoot: isolated.stateRoot }, { env: cleanEnv(), carrier: null })
+  const checked = await checkCatalogSource({ stateRoot: isolated.stateRoot }, {
+    env: cleanEnv(),
+    carrier: null,
+    fetch: mockFetch({}),
+  })
   assert.equal(checked.status, 'unpublished')
   assert.equal(checked.source.lastCheck.status, 'unpublished')
   assert.equal(checked.source.lastCheck.code, 'PREVIEW_DOWNLOAD_UNPUBLISHED')
@@ -90,6 +94,47 @@ test('source check records unpublished recovery without publishing assets', asyn
   assert.equal(checked.publicReleasePublished, false)
   assert.equal(checked.notarized, false)
 })
+
+test('source check flips to published when convention index lists carriers', async (t) => {
+  const isolated = await createIsolatedCli(t)
+  const index = {
+    schemaVersion: PREVIEW_DISTRIBUTION_SCHEMA,
+    status: 'preview-unsigned',
+    notarized: false,
+    marketplace: false,
+    publicReleasePublished: true,
+    githubReleasesUrl: GITHUB_RELEASES_URL,
+    selfHostedIndexUrl: GITHUB_PREVIEW_INDEX_CONVENTION,
+    gatekeeperNote: 'gatekeeper',
+    windowsSmartScreenNote: 'smartscreen',
+    carriers: [{
+      platform: 'darwin-arm64',
+      kind: 'dmg',
+      filename: 'Agent-Host-0.2.0-darwin-arm64.dmg',
+      url: `${GITHUB_RELEASES_URL}/download/v0.2.0-unsigned.1/Agent-Host-0.2.0-darwin-arm64.dmg`,
+      sha256: sha256(Buffer.from('fake-dmg')),
+      bytes: 8,
+    }],
+    catalog: null,
+  }
+  const checked = await checkCatalogSource({ stateRoot: isolated.stateRoot }, {
+    env: cleanEnv(),
+    carrier: null,
+    fetch: mockFetch({
+      [GITHUB_PREVIEW_INDEX_CONVENTION]: { body: Buffer.from(`${JSON.stringify(index)}\n`) },
+    }),
+  })
+  assert.equal(checked.status, 'ok')
+  assert.equal(checked.publicReleasePublished, true)
+  assert.equal(checked.notarized, false)
+  assert.equal(checked.marketplace, false)
+  assert.equal(checked.source.unpublished, false)
+  assert.equal(checked.source.lastCheck.publicReleasePublished, true)
+  assert.match(checked.source.message, /darwin-arm64/u)
+  assert.match(checked.source.message, /Not Apple-notarized|not notarized/iu)
+  assert.doesNotMatch(checked.source.message, /marketplace|App Store/iu)
+})
+
 
 test('source set accepts a local bound catalog and digest errors have recovery', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-source-catalog-'))

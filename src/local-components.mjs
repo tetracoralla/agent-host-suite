@@ -42,14 +42,63 @@ async function recordCommittedActivity(dependencies, paths, type, summary, detai
   }
 }
 
-async function cleanupUnadoptedPackage(prepared) {
-  if (prepared?.installed.created !== true) return
-  const packageRoot = dirname(prepared.installed.root)
-  await rm(prepared.installed.root, { recursive: true, force: true })
+function samePackageRoot(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') return false
+  return left === right
+}
+
+function packageIsReferenced(state, installedRoot) {
+  if (state === null || state === undefined || typeof installedRoot !== 'string') return false
+  for (const component of Object.values(state.components ?? {})) {
+    if (samePackageRoot(component?.root, installedRoot)) return true
+  }
+  for (const record of Object.values(state.privateComponents ?? {})) {
+    if (samePackageRoot(record?.current?.component?.root, installedRoot)) return true
+    if (samePackageRoot(record?.rollback?.component?.root, installedRoot)) return true
+  }
+  return false
+}
+
+async function deletePackageTree(installedRoot) {
+  const packageRoot = dirname(installedRoot)
+  await rm(installedRoot, { recursive: true, force: true })
   try {
     await rmdir(packageRoot)
   } catch (error) {
     if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error
+  }
+}
+
+async function cleanupUnadoptedPackage(prepared, preparedPaths = null, dependencies = {}) {
+  if (prepared?.installed?.created !== true) return
+  const installedRoot = prepared.installed.root
+  // Serialize with commit: another install may be adopting this shared package
+  // before its new state refs are written. Without the lifecycle lock, reclaim
+  // would delete mid-commit. Nested cleanup under our own lease must still
+  // delete (dry-run / failed import). Retain only when a *different* operation
+  // holds the lock or recovery election (true cross-install contention).
+  if (preparedPaths === null) {
+    await deletePackageTree(installedRoot)
+    return
+  }
+  try {
+    await withLifecycleMutation(
+      statePaths(preparedPaths.root),
+      'local.package-cleanup',
+      dependencies,
+      async (_dependencies, lockedPaths) => {
+        const state = await loadState(lockedPaths).catch(() => null)
+        if (packageIsReferenced(state, installedRoot)) return
+        await deletePackageTree(installedRoot)
+      },
+    )
+  } catch (error) {
+    if (
+      error instanceof AgentHostError
+      && (error.code === 'LIFECYCLE_BUSY' || error.code === 'LIFECYCLE_RECOVERY_BUSY')
+      && dependencies.lifecycleLease === undefined
+    ) return
+    throw error
   }
 }
 
@@ -250,7 +299,7 @@ async function importLocalComponentUnlocked(options, dependencies = {}, prepared
     }
     const transition = await transitionComponentInventory(options, inventory, { ...dependencies, runner })
     if (options.dryRun === true) {
-      await cleanupUnadoptedPackage(prepared)
+      await cleanupUnadoptedPackage(prepared, paths, dependencies)
       return {
         ...transition,
         schemaVersion: PREVIEW_SCHEMA,
@@ -287,7 +336,7 @@ async function importLocalComponentUnlocked(options, dependencies = {}, prepared
       ...(warnings.length === 0 ? {} : { warnings }),
     }
   } catch (error) {
-    if (!inventoryAdopted) await cleanupUnadoptedPackage(prepared).catch(() => {})
+    if (!inventoryAdopted) await cleanupUnadoptedPackage(prepared, paths, dependencies).catch(() => {})
     throw error
   }
 }

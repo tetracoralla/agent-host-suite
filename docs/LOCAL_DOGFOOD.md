@@ -97,7 +97,8 @@ Direct Runtime, automatic monitoring, native Manager runtime, Windows artifact,
 and owner experience separately. A macOS source or package PASS cannot establish
 a Windows-device result. Ad-hoc macOS signing is sufficient only for local
 dogfood. Public macOS preview distribution is likewise unsigned; Gatekeeper
-Control-click → Open is the supported first-run step, not a stand-in for
+System Settings → Privacy & Security → Open Anyway is the supported first-run
+step on macOS 15 Sequoia and later, not a stand-in for
 notarization. See [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 
 Prior dated observations remain outside the default reading path under

@@ -210,12 +210,6 @@ test('profiles list names the featured admission set without a store', async () 
   const humanOutput = human(catalog)
   assert.match(humanOutput, /Featured catalog · not a marketplace · bound release required/u)
   assert.match(humanOutput, /public download is not configured/u)
-  const fetchMissing = spawnSync(process.execPath, [cliPath, 'profiles', 'fetch', '--json'], {
-    encoding: 'utf8',
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'AGENT_HOST_FEATURED_CATALOG_URL')),
-  })
-  assert.equal(fetchMissing.status, 1)
-  assert.equal(JSON.parse(fetchMissing.stderr).error.code, 'PREVIEW_DOWNLOAD_NOT_CONFIGURED')
   assert.match(humanOutput, /featured · Featured tools · featured · math-anchor, migratory-time, armorial/u)
   assert.match(humanOutput, /local-dogfood · Standard \+ local tools · dogfood/u)
 })

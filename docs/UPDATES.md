@@ -20,7 +20,9 @@ used as a substitute.
 `profiles fetch --carrier` downloads an installer into Host private
 downloads. It does **not** quit, replace, or relaunch Agent Host. Application
 replacement is `agent-host app update` on a supported OS after digest
-comparison. Unsigned macOS builds still require Control-click → Open.
+comparison. Unsigned macOS builds still require System Settings → Privacy &
+Security → Open Anyway after a blocked first open (macOS 15 Sequoia and later;
+Control-click → Open may still work on macOS 14).
 
 ## Tools
 
@@ -50,8 +52,11 @@ GitHub tool catalog. Do not publish a tool catalog as GitHub `latest` for the
 Host application. Catalog automation uses branch `chore/github-tool-catalog`
 and is documented below.
 
-Stable application checks use GitHub’s latest non-prerelease. Preview checks
-list prereleases. GitHub `latest` never includes prerelease.
+Stable application checks use GitHub’s latest non-prerelease. GitHub `latest`
+never includes prerelease. The owner unsigned-preview publish path therefore
+publishes the public preview as a **non-prerelease** Release marked `--latest`
+(not `--prerelease --latest`, which REST rejects) so Host’s
+`/releases/latest/download/preview-distribution.json` probe can discover it.
 
 ## Automation
 
@@ -63,8 +68,8 @@ does not request Apple Developer ID or notary secrets. Each platform job admits
 registered GitHub tools for that runner, builds a catalog from official Node,
 this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer
 adapters, and those admitted tools (not test fixtures), packages unsigned
-macOS/Windows carriers, and publishes a prerelease only after those jobs
-succeed. Native archives are not reused across operating systems. The
+macOS/Windows carriers, and publishes a non-prerelease latest Release only
+after those jobs succeed (so `/releases/latest` can resolve the preview index). Native archives are not reused across operating systems. The
 notarized `.github/workflows/release.yml` remains a separate signed path.
 
 `docs/scan-github-tools.yml` refreshes catalog pins and opens or updates one

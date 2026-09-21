@@ -10,7 +10,7 @@ export const PREVIEW_FETCH_SCHEMA = 'openadam.agent-host-preview-fetch.v0.1'
 export const GITHUB_RELEASES_URL = 'https://github.com/tetracoralla/agent-host-suite/releases'
 export const GITHUB_PREVIEW_INDEX_CONVENTION = `${GITHUB_RELEASES_URL}/latest/download/preview-distribution.json`
 
-export const UNSIGNED_MACOS_GATEKEEPER_NOTE = 'Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview.'
+export const UNSIGNED_MACOS_GATEKEEPER_NOTE = 'Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, try to open Agent Host.app (or the app inside the DMG). If macOS blocks it, open System Settings → Privacy & Security and choose Open Anyway. That warning is expected for this preview. On macOS 14, Control-click → Open may still work; it does not on macOS 15 Sequoia and later. Do not turn off Gatekeeper.'
 export const WINDOWS_SMARTSCREEN_NOTE = 'Unsigned Windows ZIP packages are not Authenticode-signed. Windows SmartScreen may warn on first open; that warning is expected for this preview. Compare the ZIP to SHA256SUMS before extracting.'
 export const PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE = 'Public download is not configured. This checkout does not publish GitHub Release assets. After an owner publishes a Release or an HTTPS index, set AGENT_HOST_FEATURED_CATALOG_URL to that preview-distribution.json (or a bound current.json). This is not an app store.'
 
@@ -115,9 +115,47 @@ export function featuredCatalogDownload(env = process.env) {
     windowsSmartScreenNote: WINDOWS_SMARTSCREEN_NOTE,
     message: configured
       ? 'Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.'
-      : PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE,
+      : `${PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE} Non-developers: open ${GITHUB_RELEASES_URL} once an owner publishes an unsigned macOS arm64 DMG (not notarized, not a store). Host also probes ${GITHUB_PREVIEW_INDEX_CONVENTION} on source check.`,
   }
 }
+
+
+/**
+ * Probe the public GitHub Releases convention URL for a published
+ * preview-distribution.json. Returns null when the asset is absent (404) or
+ * still the unpublished placeholder. Does not require AGENT_HOST_FEATURED_CATALOG_URL.
+ */
+export async function probePublicPreviewIndex(options = {}) {
+  const downloads = options.downloads
+  if (typeof downloads !== 'string' || downloads.length === 0) {
+    fail('PREVIEW_DOWNLOAD_FAILED', 'A private downloads directory is required to probe the public preview index')
+  }
+  try {
+    const document = await fetchPreviewDocument(GITHUB_PREVIEW_INDEX_CONVENTION, downloads, options)
+    if (!looksLikePreviewIndex(document.value)) {
+      return { found: false, reason: 'invalid', url: GITHUB_PREVIEW_INDEX_CONVENTION, index: null }
+    }
+    const index = validatePreviewDistribution(document.value)
+    if (index.status === 'unpublished' || index.publicReleasePublished !== true) {
+      return { found: false, reason: 'unpublished', url: document.url, index }
+    }
+    if (index.catalog === null && index.carriers.length === 0) {
+      return { found: false, reason: 'empty', url: document.url, index }
+    }
+    return { found: true, reason: 'published', url: document.url, index }
+  } catch (error) {
+    if (error instanceof AgentHostError) {
+      if (error.code === 'PREVIEW_DOWNLOAD_FAILED' && error.details?.status === 404) {
+        return { found: false, reason: 'missing', url: GITHUB_PREVIEW_INDEX_CONVENTION, index: null }
+      }
+      if (error.code === 'PREVIEW_DOWNLOAD_NOT_CONFIGURED' || error.code === 'PREVIEW_DOWNLOAD_INVALID') {
+        return { found: false, reason: 'invalid', url: GITHUB_PREVIEW_INDEX_CONVENTION, index: null, error }
+      }
+    }
+    throw error
+  }
+}
+
 
 function validateCarrier(carrier) {
   exactObject(carrier, ['platform', 'kind', 'filename', 'url', 'sha256', 'bytes'], 'preview carrier')
@@ -290,6 +328,9 @@ export async function fetchBoundCatalog(url, options = {}) {
   if (looksLikePreviewIndex(document.value)) {
     const index = validatePreviewDistribution(document.value)
     if (index.catalog === null) {
+      if (options.allowMissingCatalog === true && index.publicReleasePublished === true && index.carriers.length > 0) {
+        return { sourceUrl: document.url, index, manifestPath: null, provenancePath: null, manifest: null }
+      }
       fail(
         'PREVIEW_DOWNLOAD_NOT_CONFIGURED',
         'The preview index has no bound catalog yet. GitHub Release assets have not been published. This is not an app store.',
@@ -379,14 +420,30 @@ export async function resolveReleaseManifestPath(options = {}, dependencies = {}
 
 export async function fetchPreviewRelease(options = {}, dependencies = {}) {
   const env = dependencies.env ?? process.env
-  const requested = trimEnv(options.url) || trimEnv(env[FEATURED_CATALOG_DOWNLOAD_ENV])
-  if (requested === '') fail('PREVIEW_DOWNLOAD_NOT_CONFIGURED', PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE)
+  const explicit = trimEnv(options.url) || trimEnv(env[FEATURED_CATALOG_DOWNLOAD_ENV])
+  const requested = explicit || GITHUB_PREVIEW_INDEX_CONVENTION
+  if (explicit === '') {
+    // Fall through to the public convention URL; fetchBoundCatalog still fails closed when unpublished/missing.
+  }
   const downloads = dependencies.paths?.downloads
-  const fetched = await fetchBoundCatalog(requested, {
-    downloads,
-    fetch: dependencies.fetch,
-    signal: dependencies.signal,
-  })
+  let fetched
+  try {
+    fetched = await fetchBoundCatalog(requested, {
+      downloads,
+      fetch: dependencies.fetch,
+      signal: dependencies.signal,
+      allowMissingCatalog: options.carrier === true,
+    })
+  } catch (error) {
+    if (
+      explicit === ''
+      && error instanceof AgentHostError
+      && (error.code === 'PREVIEW_DOWNLOAD_FAILED' || error.code === 'PREVIEW_DOWNLOAD_NOT_CONFIGURED')
+    ) {
+      fail('PREVIEW_DOWNLOAD_NOT_CONFIGURED', PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE, { cause: error.code })
+    }
+    throw error
+  }
   let carrier = null
   if (options.carrier === true) {
     if (fetched.index === null) {
@@ -412,6 +469,6 @@ export async function fetchPreviewRelease(options = {}, dependencies = {}) {
     index: fetched.index,
     gatekeeperNote: fetched.index?.gatekeeperNote ?? UNSIGNED_MACOS_GATEKEEPER_NOTE,
     windowsSmartScreenNote: fetched.index?.windowsSmartScreenNote ?? WINDOWS_SMARTSCREEN_NOTE,
-    message: 'Fetched an unsigned preview catalog. Compare SHA-256 values; macOS still needs Control-click → Open. This is not notarized and not an app store.',
+    message: 'Fetched an unsigned preview catalog. Compare SHA-256 values; macOS still needs System Settings → Privacy & Security → Open Anyway after a blocked first open. This is not notarized and not an app store.',
   }
 }

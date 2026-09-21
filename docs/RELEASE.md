@@ -5,8 +5,10 @@
 Public preview distribution is **unsigned**: GitHub Releases or a self-hosted
 HTTPS index provide a macOS DMG and a Windows ZIP. Apple Developer ID signing
 and notarization are **not** part of this product and are not a remaining
-blocker. Gatekeeper (Control-click → Open) and Windows SmartScreen warnings are
-the honest first-run steps. See [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
+blocker. Gatekeeper (try to open → System Settings → Privacy & Security →
+Open Anyway on macOS 15+; Control-click → Open may still work on macOS 14)
+and Windows SmartScreen warnings are the honest first-run steps. See
+[`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 This intent does not establish that either carrier has been published; this
 checkout still has no Release assets until an owner attaches them.
 
@@ -248,7 +250,9 @@ Suite version as the source package rather than a static development placeholder
 
 Public preview builds are ad-hoc signed at most. They are not Developer ID
 signed, not notarized, and not stapled. Detached SHA-256 checksums still bind
-the DMG bytes. Gatekeeper on a stranger's Mac requires Control-click → Open;
+the DMG bytes. Gatekeeper on a stranger's Mac requires try to open → System
+Settings → Privacy & Security → Open Anyway on macOS 15 Sequoia and later
+(Control-click no longer overrides unsigned or unnotarized software);
 that is expected and documented in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
 Do not describe this preview as notarized.
 

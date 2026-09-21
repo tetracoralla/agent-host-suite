@@ -9,6 +9,15 @@ After an owner publishes a tag, the assets go on that Release (or on a
 self-hosted HTTPS index). Until then, Host says **public download is not
 configured** rather than pretending there is a store.
 
+## Where a non-developer downloads today
+
+1. Open **[GitHub Releases](https://github.com/tetracoralla/agent-host-suite/releases)**.
+2. If the **latest** Release lists `Agent-Host-*-darwin-arm64.dmg` (and `SHA256SUMS` / `preview-distribution.json`), download those assets. The unsigned preview publishes as a **non-prerelease** Release marked latest so `/releases/latest` can resolve it (GitHub excludes prereleases from latest).
+3. Compare the DMG to `SHA256SUMS`, then follow **Open an unsigned macOS DMG** below (try to open → System Settings → Privacy & Security → Open Anyway). This path is **not** notarized and **not** a marketplace.
+4. If the Releases page has **no** installer assets yet, public download is not configured — Host reports that honestly. There is no App Store / Homebrew cask stand-in in this slice.
+
+Owner publish (macOS arm64 first) uses `scripts/publish-unsigned-preview.mjs` after packaging a DMG on a Mac; see **Owner checklist** below. The Actions draft `docs/unsigned-preview-release.yml` stays under `docs/` until a token with GitHub `workflow` scope can push `.github/workflows/`.
+
 ## Where to download
 
 1. **GitHub Releases** (recommended once an owner publishes a tag):
@@ -25,6 +34,7 @@ Asset names, when published, match the packagers already in this repository:
 | Windows ARM64 | ZIP | `Agent-Host-{version}-win32-arm64.zip` |
 | Index | JSON | `preview-distribution.json` |
 | Bound catalog | JSON | `current.json` plus sibling `build-provenance.json` |
+| Component archives | tar.gz | every `current.json` `artifact.url` (flat Release asset, not `artifacts/`) |
 | Digests | text | `SHA256SUMS` |
 
 Convention for Host to fetch the index:
@@ -47,13 +57,23 @@ keep a retry or local-catalog recovery.
 The DMG and `Agent Host.app` are ad-hoc signed at most. They are **not**
 Apple-notarized.
 
+Apple’s current override for unsigned or unnotarized software on **macOS 15
+Sequoia and later** is System Settings → Privacy & Security → Open Anyway;
+Control-click no longer overrides Gatekeeper
+([Apple developer note](https://developer.apple.com/news/?id=saqachfa),
+[Open apps safely](https://support.apple.com/en-gb/102445)).
+
 1. Compare the DMG to `SHA256SUMS`.
 2. Open the DMG.
 3. Drag **Agent Host** to Applications if the disk image offers that, or open
    **Agent Host.app** from the mounted volume.
-4. **Control-click** (or right-click) **Agent Host.app**, choose **Open**, then
-   confirm the Gatekeeper warning. The warning is expected.
-5. Later launches can use a normal double-click after that first Open.
+4. **Try to open** the app. If macOS reports that it cannot verify the app,
+   open **System Settings → Privacy & Security**, scroll to Security, and
+   choose **Open Anyway**. Confirm the warning. This is the supported first-open
+   path on macOS 15 Sequoia and later.
+5. On **macOS 14**, Control-click (or right-click) **Agent Host.app** → **Open**
+   may still confirm the warning. That override does not work on macOS 15+.
+6. Later launches can use a normal double-click after that first Open.
 
 Do not bypass Gatekeeper by disabling system security. Do not describe this
 preview as notarized or as an App Store app.
@@ -117,6 +137,31 @@ URL to `preview-distribution.json` / `current.json`.
 
 ## Owner checklist: publish a GitHub Release
 
+Preferred owner path (no notarization; works without `workflow` scope):
+
+```text
+# On a Mac with a built unsigned DMG (for example after npm run package:internal-beta):
+node scripts/publish-unsigned-preview.mjs prepare \
+  --tag vX.Y.Z-unsigned.1 \
+  --output .build/unsigned-preview \
+  --dmg /absolute/Agent-Host-X.Y.Z-darwin-arm64.dmg \
+  --catalog /absolute/release-catalog/current.json   # optional but preferred
+node scripts/publish-unsigned-preview.mjs publish \
+  --tag vX.Y.Z-unsigned.1 \
+  --assets .build/unsigned-preview
+# Use --dry-run on publish to print the gh release create command only.
+```
+
+`prepare` / `publish` emit `gh release create … --latest` **without** `--prerelease`. That is intentional: the first public unsigned preview **is** the current download, and only a non-prerelease Release can occupy `/releases/latest`. `publish` validates a closed asset manifest (tag/repo/URLs, every declared asset size+sha256) and refuses wrong-tag, missing, or tampered carriers; leftover files in the output directory are never uploaded.
+
+When `--catalog` points at a bound `current.json`, `prepare` copies **every referenced component archive** into that closed set and rewrites each `artifact.url` to `…/releases/download/<tag>/<basename>`. The standard builder writes local `artifacts/*.tar.gz` paths; those are not remotely consumable. A catalog that still names a local relative URL, or whose archive is missing next to `current.json`, is refused. GitHub Release assets are flat, so the basename (not the `artifacts/` prefix) is the uploaded file. After rewrite, Host binds the index digest to the **network-facing** `current.json`.
+
+After assets exist, `agent-host source check` probes the Releases `latest` convention URL and flips off **public download is not configured** when carriers are published. Tracked `catalog/preview-distribution.json` remains the unpublished placeholder in git.
+
+Manual equivalent still works:
+
+
+
 Build on a machine that already has a **bound** catalog (not
 `catalog/releases/draft-unbound`). This repository does not invent Apple
 certificates.
@@ -139,18 +184,30 @@ certificates.
    ```
 
 5. `shasum -a 256` every asset into `SHA256SUMS`.
-6. Create a **prerelease** GitHub Release for tag `vX.Y.Z` and attach the
-   DMG/ZIP, `preview-distribution.json`, `current.json`,
-   `build-provenance.json`, and `SHA256SUMS`. Release notes must say the build
-   is **not Apple-notarized** and must include the Gatekeeper steps above.
+6. Create a **non-prerelease** GitHub Release for tag `vX.Y.Z`, mark it
+   **latest**, and attach only the closed asset set: DMG/ZIP,
+   `preview-distribution.json`, `current.json`, `build-provenance.json`,
+   every component archive named by that `current.json`, and `SHA256SUMS`
+   (do not upload leftover logs from the output directory). Prefer
+   `publish-unsigned-preview.mjs prepare --catalog` so relative `artifacts/`
+   URLs are rewritten before the index digest is bound. Release notes must
+   say the build is **not Apple-notarized** and must include the Gatekeeper
+   steps above. Do not use `--prerelease`: GitHub REST cannot make a
+   prerelease latest, and Host probes `/releases/latest/download/preview-distribution.json`.
 7. Point Host at the index with `AGENT_HOST_FEATURED_CATALOG_URL`.
 
 Component `artifact.url` values in a remotely fetched `current.json` must be
-**HTTPS** (GitHub Release asset URLs are fine). Host follows HTTPS redirects
-so `github.com/.../releases/download/...` may land on
+**HTTPS** (GitHub Release asset URLs are fine). `prepare --catalog` writes
+those URLs and attaches the archives; do not publish a builder catalog whose
+URLs still point at a local `artifacts/` directory. Host follows HTTPS
+redirects so `github.com/.../releases/download/...` may land on
 `objects.githubusercontent.com`; SHA-256 still binds the bytes.
 
 ## Unsigned preview workflow
+
+Until GitHub `workflow` scope is available, the **live** owner publish path is `scripts/publish-unsigned-preview.mjs` (prepare + `gh release create`). Do not claim `.github/workflows/unsigned-preview-release.yml` is enabled while that file is absent.
+
+
 
 The required unsigned pipeline draft is
 [`unsigned-preview-release.yml`](unsigned-preview-release.yml). It remains under
