@@ -44,7 +44,13 @@ test('local Manager requires its one-session cookie and same-origin action reque
   t.after(() => rm(stateRoot, { recursive: true, force: true }))
   let readyResolve
   const ready = new Promise((resolve) => { readyResolve = resolve })
-  const running = startWebManager({ stateRoot, open: false, idleTimeoutMs: 60_000, onReady: readyResolve })
+  const running = startWebManager({
+    stateRoot,
+    open: false,
+    idleTimeoutMs: 60_000,
+    onReady: readyResolve,
+    fetch: async () => new Response('missing', { status: 404 }),
+  })
   const { origin, url, server } = await ready
   t.after(() => server.close())
 
