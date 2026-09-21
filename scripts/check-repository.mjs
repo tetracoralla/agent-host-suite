@@ -200,20 +200,23 @@ if (draftWorkflow.includes('notarytool') || draftWorkflow.includes('APPLE_NOTARY
   throw new Error('unsigned preview workflow draft must not require Apple notarization')
 }
 if (!featuredDoc.includes('ADOPTION_ACCEPTANCE.md')) {
-  throw new Error('featured catalog document must point at the unnamed adoption protocol')
+  throw new Error('featured catalog document must point at the unnamed capability exercise')
 }
 const adoptionDoc = await readFile(join(root, 'docs/ADOPTION_ACCEPTANCE.md'), 'utf8')
 if (!adoptionDoc.includes('fresh Agent task') || !adoptionDoc.includes('not adoption evidence') || !adoptionDoc.includes('doctor --featured-readiness')) {
-  throw new Error('adoption protocol must require a fresh Agent task and refuse Host status as evidence')
+  throw new Error('capability exercise must preserve fresh-task context and refuse Host status as a task verdict')
 }
 if (!adoptionDoc.includes('recipe.consistency') || !adoptionDoc.includes('userStatus') || !adoptionDoc.includes('local-dogfood')) {
-  throw new Error('adoption protocol must separate user-level readiness from recipe consistency')
+  throw new Error('capability exercise must separate user-level readiness from recipe consistency')
 }
-if (!adoptionDoc.includes('experimental variable') || adoptionDoc.includes('unnamed adoption cannot be scored on that Host even when user-level readiness')) {
-  throw new Error('adoption protocol must record working set as an experimental variable and must not gate scoring on recipe name')
+if (!/experimental\s+variable/u.test(adoptionDoc) || !adoptionDoc.includes('Participant interpretation (optional)')) {
+  throw new Error('capability exercise must keep working-set context separate from participant interpretation')
+}
+if (adoptionDoc.includes('Two tasks are enough to score') || adoptionDoc.includes('## Scorecard') || adoptionDoc.includes('without a scorecard is not a result')) {
+  throw new Error('capability exercise must not restore a fixed quota or mandatory scorecard')
 }
 if (!adoptionDoc.includes('docs/fixtures/adoption')) {
-  throw new Error('adoption protocol must ship unnamed fixtures')
+  throw new Error('capability exercise must ship unnamed fixtures')
 }
 const adoptionFixtureRoot = join(root, 'docs/fixtures/adoption')
 const steered = /\barmorial\b|\blucide\b|\biconpark\b|请使用/iu

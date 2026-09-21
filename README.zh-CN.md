@@ -105,12 +105,12 @@ tools-dev 路径，不是 featured。详见
 卡片呈现同样的关键数字，只有用户主动操作时才导出详情。详见
 [轨迹平面](docs/TRACE_PLANE.zh-CN.md)。
 
-## 不点名采用验收
+## 不点名能力练习
 
-本 checkout **没有**记录一次已完成的真人采用。没有 Host GUI / 完整 Agent 会话的
-Linux 施工环境也不能替它打分。在已经装好 Agent Host 并连接 Agent 应用的机器上，按
-[不点名采用验收](docs/ADOPTION_ACCEPTANCE.md) 把页面夹具拷出仓库、开**新会话**、
-看图标是否进入作品，且提示里不出现 Armorial。
+本 checkout 不会把 Host 检查或调用次数变成对 Agent 的判决。在已经装好 Agent Host
+并连接 Agent 应用的机器上，可按[不点名能力练习](docs/ADOPTION_ACCEPTANCE.md) 把页面
+夹具拷出仓库、开**新会话**，观察未点名 Armorial 时什么真正进入作品，再由参与者判断
+这一次任务对自己意味着什么。
 
 ```text
 agent-host doctor --featured-readiness --json
@@ -118,7 +118,7 @@ agent-host doctor --featured-readiness --json
 
 该命令报告用户级就绪（所需工具、连接、投影），与 `recipe.consistency` 配方检查分开，
 并且 `adoptionEvidence` 恒为 `false`。仅因 profile 名为 `local-dogfood` 不会让用户级
-诊断失败。Host status 与调用次数不能当采用证据。
+诊断失败。这个练习没有固定任务配额，也没有 Host 统一评分。
 
 ## 常用流程
 
@@ -175,4 +175,4 @@ npm 包分发；请从源码仓库阅读
 [`DISCOVERY_PROJECTION.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md)、
 [`FEATURED_CATALOG.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md)、
 [`UNSIGNED_PREVIEW.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/UNSIGNED_PREVIEW.md) 与
-[`ADOPTION_ACCEPTANCE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md)。
+可选的[不点名能力练习](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md)。

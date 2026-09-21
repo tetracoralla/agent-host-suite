@@ -69,7 +69,7 @@ test('featured readiness requires the featured working set and does not claim ad
   assert.match(human(ok), /Host precondition only/u)
   assert.match(human(ok), /not adoption/u)
   assert.match(human(ok), /User readiness: ok/u)
-  assert.match(ok.nextSteps.completedWork, /not adoption evidence/u)
+  assert.match(ok.nextSteps.completedWork, /not evidence that an Agent chose a tool/u)
 
   const standard = await inspectFeaturedReadiness(featuredState({ profile: 'standard' }), {
     inspectAgentApps: false,
@@ -251,7 +251,7 @@ test('doctor --featured-readiness is a Host-only route and fails closed without 
   assert.equal(deep.stderr.trim(), 'CLI_USAGE: doctor --featured-readiness does not accept --deep')
 })
 
-test('adoption fixtures never name an icon product and the protocol remains honest', async () => {
+test('unnamed capability fixtures stay unsteered and interpretation stays participant-owned', async () => {
   const protocol = await readFile(protocolPath, 'utf8')
   assert.match(protocol, /fresh Agent task/u)
   assert.match(protocol, /are not adoption evidence/u)
@@ -259,6 +259,9 @@ test('adoption fixtures never name an icon product and the protocol remains hone
   assert.match(protocol, /docs\/fixtures\/adoption/u)
   assert.match(protocol, /Lucide/u)
   assert.match(protocol, /Host `status`/u)
+  assert.match(protocol, /Participant interpretation \(optional\)/u)
+  assert.match(protocol, /not when a fixed number of tasks or fields has been filled/u)
+  assert.doesNotMatch(protocol, /Two tasks are enough to score|## Scorecard|without a scorecard is not a result/u)
 
   const forbidden = /\barmorial\b|\blucide\b|\biconpark\b|请使用/iu
   async function files(directory) {

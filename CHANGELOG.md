@@ -12,6 +12,10 @@
 
 ### Changed
 
+- The unnamed capability exercise now keeps Host readiness, neutral session
+  observations, rendered work, and participant interpretation separate. It no
+  longer imposes a fixed task quota or Host-owned adoption score.
+
 - Native and browser Managers now surface task activity as a glanceable card:
   direct calls, errors, and static references appear before an optional
   metadata-only detail export, without a Host score or adoption verdict.

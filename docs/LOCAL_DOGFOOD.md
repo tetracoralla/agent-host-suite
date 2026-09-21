@@ -74,9 +74,9 @@ agent-host cleanup --dry-run --json
 
 Default Manager refresh does not launch an Agent app. `doctor --deep` without
 `--skip-agent-apps` and **Run Full Check** are explicit current binding probes.
-A real fresh Agent task is still required to assess discovery and natural
-selection; an installed binding, historical call, or offered tool is not an
-adoption result. Runnable unnamed tasks live in
+A real fresh Agent task is still required to observe current discovery and
+natural selection; an installed binding, historical call, or offered tool is
+not a task result. Optional runnable unnamed situations live in
 [`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md). `doctor --featured-readiness`
 only checks the featured working set and projection receipts.
 

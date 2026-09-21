@@ -141,7 +141,9 @@ readiness (required tools, connection, projection receipts) and
 `local-dogfood` profile with a healthy Armorial projection is not a
 user-level failure. The report always sets `adoptionEvidence: false` and
 does not treat projection health as natural model choice. Treat a real new
-Agent task as the only current **discovery** evidence. Unnamed adoption
-scoring is a separate protocol in [`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md).
+Agent task as the only current **discovery** observation. Optional unnamed
+capability exercises are described in
+[`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md); their interpretation belongs
+to the participant, not Host.
 Do not read a CLI success against a Host projection or a second cache path as
 proof that a session Skill path existed or failed.

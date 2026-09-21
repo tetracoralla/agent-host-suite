@@ -86,7 +86,7 @@ not featured.
 | Application build, environment release, tool versions, and catalog source | `agent-host source status` / Manager Settings. Distinguishes the Manager app from the installed environment. Catalog assets are unpublished until an owner publishes a Release or an HTTPS index. |
 | Choose a local or HTTPS catalog | `source set --release-manifest` / `source set --url`, or Manager Settings. Env `AGENT_HOST_FEATURED_CATALOG_URL` still works. Interrupted, offline, and digest errors keep a retry or local-catalog recovery. This does not publish a GitHub Release. |
 | User-level task readiness (tools, connection, projection; not adoption) | `doctor --featured-readiness` overall `status` / `userStatus`. Recipe name is a separate `recipe.consistency` check. `local-dogfood` plus a healthy Armorial projection is not a user-level failure. |
-| Featured recipe consistency | `recipe.consistency` on the same report records the working set as an experimental variable. Unnamed adoption scoring uses user-level `ok` and does not require deleting other healthy tools. |
+| Featured recipe consistency | `recipe.consistency` on the same report records the working set as an experimental variable. It is context for an optional exercise, not a scoring gate, and does not require deleting other healthy tools. |
 | Observe session discovery | a **new** Agent task after `restartRequired` |
 
 If local monitoring is already enabled, `update --profile featured` keeps the
@@ -110,16 +110,15 @@ in the working set:
 1. Host materializes the Agent-app projection (Codex: content-addressed plugin
    plus public `plugin add`; Claude/ZCode: public MCP/Skill links).
 2. The Agent app must start a **fresh** task to load Skill and MCP catalogs.
-3. Natural adoption on a suitable task (for example Armorial for icon work)
-   remains Agent judgment. Host status, doctor, and observation counts do not
-   establish adoption.
+3. Natural use on a suitable task (for example Armorial for icon work) remains
+   Agent choice. Host status, doctor, and observation counts do not establish
+   why it was chosen or whether it helped.
 
 See [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md) for the Codex cache
-generations and the Host vs session honesty boundary. Unnamed page tasks,
-copy-out fixtures, and a Host-only readiness probe are in
-[`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md). That protocol is for a
-machine with Host plus Agent; this checkout does not record a completed live
-adoption.
+generations and the Host vs session honesty boundary. Optional unnamed page
+situations, copy-out fixtures, and a Host-only readiness probe are in
+[`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md). The participant decides
+what a live exercise means; this checkout does not claim one was completed.
 
 ## Non-goals for v1
 

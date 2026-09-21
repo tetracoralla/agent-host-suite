@@ -273,7 +273,7 @@ test('application directory swap replaces files and reads the new version', asyn
   assert.match(verified.output, /0\.2\.1/u)
 })
 
-test('featured readiness records working set as an experimental variable, not a scoring gate', async () => {
+test('featured readiness records working set as context, not a gate on participant interpretation', async () => {
   const report = await inspectFeaturedReadiness({
     profile: 'local-dogfood',
     channel: 'release',

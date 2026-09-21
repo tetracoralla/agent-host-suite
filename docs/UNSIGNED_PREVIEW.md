@@ -242,4 +242,4 @@ separate signed path and is not this preview. Copy
 - Applying for or simulating a Developer ID certificate
 - Claiming this checkout already has Release assets
 - A third-party plugin marketplace
-- Treating a completed `profiles fetch` as unnamed adoption
+- Treating a completed `profiles fetch` as proof of Agent choice or task value

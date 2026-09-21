@@ -140,14 +140,14 @@ visual-first Task activity card, with detail exported only on request. Those
 judgments remain with the user or the Agent they select. See
 [Trace Plane](docs/TRACE_PLANE.md).
 
-## Unnamed adoption acceptance
+## Unnamed capability exercise
 
-This checkout does not record a completed live adoption. A Linux construction
-box without Host GUI or a full Agent session cannot score it. On a machine
-that already has Agent Host and a supported Agent app, follow
-[Unnamed adoption acceptance](docs/ADOPTION_ACCEPTANCE.md): copy the page
-fixtures out of this repository, start a **fresh Agent task**, and judge
-whether icons entered the work without naming Armorial.
+This checkout does not turn a Host check or call count into a verdict about an
+Agent. On a machine that already has Agent Host and a supported Agent app, the
+optional [unnamed capability exercise](docs/ADOPTION_ACCEPTANCE.md) lets a
+participant copy a page fixture out of this repository, start a **fresh Agent
+task**, inspect what entered the work without naming Armorial, and decide what
+that particular task means to them.
 
 ```text
 agent-host doctor --featured-readiness --json
@@ -156,7 +156,7 @@ agent-host doctor --featured-readiness --json
 That command reports user-level Host readiness (required tools, connection,
 projection) separately from `recipe.consistency`. It always reports
 `adoptionEvidence: false`. A `local-dogfood` profile is not itself a
-user-level failure. Host status and call counts are not adoption.
+user-level failure. The exercise has no fixed task quota or Host-owned score.
 
 ## Typical operator flow
 
@@ -235,8 +235,8 @@ to the source repository:
 - [Unsigned preview download](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/UNSIGNED_PREVIEW.md) — GitHub Releases / HTTPS DMG and ZIP, Gatekeeper, Host catalog fetch; not notarized.
 - [Featured catalog v1](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) — owner-selected tools through existing
   install APIs, not a marketplace.
-- [Unnamed adoption acceptance](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md) — page tasks and a Host-only
-  readiness probe; not a live-adoption claim from this checkout.
+- [Unnamed capability exercise](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md) — optional page situations,
+  neutral observations, and participant-owned interpretation.
 - [Review contract](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md) — minimum high-risk review seams,
   not a completion claim.
 - [Terminology](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TERMINOLOGY.md) — canonical product language and stable

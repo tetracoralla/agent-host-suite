@@ -120,7 +120,7 @@ function nextStepsFor(checks) {
     problemClass,
     recoveryPath,
     destinationIsWork: true,
-    completedWork: 'Completed work is the Agent putting results into the work product on an unnamed task. doctor --featured-readiness is a Host precondition and is not adoption evidence. See docs/ADOPTION_ACCEPTANCE.md.',
+    completedWork: 'Inspect completed work in a fresh task if that matters to your decision. doctor --featured-readiness is Host context, not evidence that an Agent chose a tool or used its result. See docs/ADOPTION_ACCEPTANCE.md.',
   }
 }
 
@@ -228,7 +228,7 @@ export async function inspectFeaturedReadiness(state, {
   checks.push(check(
     'recipe.consistency',
     'ok',
-    `Working set recorded as an experimental variable: ${active.join(', ') || 'empty'}. Extra installed tools are not a user-health failure and are not an adoption-scoring gate.`,
+    `Working set recorded as an experimental variable: ${active.join(', ') || 'empty'}. Extra installed tools are not a user-health failure or a gate on participant interpretation.`,
     recipeDetail,
   ))
 
