@@ -12,7 +12,12 @@
 # over SOURCE_ROOT when both are set. Catalog builder comment: ARTIFACT wins over SOURCE_ROOT.
 # Do not reuse another OS archive and relabel it. This file remains a docs draft —
 # not a live .github/workflows job until copied with workflow scope. Gatekeeper
-# (Control-click → Open) remains required.
+# (try to open → System Settings → Privacy & Security → Open Anyway on macOS 15+)
+# remains required.
+# Draft only (docs/). Live owner publish path while GitHub workflow scope is unavailable:
+#   node scripts/publish-unsigned-preview.mjs prepare|publish
+# Copy to .github/workflows/unsigned-preview-release.yml only with workflow scope;
+# do not claim that Actions path is live while the file is absent from .github/workflows/.
 
 name: Unsigned preview release
 
@@ -214,11 +219,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: .build/release-assets
-      - name: Create unsigned GitHub prerelease
+      - name: Create unsigned GitHub latest release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nEach platform job admitted GitHub tools for that runner and obtained version-pinned Math Anchor / Migratory Time inputs from catalog/unsigned-preview-source-pins.json (or AGENT_HOST_*_ARTIFACT). Native archives are not reused across operating systems.\n\nmacOS: Control-click Agent Host.app, choose Open, confirm Gatekeeper.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer adapters, and GitHub tools admitted from public Releases for that platform. Incomplete manifests are refused.\n\nprofiles fetch --carrier downloads an installer. agent-host app update on a supported OS mounts or unpacks the carrier, replaces the installed application, and relaunches it after comparing digests.'
+          notes=$'Unsigned preview. Not Apple-notarized and not an App Store build.\n\nApplication carriers and the GitHub tool catalog are separate Release assets. Do not treat GitHub latest as a tool catalog.\n\nEach platform job admitted GitHub tools for that runner and obtained version-pinned Math Anchor / Migratory Time inputs from catalog/unsigned-preview-source-pins.json (or AGENT_HOST_*_ARTIFACT). Native archives are not reused across operating systems.\n\nmacOS: try to open Agent Host.app; if blocked, System Settings → Privacy & Security → Open Anyway. Control-click no longer overrides Gatekeeper on macOS 15 Sequoia and later.\nWindows: SmartScreen may warn; compare SHA-256 before running.\n\nThe bundled catalog is built from official Node, this repository’s Host runtime packages, Math Anchor, Migratory Time, Observer adapters, and GitHub tools admitted from public Releases for that platform. Incomplete manifests are refused.\n\nprofiles fetch --carrier downloads an installer. agent-host app update on a supported OS mounts or unpacks the carrier, replaces the installed application, and relaunches it after comparing digests.'
           files=()
           while IFS= read -r path; do files+=("$path"); done < <(find .build/release-assets -type f)
           # GitHub Release assets are keyed by basename; refuse duplicate names before upload.
@@ -231,4 +236,4 @@ jobs:
             exit 1
           fi
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \
-            --prerelease --verify-tag --title "Agent Host unsigned preview" --notes "$notes"
+            --latest --verify-tag --title "Agent Host unsigned preview" --notes "$notes"

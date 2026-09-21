@@ -334,7 +334,7 @@ enum L10n {
         "Run Full Check to verify bindings.": "运行完整检查以核对绑定。",
         "Open tasks keep their old tools.": "已打开的任务仍用旧工具。",
         "Unmeasured calls are not counted as success.": "未计量的调用不计为成功。",
-        "Unsigned build: Control-click the app, then Open.": "未签名：按住 Control 点开应用。",
+        "Unsigned build: try to open, then System Settings → Privacy & Security → Open Anyway.": "未签名：尝试打开后，到系统设置 → 隐私与安全性 → 仍要打开。",
         "Public download is not configured.": "尚未配置公开下载。",
         "Standard + Monitoring": "标准 + 监控",
         "Standard + Local tools": "标准 + 本地工具",

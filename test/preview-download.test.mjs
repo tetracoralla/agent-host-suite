@@ -11,6 +11,7 @@ import {
   GITHUB_PREVIEW_INDEX_CONVENTION,
   GITHUB_RELEASES_URL,
   PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE,
+  UNSIGNED_MACOS_GATEKEEPER_NOTE,
   fetchBoundCatalog,
   fetchPreviewRelease,
   normalizePreviewDownloadUrl,
@@ -22,7 +23,6 @@ import { setup } from '../src/setup.mjs'
 import { compatibleApplicationState, createCodexRunner, healthyCatalogPreflight } from './helpers.mjs'
 import { createReleaseFixture } from './release-helpers.mjs'
 
-const cliPath = fileURLToPath(new URL('../bin/agent-host.mjs', import.meta.url))
 const writerPath = fileURLToPath(new URL('../scripts/write-preview-distribution.mjs', import.meta.url))
 const supportedReleasePlatform = ['darwin', 'win32'].includes(process.platform)
 const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`
@@ -87,17 +87,32 @@ test('the tracked preview index stays an unpublished placeholder', async () => {
   assert.equal(index.notarized, false)
   assert.equal(index.catalog, null)
   assert.deepEqual(index.carriers, [])
+  assert.equal(index.gatekeeperNote, UNSIGNED_MACOS_GATEKEEPER_NOTE)
 })
 
-test('profiles fetch fails closed when no public download URL is configured', async () => {
-  const result = spawnSync(process.execPath, [cliPath, 'profiles', 'fetch', '--json'], {
-    encoding: 'utf8',
-    env: cleanEnv(),
-  })
-  assert.equal(result.status, 1)
-  const envelope = JSON.parse(result.stderr)
-  assert.equal(envelope.error.code, 'PREVIEW_DOWNLOAD_NOT_CONFIGURED')
-  assert.equal(envelope.error.message, PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE)
+test('unsigned macOS Gatekeeper copy names the macOS 15+ System Settings override', () => {
+  assert.match(UNSIGNED_MACOS_GATEKEEPER_NOTE, /Open Anyway/u)
+  assert.match(UNSIGNED_MACOS_GATEKEEPER_NOTE, /Privacy & Security/u)
+  assert.match(UNSIGNED_MACOS_GATEKEEPER_NOTE, /System Settings/u)
+  assert.match(UNSIGNED_MACOS_GATEKEEPER_NOTE, /macOS 15|Sequoia/u)
+})
+
+test('profiles fetch fails closed when the convention index returns 404 (injected, not live GitHub)', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-preview-unconfigured-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  let requested = null
+  await assert.rejects(
+    fetchPreviewRelease({}, {
+      env: cleanEnv(),
+      paths: { downloads: root },
+      fetch: async (url) => {
+        requested = String(url)
+        return new Response('missing', { status: 404 })
+      },
+    }),
+    (error) => error.code === 'PREVIEW_DOWNLOAD_NOT_CONFIGURED' && error.message === PUBLIC_DOWNLOAD_NOT_CONFIGURED_NOTE,
+  )
+  assert.equal(requested, GITHUB_PREVIEW_INDEX_CONVENTION)
 })
 
 test('an unpublished preview index does not pretend a catalog exists', async (t) => {

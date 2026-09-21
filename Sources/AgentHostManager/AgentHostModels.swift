@@ -176,7 +176,7 @@ enum ManagerSetupPolicy {
     static let profiles = ["featured", "standard", "developer", "observability"]
     static let defaultProfile = "featured"
     static let featuredToolIDs = ["math-anchor", "migratory-time", "armorial"]
-    static let unsignedMacOSGatekeeperNote = "Unsigned build: Control-click the app, then Open."
+    static let unsignedMacOSGatekeeperNote = "Unsigned build: try to open, then System Settings → Privacy & Security → Open Anyway."
     static let publicDownloadNotConfiguredNote = "Public download is not configured."
     static let workingSetNote = ""
 

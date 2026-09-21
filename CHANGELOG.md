@@ -6,7 +6,19 @@
 
 - Post-setup / Overview success handoff: after install, Manager (native + web) leads with **start work** (open a new Agent task or connect an Agent), Host-observed facts, remaining gaps, and classified recovery paths (`not-connected` / `stale-session` / `permission` / `tool-fault`). Status rows stay supporting detail, not the destination. Setup CLI results include `guidance`.
 
+### Changed
+
+- Unsigned macOS first-open copy now follows Apple’s macOS 15 Sequoia rule:
+  try to open → System Settings → Privacy & Security → Open Anyway. Control-click
+  is only documented as a macOS 14 fallback. Generated Release notes, download
+  docs, Manager, and Host prompts stay aligned. This does not add notarization
+  or turn off Gatekeeper.
+
 ### Fixed
+
+- Unconfigured `profiles fetch` tests inject a deterministic 404 for the GitHub
+  Releases convention index instead of waiting on a live empty list
+  (`PREVIEW_DOWNLOAD_TIMEOUT`).
 
 - Retry transient Windows ACL verification failures (helper throw or status=error) up to 3 times with short backoff; still fail closed on wrong-owner and permissions-unsafe (Windows CI contention flake).
 - Recognize Host-managed `downloads/tool-updates/**` and `downloads/staged-*` trees in storage safety checks so autodownload no longer breaks status/cleanup/Manager snapshot (review F1).

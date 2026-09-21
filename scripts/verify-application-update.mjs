@@ -12,7 +12,7 @@ It does not claim that a macOS /Applications replace or Windows Programs replace
 
 On a Mac, after downloading an unsigned DMG:
   1. Compare SHA-256 with SHA256SUMS
-  2. Control-click Open (Gatekeeper)
+  2. Try to open the app; if blocked, System Settings → Privacy & Security → Open Anyway
   3. Run: agent-host app update --json
 Native replacement is not simulated here.
 `)

@@ -50,6 +50,7 @@
     "check:internal-beta": "scripts/check-macos-distribution.sh internal-beta",
     "package:internal-beta": "scripts/package-internal-beta.sh",
     "package:windows": "node scripts/package-windows.mjs",
+    "publish:unsigned-preview": "node scripts/publish-unsigned-preview.mjs",
     "probe:internal-beta-artifacts": "node scripts/probe-internal-beta-artifacts.mjs",
     "probe:provider-discovery": "node scripts/probe-provider-discovery.mjs",
     "admit:github-plugin": "node scripts/admit-github-plugin.mjs",

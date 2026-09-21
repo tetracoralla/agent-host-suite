@@ -228,6 +228,15 @@ do {
         "unsigned preview copy must not promise a future notarized build"
     )
     expect(
+        ManagerSetupPolicy.unsignedMacOSGatekeeperNote.contains("Open Anyway")
+            && ManagerSetupPolicy.unsignedMacOSGatekeeperNote.contains("Privacy & Security"),
+        "unsigned preview copy must name the macOS 15+ System Settings override"
+    )
+    expect(
+        !ManagerSetupPolicy.unsignedMacOSGatekeeperNote.contains("Control-click"),
+        "unsigned preview copy must not teach Control-click as the Sequoia first-open path"
+    )
+    expect(
         ManagerSetupPolicy.publicDownloadNotConfiguredNote == "Public download is not configured.",
         "unconfigured download UI copy stays short; HTTPS catalog hook belongs in docs, not resident Manager copy"
     )

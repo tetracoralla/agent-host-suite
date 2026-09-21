@@ -853,6 +853,8 @@ test('R2 / F3 cleanup retains package while another install is mid-commit before
   try {
     // Wait until B hits gated saveState, or until B fails before that. Windows
     // cold extract + ACL + lifecycle acquire often exceeds the old 4s poll.
+    // Align with the 30s cold-start allowance so mid-commit gating is observed
+    // before A races in.
     const saveWaitMs = process.platform === 'win32' ? 30_000 : 10_000
     const deadline = Date.now() + saveWaitMs
     let pendingError = null

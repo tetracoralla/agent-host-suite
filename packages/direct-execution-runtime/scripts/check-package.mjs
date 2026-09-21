@@ -16,6 +16,13 @@ function helperTimedOut(error) {
   return error?.code === 'ETIMEDOUT' || (error?.killed === true && error?.signal === 'SIGTERM')
 }
 
+function isWin32PrivateDirectoryFreezeTimeout(result) {
+  const error = result?.calls?.[0]?.error
+  return error?.code === 'HOST_PROVIDER_REPLACED'
+    && error?.details?.phase === 'private-directory'
+    && error?.details?.timedOut === true
+}
+
 // Match Agent Host's 30s call allowance (also used by fakeConfig on Windows and
 // host-service persistent preparation). Keep this bounded — not an open inflation
 // of product deadlines. Serve readiness on win32 uses the same cold-start margin.
@@ -357,13 +364,21 @@ try {
   try {
     ready = await waitForJsonLine(service, packagedReadinessTimeoutMs)
     const runTimeoutMs = packagedCallTimeoutMs + packagedClientSlackMs + 5_000
-    const firstRun = await execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', firstOrderPath], {
+    const runPackaged = (workOrderPath) => execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', workOrderPath], {
       timeout: runTimeoutMs, maxBuffer: 1024 * 1024,
     })
-    const secondRun = await execFileAsync(process.execPath, [installedCli, 'run', '--socket', socketPath, '--work-order', secondOrderPath], {
-      timeout: runTimeoutMs, maxBuffer: 1024 * 1024,
-    })
+    let firstRun = await runPackaged(firstOrderPath)
     first = JSON.parse(firstRun.stdout)
+    // Windows cold-start: private-directory ACL freeze can exhaust its bounded
+    // helper budget (~2×15s, aligned with the 30s cold-start allowance) under
+    // runner contention while identity freeze still works on a fresh attempt.
+    // Retry once only for that timed-out freeze class; wrong-owner / unsafe
+    // stay fail-closed.
+    if (process.platform === 'win32' && isWin32PrivateDirectoryFreezeTimeout(first)) {
+      firstRun = await runPackaged(firstOrderPath)
+      first = JSON.parse(firstRun.stdout)
+    }
+    const secondRun = await runPackaged(secondOrderPath)
     second = JSON.parse(secondRun.stdout)
     if (first.calls?.[0]?.result?.value !== 'packaged-host' || first.calls[0].session !== 'cold') {
       throw new Error(`first packaged host call did not execute against a cold provider session: ${JSON.stringify(first)}`)
