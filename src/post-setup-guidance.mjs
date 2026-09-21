@@ -176,6 +176,9 @@ export function buildPostSetupGuidance(input = {}) {
   const needsFreshTask = input.needsFreshTask === true
   const agentAppsVerified = input.agentAppsVerified === undefined ? null : input.agentAppsVerified
   const doctorBlockingErrors = blockingDoctor(input.doctorBlockingErrors)
+  const doctorFreshness = input.doctorFreshness === 'stale' || input.doctorFreshness === 'fresh'
+    ? input.doctorFreshness
+    : 'none'
   const justInstalled = input.justInstalled === true
   const presentConnected = hostRecords === null
     ? connectedHosts.map((name, index) => ({
@@ -373,6 +376,24 @@ export function buildPostSetupGuidance(input = {}) {
       gaps,
       primaryAction: actionFor(PRIMARY_ACTIONS.REVIEW_REPAIR, primaryHostName),
       recoveryPath: 'Review Repair or Run Full Check, then open a new Agent task after bindings verify.',
+      primaryHostId,
+    })
+  }
+
+  if (doctorFreshness === 'stale') {
+    gaps.push('The last environment check is out of date.')
+    return pack({
+      phase: 'recover',
+      readyToWork: false,
+      problemClass: PROBLEM_CLASSES.UNVERIFIED,
+      statusLine: 'Needs check',
+      statusTone: 'action',
+      title: 'Needs check',
+      summary: 'The last environment check is out of date.',
+      observed,
+      gaps,
+      primaryAction: actionFor(PRIMARY_ACTIONS.RUN_FULL_CHECK, primaryHostName),
+      recoveryPath: 'Check again, then open a new Agent task.',
       primaryHostId,
     })
   }

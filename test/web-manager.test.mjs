@@ -3,7 +3,8 @@ import { access, chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:
 import { tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
 import test from 'node:test'
-import { buildDashboardGuidance, MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
+import { AgentHostError } from '../src/errors.mjs'
+import { buildDashboardGuidance, environmentActionInvalidatesDoctor, MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
 import { loadState, prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 import { setup } from '../src/setup.mjs'
 import { compatibleApplicationState, createCodexRunner, createDevelopmentWorkspace, healthyCatalogPreflight } from './helpers.mjs'
@@ -412,6 +413,8 @@ test('browser Overview success handoff is sparse and wires real CTA paths', asyn
   assert.match(page, /action:'tools',resume:true/u)
   assert.match(page, /action:'doctor'/u)
   assert.match(page, /action:'workspace'/u)
+  assert.match(page, /action:'pick-workspace'/u)
+  assert.match(page, /action.id==='grant-workspace'\)\{\s*call\(\{action:'pick-workspace'/u)
   assert.match(page, /action:'repair'/u)
   assert.doesNotMatch(page, /t\(''\)/u)
   assert.doesNotMatch(page, /'':/u)
@@ -695,6 +698,33 @@ test('dashboard guidance consumes missing host apps and unique connect targets',
   assert.equal(many.problemClass, 'not-connected')
   assert.equal(many.primaryAction.label, 'Connect')
   assert.equal(many.connectHostId, null)
+
+  const stale = buildDashboardGuidance({
+    configured: true,
+    environment: {
+      hosts: { codex: { version: '1' } },
+      availableAgentComponents: ['math-anchor'],
+      agentComponents: ['math-anchor'],
+    },
+  }, tools, [
+    { host: 'codex', appInstalled: true },
+    { host: 'zcode', appInstalled: false },
+    { host: 'claude', appInstalled: false },
+  ], { checks: [{ id: 'component.math-anchor', status: 'error', message: 'missing' }] }, { doctorFreshness: 'stale' })
+  assert.equal(stale.readyToWork, false)
+  assert.equal(stale.problemClass, 'unverified')
+  assert.equal(stale.primaryAction.id, 'run-full-check')
+  assert.notEqual(stale.blockingCode, 'component.math-anchor')
+})
+
+test('repair and update invalidate a cached doctor; preview does not', () => {
+  assert.equal(environmentActionInvalidatesDoctor({ action: 'repair' }), true)
+  assert.equal(environmentActionInvalidatesDoctor({ action: 'update' }), true)
+  assert.equal(environmentActionInvalidatesDoctor({ action: 'workspace' }), true)
+  assert.equal(environmentActionInvalidatesDoctor({ action: 'github' }), true)
+  assert.equal(environmentActionInvalidatesDoctor({ action: 'github', preview: true }), false)
+  assert.equal(environmentActionInvalidatesDoctor({ action: 'doctor' }), false)
+  assert.equal(environmentActionInvalidatesDoctor({ action: 'open-app' }), false)
 })
 
 test('Chinese tools and history pages drop empty translation keys and catalog essays', async () => {
@@ -711,6 +741,8 @@ test('Chinese tools and history pages drop empty translation keys and catalog es
   assert.equal(values.includes('AGENT_HOST_FEATURED_CATALOG_URL'), false)
   assert.equal(zh['Public download is not configured.'], '尚未配置公开下载。')
   assert.equal(zh['Choose folder'], '选择文件夹')
+  assert.equal(zh['Enter path'], '输入路径')
+  assert.equal(zh['Open Agent Host on this computer to choose a folder.'], '请在本机打开 Agent Host 以选择文件夹。')
 })
 
 test('connect CTA does not silently pick the first of multiple apps', async () => {
@@ -790,7 +822,7 @@ test('connect CTA does not silently pick the first of multiple apps', async () =
   assert.deepEqual(fetches[0], { action: 'host', host: 'codex', connected: true })
 })
 
-test('grant-workspace CTA asks for a folder instead of repeating doctor', async () => {
+test('grant-workspace CTA picks a folder instead of repeating doctor or teaching a path', async () => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
   const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/gui)].map((m) => m[1]).join('\n')
   const fnMatch = script.match(/function navigatePage\(page\)\{[\s\S]*?\}\nfunction renderPostSetupGuidance\(root, guidance\)\{[\s\S]*?\n\}/u)
@@ -833,17 +865,28 @@ test('grant-workspace CTA asks for a folder instead of repeating doctor', async 
     observed: [],
     gaps: [],
   })
+  function findTestId(node, id) {
+    if (node?.dataset?.testid === id) return node
+    for (const child of node?.children || []) {
+      const found = findTestId(child, id)
+      if (found) return found
+    }
+    return null
+  }
   buttons.find((b) => b.dataset.testid === 'post-setup-primary-cta').click()
   assert.equal(fetches.some((item) => item.action === 'doctor'), false)
-  const grant = buttons.find((b) => b.textContent === 'Grant folder')
-  assert.ok(grant, 'Choose folder must reveal a grant control')
+  assert.deepEqual(fetches[0], { action: 'pick-workspace' })
   const card = root.children[0]
-  const box = (card?.children || []).find((node) => node.dataset?.testid === 'grant-folder')
+  assert.equal((card?.children || []).some((node) => node.dataset?.testid === 'grant-folder'), false)
+  const advanced = findTestId(root, 'grant-folder-advanced')
+  assert.ok(advanced, 'typed path stays an advanced fallback')
+  const box = findTestId(root, 'grant-folder')
   const input = (box?.children || []).find((node) => node.tagName === 'input')
-  assert.ok(input, 'grant control must include a folder path field')
+  const grant = buttons.find((b) => b.textContent === 'Grant folder')
+  assert.ok(input && grant, 'advanced fallback still grants an explicit path')
   input.value = '/tmp/project'
   grant.click()
-  assert.deepEqual(fetches[0], { action: 'workspace', path: '/tmp/project' })
+  assert.deepEqual(fetches[1], { action: 'workspace', path: '/tmp/project' })
 })
 
 test('workspace action grants an accessible project folder', async (t) => {
@@ -883,6 +926,180 @@ test('workspace action grants an accessible project folder', async (t) => {
   const paths = await prepareStatePaths(stateRoot)
   const state = await loadState(paths)
   assert.equal(state.workspaceRoot, grantedFolder)
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
+test('repair after a doctor fault does not keep the stale blocking check', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-web-stale-doc-ws-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-stale-doc-state-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  const installed = await setup(
+    { profile: 'standard', hosts: [], noHost: true, developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false },
+    {
+      runner: fake.runner,
+      catalogPreflight: healthyCatalogPreflight,
+      applicationStatePreflight: compatibleApplicationState,
+    },
+  )
+  assert.equal(installed.status, 'installed')
+  const paths = await prepareStatePaths(stateRoot)
+  const before = await loadState(paths)
+  const identity = before.components['math-anchor']?.identityFiles?.[0]
+  assert.equal(typeof identity, 'string')
+  const original = await readFile(identity)
+  await rm(identity)
+
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({ stateRoot, open: false, idleTimeoutMs: 60_000, onReady: readyResolve })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+  const headers = { cookie, origin, 'content-type': 'application/json' }
+
+  const diagnosed = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'doctor' }),
+  })
+  assert.equal(diagnosed.status, 200)
+  const diagnosedBody = await diagnosed.json()
+  const mathFault = (diagnosedBody.result?.checks || []).find((item) => item.id === 'component.math-anchor')
+  assert.equal(mathFault?.status, 'error')
+  assert.equal(diagnosedBody.dashboard.doctorFreshness, 'fresh')
+  assert.equal(diagnosedBody.dashboard.guidance.blockingCode, 'component.math-anchor')
+
+  const cached = await fetch(`${origin}/api/dashboard`, { headers: { cookie } })
+  assert.equal(cached.status, 200)
+  assert.equal((await cached.json()).guidance.blockingCode, 'component.math-anchor')
+
+  await writeFile(identity, original)
+  const repaired = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'repair' }),
+  })
+  assert.equal(repaired.status, 200)
+  const repairedBody = await repaired.json()
+  assert.equal(repairedBody.result.status, 'repaired')
+  const repairedMath = (repairedBody.dashboard?.doctor?.checks || []).find((item) => item.id === 'component.math-anchor')
+  assert.equal(repairedMath?.status, 'ok')
+  assert.notEqual(repairedBody.dashboard.guidance.blockingCode, 'component.math-anchor')
+  assert.equal(repairedBody.dashboard.doctorFreshness, 'fresh')
+
+  const afterRepair = await fetch(`${origin}/api/dashboard`, { headers: { cookie } })
+  assert.equal(afterRepair.status, 200)
+  const afterBody = await afterRepair.json()
+  const afterMath = (afterBody.doctor?.checks || []).find((item) => item.id === 'component.math-anchor')
+  assert.equal(afterMath?.status, 'ok')
+  assert.notEqual(afterBody.guidance.blockingCode, 'component.math-anchor')
+
+  const redose = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'doctor' }),
+  })
+  assert.equal(redose.status, 200)
+  const redoseMath = ((await redose.json()).result?.checks || []).find((item) => item.id === 'component.math-anchor')
+  assert.equal(redoseMath?.status, 'ok')
+
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
+test('pick-workspace uses a real folder picker, cancel and inaccessible keep the previous grant', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'agent-host-web-pick-ws-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-pick-state-'))
+  const folder = await mkdtemp(join(tmpdir(), 'agent-host-web-pick-folder-'))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true }), rm(folder, { recursive: true, force: true })]))
+  await createDevelopmentWorkspace(root)
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false })
+  const installed = await setup(
+    { profile: 'standard', hosts: [], noHost: true, developmentRoot: root, stateRoot, noService: true, dryRun: false, enableObservability: false },
+    {
+      runner: fake.runner,
+      catalogPreflight: healthyCatalogPreflight,
+      applicationStatePreflight: compatibleApplicationState,
+    },
+  )
+  assert.equal(installed.status, 'installed')
+  const picks = [
+    { status: 'picked', path: folder },
+    { status: 'cancelled' },
+    { status: 'picked', path: join(folder, 'missing-agent-host-folder') },
+  ]
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({
+    stateRoot,
+    open: false,
+    idleTimeoutMs: 60_000,
+    onReady: readyResolve,
+    pickDirectory: async () => {
+      const next = picks.shift()
+      if (next === undefined) {
+        throw new AgentHostError('DIRECTORY_PICKER_UNAVAILABLE', 'Open Agent Host on this computer to choose a folder.')
+      }
+      return next
+    },
+  })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+  const headers = { cookie, origin, 'content-type': 'application/json' }
+
+  const granted = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'pick-workspace' }),
+  })
+  assert.equal(granted.status, 200)
+  const grantedBody = await granted.json()
+  const grantedFolder = await realpath(folder)
+  assert.equal(grantedBody.result.status, 'workspace-granted')
+  assert.equal(grantedBody.result.workspaceRoot, grantedFolder)
+  assert.equal((await loadState(await prepareStatePaths(stateRoot))).workspaceRoot, grantedFolder)
+
+  const cancelled = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'pick-workspace' }),
+  })
+  assert.equal(cancelled.status, 200)
+  assert.equal((await cancelled.json()).result.status, 'cancelled')
+  assert.equal((await loadState(await prepareStatePaths(stateRoot))).workspaceRoot, grantedFolder)
+
+  const inaccessible = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'pick-workspace' }),
+  })
+  assert.equal(inaccessible.status, 400)
+  assert.equal((await inaccessible.json()).error.code, 'WORKSPACE_ROOT_INVALID')
+  assert.equal((await loadState(await prepareStatePaths(stateRoot))).workspaceRoot, grantedFolder)
+
+  const unavailable = await fetch(`${origin}/api/action`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'pick-workspace' }),
+  })
+  assert.equal(unavailable.status, 400)
+  assert.equal((await unavailable.json()).error.code, 'DIRECTORY_PICKER_UNAVAILABLE')
+  assert.equal((await loadState(await prepareStatePaths(stateRoot))).workspaceRoot, grantedFolder)
+
+  const continued = await fetch(`${origin}/api/dashboard`, { headers: { cookie } })
+  assert.equal(continued.status, 200)
+  assert.equal((await continued.json()).snapshot.environment.workspaceGranted, true)
+
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  assert.match(page, /revealGrantPathFallback/u)
+  assert.match(page, /DIRECTORY_PICKER_UNAVAILABLE/u)
+
   await new Promise((resolve) => server.close(resolve))
   await running
 })

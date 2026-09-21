@@ -171,6 +171,24 @@ test('connect names the only available app and does not pick the first of many',
   assert.equal(many.connectHostId, null)
 })
 
+test('stale doctor does not keep an old fault or pretend the environment is healthy', () => {
+  const stale = buildPostSetupGuidance({
+    configured: true,
+    connectedHosts: ['Codex'],
+    installedToolCount: 2,
+    activeToolCount: 2,
+    primaryHostName: 'Codex',
+    primaryHostId: 'codex',
+    doctorBlockingErrors: [],
+    doctorFreshness: 'stale',
+  })
+  assert.equal(stale.readyToWork, false)
+  assert.equal(stale.problemClass, PROBLEM_CLASSES.UNVERIFIED)
+  assert.equal(stale.statusLine, 'Needs check')
+  assert.equal(stale.primaryAction.id, PRIMARY_ACTIONS.RUN_FULL_CHECK)
+  assert.equal(stale.primaryAction.label, 'Check')
+})
+
 test('setup result guidance requires a fresh task when hosts were connected', () => {
   const guidance = guidanceFromSetupResult({
     status: 'installed',

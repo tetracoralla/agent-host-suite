@@ -30,6 +30,7 @@ import {
 import { browseRecommendedTools, installGitHubTool, updatesCheck, updatesInstall, updatesStatus } from './updates.mjs'
 import { buildPostSetupGuidance } from './post-setup-guidance.mjs'
 import { readVerifiedLogoBytes } from './tool-presentation.mjs'
+import { pickDirectory as pickLocalDirectory } from './directory-picker.mjs'
 
 export const MANAGER_SETUP_PROFILES = Object.freeze(['featured', 'standard', 'developer', 'observability'])
 
@@ -137,7 +138,28 @@ async function serveToolLogo(stateRoot, id) {
 }
 
 
-export function buildDashboardGuidance(snapshot, tools, hosts, doctor = null) {
+export function environmentActionInvalidatesDoctor(payload) {
+  switch (payload?.action) {
+    case 'repair':
+    case 'update':
+    case 'rollback':
+    case 'setup':
+    case 'tools':
+    case 'host':
+    case 'workspace':
+    case 'uninstall':
+    case 'updates-install':
+    case 'cleanup':
+    case 'monitoring':
+      return true
+    case 'github':
+      return payload.preview !== true
+    default:
+      return false
+  }
+}
+
+export function buildDashboardGuidance(snapshot, tools, hosts, doctor = null, extras = {}) {
   const configured = snapshot?.configured === true
   const env = snapshot?.environment || {}
   const connectedHosts = Object.keys(env.hosts || {}).filter((id) => env.hosts[id])
@@ -158,7 +180,10 @@ export function buildDashboardGuidance(snapshot, tools, hosts, doctor = null) {
   const present = hostRecords.filter((row) => row.connected && row.appInstalled !== false)
   const missingConnected = hostRecords.filter((row) => row.connected && row.appInstalled === false)
   const primary = present[0] || null
-  const doctorBlockingErrors = Array.isArray(doctor?.checks)
+  const doctorFreshness = extras.doctorFreshness === 'stale' || extras.doctorFreshness === 'fresh'
+    ? extras.doctorFreshness
+    : (doctor ? 'fresh' : 'none')
+  const doctorBlockingErrors = doctorFreshness === 'fresh' && Array.isArray(doctor?.checks)
     ? doctor.checks.filter((item) => item?.status === 'error').map((item) => ({
       id: item.id,
       message: item.message,
@@ -178,6 +203,7 @@ export function buildDashboardGuidance(snapshot, tools, hosts, doctor = null) {
     primaryHostName: primary ? primary.name : (connectedHosts[0] ? (hostNames[connectedHosts[0]] || connectedHosts[0]) : null),
     primaryHostId: primary?.id || null,
     doctorBlockingErrors,
+    doctorFreshness,
     hostRecords,
     workspaceGranted: env.workspaceGranted,
   })
@@ -228,7 +254,11 @@ async function dashboard(stateRoot, extras = {}) {
     recommended,
     updates,
     hosts,
-    guidance: buildDashboardGuidance(snapshot, tools, hosts, extras.doctor),
+    doctor: extras.doctorFreshness === 'fresh' ? extras.doctor ?? null : null,
+    doctorFreshness: extras.doctorFreshness ?? (extras.doctor ? 'fresh' : 'none'),
+    guidance: buildDashboardGuidance(snapshot, tools, hosts, extras.doctor, {
+      doctorFreshness: extras.doctorFreshness ?? (extras.doctor ? 'fresh' : 'none'),
+    }),
   }
 }
 
@@ -335,6 +365,15 @@ async function action(value, stateRoot, dependencies = {}) {
       throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a project folder')
     }
     return grantWorkspace({ stateRoot, workspaceRoot: value.path.trim() })
+  }
+  if (value.action === 'pick-workspace') {
+    const picked = await (dependencies.pickDirectory ?? pickLocalDirectory)()
+    if (picked?.status === 'cancelled') return { status: 'cancelled' }
+    const path = typeof picked?.path === 'string' ? picked.path : null
+    if (path === null || path.trim() === '') {
+      throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a project folder')
+    }
+    return grantWorkspace({ stateRoot, workspaceRoot: path.trim() })
   }
   if (value.action === 'doctor') {
     return doctorAction(stateRoot)
@@ -525,7 +564,7 @@ const zh={
   'Overview':'总览','Environment':'环境','Tools':'工具','Updates':'更新','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…','Browse recommended tools':'浏览推荐工具','Add GitHub project':'添加 GitHub 项目','GitHub repository or Release URL':'GitHub 仓库或 Release 地址','Preview GitHub project':'预览 GitHub 项目','Add from GitHub':'从 GitHub 添加','Previewing GitHub project…':'正在预览 GitHub 项目…','Adding GitHub tool…':'正在添加 GitHub 工具…','Check for updates':'检查更新','Checking updates…':'正在检查更新…','This platform':'当前平台','No asset for this platform':'当前平台无安装包','profiles fetch --carrier downloads an installer. It does not replace Agent Host.':'profiles fetch --carrier 只下载安装包，不会替换或重启 Agent Host。',
   'Versions':'版本','Application':'应用','Environment release':'环境兼容版本','Catalog source':'目录来源','Catalog assets are unpublished.':'目录资产尚未发布。','Not Apple-notarized. Not a store.':'未经 Apple 公证，也不是应用商店。','Check source':'检查来源','Checking source…':'正在检查来源…','Use local catalog':'使用本地目录','Set HTTPS catalog':'设置 HTTPS 目录','Clear source':'清除来源','Last check':'最近检查','Retry':'重试','HTTPS catalog URL':'HTTPS 目录 URL','Local catalog path':'本地目录路径','not installed':'未安装','source-checkout':'源码 checkout','The Manager application and the installed Agent environment can share this product name with different payloads. Application build, environment release, and tool versions are separate.':'管理器应用与已安装的 Agent 环境可以同名但载荷不同。应用 build、环境兼容版本和工具版本是分开的。','Install update':'安装更新','Install all updates':'安装全部更新','update available':'可更新','Check for updates to load current and available versions.':'请检查更新以查看当前版本和可用版本。','compatible after Host update':'需先更新 Host','official upgrade':'官方升级','installed, version unread':'已安装，未能读取版本','check failed':'检查失败',
 
-  'Agent environment':'Agent 环境','Installed locally on this PC':'已安装在这台电脑上','Set up a compatible local tool environment':'设置兼容的本地工具环境','Set up tools':'设置工具','Standard tools':'标准工具','Featured tools':'精选工具','Developer Kit':'开发者 Kit','Standard + monitoring':'标准工具 + 监控','Set up':'设置','Setting up tools…':'正在设置工具…','Check again':'重新检测','Connect later':'稍后连接','Detected on this PC':'已在这台电脑上检测到','Math Anchor':'Math Anchor','Migratory Time':'Migratory Time','Armorial':'Armorial','Exact and scientific calculation':'精确与科学计算','Reliable worldwide time conversion':'可靠的全球时区转换','Choose project-aware icons without redrawing them':'按项目选用图标，无需重绘','Skill-only kit; this profile adds no Agent MCP tools':'仅 Skill；此配置不添加 Agent MCP 工具','Choose a tool set, then install.':'先选择工具集并安装 Agent Host；受支持的 Agent 应用可以现在连接，也可以稍后连接。','Install now; connect later.':'安装时可以不连接 Agent 应用。若未检测到受支持应用，可先安装 Agent Host，稍后再从“Agent 应用”连接。','Install complete — start work':'安装完成 — 可以开始工作','Ready to start work':'可以开始工作','Ready — start work in a new Agent task':'已就绪 — 请在新的 Agent 任务中开始工作','Install finished — connect an Agent to start work':'安装已完成 — 请连接 Agent 以开始工作','Open a new Agent task to start work':'打开新的 Agent 任务以开始工作','Connect an Agent app':'连接 Agent 应用','Review Repair':'查看修复','What Host confirmed':'Host 已确认的内容','Still open':'仍需注意','Next step':'下一步','Recovery path':'继续路径','Problem class':'问题类别','not-connected':'未连接','stale-session':'旧会话','permission':'权限','tool-fault':'工具故障','tools-paused':'工具已暂停','unverified':'尚未核验','Health details':'健康详情','Start work':'开始工作','Details':'详情','Ready':'就绪','Connect Agent to use':'连接 Agent 后即可使用','Tools paused':'工具已暂停','No tools selected':'尚未选择工具','Needs repair':'需要修复','Needs check':'需要检查','Permission blocked':'权限受阻','Bindings need repair':'绑定需要修复','Connect':'连接','Resume':'恢复','Repair':'修复','Check':'检查','Fix access':'修复访问','Choose folder':'选择文件夹','Need a project folder':'需要项目文件夹','Choose a project folder':'选择项目文件夹','Absolute folder path':'项目文件夹的绝对路径','Grant folder':'授予文件夹','Granting folder…':'正在授予文件夹…','Folder granted. Start a new Agent task so tools see it.':'已授予文件夹。请启动新的 Agent 任务，工具才能看到它。','Check found a problem':'检查发现问题','Check passed':'检查通过','app-missing':'应用缺失','Connect Codex':'连接 Codex','Connect ZCode':'连接 ZCode','Connect Claude Code':'连接 Claude Code','Choose Agent':'选择 Agent','{name} is not installed':'{name} 未安装','Install {name}, or connect a different installed app.':'请安装 {name}，或改连另一个已安装的应用。','Start a new Agent task so tools see the folder.':'请启动新的 Agent 任务，工具才能看到该文件夹。','Open Agent':'打开 Agent','Open Codex':'打开 Codex','Open ZCode':'打开 ZCode','Open Claude Code':'打开 Claude Code','Start a new task in the app':'在应用中开始新任务','Opening…':'正在打开…','Repairing…':'正在修复…','Checking…':'正在检查…','Set up':'设置','Set up tools':'设置工具','Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.':'Host 已确认它能观察到的本地环境。下一步是打开新的 Agent 任务开始真实工作，而不是停留在状态清单。','Host cannot confirm that an already-open Agent task has loaded these tools.':'Host 无法确认已经打开的 Agent 任务已载入这些工具。','Tools are on this machine, but no Agent app is connected yet.':'工具已在本机，但尚未连接 Agent 应用。','Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.':'打开「Agent 应用」→ 连接受支持的应用 → 在该应用中启动新任务。旧任务不会自动获得这些工具。','Public download is not configured.':'尚未配置公开下载。','Featured catalog download':'精选目录下载','Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview.':'未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请按住 Control 点击 Agent Host.app（或 DMG 中的应用），选择“打开”，再确认 Gatekeeper 提示。该提示是此预览的预期步骤。','Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.':'未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。',
+  'Agent environment':'Agent 环境','Installed locally on this PC':'已安装在这台电脑上','Set up a compatible local tool environment':'设置兼容的本地工具环境','Set up tools':'设置工具','Standard tools':'标准工具','Featured tools':'精选工具','Developer Kit':'开发者 Kit','Standard + monitoring':'标准工具 + 监控','Set up':'设置','Setting up tools…':'正在设置工具…','Check again':'重新检测','Connect later':'稍后连接','Detected on this PC':'已在这台电脑上检测到','Math Anchor':'Math Anchor','Migratory Time':'Migratory Time','Armorial':'Armorial','Exact and scientific calculation':'精确与科学计算','Reliable worldwide time conversion':'可靠的全球时区转换','Choose project-aware icons without redrawing them':'按项目选用图标，无需重绘','Skill-only kit; this profile adds no Agent MCP tools':'仅 Skill；此配置不添加 Agent MCP 工具','Choose a tool set, then install.':'先选择工具集并安装 Agent Host；受支持的 Agent 应用可以现在连接，也可以稍后连接。','Install now; connect later.':'安装时可以不连接 Agent 应用。若未检测到受支持应用，可先安装 Agent Host，稍后再从“Agent 应用”连接。','Install complete — start work':'安装完成 — 可以开始工作','Ready to start work':'可以开始工作','Ready — start work in a new Agent task':'已就绪 — 请在新的 Agent 任务中开始工作','Install finished — connect an Agent to start work':'安装已完成 — 请连接 Agent 以开始工作','Open a new Agent task to start work':'打开新的 Agent 任务以开始工作','Connect an Agent app':'连接 Agent 应用','Review Repair':'查看修复','What Host confirmed':'Host 已确认的内容','Still open':'仍需注意','Next step':'下一步','Recovery path':'继续路径','Problem class':'问题类别','not-connected':'未连接','stale-session':'旧会话','permission':'权限','tool-fault':'工具故障','tools-paused':'工具已暂停','unverified':'尚未核验','Health details':'健康详情','Start work':'开始工作','Details':'详情','Ready':'就绪','Connect Agent to use':'连接 Agent 后即可使用','Tools paused':'工具已暂停','No tools selected':'尚未选择工具','Needs repair':'需要修复','Needs check':'需要检查','Permission blocked':'权限受阻','Bindings need repair':'绑定需要修复','Connect':'连接','Resume':'恢复','Repair':'修复','Check':'检查','Fix access':'修复访问','Choose folder':'选择文件夹','Need a project folder':'需要项目文件夹','Choose a project folder':'选择项目文件夹','Absolute folder path':'项目文件夹的绝对路径','Enter path':'输入路径','Grant folder':'授予文件夹','Granting folder…':'正在授予文件夹…','Open Agent Host on this computer to choose a folder.':'请在本机打开 Agent Host 以选择文件夹。','Folder granted. Start a new Agent task so tools see it.':'已授予文件夹。请启动新的 Agent 任务，工具才能看到它。','Check found a problem':'检查发现问题','Check passed':'检查通过','app-missing':'应用缺失','Connect Codex':'连接 Codex','Connect ZCode':'连接 ZCode','Connect Claude Code':'连接 Claude Code','Choose Agent':'选择 Agent','{name} is not installed':'{name} 未安装','Install {name}, or connect a different installed app.':'请安装 {name}，或改连另一个已安装的应用。','Start a new Agent task so tools see the folder.':'请启动新的 Agent 任务，工具才能看到该文件夹。','Open Agent':'打开 Agent','Open Codex':'打开 Codex','Open ZCode':'打开 ZCode','Open Claude Code':'打开 Claude Code','Start a new task in the app':'在应用中开始新任务','Opening…':'正在打开…','Repairing…':'正在修复…','Checking…':'正在检查…','Set up':'设置','Set up tools':'设置工具','Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.':'Host 已确认它能观察到的本地环境。下一步是打开新的 Agent 任务开始真实工作，而不是停留在状态清单。','Host cannot confirm that an already-open Agent task has loaded these tools.':'Host 无法确认已经打开的 Agent 任务已载入这些工具。','Tools are on this machine, but no Agent app is connected yet.':'工具已在本机，但尚未连接 Agent 应用。','Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.':'打开「Agent 应用」→ 连接受支持的应用 → 在该应用中启动新任务。旧任务不会自动获得这些工具。','Public download is not configured.':'尚未配置公开下载。','Featured catalog download':'精选目录下载','Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, Control-click Agent Host.app (or the app inside the DMG), choose Open, then confirm the Gatekeeper warning. That warning is expected for this preview.':'未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请按住 Control 点击 Agent Host.app（或 DMG 中的应用），选择“打开”，再确认 Gatekeeper 提示。该提示是此预览的预期步骤。','Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.':'未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。',
   'Installed components':'已安装组件','Connected Agent apps':'已连接的 Agent 应用','Allocated bytes':'占用空间（字节）','Local monitoring':'本地监控','On':'已开启','Off':'已关闭','Agent apps':'Agent 应用','Not installed':'未安装','Connected':'已连接','Available':'可连接','Disconnect':'断开连接','Connect':'连接','Disconnecting…':'正在断开连接…','Connecting…':'正在连接…',
   'Tool environment actions':'工具环境操作','Update tools':'更新工具','Restore previous tools':'恢复上一版工具','Clean old packages':'清理旧软件包','Disconnect, keep data':'断开并保留数据','Disconnect, remove Host data':'断开并移除 Host 数据','Updating tools…':'正在更新工具…','Restoring tools…':'正在恢复工具…','Cleaning storage…':'正在清理存储…','Disconnecting tools…':'正在断开工具…','Disconnect tools and remove Agent Host private Suite data? Observer history remains separately owned.':'断开工具并移除 Agent Host 私有数据？Observer 历史记录仍由其独立保留。','On Windows, application restore and uninstall are also available in the openAdam Start menu folder.':'在 Windows 上，也可从“开始”菜单的 openAdam 文件夹恢复或卸载应用。',
   'Working set for new tasks':'新任务的工作集','Get featured tools':'获取精选工具','Getting featured tools…':'正在获取精选工具…','Installed':'已安装','Not installed in this environment':'此环境尚未安装','Featured':'所有者精选的工具；不是应用市场、商店、排行或付费目录。','No Agent environment is installed.':'尚未安装 Agent 环境。','Available tools':'可用工具','Changes take effect in a fresh Agent task.':'更改会在新的 Agent 任务中生效。','Apply tool set':'应用工具集',
@@ -547,22 +586,38 @@ for(const b of document.querySelectorAll('#nav button'))b.onclick=()=>setPage(b.
 $('#settingsButton').onclick=()=>$('#settingsDialog').showModal();$('#settingsDone').onclick=()=>$('#settingsDialog').close();$('#languageSelect').onchange=()=>call({action:'preferences',language:$('#languageSelect').value},t('Saving language…'));
 function notice(message){$('#error').textContent=message;$('#error').classList.toggle('hidden',!message)}
 function busy(active,label){changing=active;$('#busyText').textContent=label||'';$('#busy').classList.toggle('hidden',!active);$('.shell').inert=active;$('#settingsDialog').inert=active}
-function acceptDashboard(value){data=value;languageSelection=data.preferences?.language||'system';render()}
+function grantPathRow(){
+  const box=el('div',undefined,'row');box.dataset.testid='grant-folder';
+  const input=el('input');input.type='text';input.placeholder=t('Absolute folder path');input.setAttribute('aria-label',t('Choose a project folder'));
+  const go=button('Grant folder',()=>{const path=(input.value||'').trim();if(!path){notice(t('Choose a project folder'));return}call({action:'workspace',path},t('Granting folder…'))},'action primary');
+  box.append(input,go);return box;
+}
+function revealGrantPathFallback(){
+  const advanced=document.querySelector('[data-testid=grant-folder-advanced]');
+  if(advanced){advanced.open=true;advanced.querySelector('input')?.focus();return}
+  const c=document.querySelector('.start-work');
+  if(!c||c.querySelector('[data-testid=grant-folder]'))return;
+  const box=grantPathRow();c.append(box);box.querySelector('input')?.focus();
+}
+function acceptDashboard(value){data=value;languageSelection=data.preferences?.language||'system';if('doctor' in value)lastDoctor=value.doctor;render()}
 async function call(action,label){
   if(changing)return;
   busy(true,label);notice('');let confirmed=false;
   try{
     const r=await fetch('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(action)});
     const v=await r.json();
-    if(!r.ok){notice(v.error?.message||t('The action failed'));return}
+    if(!r.ok){
+      notice((v.error?.message&&t(v.error.message))||t('The action failed'));
+      if(action.action==='pick-workspace'&&v.error?.code==='DIRECTORY_PICKER_UNAVAILABLE') revealGrantPathFallback();
+      return
+    }
     confirmed=true;
     if(action.action==='preferences'){languageSelection=action.language;applyChrome()}
+    if(action.action==='doctor') lastDoctor=v.result;
     if(v.dashboard)acceptDashboard(v.dashboard);
     if(action.action==='github'&&action.preview){ lastPreview=v.result; lastGithubTarget=action.github; lastGithubPreviewed=action.github }
     if(action.action==='github'&&!action.preview) lastPreview=null;
     if(action.action==='updates-check'||action.action==='updates-install') lastUpdates=v.result;
-    if(action.action==='doctor') lastDoctor=v.result;
-    if(action.action==='workspace') lastDoctor=null;
     if(v.dashboard)render();
     const warnings=(v.result?.warnings||[]).slice(0,8).map(w=>f('Completed with a warning: {message}',{message:w.message||w.code}));
     if(v.result?.presentation) notice([v.result.presentation.displayName,v.result.origin?.tag,v.result.compatibility?.available?'compatible asset listed':'no compatible asset'].filter(Boolean).join(' · '));
@@ -572,9 +627,9 @@ async function call(action,label){
       if(failed.length) notice([t('Check found a problem'), failed[0].message, failed[0].id].filter(Boolean).join(' · '));
       else notice(t('Check passed'));
     }
-    else if(action.action==='workspace') notice(t(v.result?.nextStep||'Start a new Agent task so tools see the folder.'));
+    else if(action.action==='workspace'||(action.action==='pick-workspace'&&v.result?.status==='workspace-granted')) notice(t(v.result?.nextStep||'Start a new Agent task so tools see the folder.'));
     else if(v.refreshError||!v.dashboard)warnings.push(t('Change completed; the current status could not be refreshed. Use Refresh to try again.'));
-    if(warnings.length && action.action!=='doctor' && action.action!=='workspace') notice(warnings.join(' '));
+    if(warnings.length && action.action!=='doctor' && action.action!=='workspace' && action.action!=='pick-workspace') notice(warnings.join(' '));
   }catch{
     notice(t(confirmed?'Change completed; the current status could not be refreshed. Use Refresh to try again.':'The request ended without a confirmed result. Refresh the environment before repeating the action.'));
   }finally{busy(false)}
@@ -744,12 +799,7 @@ function renderPostSetupGuidance(root, guidance){
     if(action.id==='review-repair'){call({action:'repair'},t('Repairing…'));return}
     if(action.id==='run-full-check'){call({action:'doctor'},t('Checking…'));return}
     if(action.id==='grant-workspace'){
-      const existing=typeof c.querySelector==='function'?c.querySelector('[data-testid=grant-folder]'):null;
-      if(existing){existing.querySelector?.('input')?.focus();return}
-      const box=el('div',undefined,'row');box.dataset.testid='grant-folder';
-      const input=el('input');input.type='text';input.placeholder=t('Absolute folder path');input.setAttribute('aria-label',t('Choose a project folder'));
-      const go=button('Grant folder',()=>{const path=(input.value||'').trim();if(!path){notice(t('Choose a project folder'));return}call({action:'workspace',path},t('Granting folder…'))},'action primary');
-      box.append(input,go);c.append(box);input.focus();
+      call({action:'pick-workspace'},t('Choose a project folder'));
       return;
     }
     if(action.id==='open-app'||action.id==='start-new-agent-task'){
@@ -781,6 +831,15 @@ function renderPostSetupGuidance(root, guidance){
   const doctorChecks=(typeof lastDoctor==='undefined'?null:lastDoctor)?.checks||[];
   for(const item of doctorChecks.filter(x=>x.status==='error')){
     body.append(el('div','• '+(item.id||'')+' · '+(item.message||''),'muted'));
+  }
+  if(action.id==='grant-workspace'){
+    const advanced=el('details');
+    advanced.dataset.testid='grant-folder-advanced';
+    advanced.append(el('summary',t('Enter path')));
+    const box=el('div',undefined,'row');box.dataset.testid='grant-folder';
+    const input=el('input');input.type='text';input.placeholder=t('Absolute folder path');input.setAttribute('aria-label',t('Choose a project folder'));
+    const go=button('Grant folder',()=>{const path=(input.value||'').trim();if(!path){notice(t('Choose a project folder'));return}call({action:'workspace',path},t('Granting folder…'))},'action primary');
+    box.append(input,go);advanced.append(box);body.append(advanced);
   }
   details.append(body);
   c.append(details);
@@ -902,9 +961,33 @@ export async function startWebManager(options = {}) {
   let origin
   let idleTimer
   let lastDoctor = null
+  let doctorFreshness = 'none'
   const traceSourceReader = options.traceSourceReader ?? observabilityTraceSources
   const traceExporter = options.traceExporter ?? exportObservabilityTrace
-  const actionDependencies = { openAgentApp: options.openAgentApp }
+  const pickDirectory = options.pickDirectory ?? pickLocalDirectory
+  const actionDependencies = { openAgentApp: options.openAgentApp, pickDirectory }
+  const dashboardDoctor = () => ({ doctor: lastDoctor, doctorFreshness })
+  async function syncDoctorCache(payload, result) {
+    if (payload.action === 'doctor') {
+      lastDoctor = result
+      doctorFreshness = 'fresh'
+      return
+    }
+    const grantedPick = payload.action === 'pick-workspace' && result?.status === 'workspace-granted'
+    const mutated = payload.action !== 'pick-workspace' && environmentActionInvalidatesDoctor(payload)
+    if (!grantedPick && !mutated) return
+    const shouldRecheck = doctorFreshness === 'fresh' || doctorFreshness === 'stale'
+    lastDoctor = null
+    if (!shouldRecheck) return
+    doctorFreshness = 'stale'
+    try {
+      lastDoctor = await doctorAction(stateRoot)
+      doctorFreshness = 'fresh'
+    } catch {
+      lastDoctor = null
+      doctorFreshness = 'stale'
+    }
+  }
   const touch = (server) => {
     clearTimeout(idleTimer)
     idleTimer = setTimeout(() => server.close(), options.idleTimeoutMs ?? IDLE_TIMEOUT_MS)
@@ -937,7 +1020,7 @@ export async function startWebManager(options = {}) {
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/dashboard') {
-        json(response, 200, await dashboard(stateRoot, { doctor: lastDoctor }))
+        json(response, 200, await dashboard(stateRoot, dashboardDoctor()))
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/tool-logo') {
@@ -988,14 +1071,13 @@ export async function startWebManager(options = {}) {
         }
         const payload = await bodyJson(request)
         const result = await action(payload, stateRoot, actionDependencies)
-        if (payload.action === 'doctor') lastDoctor = result
-        if (payload.action === 'workspace') lastDoctor = null
+        await syncDoctorCache(payload, result)
         // The lifecycle result is authoritative once the action has committed.
         // A later read failure must not invite the caller to repeat that action.
         let current = null
         let refreshError = null
         try {
-          current = await dashboard(stateRoot, { doctor: lastDoctor })
+          current = await dashboard(stateRoot, dashboardDoctor())
         } catch (error) {
           refreshError = asPublicError(error)
         }

@@ -93,8 +93,10 @@ sleep 2
 `, { mode: 0o700 })
   await chmod(script, 0o700)
 
+  // confirmMs must outlast process exit; 800ms observed a still-alive pid on this
+  // machine (~1330ms to exit) and treated startup as confirmed. Product default is unchanged.
   await assert.rejects(
-    () => startDetachedProcess(script, [], { confirmMs: 800 }),
+    () => startDetachedProcess(script, [], { confirmMs: 3_000 }),
     (error) => error.code === 'HOST_COMMAND_FAILED',
   )
   await assert.rejects(readFile(marker))
