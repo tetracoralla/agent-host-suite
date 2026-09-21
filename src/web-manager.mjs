@@ -328,8 +328,10 @@ async function action(value, stateRoot, dependencies = {}) {
   if (value.action === 'preferences') return setManagerLanguage(stateRoot, value.language)
   if (value.action === 'source') {
     if (value.clear === true) return clearCatalogSource({ stateRoot })
-    if (value.check === true) return checkCatalogSource({ stateRoot })
-    if (typeof value.url === 'string' && value.url.trim() !== '') return setCatalogSource({ stateRoot, url: value.url })
+    if (value.check === true) return checkCatalogSource({ stateRoot }, { fetch: dependencies.fetch })
+    if (typeof value.url === 'string' && value.url.trim() !== '') {
+      return setCatalogSource({ stateRoot, url: value.url }, { fetch: dependencies.fetch })
+    }
     if (typeof value.path === 'string' && value.path.trim() !== '') {
       return setCatalogSource({ stateRoot, releaseManifest: value.path })
     }
@@ -965,7 +967,7 @@ export async function startWebManager(options = {}) {
   const traceSourceReader = options.traceSourceReader ?? observabilityTraceSources
   const traceExporter = options.traceExporter ?? exportObservabilityTrace
   const pickDirectory = options.pickDirectory ?? pickLocalDirectory
-  const actionDependencies = { openAgentApp: options.openAgentApp, pickDirectory }
+  const actionDependencies = { openAgentApp: options.openAgentApp, pickDirectory, fetch: options.fetch }
   const dashboardDoctor = () => ({ doctor: lastDoctor, doctorFreshness })
   async function syncDoctorCache(payload, result) {
     if (payload.action === 'doctor') {
