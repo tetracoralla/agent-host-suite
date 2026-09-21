@@ -267,6 +267,16 @@ enum L10n {
         "Retained trace sessions": "保留的轨迹会话",
         "Choose one Agent app to list locally retained metadata, then export one session for analysis.": "选择一个 Agent 应用，列出本地保留的元数据，再导出一个会话用于分析。",
         "No trace adapters are available.": "没有可用的轨迹适配器。",
+        "Task activity": "任务活动",
+        "No retained task activity for this Agent app.": "此 Agent 应用没有保留的任务活动。",
+        "Show recent tasks": "显示最近任务",
+        "Direct calls": "直接调用",
+        "Static references": "静态引用",
+        "Export details": "导出详情",
+        "Showing the newest {count} retained tasks.": "正在显示最近的 {count} 个保留任务。",
+        "Direct calls are observed execution. Static references are not. Exported details contain metadata only and no Host verdict.": "直接调用是执行观测；静态引用不是。导出详情仅含元数据，不含 Host 判决。",
+        "The installed monitoring component could not complete this request. Update or repair Agent Host, then try again.": "当前安装的监控组件无法完成这项请求。请更新或修复 Agent Host 后重试。",
+        "The monitoring request was cancelled.": "监控请求已取消。",
         "Load sessions": "载入会话",
         "No retained sessions for this Agent app.": "此 Agent 应用没有保留的会话。",
         "{events} events · last observed {date}": "{events} 个事件 · 最后观测于 {date}",
@@ -523,6 +533,8 @@ enum L10n {
         ,"Preparing setup": "正在准备设置"
         ,"Loading trace sessions": "正在载入轨迹会话"
         ,"Preparing trace export": "正在准备轨迹导出"
+        ,"Loading task activity": "正在加载任务活动"
+        ,"Preparing task export": "正在准备任务导出"
         ,"Installing standard tools": "正在安装标准工具"
         ,"Preparing restore": "正在准备恢复"
         ,"Repairing environment": "正在修复环境"

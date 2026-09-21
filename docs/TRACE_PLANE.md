@@ -87,9 +87,10 @@ agent-host observability export-trace --provider zcode \
 `adapters` is a path-free capability catalog. `trace-sources` and
 `task-sources` are path-free, bounded catalogs of retained pseudonymous
 sessions for one provider. Under Usage & Reliability, Manager exposes the
-same listing and metadata-only download flow for retained trace sessions;
-task activity packs are exported only through the explicit CLI commands
-today. If a browser download is abandoned, Manager cancels the installed
+same listing and metadata-only download flow for retained trace sessions.
+Native and browser Managers show task activity through direct-call, error, and
+static-reference counts, with detail exported only on request. If a browser
+download is abandoned, Manager cancels the installed
 Observer process and removes its private temporary output. Completed exports
 are published only as new files, so interruption cannot expose a partial pack.
 `adapter-plan` returns the exact

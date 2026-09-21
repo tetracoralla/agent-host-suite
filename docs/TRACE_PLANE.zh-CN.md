@@ -70,8 +70,9 @@ agent-host observability export-trace --provider zcode \
 
 `adapters` 返回不含路径的能力目录；`trace-sources` 与 `task-sources` 返回一个 Provider
 当前保留的、带数量上限且不含路径的匿名会话目录。Manager 的“使用情况与
-可靠性”页面仅为保留轨迹会话提供同样的列表与纯元数据下载流程；任务活动包
-目前只能通过显式 CLI 命令导出。浏览器放弃下载时，
+可靠性”页面为保留轨迹会话提供同样的列表与纯元数据下载流程；原生和浏览器
+Manager 先显示任务活动中的直接调用、错误和静态引用数量，只有用户主动操作
+才导出详情。浏览器放弃下载时，
 Manager 会取消已安装 Observer 的子进程并清除私有临时输出；只有完整结果
 才会以新文件发布，因此中断不会暴露半成品。`adapter-plan` 返回一个适配器当前所需
 的用户级配置片段与撤回方法，但始终标记 `appliesChanges: false`，Agent Host

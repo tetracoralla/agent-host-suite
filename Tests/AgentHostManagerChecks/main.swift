@@ -521,6 +521,30 @@ do {
     let emptyTraceSources = try JSONDecoder().decode(TraceSourceCatalog.self, from: emptyTraceSourcePayload)
     expect(!emptyTraceSources.isValid(expectedProvider: "zcode"), "a retained trace catalog must not expose an empty session")
 
+    let taskSourcePayload = Data(#"""
+    {
+      "schemaVersion": "openadam.agent-host-task-source-catalog.v0.1",
+      "status": "ok",
+      "generatedAt": "2026-09-21T00:00:00.000Z",
+      "provider": "codex",
+      "requestedRange": {"fromMs": null, "toMs": null},
+      "retention": {"retentionDays": 30, "currentCutoffMs": 1, "eventsBeforeCutoffMayHaveBeenRemoved": true, "collectionBeforeMonitoringWasEnabled": "unavailable"},
+      "privacy": {"contentPolicy": "metadata-only", "sourcePathIncluded": false, "rawConversationContentIncluded": false, "toolArgumentsIncluded": false, "toolResultsIncluded": false},
+      "limits": {"maxSources": 25, "sourceLimitReached": false, "sourcesReturned": 1},
+      "sources": [{"sessionHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sessionStartedAtMs": 5, "firstEventAtMs": 10, "lastEventAtMs": 20, "observedTurns": 1, "toolObservations": 3, "directCalls": 2, "staticReferences": 1, "completed": 1, "errors": 1, "cancelled": 0, "outcomeUnknown": 1, "usageRecords": 1, "completeness": "unknown"}],
+      "observationBoundary": {"directCallsAreExecutionObservations": true, "staticReferencesAreExecutionObservations": false, "terminalStatusMayBePartial": true},
+      "unknowns": ["result-adoption", "comparative-value"],
+      "interpretationStatus": "not-performed"
+    }
+    """#.utf8)
+    let taskSources = try JSONDecoder().decode(TaskSourceCatalog.self, from: taskSourcePayload)
+    expect(taskSources.sources.first?.directCalls == 2, "task activity must preserve direct-call counts")
+    expect(taskSources.sources.first?.staticReferences == 1, "task activity must keep static references separate")
+    expect(taskSources.isValid(expectedProvider: "codex"), "task activity must preserve its metadata-only observation boundary")
+    let misclassifiedTaskSourcePayload = Data(String(data: taskSourcePayload, encoding: .utf8)!.replacingOccurrences(of: "\"staticReferences\": 1", with: "\"staticReferences\": 2").utf8)
+    let misclassifiedTaskSources = try JSONDecoder().decode(TaskSourceCatalog.self, from: misclassifiedTaskSourcePayload)
+    expect(!misclassifiedTaskSources.isValid(expectedProvider: "codex"), "task activity must reject counts that manufacture execution from static references")
+
     let retainedPackData = Data(#"{"schemaVersion":"openadam.agent-host-trace-analysis-pack.v0.2","source":{"provider":"zcode","selectionKind":"observer-retained-session","sessionHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"privacy":{"contentPolicy":"metadata-only","selectedConversationContentIncluded":false,"sensitiveContentConfirmed":false,"transportSecretsExcluded":true,"selectedContentMayContainUserSecrets":false,"observerPackRetained":false,"sourceUsesObserverRetainedMetadata":true,"sourcePathIncluded":false,"toolArgumentsIncluded":false,"toolResultsIncluded":false},"limits":{"eventsReturned":0,"eventsAvailable":0},"events":[],"interpretationStatus":"not-performed"}"#.utf8)
     let retainedReceipt = TraceExportReceipt(
         status: "completed",
@@ -543,6 +567,50 @@ do {
             sessionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         ),
         "the saved trace bytes must agree with their receipt and metadata-only promise"
+    )
+
+    let taskPackData = Data(#"{"schemaVersion":"openadam.agent-host-task-activity-pack.v0.1","source":{"provider":"codex","selectionKind":"observer-retained-task-session","sessionHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"privacy":{"contentPolicy":"metadata-only","observerPackRetained":false,"sourceUsesObserverRetainedMetadata":true,"sourcePathIncluded":false,"rawConversationContentIncluded":false,"toolArgumentsIncluded":false,"toolResultsIncluded":false},"limits":{"eventsReturned":0,"eventsAvailable":1},"events":[],"observationBoundary":{"directCallsAreExecutionObservations":true,"staticReferencesAreExecutionObservations":false,"nestedChildReceiptsRequireAProviderTraceOrComponentReceipt":true,"adoptionNotRepresented":true},"interpretationStatus":"not-performed"}"#.utf8)
+    let taskReceipt = TaskExportReceipt(
+        status: "completed",
+        schemaVersion: TaskActivityContractValidator.retainedPackVersion,
+        outputPath: "/private/task.json",
+        outputBytes: taskPackData.count,
+        eventsReturned: 0,
+        eventsAvailable: 1,
+        contentPolicy: "metadata-only",
+        observerPackRetained: false,
+        interpretationStatus: "not-performed"
+    )
+    expect(
+        TaskActivityContractValidator.isValidRetainedExport(
+            data: taskPackData,
+            receipt: taskReceipt,
+            outputPath: "/private/task.json",
+            provider: "codex",
+            sessionHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ),
+        "the saved task activity bytes must agree with their receipt and neutral observation boundary"
+    )
+    let selfCertifyingTaskPack = Data(String(data: taskPackData, encoding: .utf8)!.replacingOccurrences(of: "\"nestedChildReceiptsRequireAProviderTraceOrComponentReceipt\":true", with: "\"nestedChildReceiptsRequireAProviderTraceOrComponentReceipt\":false").utf8)
+    expect(
+        !TaskActivityContractValidator.isValidRetainedExport(
+            data: selfCertifyingTaskPack,
+            receipt: TaskExportReceipt(
+                status: taskReceipt.status,
+                schemaVersion: taskReceipt.schemaVersion,
+                outputPath: taskReceipt.outputPath,
+                outputBytes: selfCertifyingTaskPack.count,
+                eventsReturned: taskReceipt.eventsReturned,
+                eventsAvailable: taskReceipt.eventsAvailable,
+                contentPolicy: taskReceipt.contentPolicy,
+                observerPackRetained: taskReceipt.observerPackRetained,
+                interpretationStatus: taskReceipt.interpretationStatus
+            ),
+            outputPath: "/private/task.json",
+            provider: "codex",
+            sessionHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ),
+        "task activity must not treat a nested reference as its own execution receipt"
     )
     let selectedContentPack = Data(String(data: retainedPackData, encoding: .utf8)!.replacingOccurrences(of: "metadata-only", with: "selected-content").utf8)
     expect(

@@ -285,6 +285,140 @@ test('local Manager lists retained sessions and downloads one metadata-only pack
   await running
 })
 
+test('local Manager shows task activity facts and downloads one neutral metadata pack', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-task-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  const session = 'b'.repeat(64)
+  const calls = []
+  let exportedPath
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({
+    stateRoot,
+    open: false,
+    idleTimeoutMs: 60_000,
+    onReady: readyResolve,
+    taskSourceReader: async (options) => {
+      calls.push(['sources', options])
+      return {
+        schemaVersion: 'openadam.agent-host-task-source-catalog.v0.1',
+        status: 'ok',
+        provider: options.provider,
+        retention: { retentionDays: 30, currentCutoffMs: 0, eventsBeforeCutoffMayHaveBeenRemoved: true, collectionBeforeMonitoringWasEnabled: 'unavailable' },
+        privacy: { contentPolicy: 'metadata-only', sourcePathIncluded: false, rawConversationContentIncluded: false, toolArgumentsIncluded: false, toolResultsIncluded: false },
+        limits: { maxSources: options.limit, sourceLimitReached: false, sourcesReturned: 1 },
+        sources: [{ sessionHash: session, sessionStartedAtMs: null, firstEventAtMs: 1, lastEventAtMs: 2, observedTurns: 1, toolObservations: 3, directCalls: 2, staticReferences: 1, completed: 1, errors: 1, cancelled: 0, outcomeUnknown: 1, usageRecords: 1, completeness: 'unknown' }],
+        observationBoundary: { directCallsAreExecutionObservations: true, staticReferencesAreExecutionObservations: false, terminalStatusMayBePartial: true },
+        interpretationStatus: 'not-performed',
+      }
+    },
+    taskExporter: async (options) => {
+      calls.push(['export', options])
+      exportedPath = options.output
+      const body = `${JSON.stringify({
+        schemaVersion: 'openadam.agent-host-task-activity-pack.v0.1',
+        source: { provider: options.provider, selectionKind: 'observer-retained-task-session', sessionHash: options.session },
+        privacy: { contentPolicy: 'metadata-only', observerPackRetained: false, sourceUsesObserverRetainedMetadata: true, sourcePathIncluded: false, rawConversationContentIncluded: false, toolArgumentsIncluded: false, toolResultsIncluded: false },
+        limits: { eventsReturned: 0, eventsAvailable: 1 },
+        events: [],
+        observationBoundary: { directCallsAreExecutionObservations: true, staticReferencesAreExecutionObservations: false, nestedChildReceiptsRequireAProviderTraceOrComponentReceipt: true, adoptionNotRepresented: true },
+        interpretationStatus: 'not-performed',
+      })}\n`
+      await writeFile(options.output, body, { mode: 0o600 })
+      return { status: 'completed', schemaVersion: 'openadam.agent-host-task-activity-pack.v0.1', outputPath: options.output, outputBytes: Buffer.byteLength(body), eventsReturned: 0, eventsAvailable: 1, contentPolicy: 'metadata-only', observerPackRetained: false, interpretationStatus: 'not-performed' }
+    },
+  })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+
+  const listed = await fetch(`${origin}/api/task-sources?provider=codex&limit=25`, { headers: { cookie } })
+  assert.equal(listed.status, 200)
+  const catalog = await listed.json()
+  assert.equal(catalog.sources[0].directCalls, 2)
+  assert.equal(catalog.sources[0].staticReferences, 1)
+  const invalid = await fetch(`${origin}/api/task-sources?provider=codex&privatePath=/tmp`, { headers: { cookie } })
+  assert.equal(invalid.status, 400)
+
+  const rejected = await fetch(`${origin}/api/task-export`, {
+    method: 'POST',
+    headers: { cookie, origin: 'https://example.invalid', 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'codex', session }),
+  })
+  assert.equal(rejected.status, 403)
+  const exported = await fetch(`${origin}/api/task-export`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'codex', session }),
+  })
+  assert.equal(exported.status, 200)
+  assert.match(exported.headers.get('content-disposition'), /agent-host-codex-task-bbbbbbbbbbbb\.json/u)
+  assert.equal((await exported.json()).observationBoundary.adoptionNotRepresented, true)
+  await assert.rejects(access(exportedPath))
+  assert.equal(calls[0][1].limit, 25)
+  assert.equal(calls[1][0], 'export')
+  assert.equal(calls[1][1].maxOutputBytes, 8 * 1024 * 1024)
+  assert.equal(calls[1][1].signal instanceof AbortSignal, true)
+
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
+test('local Manager cancels an abandoned task activity export and removes its temporary output', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-task-cancel-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  let readyResolve
+  let exportStartedResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const exportStarted = new Promise((resolve) => { exportStartedResolve = resolve })
+  let exportedPath
+  const running = startWebManager({
+    stateRoot,
+    open: false,
+    idleTimeoutMs: 60_000,
+    onReady: readyResolve,
+    taskExporter: async (options) => {
+      exportedPath = options.output
+      await writeFile(options.output, '{}\n', { mode: 0o600 })
+      exportStartedResolve()
+      await new Promise((resolve, reject) => {
+        if (options.signal.aborted) {
+          reject(new Error('cancelled'))
+          return
+        }
+        options.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true })
+      })
+    },
+  })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+  const controller = new AbortController()
+  const pending = fetch(`${origin}/api/task-export`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'codex', session: 'b'.repeat(64) }),
+    signal: controller.signal,
+  })
+  await exportStarted
+  controller.abort()
+  await assert.rejects(pending, { name: 'AbortError' })
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await access(exportedPath)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    } catch {
+      break
+    }
+  }
+  await assert.rejects(access(exportedPath))
+
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
 test('local Manager rejects a retained export whose file contradicts its metadata-only receipt', async (t) => {
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-trace-invalid-'))
   t.after(() => rm(stateRoot, { recursive: true, force: true }))

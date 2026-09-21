@@ -135,7 +135,9 @@ static-reference, and error summary. `observability export-task` exports one
 bounded pseudonymous task record for closer inspection. It separates direct
 execution observations from tool names found only inside orchestration input;
 it does not decide whether a result was adopted, useful, or better than an
-alternative. Those are judgments for the user or the Agent they select. See
+alternative. The native and browser Managers expose the same facts as a
+visual-first Task activity card, with detail exported only on request. Those
+judgments remain with the user or the Agent they select. See
 [Trace Plane](docs/TRACE_PLANE.md).
 
 ## Unnamed adoption acceptance

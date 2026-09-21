@@ -10,7 +10,7 @@ import { doctor as runDoctorChecks } from './doctor.mjs'
 import { resolveExecutable } from './process.mjs'
 import { resolveZcodeExecutable } from './hosts/zcode.mjs'
 import { openAgentApp } from './open-agent-app.mjs'
-import { disableObservability, enableObservability, exportObservabilityTrace, observabilityTraceSources, readCurrentObservability } from './observability.mjs'
+import { disableObservability, enableObservability, exportObservabilityTask, exportObservabilityTrace, observabilityTaskSources, observabilityTraceSources, readCurrentObservability } from './observability.mjs'
 import { operationsSnapshot } from './operations-snapshot.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { setup } from './setup.mjs'
@@ -46,6 +46,8 @@ async function configuredReleaseManifest(stateRoot, env = process.env) {
 }
 const TRACE_SOURCE_CATALOG_VERSION = 'openadam.agent-host-trace-source-catalog.v0.1'
 const RETAINED_TRACE_PACK_VERSION = 'openadam.agent-host-trace-analysis-pack.v0.2'
+const TASK_SOURCE_CATALOG_VERSION = 'openadam.agent-host-task-source-catalog.v0.1'
+const TASK_ACTIVITY_PACK_VERSION = 'openadam.agent-host-task-activity-pack.v0.1'
 const SESSION_HASH = /^[a-f0-9]{64}$/u
 
 function fixedEqual(left, right) {
@@ -431,6 +433,66 @@ async function traceSources(url, stateRoot, reader) {
   return catalog
 }
 
+async function taskSources(url, stateRoot, reader) {
+  const unexpected = [...url.searchParams.keys()].filter((key) => !['provider', 'fromMs', 'toMs', 'limit'].includes(key))
+  if (unexpected.length > 0) throw new AgentHostError('MANAGER_REQUEST_INVALID', 'The task query contains unsupported fields', { fields: unexpected })
+  const provider = url.searchParams.get('provider')
+  if (typeof provider !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(provider)) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose one task provider')
+  }
+  const catalog = await reader({
+    stateRoot,
+    provider,
+    fromMs: integerQuery(url.searchParams.get('fromMs'), 'fromMs', 0, Number.MAX_SAFE_INTEGER),
+    toMs: integerQuery(url.searchParams.get('toMs'), 'toMs', 0, Number.MAX_SAFE_INTEGER),
+    limit: integerQuery(url.searchParams.get('limit'), 'limit', 1, 50) ?? 25,
+  })
+  const privacy = catalog?.privacy
+  const boundary = catalog?.observationBoundary
+  const limits = catalog?.limits
+  const retention = catalog?.retention
+  const sourcesValid = Array.isArray(catalog?.sources) && catalog.sources.every((source) => {
+    const outcomes = source?.completed + source?.errors + source?.cancelled + source?.outcomeUnknown
+    return SESSION_HASH.test(source?.sessionHash)
+      && (source?.sessionStartedAtMs === null || (Number.isSafeInteger(source?.sessionStartedAtMs) && source.sessionStartedAtMs >= 0))
+      && Number.isSafeInteger(source?.firstEventAtMs) && source.firstEventAtMs >= 0
+      && Number.isSafeInteger(source?.lastEventAtMs) && source.lastEventAtMs >= source.firstEventAtMs
+      && Number.isSafeInteger(source?.observedTurns) && source.observedTurns >= 0
+      && Number.isSafeInteger(source?.toolObservations) && source.toolObservations >= 0
+      && Number.isSafeInteger(source?.directCalls) && source.directCalls >= 0
+      && Number.isSafeInteger(source?.staticReferences) && source.staticReferences >= 0
+      && source.directCalls + source.staticReferences === source.toolObservations
+      && Number.isSafeInteger(outcomes) && outcomes === source.toolObservations
+      && Number.isSafeInteger(source?.usageRecords) && source.usageRecords >= 0
+      && source.toolObservations + source.usageRecords >= 1
+      && source?.completeness === 'unknown'
+  })
+  if (catalog?.schemaVersion !== TASK_SOURCE_CATALOG_VERSION
+    || catalog?.status !== 'ok'
+    || catalog?.provider !== provider
+    || catalog?.interpretationStatus !== 'not-performed'
+    || privacy?.contentPolicy !== 'metadata-only'
+    || privacy?.sourcePathIncluded !== false
+    || privacy?.rawConversationContentIncluded !== false
+    || privacy?.toolArgumentsIncluded !== false
+    || privacy?.toolResultsIncluded !== false
+    || boundary?.directCallsAreExecutionObservations !== true
+    || boundary?.staticReferencesAreExecutionObservations !== false
+    || boundary?.terminalStatusMayBePartial !== true
+    || !Number.isSafeInteger(limits?.maxSources) || limits.maxSources < 1 || limits.maxSources > 50
+    || !Number.isSafeInteger(limits?.sourcesReturned) || limits.sourcesReturned !== catalog?.sources?.length
+    || limits.sourcesReturned > limits.maxSources
+    || typeof limits?.sourceLimitReached !== 'boolean'
+    || !Number.isSafeInteger(retention?.retentionDays) || retention.retentionDays < 1
+    || !Number.isSafeInteger(retention?.currentCutoffMs) || retention.currentCutoffMs < 0
+    || retention?.eventsBeforeCutoffMayHaveBeenRemoved !== true
+    || retention?.collectionBeforeMonitoringWasEnabled !== 'unavailable'
+    || !sourcesValid) {
+    throw new AgentHostError('TASK_SOURCE_CATALOG_INVALID', 'The monitoring component returned an invalid task activity catalog')
+  }
+  return catalog
+}
+
 function validateRetainedTraceDownload(receipt, body, output, provider, session) {
   let pack
   try {
@@ -516,6 +578,92 @@ async function exportTraceDownload(value, stateRoot, exporter, signal) {
   }
 }
 
+function validateTaskActivityDownload(receipt, body, output, provider, session) {
+  let pack
+  try {
+    pack = JSON.parse(body.toString('utf8'))
+  } catch {
+    throw new AgentHostError('TASK_EXPORT_CONTENT_INVALID', 'The task activity export is not valid JSON')
+  }
+  const privacy = pack?.privacy
+  const boundary = pack?.observationBoundary
+  const countsValid = Number.isSafeInteger(receipt?.eventsReturned)
+    && receipt.eventsReturned >= 0
+    && Number.isSafeInteger(receipt?.eventsAvailable)
+    && receipt.eventsAvailable >= receipt.eventsReturned
+    && receipt.eventsReturned === pack?.limits?.eventsReturned
+    && receipt.eventsAvailable === pack?.limits?.eventsAvailable
+    && Array.isArray(pack?.events)
+    && pack.events.length === receipt.eventsReturned
+  if (receipt?.status !== 'completed'
+    || receipt?.schemaVersion !== TASK_ACTIVITY_PACK_VERSION
+    || receipt?.outputPath !== output
+    || receipt?.outputBytes !== body.length
+    || receipt?.contentPolicy !== 'metadata-only'
+    || receipt?.observerPackRetained !== false
+    || receipt?.interpretationStatus !== 'not-performed'
+    || pack?.schemaVersion !== TASK_ACTIVITY_PACK_VERSION
+    || pack?.source?.provider !== provider
+    || pack?.source?.selectionKind !== 'observer-retained-task-session'
+    || pack?.source?.sessionHash !== session
+    || privacy?.contentPolicy !== 'metadata-only'
+    || privacy?.observerPackRetained !== false
+    || privacy?.sourceUsesObserverRetainedMetadata !== true
+    || privacy?.sourcePathIncluded !== false
+    || privacy?.rawConversationContentIncluded !== false
+    || privacy?.toolArgumentsIncluded !== false
+    || privacy?.toolResultsIncluded !== false
+    || boundary?.directCallsAreExecutionObservations !== true
+    || boundary?.staticReferencesAreExecutionObservations !== false
+    || boundary?.nestedChildReceiptsRequireAProviderTraceOrComponentReceipt !== true
+    || boundary?.adoptionNotRepresented !== true
+    || pack?.interpretationStatus !== 'not-performed'
+    || !countsValid) {
+    throw new AgentHostError('TASK_EXPORT_CONTENT_INVALID', 'The monitoring component returned an invalid task activity export')
+  }
+}
+
+async function exportTaskActivityDownload(value, stateRoot, exporter, signal) {
+  exactObject(value, ['provider', 'session', 'fromMs', 'toMs'])
+  if (typeof value.provider !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value.provider)) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose one task provider')
+  }
+  if (typeof value.session !== 'string' || !SESSION_HASH.test(value.session)) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose one retained task session')
+  }
+  for (const [name, selected] of [['fromMs', value.fromMs], ['toMs', value.toMs]]) {
+    if (selected !== undefined && (!Number.isSafeInteger(selected) || selected < 0)) {
+      throw new AgentHostError('MANAGER_REQUEST_INVALID', `${name} is outside the supported range`)
+    }
+  }
+  if (value.fromMs !== undefined && value.toMs !== undefined && value.fromMs > value.toMs) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'The task range start must not be after its end')
+  }
+  const temporary = await mkdtemp(join(tmpdir(), 'agent-host-task-download-'))
+  const output = join(temporary, 'task-activity-pack.json')
+  try {
+    const receipt = await exporter({
+      stateRoot,
+      provider: value.provider,
+      session: value.session,
+      output,
+      fromMs: value.fromMs,
+      toMs: value.toMs,
+      maxEvents: 500,
+      maxOutputBytes: 8 * 1024 * 1024,
+      signal,
+    })
+    const body = await readFile(output)
+    validateTaskActivityDownload(receipt, body, output, value.provider, value.session)
+    return {
+      body,
+      filename: `agent-host-${value.provider}-task-${value.session.slice(0, 12)}.json`,
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true })
+  }
+}
+
 function openBrowser(url) {
   const command = platform() === 'win32' ? 'cmd.exe' : platform() === 'darwin' ? '/usr/bin/open' : 'xdg-open'
   const args = platform() === 'win32' ? ['/d', '/s', '/c', 'start', '""', url] : [url]
@@ -532,7 +680,7 @@ function managerDocument() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agent Host</title><style>
-:root{color-scheme:light dark;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f6f8;color:#15171a;--status-action:#15171a;--status-ready:#1769e0;--status-paused:#995500;--status-fault:#b42318}*{box-sizing:border-box}body{margin:0}button,select{font:inherit}.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}.side{padding:28px 18px;background:#111318;color:#f7f7f8}.brand{font-size:20px;font-weight:700;margin:0 10px 28px}.nav{display:grid;gap:6px}.nav button,.side-footer button{border:0;background:transparent;color:#aeb4bf;text-align:left;padding:10px 12px;border-radius:9px}.nav button[aria-current=true]{background:#292d35;color:white}.nav button:focus-visible,.side-footer button:focus-visible,button.action:focus-visible,select:focus-visible{outline:3px solid #75a9ff;outline-offset:2px}.side-footer{position:fixed;bottom:16px;margin-left:10px;display:grid;gap:2px}.side-footer button{padding:4px 0;font-size:12px}.version{color:#777f8c;font-size:12px}.main{padding:36px;max-width:1080px;width:100%}h1{font-size:30px;margin:0}h2{font-size:17px;margin:0 0 14px}.sub{color:#69707b;margin:4px 0 26px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}.card{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px #00000008}.metric{font-size:25px;font-weight:700}.muted{color:#747b86}.row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #eceef1}.tool-logo{width:28px;height:28px;border-radius:6px;object-fit:cover;background:#e8eaee}.logo-fallback{width:28px;height:28px;border-radius:6px;background:#d9e5f7;display:inline-block}.row:first-of-type{border-top:0}.row .grow{flex:1}.pill{font-size:12px;padding:3px 8px;border-radius:20px;background:#edf5ee;color:#26733a}.pill.warn{background:#fff2de;color:#995500}button.action{border:1px solid #cfd4da;background:#fff;color:#17191c;padding:8px 12px;border-radius:9px}button.primary{background:#1769e0;border-color:#1769e0;color:#fff}button.danger{color:#b42318}button:disabled{opacity:.5}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions select{min-width:180px;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit}.hidden{display:none!important}.notice{padding:12px 14px;border-radius:10px;background:#fff4df;color:#7a4c00;margin-bottom:16px}.empty{padding:70px 20px;text-align:center;color:#737a84}.check{display:flex;gap:8px;align-items:center}.tool-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 18px}.heat{display:grid;grid-template-columns:repeat(30,minmax(5px,1fr));gap:4px;margin:12px 0 4px}.heat i{display:block;aspect-ratio:1;border-radius:3px;background:#d9e5f7}.heat i.on{background:#1769e0}dialog{width:min(420px,calc(100% - 32px));border:1px solid #d9dde3;border-radius:14px;padding:20px;background:#fff;color:#17191c}dialog::backdrop{background:#11131888}.setting-row{display:grid;gap:7px;margin:20px 0}.setting-row select,.setting-row input,dialog input{width:100%;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit;margin:6px 0}.busy{position:fixed;inset:0;background:#ffffffaa;display:grid;place-items:center;backdrop-filter:blur(2px)}.busy div{background:#111318;color:white;padding:14px 20px;border-radius:12px}.start-work{padding:20px 18px}.start-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.start-status{font-size:22px;font-weight:700}.start-status[data-tone=ready]{color:var(--status-ready)}.start-status[data-tone=paused]{color:var(--status-paused)}.start-status[data-tone=fault]{color:var(--status-fault)}.start-status[data-tone=action]{color:var(--status-action)}.start-hint{margin:8px 0 0}.start-work details,.main>details{margin-top:12px}.start-work summary,.main>details>summary{cursor:pointer;color:#747b86;font-size:13px}.start-details{margin-top:8px;display:grid;gap:4px}@media(max-width:760px){.shell{grid-template-columns:1fr;grid-template-rows:auto 1fr}.side{padding:15px}.brand{margin-bottom:12px}.nav{grid-template-columns:repeat(5,1fr)}.nav button{text-align:center;padding:8px 4px;font-size:12px}.side-footer{position:absolute;right:14px;top:11px;bottom:auto;margin:0}.side-footer button{padding:4px 8px}.version{display:none}.main{padding:22px}.heat{grid-template-columns:repeat(15,minmax(7px,1fr))}}
+:root{color-scheme:light dark;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f6f8;color:#15171a;--status-action:#15171a;--status-ready:#1769e0;--status-paused:#995500;--status-fault:#b42318}*{box-sizing:border-box}body{margin:0}button,select{font:inherit}.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}.side{padding:28px 18px;background:#111318;color:#f7f7f8}.brand{font-size:20px;font-weight:700;margin:0 10px 28px}.nav{display:grid;gap:6px}.nav button,.side-footer button{border:0;background:transparent;color:#aeb4bf;text-align:left;padding:10px 12px;border-radius:9px}.nav button[aria-current=true]{background:#292d35;color:white}.nav button:focus-visible,.side-footer button:focus-visible,button.action:focus-visible,select:focus-visible{outline:3px solid #75a9ff;outline-offset:2px}.side-footer{position:fixed;bottom:16px;margin-left:10px;display:grid;gap:2px}.side-footer button{padding:4px 0;font-size:12px}.version{color:#777f8c;font-size:12px}.main{padding:36px;max-width:1080px;width:100%}h1{font-size:30px;margin:0}h2{font-size:17px;margin:0 0 14px}.sub{color:#69707b;margin:4px 0 26px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}.card{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px #00000008}.metric{font-size:25px;font-weight:700}.muted{color:#747b86}.row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #eceef1}.tool-logo{width:28px;height:28px;border-radius:6px;object-fit:cover;background:#e8eaee}.logo-fallback{width:28px;height:28px;border-radius:6px;background:#d9e5f7;display:inline-block}.row:first-of-type{border-top:0}.row .grow{flex:1}.task-row{align-items:flex-start}.task-title{font-weight:600}.task-stats{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;font-size:13px}.task-stats strong{font-variant-numeric:tabular-nums}.task-errors{color:var(--status-fault)}.pill{font-size:12px;padding:3px 8px;border-radius:20px;background:#edf5ee;color:#26733a}.pill.warn{background:#fff2de;color:#995500}button.action{border:1px solid #cfd4da;background:#fff;color:#17191c;padding:8px 12px;border-radius:9px}button.primary{background:#1769e0;border-color:#1769e0;color:#fff}button.danger{color:#b42318}button:disabled{opacity:.5}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions select{min-width:180px;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit}.hidden{display:none!important}.notice{padding:12px 14px;border-radius:10px;background:#fff4df;color:#7a4c00;margin-bottom:16px}.empty{padding:70px 20px;text-align:center;color:#737a84}.check{display:flex;gap:8px;align-items:center}.tool-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 18px}.heat{display:grid;grid-template-columns:repeat(30,minmax(5px,1fr));gap:4px;margin:12px 0 4px}.heat i{display:block;aspect-ratio:1;border-radius:3px;background:#d9e5f7}.heat i.on{background:#1769e0}dialog{width:min(420px,calc(100% - 32px));border:1px solid #d9dde3;border-radius:14px;padding:20px;background:#fff;color:#17191c}dialog::backdrop{background:#11131888}.setting-row{display:grid;gap:7px;margin:20px 0}.setting-row select,.setting-row input,dialog input{width:100%;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit;margin:6px 0}.busy{position:fixed;inset:0;background:#ffffffaa;display:grid;place-items:center;backdrop-filter:blur(2px)}.busy div{background:#111318;color:white;padding:14px 20px;border-radius:12px}.start-work{padding:20px 18px}.start-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.start-status{font-size:22px;font-weight:700}.start-status[data-tone=ready]{color:var(--status-ready)}.start-status[data-tone=paused]{color:var(--status-paused)}.start-status[data-tone=fault]{color:var(--status-fault)}.start-status[data-tone=action]{color:var(--status-action)}.start-hint{margin:8px 0 0}.start-work details,.main>details{margin-top:12px}.start-work summary,.main>details>summary{cursor:pointer;color:#747b86;font-size:13px}.start-details{margin-top:8px;display:grid;gap:4px}@media(max-width:760px){.shell{grid-template-columns:1fr;grid-template-rows:auto 1fr}.side{padding:15px}.brand{margin-bottom:12px}.nav{grid-template-columns:repeat(5,1fr)}.nav button{text-align:center;padding:8px 4px;font-size:12px}.side-footer{position:absolute;right:14px;top:11px;bottom:auto;margin:0}.side-footer button{padding:4px 8px}.version{display:none}.main{padding:22px}.heat{grid-template-columns:repeat(15,minmax(7px,1fr))}.task-row{flex-wrap:wrap}}
 @media(prefers-color-scheme:dark){:root{background:#0d0f12;color:#f1f2f4;--status-action:#f1f2f4;--status-ready:#7eb0ff;--status-paused:#ffb020;--status-fault:#ff6b5a}.side{background:#08090b}.card,dialog{background:#17191e;border-color:#2b2f36;color:#f1f2f4}.row{border-color:#2b2f36}button.action,.setting-row select{background:#202329;border-color:#3a3f48;color:#f1f2f4}.muted,.sub{color:#9da4af}.busy{background:#0d0f12aa}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand">Agent Host</div><nav class="nav" id="nav"><button data-page="environment" aria-current="true"></button><button data-page="tools"></button><button data-page="updates"></button><button data-page="activity"></button><button data-page="usage"></button></nav><div class="side-footer"><button id="refreshButton"></button><button id="settingsButton"></button><div class="version" id="version"></div></div></aside><main class="main"><div id="error" class="notice hidden" role="alert"></div><section id="environment"></section><section id="tools" class="hidden"></section><section id="updates" class="hidden"></section><section id="usage" class="hidden"></section><section id="activity" class="hidden"></section></main></div><dialog id="settingsDialog"><h2 id="settingsTitle"></h2><label class="setting-row"><span id="languageLabel"></span><select id="languageSelect"></select></label><div id="versionPlanes"></div><div id="sourceSettings"></div><div class="actions"><button class="action primary" id="settingsDone"></button></div></dialog><div id="busy" class="busy hidden" role="status" aria-live="polite"><div id="busyText"></div></div>
 <script>
@@ -562,7 +710,7 @@ const zh={
 "Script references do not prove execution. Binding counts can include older open sessions.":"脚本引用不能证明实际执行。绑定期间统计可能包括尚未关闭的旧会话。",
 "Use the installed Agent Host operations skill to analyze the current usage report, version history, runtime errors and coverage. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; counts alone do not establish adoption or correctness.":"请使用已安装的 Agent Host operations 技能分析当前使用报告、版本历史、运行错误和采集覆盖。区分真实任务与健康检查、脚本引用与实际执行。结合当前任务提出改进，不要仅凭次数推断采纳或正确性。",
 
-  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','On-demand Skill only; MCP stays off until you include this tool in the working set.':'仅按需 Skill；在重新加入工作集之前不会提供 MCP。','Fully paused: no MCP and no on-demand Skill.':'完全暂停：无 MCP，也无按需 Skill。','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源',
+  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','On-demand Skill only; MCP stays off until you include this tool in the working set.':'仅按需 Skill；在重新加入工作集之前不会提供 MCP。','Fully paused: no MCP and no on-demand Skill.':'完全暂停：无 MCP，也无按需 Skill。','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源','Task provider':'任务来源',
   'Overview':'总览','Environment':'环境','Tools':'工具','Updates':'更新','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…','Browse recommended tools':'浏览推荐工具','Add GitHub project':'添加 GitHub 项目','GitHub repository or Release URL':'GitHub 仓库或 Release 地址','Preview GitHub project':'预览 GitHub 项目','Add from GitHub':'从 GitHub 添加','Previewing GitHub project…':'正在预览 GitHub 项目…','Adding GitHub tool…':'正在添加 GitHub 工具…','Check for updates':'检查更新','Checking updates…':'正在检查更新…','This platform':'当前平台','No asset for this platform':'当前平台无安装包','profiles fetch --carrier downloads an installer. It does not replace Agent Host.':'profiles fetch --carrier 只下载安装包，不会替换或重启 Agent Host。',
   'Versions':'版本','Application':'应用','Environment release':'环境兼容版本','Catalog source':'目录来源','Catalog assets are unpublished.':'目录资产尚未发布。','Not Apple-notarized. Not a store.':'未经 Apple 公证，也不是应用商店。','Check source':'检查来源','Checking source…':'正在检查来源…','Use local catalog':'使用本地目录','Set HTTPS catalog':'设置 HTTPS 目录','Clear source':'清除来源','Last check':'最近检查','Retry':'重试','HTTPS catalog URL':'HTTPS 目录 URL','Local catalog path':'本地目录路径','not installed':'未安装','source-checkout':'源码 checkout','The Manager application and the installed Agent environment can share this product name with different payloads. Application build, environment release, and tool versions are separate.':'管理器应用与已安装的 Agent 环境可以同名但载荷不同。应用 build、环境兼容版本和工具版本是分开的。','Install update':'安装更新','Install all updates':'安装全部更新','update available':'可更新','Check for updates to load current and available versions.':'请检查更新以查看当前版本和可用版本。','compatible after Host update':'需先更新 Host','official upgrade':'官方升级','installed, version unread':'已安装，未能读取版本','check failed':'检查失败',
 
@@ -571,9 +719,9 @@ const zh={
   'Tool environment actions':'工具环境操作','Update tools':'更新工具','Restore previous tools':'恢复上一版工具','Clean old packages':'清理旧软件包','Disconnect, keep data':'断开并保留数据','Disconnect, remove Host data':'断开并移除 Host 数据','Updating tools…':'正在更新工具…','Restoring tools…':'正在恢复工具…','Cleaning storage…':'正在清理存储…','Disconnecting tools…':'正在断开工具…','Disconnect tools and remove Agent Host private Suite data? Observer history remains separately owned.':'断开工具并移除 Agent Host 私有数据？Observer 历史记录仍由其独立保留。','On Windows, application restore and uninstall are also available in the openAdam Start menu folder.':'在 Windows 上，也可从“开始”菜单的 openAdam 文件夹恢复或卸载应用。',
   'Working set for new tasks':'新任务的工作集','Get featured tools':'获取精选工具','Getting featured tools…':'正在获取精选工具…','Installed':'已安装','Not installed in this environment':'此环境尚未安装','Featured':'所有者精选的工具；不是应用市场、商店、排行或付费目录。','No Agent environment is installed.':'尚未安装 Agent 环境。','Available tools':'可用工具','Changes take effect in a fresh Agent task.':'更改会在新的 Agent 任务中生效。','Apply tool set':'应用工具集',
   'Usage & Reliability':'使用情况与可靠性','Local monitoring is off':'本地监控已关闭','{days} day local metadata window':'最近 {days} 天的本地元数据','Monitoring':'监控','Collect metadata-only activity, Token, and runtime outcome observations. No prompts, arguments, results, source paths, network calls, or model calls are used.':'仅采集活动、Token 与运行结果的元数据。不使用提示词、参数、结果、源码路径、网络请求或模型调用。','Turn on monitoring':'开启监控','Turning on monitoring…':'正在开启监控…','Live snapshots are unavailable; showing the last completed refresh.':'实时快照不可用，当前显示上次完成的刷新结果。',
-  'Measured tool calls':'已测量工具调用','Completed':'已完成','Errors':'错误','Cancelled':'已取消','Provider-reported Tokens':'Provider 报告的 Token','Peak observed UTC day':'单日 Token 峰值（UTC）','Observed sessions':'已观测会话','Observed turns':'已观测轮次','Current UTC-day streak':'当前连续活跃天数（UTC）','Longest UTC-day streak':'最长连续活跃天数（UTC）','{date} · {tokens} Tokens · {calls} tool calls':'{date} · {tokens} Token · {calls} 次工具调用','{days} active UTC days · longest session metadata span is not chat duration.':'{days} 个活跃 UTC 日；最长会话元数据跨度不等于聊天时长。','Agent activity':'Agent 活动','No supported Agent activity was observed.':'未观测到受支持的 Agent 活动。','Most used Agent Host tools':'最常用的 Agent Host 工具','Unknown':'未知','{calls} calls · {errors} errors · {cancelled} cancelled':'{calls} 次调用 · {errors} 次错误 · {cancelled} 次取消','No mapped calls were observed.':'未观测到已映射的调用。','Counts do not establish Skill activation, non-use reasons, adoption, correctness, task quality, or value. Provider Token semantics remain separate.':'这些计数不能证明 Skill 已激活、未使用原因、结果采纳、正确性、任务质量或价值；不同 Provider 的 Token 语义仍分别呈现。','Turn off monitoring':'关闭监控','Turning off monitoring…':'正在关闭监控…','Agent trace coverage':'Agent 轨迹覆盖','Model steps':'模型步骤','Tool offers':'工具已提供','Trace tool calls':'轨迹工具调用','Trace tool results':'轨迹工具结果','Turn endings':'轮次结束','Public events':'公开事件','Official hooks':'官方 Hook','Local records':'本机记录','Aggregate usage':'聚合用量','Current':'当前','Partial':'部分','Needs attention':'需要处理','Not configured':'未配置','Offered, called, and returned are separate recorded facts. They do not establish why a tool was chosen, whether its result was adopted, or whether the work was correct.':'工具已提供、已调用和已返回是彼此独立的记录事实；它们不能说明为何选择工具、结果是否被采纳，也不能证明工作正确。','Trace sessions':'轨迹会话','Load sessions':'加载会话','Loading trace sessions…':'正在加载轨迹会话…','Export metadata':'导出元数据','Preparing trace export…':'正在准备轨迹导出…','No retained sessions for this provider.':'此 Provider 没有保留的会话。','Retained metadata may be partial because older observations expire and monitoring may have started mid-session.':'由于较早观测会过期，而且监控可能在会话中途启用，因此保留的元数据可能不完整。','{events} events · last observed {date}':'{events} 个事件 · 最近观测于 {date}','Trace export failed':'轨迹导出失败','Trace session list failed':'轨迹会话列表加载失败',
+  'Measured tool calls':'已测量工具调用','Completed':'已完成','Errors':'错误','Cancelled':'已取消','Provider-reported Tokens':'Provider 报告的 Token','Peak observed UTC day':'单日 Token 峰值（UTC）','Observed sessions':'已观测会话','Observed turns':'已观测轮次','Current UTC-day streak':'当前连续活跃天数（UTC）','Longest UTC-day streak':'最长连续活跃天数（UTC）','{date} · {tokens} Tokens · {calls} tool calls':'{date} · {tokens} Token · {calls} 次工具调用','{days} active UTC days · longest session metadata span is not chat duration.':'{days} 个活跃 UTC 日；最长会话元数据跨度不等于聊天时长。','Agent activity':'Agent 活动','No supported Agent activity was observed.':'未观测到受支持的 Agent 活动。','Most used Agent Host tools':'最常用的 Agent Host 工具','Unknown':'未知','{calls} calls · {errors} errors · {cancelled} cancelled':'{calls} 次调用 · {errors} 次错误 · {cancelled} 次取消','No mapped calls were observed.':'未观测到已映射的调用。','Counts do not establish Skill activation, non-use reasons, adoption, correctness, task quality, or value. Provider Token semantics remain separate.':'这些计数不能证明 Skill 已激活、未使用原因、结果采纳、正确性、任务质量或价值；不同 Provider 的 Token 语义仍分别呈现。','Turn off monitoring':'关闭监控','Turning off monitoring…':'正在关闭监控…','Agent trace coverage':'Agent 轨迹覆盖','Model steps':'模型步骤','Tool offers':'工具已提供','Trace tool calls':'轨迹工具调用','Trace tool results':'轨迹工具结果','Turn endings':'轮次结束','Public events':'公开事件','Official hooks':'官方 Hook','Local records':'本机记录','Aggregate usage':'聚合用量','Current':'当前','Partial':'部分','Needs attention':'需要处理','Not configured':'未配置','Offered, called, and returned are separate recorded facts. They do not establish why a tool was chosen, whether its result was adopted, or whether the work was correct.':'工具已提供、已调用和已返回是彼此独立的记录事实；它们不能说明为何选择工具、结果是否被采纳，也不能证明工作正确。','Trace sessions':'轨迹会话','Load sessions':'加载会话','Loading trace sessions…':'正在加载轨迹会话…','Export metadata':'导出元数据','Preparing trace export…':'正在准备轨迹导出…','No retained sessions for this provider.':'此 Provider 没有保留的会话。','Retained metadata may be partial because older observations expire and monitoring may have started mid-session.':'由于较早观测会过期，而且监控可能在会话中途启用，因此保留的元数据可能不完整。','{events} events · last observed {date}':'{events} 个事件 · 最近观测于 {date}','Trace export failed':'轨迹导出失败','Trace session list failed':'轨迹会话列表加载失败','Task activity':'任务活动','Show recent tasks':'显示最近任务','Loading task activity…':'正在加载任务活动…','Export details':'导出详情','Preparing task export…':'正在准备任务导出…','No retained task activity for this Agent app.':'此 Agent 应用没有保留的任务活动。','direct calls':'次直接调用','errors':'个错误','static references':'个静态引用','Showing the newest {count} retained tasks.':'正在显示最近的 {count} 个保留任务。','Direct calls are observed execution. Static references are not. Exported details contain metadata only and no Host verdict.':'直接调用是执行观测；静态引用不是。导出详情仅含元数据，不含 Host 判决。','Task export failed':'任务导出失败','Task activity list failed':'任务活动列表加载失败',
   'No retained trace metadata matches this provider and session':'没有与此 Provider 和会话匹配的保留轨迹元数据。','The retained session has no events in the requested time range':'保留的会话在所选时间范围内没有事件。','Observer trace metadata schema is unavailable':'Observer 的轨迹元数据结构不可用。','Observability is not enabled':'本地监控尚未开启。',
-  'Changes made to this environment':'此环境的变更','Recent changes':'最近变更','No lifecycle changes yet.':'尚无生命周期变更。','Agent Host is unavailable':'Agent Host 当前不可用','The action failed':'操作失败'
+  'Changes made to this environment':'此环境的变更','Recent changes':'最近变更','No lifecycle changes yet.':'尚无生命周期变更。','Agent Host is unavailable':'Agent Host 当前不可用','The action failed':'操作失败','The installed monitoring component could not complete this request. Update or repair Agent Host, then try again.':'当前安装的监控组件无法完成这项请求。请更新或修复 Agent Host 后重试。','The monitoring request was cancelled.':'监控请求已取消。'
 };
 function activeLanguage(){if(languageSelection==='zh-Hans')return'zh-Hans';if(languageSelection==='en')return'en';return(navigator.languages?.[0]||navigator.language||'en').toLowerCase().startsWith('zh')?'zh-Hans':'en'}
 function t(key){return activeLanguage()==='zh-Hans'?(zh[key]||key):key}
@@ -922,6 +1070,9 @@ function renderTools(value){
 async function downloadTrace(provider,session){$('#busyText').textContent=t('Preparing trace export…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/trace-export',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider,session})});if(!r.ok){const v=await r.json();throw new Error(t(v.error?.message||'Trace export failed'))}const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='agent-host-'+provider+'-trace-'+session.slice(0,12)+'.json';document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}catch(e){$('#error').textContent=e.message;$('#error').classList.remove('hidden')}finally{$('#busy').classList.add('hidden')}}
 async function loadTraceSessions(provider,container){$('#busyText').textContent=t('Loading trace sessions…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/trace-sources?provider='+encodeURIComponent(provider)+'&limit=25'),v=await r.json();if(!r.ok)throw new Error(t(v.error?.message||'Trace session list failed'));container.replaceChildren();for(const item of v.sources){const line=el('div',undefined,'row'),label=el('div',undefined,'grow');label.append(el('div',(names[provider]||provider)+' · '+item.sessionHash.slice(0,12)+'…'),el('div',f('{events} events · last observed {date}',{events:number(item.totalEvents),date:new Date(item.lastEventAtMs).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US')}),'muted'));line.append(label,button('Export metadata',()=>downloadTrace(provider,item.sessionHash)));container.append(line)}if(!v.sources.length)container.append(el('p',t('No retained sessions for this provider.'),'muted'))}catch(e){container.replaceChildren(el('p',e.message||t('Trace session list failed'),'notice'))}finally{$('#busy').classList.add('hidden')}}
 function renderTraceSessions(trace,root){const providers=[...new Set((trace.adapters||[]).map(x=>x.provider).filter(Boolean))];const c=card('Trace sessions');if(!providers.length){c.append(el('p',t('No retained sessions for this provider.'),'muted'));root.append(c);return}const actions=el('div',undefined,'actions'),select=document.createElement('select'),list=el('div');select.setAttribute('aria-label',t('Trace provider'));for(const provider of providers){const option=el('option',names[provider]||provider);option.value=provider;select.append(option)}actions.append(select,button('Load sessions',()=>loadTraceSessions(select.value,list),'action primary'));c.append(actions,el('p',t('Retained metadata may be partial because older observations expire and monitoring may have started mid-session.'),'muted'),list);root.append(c)}
+async function downloadTask(provider,session){$('#busyText').textContent=t('Preparing task export…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/task-export',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider,session})});if(!r.ok){const v=await r.json();throw new Error(t(v.error?.message||'Task export failed'))}const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='agent-host-'+provider+'-task-'+session.slice(0,12)+'.json';document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}catch(e){$('#error').textContent=e.message;$('#error').classList.remove('hidden')}finally{$('#busy').classList.add('hidden')}}
+async function loadTaskSessions(provider,container){$('#busyText').textContent=t('Loading task activity…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/task-sources?provider='+encodeURIComponent(provider)+'&limit=25'),v=await r.json();if(!r.ok)throw new Error(t(v.error?.message||'Task activity list failed'));container.replaceChildren();for(const item of v.sources){const line=el('div',undefined,'row task-row'),label=el('div',undefined,'grow'),title=el('div',(names[provider]||provider)+' · '+new Date(item.lastEventAtMs).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US'),'task-title'),stats=el('div',undefined,'task-stats'),direct=el('span'),errors=el('span',undefined,item.errors>0?'task-errors':undefined),references=el('span',undefined,'muted');direct.append(el('strong',number(item.directCalls)),' '+t('direct calls'));errors.append(el('strong',number(item.errors)),' '+t('errors'));references.append(el('strong',number(item.staticReferences)),' '+t('static references'));stats.append(direct,errors,references);label.append(title,stats);line.append(label,button('Export details',()=>downloadTask(provider,item.sessionHash)));container.append(line)}if(!v.sources.length)container.append(el('p',t('No retained task activity for this Agent app.'),'muted'));if(v.limits?.sourceLimitReached)container.append(el('p',f('Showing the newest {count} retained tasks.',{count:number(v.limits.sourcesReturned)}),'muted'))}catch(e){container.replaceChildren(el('p',e.message||t('Task activity list failed'),'notice'))}finally{$('#busy').classList.add('hidden')}}
+function renderTaskSessions(u,root){const providers=[...new Set((u.providerActivity||[]).map(x=>x.provider).filter(Boolean))],c=card('Task activity');if(!providers.length){c.append(el('p',t('No retained task activity for this Agent app.'),'muted'));root.append(c);return}const actions=el('div',undefined,'actions'),select=document.createElement('select'),list=el('div');select.setAttribute('aria-label',t('Task provider'));for(const provider of providers){const option=el('option',names[provider]||provider);option.value=provider;select.append(option)}actions.append(select,button('Show recent tasks',()=>loadTaskSessions(select.value,list),'action primary'));c.append(actions,list,el('p',t('Direct calls are observed execution. Static references are not. Exported details contain metadata only and no Host verdict.'),'muted'));root.append(c)}
 function renderToolHistory(u,root){
   const tools=card('Tool activity');
   const toolList=el('div'),toolCount=el('p',undefined,'muted');let expanded=false;
@@ -951,7 +1102,7 @@ function renderToolHistory(u,root){
   c.append(el('p',t('Version totals survive updates and raw-event cleanup; earlier deleted records cannot be recovered.'),'muted'));
   c.append(button('Copy analysis request',async()=>{try{await navigator.clipboard.writeText(t('Use the installed Agent Host operations skill to analyze the current usage report, version history, runtime errors and coverage. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; counts alone do not establish adoption or correctness.'));copied.textContent=t('Analysis request copied')}catch{copied.textContent=t('Clipboard unavailable')}}),copied);root.append(c);
 }
-function renderUsage(u){const root=$('#usage');root.replaceChildren(el('h1',t('Usage')),el('p',u.enabled?f('{days} day local metadata window',{days:u.windowDays||'—'}):t('Local monitoring is off'),'sub'));if(!u.enabled){const c=card('Monitoring');c.append(el('p',t('Collect metadata-only activity, Token, and runtime outcome observations. No prompts, arguments, results, source paths, network calls, or model calls are used.'),'muted'),button('Turn on monitoring',()=>call({action:'monitoring',enabled:true},t('Turning on monitoring…')),'action primary'));root.append(c);return}if(u.observationSource==='cached-agent-host-refresh')root.append(el('div',t('Live snapshots are unavailable; showing the last completed refresh.'),'notice'));const grid=el('div',undefined,'grid');for(const[v,label]of[[u.reliability.measuredToolCalls,'Measured tool calls'],[u.reliability.completedToolCalls,'Completed'],[u.reliability.toolErrors,'Errors'],[u.reliability.toolCancellations,'Cancelled']]){const c=card(label);c.append(el('div',number(v),'metric'));grid.append(c)}root.append(grid);renderToolHistory(u,root);const trace=u.trace||{adapters:[]},traceCard=card('Agent trace coverage'),traceGrid=el('div',undefined,'grid');for(const[v,label]of[[trace.modelSteps,'Model steps'],[trace.toolOffers,'Tool offers'],[trace.toolCalls,'Trace tool calls'],[trace.toolResults,'Trace tool results'],[trace.turnEnds,'Turn endings']]){const m=el('div');m.append(el('div',number(v),'metric'),el('div',t(label),'muted'));traceGrid.append(m)}traceCard.append(traceGrid);for(const a of trace.adapters||[]){const transport={'public-events':'Public events',opentelemetry:'OpenTelemetry','official-hooks':'Official hooks','stable-local-records':'Local records','aggregate-store':'Aggregate usage'}[a.transport]||'Unknown',status={ok:'Current',partial:'Partial',error:'Needs attention',missing:'Unavailable',unavailable:'Unavailable',unconfigured:'Not configured'}[a.status]||'Unknown';traceCard.append(row((names[a.provider]||a.provider)+' · '+t(transport),t(status)))}traceCard.append(el('p',t('Offered, called, and returned are separate recorded facts. They do not establish why a tool was chosen, whether its result was adopted, or whether the work was correct.'),'muted'));root.append(traceCard);renderTraceSessions(trace,root);for(const a of u.providerActivity){const p=u.providerUsage.find(x=>x.provider===a.provider)||{};const c=card(names[a.provider]||a.provider);const g=el('div',undefined,'grid');for(const[v,label]of[[p.totalTokens,'Provider-reported Tokens'],[p.peakObservedDailyTokens,'Peak observed UTC day'],[a.observedSessions,'Observed sessions'],[a.observedTurns,'Observed turns'],[a.currentObservedDayStreak,'Current UTC-day streak'],[a.longestObservedDayStreak,'Longest UTC-day streak']]){const m=el('div');m.append(el('div',number(v),'metric'),el('div',t(label),'muted'));g.append(m)}c.append(g);const days=u.dailyActivity.entries.filter(x=>x.provider===a.provider).slice(-30),heat=el('div',undefined,'heat'),max=Math.max(1,...days.map(x=>x.totalTokens??x.toolCalls??0));for(const d of days){const i=el('i');const v=d.totalTokens??d.toolCalls??0;i.className=v>0?'on':'';i.style.opacity=String(.2+.8*v/max);i.title=f('{date} · {tokens} Tokens · {calls} tool calls',{date:d.utcDate,tokens:number(d.totalTokens),calls:number(d.toolCalls)});heat.append(i)}c.append(heat,el('p',f('{days} active UTC days · longest session metadata span is not chat duration.',{days:number(a.observedActiveDays)}),'muted'));root.append(c)}if(!u.providerActivity.length){const ac=card('Agent activity');ac.append(el('p',t('No supported Agent activity was observed.'),'muted'));root.append(ac)}const controls=card('Monitoring');controls.append(button('Turn off monitoring',()=>call({action:'monitoring',enabled:false},t('Turning off monitoring…'))));root.append(controls)}
+function renderUsage(u){const root=$('#usage');root.replaceChildren(el('h1',t('Usage')),el('p',u.enabled?f('{days} day local metadata window',{days:u.windowDays||'—'}):t('Local monitoring is off'),'sub'));if(!u.enabled){const c=card('Monitoring');c.append(el('p',t('Collect metadata-only activity, Token, and runtime outcome observations. No prompts, arguments, results, source paths, network calls, or model calls are used.'),'muted'),button('Turn on monitoring',()=>call({action:'monitoring',enabled:true},t('Turning on monitoring…')),'action primary'));root.append(c);return}if(u.observationSource==='cached-agent-host-refresh')root.append(el('div',t('Live snapshots are unavailable; showing the last completed refresh.'),'notice'));const grid=el('div',undefined,'grid');for(const[v,label]of[[u.reliability.measuredToolCalls,'Measured tool calls'],[u.reliability.completedToolCalls,'Completed'],[u.reliability.toolErrors,'Errors'],[u.reliability.toolCancellations,'Cancelled']]){const c=card(label);c.append(el('div',number(v),'metric'));grid.append(c)}root.append(grid);renderTaskSessions(u,root);renderToolHistory(u,root);const trace=u.trace||{adapters:[]},traceCard=card('Agent trace coverage'),traceGrid=el('div',undefined,'grid');for(const[v,label]of[[trace.modelSteps,'Model steps'],[trace.toolOffers,'Tool offers'],[trace.toolCalls,'Trace tool calls'],[trace.toolResults,'Trace tool results'],[trace.turnEnds,'Turn endings']]){const m=el('div');m.append(el('div',number(v),'metric'),el('div',t(label),'muted'));traceGrid.append(m)}traceCard.append(traceGrid);for(const a of trace.adapters||[]){const transport={'public-events':'Public events',opentelemetry:'OpenTelemetry','official-hooks':'Official hooks','stable-local-records':'Local records','aggregate-store':'Aggregate usage'}[a.transport]||'Unknown',status={ok:'Current',partial:'Partial',error:'Needs attention',missing:'Unavailable',unavailable:'Unavailable',unconfigured:'Not configured'}[a.status]||'Unknown';traceCard.append(row((names[a.provider]||a.provider)+' · '+t(transport),t(status)))}traceCard.append(el('p',t('Offered, called, and returned are separate recorded facts. They do not establish why a tool was chosen, whether its result was adopted, or whether the work was correct.'),'muted'));root.append(traceCard);renderTraceSessions(trace,root);for(const a of u.providerActivity){const p=u.providerUsage.find(x=>x.provider===a.provider)||{};const c=card(names[a.provider]||a.provider);const g=el('div',undefined,'grid');for(const[v,label]of[[p.totalTokens,'Provider-reported Tokens'],[p.peakObservedDailyTokens,'Peak observed UTC day'],[a.observedSessions,'Observed sessions'],[a.observedTurns,'Observed turns'],[a.currentObservedDayStreak,'Current UTC-day streak'],[a.longestObservedDayStreak,'Longest UTC-day streak']]){const m=el('div');m.append(el('div',number(v),'metric'),el('div',t(label),'muted'));g.append(m)}c.append(g);const days=u.dailyActivity.entries.filter(x=>x.provider===a.provider).slice(-30),heat=el('div',undefined,'heat'),max=Math.max(1,...days.map(x=>x.totalTokens??x.toolCalls??0));for(const d of days){const i=el('i');const v=d.totalTokens??d.toolCalls??0;i.className=v>0?'on':'';i.style.opacity=String(.2+.8*v/max);i.title=f('{date} · {tokens} Tokens · {calls} tool calls',{date:d.utcDate,tokens:number(d.totalTokens),calls:number(d.toolCalls)});heat.append(i)}c.append(heat,el('p',f('{days} active UTC days · longest session metadata span is not chat duration.',{days:number(a.observedActiveDays)}),'muted'));root.append(c)}if(!u.providerActivity.length){const ac=card('Agent activity');ac.append(el('p',t('No supported Agent activity was observed.'),'muted'));root.append(ac)}const controls=card('Monitoring');controls.append(button('Turn off monitoring',()=>call({action:'monitoring',enabled:false},t('Turning off monitoring…'))));root.append(controls)}
 function renderActivity(items){const root=$('#activity');root.replaceChildren(el('h1',t('History')));const c=card('Recent changes');for(const item of items)c.append(row(item.summary,new Date(item.occurredAt).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US')));if(!items.length)c.append(el('p',t('No lifecycle changes yet.'),'muted'));root.append(c)}
 applyChrome();load().catch(e=>{$('#error').textContent=e.message;$('#error').classList.remove('hidden')});
 </script></body></html>`
@@ -966,6 +1117,8 @@ export async function startWebManager(options = {}) {
   let doctorFreshness = 'none'
   const traceSourceReader = options.traceSourceReader ?? observabilityTraceSources
   const traceExporter = options.traceExporter ?? exportObservabilityTrace
+  const taskSourceReader = options.taskSourceReader ?? observabilityTaskSources
+  const taskExporter = options.taskExporter ?? exportObservabilityTask
   const pickDirectory = options.pickDirectory ?? pickLocalDirectory
   const actionDependencies = { openAgentApp: options.openAgentApp, pickDirectory, fetch: options.fetch }
   const dashboardDoctor = () => ({ doctor: lastDoctor, doctorFreshness })
@@ -1048,6 +1201,10 @@ export async function startWebManager(options = {}) {
         json(response, 200, await traceSources(url, stateRoot, traceSourceReader))
         return
       }
+      if (request.method === 'GET' && url.pathname === '/api/task-sources') {
+        json(response, 200, await taskSources(url, stateRoot, taskSourceReader))
+        return
+      }
       if (request.method === 'POST' && url.pathname === '/api/trace-export') {
         if (request.headers.origin !== origin || !String(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
           json(response, 403, { status: 'error', error: { code: 'MANAGER_ORIGIN_REJECTED', message: 'The Manager export did not come from this local app.' } })
@@ -1059,6 +1216,24 @@ export async function startWebManager(options = {}) {
         response.once('close', cancel)
         try {
           const exported = await exportTraceDownload(await bodyJson(request), stateRoot, traceExporter, controller.signal)
+          traceDownload(response, exported.body, exported.filename)
+        } finally {
+          request.off('aborted', cancel)
+          response.off('close', cancel)
+        }
+        return
+      }
+      if (request.method === 'POST' && url.pathname === '/api/task-export') {
+        if (request.headers.origin !== origin || !String(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+          json(response, 403, { status: 'error', error: { code: 'MANAGER_ORIGIN_REJECTED', message: 'The Manager export did not come from this local app.' } })
+          return
+        }
+        const controller = new AbortController()
+        const cancel = () => controller.abort()
+        request.once('aborted', cancel)
+        response.once('close', cancel)
+        try {
+          const exported = await exportTaskActivityDownload(await bodyJson(request), stateRoot, taskExporter, controller.signal)
           traceDownload(response, exported.body, exported.filename)
         } finally {
           request.off('aborted', cancel)

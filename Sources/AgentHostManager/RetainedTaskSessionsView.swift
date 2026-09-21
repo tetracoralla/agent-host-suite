@@ -1,31 +1,28 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct RetainedTraceSessionsView: View {
+struct RetainedTaskSessionsView: View {
     @ObservedObject var store: AgentHostStore
     let usage: UsageSummary
 
-    @State private var provider = "zcode"
+    @State private var provider = "codex"
     @State private var document: JSONExportDocument?
-    @State private var filename = "agent-host-trace.json"
+    @State private var filename = "agent-host-task-activity.json"
     @State private var isPresentingExporter = false
 
     var body: some View {
         let providers = providerIDs
-        let catalog = store.traceSourceCatalog?.provider == provider ? store.traceSourceCatalog : nil
+        let catalog = store.taskSourceCatalog?.provider == provider ? store.taskSourceCatalog : nil
         Panel {
-            Text(L10n.text("Retained trace sessions")).font(.headline)
-            Text(L10n.text("Choose one Agent app to list locally retained metadata, then export one session for analysis."))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(L10n.text("Task activity")).font(.headline)
             if providers.isEmpty {
-                Text(L10n.text("No trace adapters are available."))
+                Text(L10n.text("No retained task activity for this Agent app."))
                     .foregroundStyle(.secondary)
             } else {
                 sourceControls(providers)
                 if let catalog { sourceList(catalog) }
             }
-            Text(L10n.text("Exports contain metadata only: no prompts, reasoning, tool arguments, tool results, source paths, or interpretation."))
+            Text(L10n.text("Direct calls are observed execution. Static references are not. Exported details contain metadata only and no Host verdict."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -51,11 +48,12 @@ struct RetainedTraceSessionsView: View {
             }
             .labelsHidden()
             .frame(maxWidth: 220)
-            Button(L10n.text("Load sessions")) {
-                Task { await store.loadTraceSources(provider: provider) }
+            Button(L10n.text("Show recent tasks")) {
+                Task { await store.loadTaskSources(provider: provider) }
             }
+            .buttonStyle(.borderedProminent)
             .disabled(store.isBusy)
-            if store.currentAction == "Loading trace sessions" {
+            if store.currentAction == "Loading task activity" {
                 ProgressView().controlSize(.small)
             }
             Spacer()
@@ -65,27 +63,25 @@ struct RetainedTraceSessionsView: View {
         }
     }
 
-    @ViewBuilder private func sourceList(_ catalog: TraceSourceCatalog) -> some View {
+    @ViewBuilder private func sourceList(_ catalog: TaskSourceCatalog) -> some View {
         if catalog.sources.isEmpty {
-            Text(L10n.text("No retained sessions for this Agent app."))
+            Text(L10n.text("No retained task activity for this Agent app."))
                 .foregroundStyle(.secondary)
         } else {
             ForEach(Array(catalog.sources.enumerated()), id: \.element.id) { index, source in
                 if index > 0 { Divider() }
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(ManagerAgentApp.named(catalog.provider).name) · \(source.sessionHash.prefix(12))…")
-                            .lineLimit(1)
-                            .help(source.sessionHash)
-                        Text(L10n.format("{events} events · last observed {date}", [
-                            "events": source.totalEvents.formatted(),
-                            "date": traceDate(source.lastEventAtMs),
-                        ]))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("\(ManagerAgentApp.named(catalog.provider).name) · \(taskDate(source.lastEventAtMs))")
+                            .fontWeight(.semibold)
+                        HStack(spacing: 16) {
+                            TaskActivityMetric(value: source.directCalls, label: "Direct calls")
+                            TaskActivityMetric(value: source.errors, label: "Errors", color: source.errors > 0 ? .orange : .secondary)
+                            TaskActivityMetric(value: source.staticReferences, label: "Static references", color: .secondary)
+                        }
                     }
-                    Spacer()
-                    Button(L10n.text("Export metadata")) {
+                    Spacer(minLength: 12)
+                    Button(L10n.text("Export details")) {
                         prepareExport(provider: catalog.provider, source: source)
                     }
                     .disabled(store.isBusy)
@@ -94,7 +90,7 @@ struct RetainedTraceSessionsView: View {
             }
         }
         if catalog.limits.sourceLimitReached {
-            Text(L10n.format("Showing the newest {count} retained sessions.", [
+            Text(L10n.format("Showing the newest {count} retained tasks.", [
                 "count": catalog.limits.sourcesReturned.formatted(),
             ]))
             .font(.caption)
@@ -109,10 +105,10 @@ struct RetainedTraceSessionsView: View {
 
     private var providerIDs: [String] {
         var seen = Set<String>()
-        return usage.trace.adapters.compactMap(\.provider).filter { seen.insert($0).inserted }
+        return usage.providerActivity.compactMap(\.provider).filter { seen.insert($0).inserted }
     }
 
-    private func traceDate(_ milliseconds: Int64) -> String {
+    private func taskDate(_ milliseconds: Int64) -> String {
         let formatter = DateFormatter()
         formatter.locale = L10n.locale
         formatter.dateStyle = .medium
@@ -120,12 +116,31 @@ struct RetainedTraceSessionsView: View {
         return formatter.string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1_000))
     }
 
-    private func prepareExport(provider: String, source: TraceSourceEntry) {
+    private func prepareExport(provider: String, source: TaskSourceEntry) {
         Task {
-            guard let data = await store.prepareTraceExport(provider: provider, sessionHash: source.sessionHash) else { return }
-            filename = "agent-host-\(provider)-trace-\(source.sessionHash.prefix(12)).json"
+            guard let data = await store.prepareTaskActivityExport(provider: provider, sessionHash: source.sessionHash) else { return }
+            filename = "agent-host-\(provider)-task-\(source.sessionHash.prefix(12)).json"
             document = JSONExportDocument(data: data)
             isPresentingExporter = true
         }
+    }
+}
+
+private struct TaskActivityMetric: View {
+    let value: Int
+    let label: String
+    var color: Color = .primary
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(value.formatted())
+                .font(.callout.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(value > 0 ? color : .secondary)
+            Text(L10n.text(label))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }

@@ -101,7 +101,9 @@ tools-dev 路径，不是 featured。详见
 `observability task-sources` 先给出容易扫读的会话数、直接调用、静态引用和
 错误数量；`observability export-task` 可再导出一个有界、匿名化的任务记录。
 它把直接执行与仅出现在编排输入里的工具名分开，但不替用户判断结果是否被
-采用、是否有用、是否优于其他方案。详见[轨迹平面](docs/TRACE_PLANE.zh-CN.md)。
+采用、是否有用、是否优于其他方案。原生和浏览器 Manager 也以“任务活动”
+卡片呈现同样的关键数字，只有用户主动操作时才导出详情。详见
+[轨迹平面](docs/TRACE_PLANE.zh-CN.md)。
 
 ## 不点名采用验收
 

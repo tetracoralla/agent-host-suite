@@ -56,7 +56,7 @@ struct ContentView: View {
             }
             Button(L10n.text("OK"), role: .cancel) { store.dismissError() }
         } message: {
-            Text(store.errorMessage ?? "")
+            Text(L10n.text(store.errorMessage ?? ""))
         }
         .sheet(isPresented: $store.isPresentingSetupPlan) {
             if let plan = store.setupPlan {

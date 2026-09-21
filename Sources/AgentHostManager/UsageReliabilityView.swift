@@ -40,6 +40,7 @@ struct UsageReliabilityView: View {
                         }
                     }
 
+                    RetainedTaskSessionsView(store: store, usage: usage)
                     tools(usage)
                     versionHistory(usage)
                     reliability(usage)

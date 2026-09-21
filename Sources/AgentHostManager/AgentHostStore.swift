@@ -13,6 +13,7 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var observations: ObservabilityStatus?
     @Published private(set) var usage: UsageSummary?
     @Published private(set) var traceSourceCatalog: TraceSourceCatalog?
+    @Published private(set) var taskSourceCatalog: TaskSourceCatalog?
     @Published private(set) var doctor: DoctorResult?
     @Published private(set) var snapshot: SuiteSnapshot?
     @Published private(set) var hostStatuses: [String: HostStatusResult] = [:]
@@ -366,6 +367,7 @@ final class AgentHostStore: ObservableObject {
     func refresh() async {
         await work("Checking environment", blocksInterface: suite == nil) {
             self.traceSourceCatalog = nil
+            self.taskSourceCatalog = nil
             let status = try await cli.run(["status"], as: SuiteStatus.self)
             self.suite = status
 
@@ -551,6 +553,29 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
+    func loadTaskSources(provider: String) async {
+        await work("Loading task activity", blocksInterface: false) {
+            self.taskSourceCatalog = nil
+            let catalog = try await self.cli.run(
+                ["observability", "task-sources", "--provider", provider, "--limit", "25"],
+                as: TaskSourceCatalog.self
+            )
+            guard catalog.isValid(expectedProvider: provider) else {
+                throw CLIError.failed(
+                    code: "TASK_SOURCE_CATALOG_INVALID",
+                    message: "Agent Host returned an invalid task activity catalog."
+                )
+            }
+            self.taskSourceCatalog = catalog
+        }
+    }
+
+    func prepareTaskActivityExport(provider: String, sessionHash: String) async -> Data? {
+        await workResult("Preparing task export", blocksInterface: false) {
+            try await self.cli.exportRetainedTaskActivity(provider: provider, sessionHash: sessionHash)
+        }
+    }
+
     func setHost(_ id: String, connected: Bool) async {
         guard connected else {
             await action(["host", "remove", id], label: "Disconnecting Agent app")
@@ -687,10 +712,12 @@ final class AgentHostStore: ObservableObject {
         try await reloadStatus()
         source = try? await cli.run(ManagerSourcePolicy.statusArguments(), as: SourceStatus.self)
         traceSourceCatalog = nil
+        taskSourceCatalog = nil
         guard suite?.configured == true else {
             observations = nil
             usage = nil
             traceSourceCatalog = nil
+            taskSourceCatalog = nil
             doctor = nil
             snapshot = nil
             hostStatuses = [:]

@@ -64,13 +64,27 @@ async function regularFile(path) {
 }
 
 async function runJson(component, args, runner, options = {}) {
-  const result = await runner(component.command, [...component.args, ...args], {
-    cwd: component.root,
-    env: options.env,
-    signal: options.signal,
-    timeoutMs: options.timeoutMs ?? 120_000,
-    maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
-  })
+  let result
+  try {
+    result = await runner(component.command, [...component.args, ...args], {
+      cwd: component.root,
+      env: options.env,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs ?? 120_000,
+      maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
+    })
+  } catch (error) {
+    if (error instanceof AgentHostError && error.code === 'HOST_COMMAND_CANCELLED') {
+      throw new AgentHostError('HOST_COMMAND_CANCELLED', 'The monitoring request was cancelled.')
+    }
+    if (error instanceof AgentHostError && error.code.startsWith('HOST_COMMAND_')) {
+      throw new AgentHostError(
+        'OBSERVABILITY_COMPONENT_COMMAND_FAILED',
+        'The installed monitoring component could not complete this request. Update or repair Agent Host, then try again.',
+      )
+    }
+    throw error
+  }
   let value
   try {
     value = JSON.parse(result.stdout)
@@ -676,6 +690,7 @@ async function runObserverConfigurationCommand(options, commandArgs, dependencie
   if (observer === undefined) throw new AgentHostError('OBSERVABILITY_COMPONENT_MISSING', 'The installed Observer component is unavailable')
   return runJson(observer, [...commandArgs, '--json'], runner, {
     env: observerEnvironment(state),
+    signal: options.signal,
     timeoutMs: 30_000,
     maxBuffer: 2 * 1024 * 1024,
   })

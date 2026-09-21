@@ -1120,6 +1120,88 @@ struct TraceSourceCatalog: Decodable, Equatable, Sendable {
     }
 }
 
+struct TaskSourceObservationBoundary: Decodable, Equatable, Sendable {
+    let directCallsAreExecutionObservations: Bool
+    let staticReferencesAreExecutionObservations: Bool
+    let terminalStatusMayBePartial: Bool
+}
+
+struct TaskSourceEntry: Decodable, Equatable, Identifiable, Sendable {
+    let sessionHash: String
+    let sessionStartedAtMs: Int64?
+    let firstEventAtMs: Int64
+    let lastEventAtMs: Int64
+    let observedTurns: Int
+    let toolObservations: Int
+    let directCalls: Int
+    let staticReferences: Int
+    let completed: Int
+    let errors: Int
+    let cancelled: Int
+    let outcomeUnknown: Int
+    let usageRecords: Int
+    let completeness: String
+
+    var id: String { sessionHash }
+}
+
+struct TaskSourceCatalog: Decodable, Equatable, Sendable {
+    let schemaVersion: String
+    let status: String
+    let generatedAt: String
+    let provider: String
+    let requestedRange: TraceSourceRange
+    let retention: TraceSourceRetention
+    let privacy: TraceSourcePrivacy
+    let limits: TraceSourceLimits
+    let sources: [TaskSourceEntry]
+    let observationBoundary: TaskSourceObservationBoundary
+    let unknowns: [String]
+    let interpretationStatus: String
+
+    func isValid(expectedProvider: String) -> Bool {
+        schemaVersion == "openadam.agent-host-task-source-catalog.v0.1"
+            && status == "ok"
+            && provider == expectedProvider
+            && privacy.contentPolicy == "metadata-only"
+            && !privacy.sourcePathIncluded
+            && !privacy.rawConversationContentIncluded
+            && !privacy.toolArgumentsIncluded
+            && !privacy.toolResultsIncluded
+            && observationBoundary.directCallsAreExecutionObservations
+            && !observationBoundary.staticReferencesAreExecutionObservations
+            && observationBoundary.terminalStatusMayBePartial
+            && interpretationStatus == "not-performed"
+            && limits.maxSources > 0
+            && limits.maxSources <= 500
+            && limits.sourcesReturned == sources.count
+            && sources.count <= limits.maxSources
+            && retention.retentionDays > 0
+            && retention.currentCutoffMs >= 0
+            && retention.eventsBeforeCutoffMayHaveBeenRemoved
+            && retention.collectionBeforeMonitoringWasEnabled == "unavailable"
+            && sources.allSatisfy { source in
+                source.sessionHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+                    && (source.sessionStartedAtMs.map { $0 >= 0 } ?? true)
+                    && source.firstEventAtMs >= 0
+                    && source.lastEventAtMs >= source.firstEventAtMs
+                    && source.observedTurns >= 0
+                    && source.toolObservations >= 0
+                    && source.directCalls >= 0
+                    && source.staticReferences >= 0
+                    && source.directCalls + source.staticReferences == source.toolObservations
+                    && source.completed >= 0
+                    && source.errors >= 0
+                    && source.cancelled >= 0
+                    && source.outcomeUnknown >= 0
+                    && source.completed + source.errors + source.cancelled + source.outcomeUnknown == source.toolObservations
+                    && source.usageRecords >= 0
+                    && source.toolObservations + source.usageRecords >= 1
+                    && source.completeness == "unknown"
+            }
+    }
+}
+
 struct TraceExportReceipt: Decodable, Equatable, Sendable {
     let status: String
     let schemaVersion: String
@@ -1171,6 +1253,68 @@ enum TraceContractValidator {
               privacy["sourcePathIncluded"] as? Bool == false,
               privacy["toolArgumentsIncluded"] as? Bool == false,
               privacy["toolResultsIncluded"] as? Bool == false,
+              let limits = value["limits"] as? [String: Any],
+              limits["eventsReturned"] as? Int == receipt.eventsReturned,
+              limits["eventsAvailable"] as? Int == receipt.eventsAvailable,
+              let events = value["events"] as? [Any],
+              events.count == receipt.eventsReturned else {
+            return false
+        }
+        return true
+    }
+}
+
+struct TaskExportReceipt: Decodable, Equatable, Sendable {
+    let status: String
+    let schemaVersion: String
+    let outputPath: String
+    let outputBytes: Int
+    let eventsReturned: Int
+    let eventsAvailable: Int
+    let contentPolicy: String
+    let observerPackRetained: Bool
+    let interpretationStatus: String
+}
+
+enum TaskActivityContractValidator {
+    static let retainedPackVersion = "openadam.agent-host-task-activity-pack.v0.1"
+
+    static func isValidRetainedExport(
+        data: Data,
+        receipt: TaskExportReceipt,
+        outputPath: String,
+        provider: String,
+        sessionHash: String
+    ) -> Bool {
+        guard receipt.status == "completed",
+              receipt.schemaVersion == retainedPackVersion,
+              receipt.outputPath == outputPath,
+              receipt.outputBytes == data.count,
+              receipt.eventsReturned >= 0,
+              receipt.eventsAvailable >= receipt.eventsReturned,
+              receipt.contentPolicy == "metadata-only",
+              receipt.observerPackRetained == false,
+              receipt.interpretationStatus == "not-performed",
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value["schemaVersion"] as? String == retainedPackVersion,
+              value["interpretationStatus"] as? String == "not-performed",
+              let source = value["source"] as? [String: Any],
+              source["provider"] as? String == provider,
+              source["selectionKind"] as? String == "observer-retained-task-session",
+              source["sessionHash"] as? String == sessionHash,
+              let privacy = value["privacy"] as? [String: Any],
+              privacy["contentPolicy"] as? String == "metadata-only",
+              privacy["observerPackRetained"] as? Bool == false,
+              privacy["sourceUsesObserverRetainedMetadata"] as? Bool == true,
+              privacy["sourcePathIncluded"] as? Bool == false,
+              privacy["rawConversationContentIncluded"] as? Bool == false,
+              privacy["toolArgumentsIncluded"] as? Bool == false,
+              privacy["toolResultsIncluded"] as? Bool == false,
+              let boundary = value["observationBoundary"] as? [String: Any],
+              boundary["directCallsAreExecutionObservations"] as? Bool == true,
+              boundary["staticReferencesAreExecutionObservations"] as? Bool == false,
+              boundary["nestedChildReceiptsRequireAProviderTraceOrComponentReceipt"] as? Bool == true,
+              boundary["adoptionNotRepresented"] as? Bool == true,
               let limits = value["limits"] as? [String: Any],
               limits["eventsReturned"] as? Int == receipt.eventsReturned,
               limits["eventsAvailable"] as? Int == receipt.eventsAvailable,
