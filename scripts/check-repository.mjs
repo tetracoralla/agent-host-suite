@@ -18,6 +18,7 @@ const required = [
   'scripts/release-source-provenance.mjs', 'scripts/check-release-source-provenance.mjs', 'scripts/provider-source-build.mjs', 'src/release-provenance.mjs',
   'schemas/agent-host-activity.schema.v0.1.json', 'schemas/agent-host-usage.schema.v0.1.json',
   'schemas/agent-host-trace-source-catalog.schema.v0.1.json', 'schemas/agent-host-trace-analysis-pack.schema.v0.1.json', 'schemas/agent-host-trace-analysis-pack.schema.v0.2.json',
+  'schemas/agent-host-task-source-catalog.schema.v0.1.json', 'schemas/agent-host-task-activity-pack.schema.v0.1.json',
   'schemas/agent-host-release-source-lock.schema.v0.1.json', 'schemas/agent-host-build-provenance.schema.v0.1.json',
   'schemas/agent-host-developer-kit-integration.schema.v0.1.json',
   'schemas/agent-host-profile.schema.v0.1.json', 'schemas/agent-host-profile.schema.v0.2.json',

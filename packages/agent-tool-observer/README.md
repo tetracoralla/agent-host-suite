@@ -196,6 +196,10 @@ bounded, path-free set of retained pseudonymous sessions for one provider, and
 `trace-export --session` can publish one explicit session/time range as a
 metadata-only v0.2 pack. This read-only route never offers selected content,
 never triggers collection, and keeps retention and completeness limits visible.
+`task-sources` and `task-export` provide the corresponding metadata-only route
+over ordinary retained tool and usage observations. They keep direct execution
+observations separate from nested static references and leave interpretation
+to the user or the Agent they select.
 
 ## Claim boundary
 

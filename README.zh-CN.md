@@ -96,6 +96,13 @@ agent-host doctor --deep --json
 tools-dev 路径，不是 featured。详见
 [精选目录 v1](docs/FEATURED_CATALOG.md)。
 
+## 任务活动
+
+`observability task-sources` 先给出容易扫读的会话数、直接调用、静态引用和
+错误数量；`observability export-task` 可再导出一个有界、匿名化的任务记录。
+它把直接执行与仅出现在编排输入里的工具名分开，但不替用户判断结果是否被
+采用、是否有用、是否优于其他方案。详见[轨迹平面](docs/TRACE_PLANE.zh-CN.md)。
+
 ## 不点名采用验收
 
 本 checkout **没有**记录一次已完成的真人采用。没有 Host GUI / 完整 Agent 会话的
@@ -135,7 +142,7 @@ Agent Host 私有状态上使用其中的不透明恢复标识和 manifest 摘�
 Agent Host 默认保留用户拥有的应用配置与数据。本机监测需要主动开启，被动采集只保存元数据。
 `uninstall --purge-data` 会删除 Suite 拥有的快照与历史，但 Observer 共享数据库有独立的数据
 生命周期，因此会被保留。观测到工具调用或工具曾被提供，不能证明 Skill 已激活、结果被采用、
-结果正确、任务质量或价值。完整边界见
+结果正确、任务质量或价值。观察与显式导出边界见
 [`docs/TRACE_PLANE.zh-CN.md`](docs/TRACE_PLANE.zh-CN.md)。
 
 `update` 上明确给出的 manifest 用于选择新的 release catalog；不带该参数的 `update` 只适用于

@@ -695,6 +695,32 @@ export async function observabilityTraceSources(options, dependencies = {}) {
   return runObserverConfigurationCommand(options, args, dependencies)
 }
 
+export async function observabilityTaskSources(options, dependencies = {}) {
+  if (typeof options.provider !== 'string' || options.provider.length === 0) {
+    throw new AgentHostError('CLI_USAGE', 'observability task-sources requires --provider')
+  }
+  const args = ['task-sources', '--provider', options.provider, '--limit', String(options.limit ?? 50)]
+  if (options.fromMs !== undefined) args.push('--from-ms', String(options.fromMs))
+  if (options.toMs !== undefined) args.push('--to-ms', String(options.toMs))
+  return runObserverConfigurationCommand(options, args, dependencies)
+}
+
+export async function exportObservabilityTask(options, dependencies = {}) {
+  if (typeof options.provider !== 'string' || typeof options.session !== 'string' || typeof options.output !== 'string') {
+    throw new AgentHostError('CLI_USAGE', 'observability export-task requires --provider, --session, and --output')
+  }
+  const args = [
+    'task-export', '--provider', options.provider,
+    '--session', options.session,
+    '--output', options.output,
+    '--max-events', String(options.maxEvents ?? 500),
+    '--max-output-bytes', String(options.maxOutputBytes ?? 16 * 1024 * 1024),
+  ]
+  if (options.fromMs !== undefined) args.push('--from-ms', String(options.fromMs))
+  if (options.toMs !== undefined) args.push('--to-ms', String(options.toMs))
+  return runObserverConfigurationCommand(options, args, dependencies)
+}
+
 export async function observabilityAdapterPlan(options, dependencies = {}) {
   if (typeof options.adapter !== 'string' || options.adapter.length === 0) {
     throw new AgentHostError('CLI_USAGE', 'observability adapter-plan requires --adapter')

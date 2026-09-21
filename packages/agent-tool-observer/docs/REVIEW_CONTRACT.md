@@ -47,6 +47,10 @@ outcomes are preserved and verified.
    metadata-only, reports retention and unknown completeness, preserves event
    family and adapter provenance, never triggers collection, and fails closed
    for invalid or empty selections without creating an output.
+10. Ordinary task discovery and export use only retained metadata, remain
+    provider-scoped and bounded, distinguish direct execution observations from
+    static nested references, and never write the exported pack back into
+    Observer state.
 
 ## Whole-run bounds and recovery
 
@@ -106,6 +110,10 @@ outcomes are preserved and verified.
    rollups are never relabeled as incremental daily consumption. The longest
    observed session span is checked and labeled as the span between retained
    metadata events, never chat duration or active human work time.
+9. A Task Activity Pack does not represent adoption, usefulness, comparative
+   value, or the Agent's reason for a choice. Provider-reported rationale
+   presence and stable turn reasons remain optional source reports; their
+   absence is not interpreted.
 
 ## Automatic installation
 

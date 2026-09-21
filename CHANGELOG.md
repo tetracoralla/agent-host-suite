@@ -4,6 +4,10 @@
 
 ### Added
 
+- Task activity export: list/export bounded pseudonymous ordinary task
+  sessions, keep direct executions separate from nested static references, and
+  leave adoption, usefulness, and value judgments with the user or their Agent.
+
 - Post-setup / Overview success handoff: after install, Manager (native + web) leads with **start work** (open a new Agent task or connect an Agent), Host-observed facts, remaining gaps, and classified recovery paths (`not-connected` / `stale-session` / `permission` / `tool-fault`). Status rows stay supporting detail, not the destination. Setup CLI results include `guidance`.
 
 ### Changed

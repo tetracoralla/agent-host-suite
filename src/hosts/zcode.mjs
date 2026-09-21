@@ -19,7 +19,7 @@ function targets(manifest, workspaceRoot) {
     .map(([component, value]) => {
       const variables = value.workspaceEnvironment ?? []
       if (variables.length > 0 && workspaceRoot === null) {
-        throw new AgentHostError('WORKSPACE_GRANT_REQUIRED', `${value.displayName ?? component} requires --workspace-root so ZCode can grant its deterministic tools an explicit local workspace`, {
+        throw new AgentHostError('WORKSPACE_GRANT_REQUIRED', `${value.displayName ?? component} requires --workspace-root so ZCode can grant its local tools an explicit workspace`, {
           component,
           variables,
         })

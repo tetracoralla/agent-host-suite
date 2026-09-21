@@ -15,6 +15,7 @@ import { readSnapshot, writeSnapshot } from "./snapshot.mjs";
 import { buildStatus, renderStatus } from "./status.mjs";
 import { exportTraceAnalysisPack } from "./trace-export.mjs";
 import { exportRetainedTraceAnalysisPack, listRetainedTraceSources } from "./retained-trace.mjs";
+import { exportRetainedTaskActivityPack, listRetainedTaskSources } from "./retained-task.mjs";
 import { buildAdapterPlan, listAdapterPlans } from "./adapter-plans.mjs";
 
 process.umask(0o077);
@@ -28,6 +29,8 @@ function usage() {
   agent-tool-observer ingest-agent-host-deployment --file FILE [--json]
   agent-tool-observer trace-sources --provider PROVIDER [--from-ms N] [--to-ms N] [--limit N] [--json]
   agent-tool-observer trace-export --provider PROVIDER (--file FILE | --session HASH) --output FILE [--from-ms N] [--to-ms N] [--include-selected-content --confirm-sensitive-content] [--max-events N] [--max-output-bytes N] [--json]
+  agent-tool-observer task-sources --provider PROVIDER [--from-ms N] [--to-ms N] [--limit N] [--json]
+  agent-tool-observer task-export --provider PROVIDER --session HASH --output FILE [--from-ms N] [--to-ms N] [--max-events N] [--max-output-bytes N] [--json]
   agent-tool-observer adapters [--json]
   agent-tool-observer adapter-plan --adapter ID [--json]
   agent-tool-observer maintain [--dry-run] [--json]
@@ -188,15 +191,15 @@ export function parseArguments(argumentsList) {
     || options.includeSelectedContent || options.confirmSensitiveContent
     || options.session !== null || options.fromMs !== null || options.toMs !== null
     || seen.has("--limit") || seen.has("--max-events") || seen.has("--max-output-bytes");
-  if (traceOnlySelected && !["trace-export", "trace-sources"].includes(options.command)) {
-    throw new ObserverError("ARGUMENT_INVALID", "trace selection options are supported only by trace commands");
+  if (traceOnlySelected && !["trace-export", "trace-sources", "task-export", "task-sources"].includes(options.command)) {
+    throw new ObserverError("ARGUMENT_INVALID", "observation selection options are supported only by trace and task commands");
   }
-  if (options.command === "trace-sources") {
-    if (options.provider === null) throw new ObserverError("ARGUMENT_INVALID", "trace-sources requires --provider");
+  if (["trace-sources", "task-sources"].includes(options.command)) {
+    if (options.provider === null) throw new ObserverError("ARGUMENT_INVALID", `${options.command} requires --provider`);
     if (options.output !== null || options.file !== null || options.session !== null
       || options.includeSelectedContent || options.confirmSensitiveContent
       || seen.has("--max-events") || seen.has("--max-output-bytes")) {
-      throw new ObserverError("ARGUMENT_INVALID", "trace-sources accepts only provider, range, limit, and output-format options");
+      throw new ObserverError("ARGUMENT_INVALID", `${options.command} accepts only provider, range, limit, and output-format options`);
     }
   }
   if (options.command === "trace-export") {
@@ -206,6 +209,14 @@ export function parseArguments(argumentsList) {
     if (seen.has("--limit")) throw new ObserverError("ARGUMENT_INVALID", "--limit is supported only by trace-sources");
     if (options.file !== null && (options.fromMs !== null || options.toMs !== null)) {
       throw new ObserverError("ARGUMENT_INVALID", "--from-ms and --to-ms require --session");
+    }
+  }
+  if (options.command === "task-export") {
+    if (options.output === null || options.provider === null || options.session === null) {
+      throw new ObserverError("ARGUMENT_INVALID", "task-export requires --provider, --session, and --output");
+    }
+    if (options.file !== null || options.includeSelectedContent || options.confirmSensitiveContent || seen.has("--limit")) {
+      throw new ObserverError("ARGUMENT_INVALID", "task-export accepts only provider, session, range, bounds, output, and output-format options");
     }
   }
   if (options.fromMs !== null && options.toMs !== null && options.fromMs > options.toMs) {
@@ -287,6 +298,32 @@ export async function main(argumentsList = process.argv.slice(2)) {
     return 0;
   }
 
+  if (options.command === "task-sources") {
+    const database = openReadOnlyStateDatabase(config);
+    let result;
+    try {
+      result = listRetainedTaskSources(database, config, {
+        provider: options.provider,
+        fromMs: options.fromMs,
+        toMs: options.toMs,
+        limit: options.limit
+      });
+    } finally {
+      database.close();
+    }
+    if (options.json) printJson(result);
+    else {
+      const direct = result.sources.reduce((total, source) => total + source.directCalls, 0);
+      const references = result.sources.reduce((total, source) => total + source.staticReferences, 0);
+      const errors = result.sources.reduce((total, source) => total + source.errors, 0);
+      const bounded = result.limits.sourceLimitReached ? " · more retained sessions not shown" : "";
+      process.stdout.write(
+        `Task activity: ${result.sources.length} ${result.provider} session${result.sources.length === 1 ? "" : "s"} · ${direct} direct call${direct === 1 ? "" : "s"} · ${references} static reference${references === 1 ? "" : "s"} · ${errors} error${errors === 1 ? "" : "s"}${bounded}.\n`
+      );
+    }
+    return 0;
+  }
+
   if (options.command === "trace-export") {
     let result;
     if (options.session !== null) {
@@ -319,6 +356,29 @@ export async function main(argumentsList = process.argv.slice(2)) {
     if (options.json) printJson(result);
     else process.stdout.write(
       `Trace Analysis Pack written: ${result.eventsReturned} bounded events; ${result.contentPolicy}; Observer did not retain the pack.\n`
+    );
+    return 0;
+  }
+
+  if (options.command === "task-export") {
+    const database = openReadOnlyStateDatabase(config);
+    let result;
+    try {
+      result = exportRetainedTaskActivityPack(database, config, {
+        provider: options.provider,
+        sessionHash: options.session,
+        output: options.output,
+        fromMs: options.fromMs,
+        toMs: options.toMs,
+        maxEvents: options.maxEvents,
+        maxOutputBytes: options.maxOutputBytes
+      });
+    } finally {
+      database.close();
+    }
+    if (options.json) printJson(result);
+    else process.stdout.write(
+      `Task Activity Pack written: ${result.eventsReturned} metadata events; interpretation remains with the user or selected Agent.\n`
     );
     return 0;
   }

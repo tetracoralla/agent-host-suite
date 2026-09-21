@@ -140,7 +140,7 @@ async function readMcpProjection(component, workspaceRoot) {
     throw new AgentHostError('CODEX_PROJECTION_INVALID', `${component.displayName ?? component.plugin} must expose exactly one MCP server in its Codex plugin`)
   }
   if ((component.workspaceEnvironment ?? []).length > 0 && workspaceRoot === null) {
-    throw new AgentHostError('WORKSPACE_GRANT_REQUIRED', `${component.displayName ?? component.plugin} requires --workspace-root so Codex can grant its deterministic tools an explicit local workspace`, {
+    throw new AgentHostError('WORKSPACE_GRANT_REQUIRED', `${component.displayName ?? component.plugin} requires --workspace-root so Codex can grant its local tools an explicit workspace`, {
       component: component.plugin,
       variables: component.workspaceEnvironment,
     })

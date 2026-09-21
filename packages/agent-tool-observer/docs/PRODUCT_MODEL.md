@@ -227,6 +227,15 @@ file, never triggers collection, declares the retention cutoff, and keeps
 session completeness unknown. It supports every provider that has normalized
 session-bearing trace rows; unavailable or expired data is not reconstructed.
 
+Ordinary `tool_event` and `usage_event` rows have a separate Task Activity Pack
+route so a provider session need not have detailed trace rows to be selected.
+This pack preserves the session/turn/call hashes already retained by Observer
+and labels non-derived records as direct execution observations. Statically
+extracted nested tool names remain static references even when their outer
+orchestration call completed. Observer does not infer a child receipt, adoption,
+discovery cause, or value. A user may inspect the pack, ask their Agent to
+interpret it, combine it with task-native work, or ignore it.
+
 The report emits these signals:
 
 - `observed-use`: repeated calls exist, without claiming correctness or value;

@@ -22,7 +22,7 @@ Shell 缺失的事实。
 工具参数与结果、Header、Provider 选项、凭据、命令、错误正文和路径
 绝不进入 Observer 数据库。
 
-### 显式轨迹分析包
+### 显式轨迹与任务活动包
 
 显式导出分为两条路线。用户可以选择一份明确的 ZCode model-I/O 文件和
 输出位置；这个 v0.1 分析包默认仍为纯元数据。
@@ -45,12 +45,22 @@ Observer 当前保留的会话，再用一个明确的会话哈希和可选毫�
 分析包只是交给用户所选 Agent 的材料，不是 Observer 的推荐、评估、
 批准，也不能证明正确性或采纳。
 
+Observer 还可以从既有 `tool_event` 与 `usage_event` 元数据列出普通任务会话。
+任务活动包把每条工具记录明确标为 `direct-execution-observation` 或
+`static-reference`。例如 `functions.exec` 输入中出现的嵌套工具名只能算静态
+引用；外层调用完成不能被虚构成子调用回执。要证明子调用执行，需要 Provider
+轨迹或组件执行回执。任务活动包本身不判断采用。
+
 启用本机监测后，可通过 Agent Host 的公开命令使用：
 
 ```sh
 agent-host observability adapters --json
 agent-host observability adapter-plan --adapter openadam.gemini-cli-otel --json
 agent-host observability trace-sources --provider zcode --limit 25 --json
+agent-host observability task-sources --provider codex --limit 25 --json
+agent-host observability export-task --provider codex \
+  --session 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  --output /新建的/task-activity-pack.json --json
 agent-host observability export-trace --provider zcode \
   --session 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   --output /新建的/retained-trace-pack.json --json
@@ -58,9 +68,10 @@ agent-host observability export-trace --provider zcode \
   --file /明确选择的/model-io-file.jsonl --output /新建的/trace-pack.json --json
 ```
 
-`adapters` 返回不含路径的能力目录；`trace-sources` 返回一个 Provider
+`adapters` 返回不含路径的能力目录；`trace-sources` 与 `task-sources` 返回一个 Provider
 当前保留的、带数量上限且不含路径的匿名会话目录。Manager 的“使用情况与
-可靠性”页面也提供同样的会话列表与纯元数据下载流程。浏览器放弃下载时，
+可靠性”页面仅为保留轨迹会话提供同样的列表与纯元数据下载流程；任务活动包
+目前只能通过显式 CLI 命令导出。浏览器放弃下载时，
 Manager 会取消已安装 Observer 的子进程并清除私有临时输出；只有完整结果
 才会以新文件发布，因此中断不会暴露半成品。`adapter-plan` 返回一个适配器当前所需
 的用户级配置片段与撤回方法，但始终标记 `appliesChanges: false`，Agent Host
@@ -106,5 +117,7 @@ Claude 命令 Hook 方案固定使用 `async=true`、空输出和退出码 0，�
 只写元数据；Shell 报告的完成状态不是质量判断。
 
 任何被动适配器都不能证明 Skill 激活、语义效果、结果采纳、未使用原因、
-任务质量、机会或产品价值。用户或其 Agent 可以分析显式选择的材料并另行
-撰写提案，但该提案必须保留自己的来源与不确定性。
+任务质量、机会或产品价值。用户或其 Agent 可以分析显式选择的材料、结合
+任务成品形成自己的解释，也可以忽略这些材料。Provider 若公开“存在自述理由”
+或稳定轮次原因等有界信号，Observer 会按来源记录；它不要求 Agent 必须反馈，
+不从缺失反馈推断原因，也不会把这些内容变成 Host 判决。

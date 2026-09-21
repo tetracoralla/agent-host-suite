@@ -65,7 +65,7 @@ that affect the decision; counts alone do not choose a repair or retirement.
 Authorized implementation work follows the owning repository's instructions.
 It does not make private runtime storage a substitute for a missing product API.
 
-## Authorized operations and selected trace analysis
+## Authorized operations, task activity, and selected trace analysis
 
 Run refresh, update, rollback, cleanup, tool-set changes or uninstall only within
 the user's requested scope. Preserve current component versions and private
@@ -82,6 +82,22 @@ FILE --json`. Add `--from-ms`/`--to-ms` only for the selected time range. Export
 metadata-only and does not establish complete trace coverage. Start with its
 bounded summary; expand content-addressed tool catalogs only when needed.
 A temporary analysis does not authorize updating Agent memory.
+
+For a question about what happened in one task, do not stop at aggregate
+`usage` totals. Use `observability task-sources --provider
+PROVIDER --json` to find the pseudonymous ordinary task session, then export
+one selected session with `observability export-task --provider PROVIDER
+--session HASH --output FILE --json`. The pack deliberately distinguishes
+`direct-execution-observation` from `static-reference`; an orchestration source
+mention is not a child execution receipt. Start with the human-readable summary
+and open the detailed JSON only when the decision needs it.
+
+Interpret the selected activity together with the task-native artifact and
+relevant tests. Provider-reported rationale presence or stable completion
+reasons are optional source reports, not Host conclusions. Do not require an
+Agent to explain every choice, infer a reason from silence, or convert activity
+into an adoption, quality, or value score. The user may accept, challenge, or
+ignore an interpretation.
 
 If setup/update/rollback returns `SERVICE_INSTALL_ROLLBACK_FAILED`, preserve its
 recovery details and report that rollback did not succeed. For authorized recovery,

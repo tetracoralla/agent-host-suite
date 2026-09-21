@@ -7,8 +7,11 @@ installed versions, machine state, or release acceptance.
 ## User and task
 
 The intended **external user** is an individual desktop Agent user who wants a
-small set of deterministic tools plus reliable local execution without cloning
-and configuring many repositories by hand. That path requires a bound
+coherent, trustworthy set of Agent capabilities plus reliable local execution
+without cloning and configuring many repositories by hand. The default working
+set may stay deliberately small, but that is an attention and context choice,
+not a ceiling on the kinds of useful capabilities the environment may admit.
+That path requires a bound
 compatibility release. This source checkout is not that release: it has no
 GitHub Release assets in-tree, no Apple-notarized DMG, and no tool marketplace.
 Unsigned preview download is documented in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
@@ -32,6 +35,10 @@ The user chooses an installed profile and a smaller active tool set, reviews
 the requested Agent-app and background-service changes, installs one Agent
 environment, checks current health, updates or rolls back a bound compatibility
 release, and can remove everything Agent Host created.
+
+Making a capability available is an offer, not an endorsement or an obligation
+to use it. The user and their Agent may activate, ignore, challenge, replace, or
+remove it without first accepting Agent Host's interpretation of its value.
 
 The Windows Manager and native macOS Manager present English and Simplified
 Chinese, follow the operating-system language by default, and keep the explicit
@@ -86,7 +93,8 @@ quality. Replacing configuration requires a newly built and previewed archive.
 - `packages/direct-execution-runtime` owns bounded Host execution mechanics.
 - Agent Host owns artifact acquisition, hash verification, installation,
   official host integration, local service lifecycle, profiles, update,
-  rollback, removal, a small human status surface, and one bounded product
+  rollback, removal, optional passive observation and explicit task-activity
+  export, a small human status surface, and one bounded product
   operations Skill for external Agents.
 - Agent apps remain independently updated hosts. Agent Host never patches their
   binaries or private implementation files.
@@ -188,13 +196,19 @@ Exact versions and fields belong to
 9. **Observation.** Automatic record adapters are read-only. Telemetry and hook
    adapters require an explicit user-owned configuration action. Passive
    storage is metadata-only; content export requires a second confirmation and
-   never enters Observer storage. See [`TRACE_PLANE.md`](TRACE_PLANE.md).
+   never enters Observer storage. A user can explicitly export one bounded,
+   pseudonymous task session with direct calls kept distinct from static nested
+   references. See [`TRACE_PLANE.md`](TRACE_PLANE.md).
 
 An observation controls only what it directly reports. Offered tools,
 historical calls, or installed Skills do not establish current-session Skill
 activation, non-use reason, semantic effect, result adoption, correctness,
 task quality, opportunity, or value. Those remain unknown unless a separate
-current assessment or controlled task establishes them.
+current assessment or controlled task establishes them. A user or their Agent
+may interpret an explicitly selected export, combine it with task-native work,
+or ignore it. Provider-reported rationale presence and stable completion
+reasons may be retained when available, but remain source-reported context—not
+Host judgments and not required setup.
 
 ## Human surface
 
@@ -225,8 +239,11 @@ visible status was last checked. Automatic refresh does not launch Agent apps;
 mutations remain disabled while current local state is being reacquired. Full
 Check is the explicit current Agent-app binding route.
 
-The primary interface does not show MCP schemas, Agent reasoning, Capability
-catalogs, protocol metadata, prompts, or marketing explanations. Usage &
+The primary interface leads with a few task-relevant states and one useful next
+action; history, provenance, and machine detail remain available on demand. It
+does not require a person to read an evidence chain before they can act. It
+does not show MCP schemas, Agent reasoning, Capability catalogs, protocol
+metadata, prompts, or marketing explanations. Usage &
 Reliability preserves unavailable and partial coverage and never derives a
 non-use reason, correctness, adoption, quality, opportunity, or value.
 

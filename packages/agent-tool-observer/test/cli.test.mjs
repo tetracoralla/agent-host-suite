@@ -62,3 +62,17 @@ test("CLI separates retained trace discovery from exact-file and session exports
   assert.throws(() => parseArguments(["trace-sources", "--provider", "zcode", "--max-events", "10"]), { code: "ARGUMENT_INVALID" });
   assert.throws(() => parseArguments(["trace-sources", "--provider", "ZCode"]), { code: "ARGUMENT_INVALID" });
 });
+
+test("CLI exposes retained task activity without treating static references as execution", () => {
+  const session = "b".repeat(64);
+  const sources = parseArguments(["task-sources", "--provider", "codex", "--from-ms", "10", "--to-ms", "20", "--limit", "25", "--json"]);
+  assert.deepEqual(
+    { command: sources.command, provider: sources.provider, fromMs: sources.fromMs, toMs: sources.toMs, limit: sources.limit, json: sources.json },
+    { command: "task-sources", provider: "codex", fromMs: 10, toMs: 20, limit: 25, json: true }
+  );
+  const exported = parseArguments(["task-export", "--provider", "codex", "--session", session, "--output", "/tmp/task.json"]);
+  assert.equal(exported.session, session);
+  assert.throws(() => parseArguments(["task-export", "--provider", "codex", "--output", "/tmp/task.json"]), { code: "ARGUMENT_INVALID" });
+  assert.throws(() => parseArguments(["task-export", "--provider", "codex", "--session", session, "--file", "/tmp/source.jsonl", "--output", "/tmp/task.json"]), { code: "ARGUMENT_INVALID" });
+  assert.throws(() => parseArguments(["task-sources", "--provider", "codex", "--max-events", "10"]), { code: "ARGUMENT_INVALID" });
+});

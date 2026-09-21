@@ -128,6 +128,16 @@ Tracked `draft-unbound` setup fails closed. `--development-root` is the
 tools-dev path, not featured. Details:
 [Featured catalog v1](docs/FEATURED_CATALOG.md).
 
+## Task activity
+
+`observability task-sources` gives a glanceable session, direct-call,
+static-reference, and error summary. `observability export-task` exports one
+bounded pseudonymous task record for closer inspection. It separates direct
+execution observations from tool names found only inside orchestration input;
+it does not decide whether a result was adopted, useful, or better than an
+alternative. Those are judgments for the user or the Agent they select. See
+[Trace Plane](docs/TRACE_PLANE.md).
+
 ## Unnamed adoption acceptance
 
 This checkout does not record a completed live adoption. A Linux construction
@@ -172,8 +182,9 @@ Agent Host preserves user-owned host entries and data by default. Monitoring is
 opt-in and passive collection is metadata-only. `uninstall --purge-data`
 removes Suite-owned snapshots and history, but the Observer's shared database
 has its own data lifecycle and is retained. A recorded call or offered tool
-does not establish Skill activation, result adoption, correctness, quality, or value. See
-[Trace Plane](docs/TRACE_PLANE.md) for the observation and export boundary.
+does not by itself establish Skill activation, result adoption, correctness,
+quality, or value. See [Trace Plane](docs/TRACE_PLANE.md) for the observation
+and explicit-export boundary.
 
 The explicit manifest on `update` selects a new release catalog. An
 unparameterized `update` is appropriate only for a packaged carrier whose

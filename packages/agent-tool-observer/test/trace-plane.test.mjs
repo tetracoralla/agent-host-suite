@@ -7,9 +7,11 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
   openStateDatabase,
+  putToolEvent,
   putTraceModelStep,
   putTraceToolEvent,
-  putTraceTurnEvent
+  putTraceTurnEvent,
+  putUsageEvent
 } from "../src/db.mjs";
 import { traceToolEventSummaryRows, traceToolOfferRows } from "../src/db-read.mjs";
 import { buildReport } from "../src/report.mjs";
@@ -20,6 +22,7 @@ import { scanZcodeTrace } from "../src/providers/zcode-trace.mjs";
 import { TRACE_ADAPTERS } from "../src/trace-adapters.mjs";
 import { exportTraceAnalysisPack } from "../src/trace-export.mjs";
 import { exportRetainedTraceAnalysisPack, listRetainedTraceSources } from "../src/retained-trace.mjs";
+import { exportRetainedTaskActivityPack, listRetainedTaskSources } from "../src/retained-task.mjs";
 import { appendHookRecords, processHookInput, projectHookEvent } from "../src/hook-bridge.mjs";
 import { buildAdapterPlan, listAdapterPlans } from "../src/adapter-plans.mjs";
 import {
@@ -468,6 +471,104 @@ test("retained trace sources are bounded and one explicit session exports metada
       turns: database.prepare("SELECT count(*) AS n FROM trace_turn_event").get().n
     }, before);
     if (process.platform !== "win32") assert.equal(fs.lstatSync(output).mode & 0o077, 0);
+    database.close();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("retained task activity separates direct execution observations from nested static references", () => {
+  const root = temporaryRoot();
+  try {
+    const { config } = fixtureConfig(root);
+    const database = openStateDatabase(config);
+    const sessionHash = "a".repeat(64);
+    const turnHash = "b".repeat(64);
+    const shared = {
+      provider: "codex",
+      sourceId: "fixture-source",
+      sessionHash,
+      turnHash,
+      sessionStartedAtMs: 1_000,
+      occurredAtMs: 2_000,
+      durationMs: null,
+      retryCount: null,
+      requestBytes: null,
+      responseBytes: null,
+      sourceFormat: "codex-session-jsonl",
+      recordedAtMs: 3_000
+    };
+    putToolEvent(database, {
+      ...shared,
+      eventId: "direct-event",
+      callHash: "c".repeat(64),
+      completedAtMs: 2_100,
+      toolName: "functions.exec",
+      toolNamespace: "functions",
+      routeClass: "orchestration",
+      isOpenAdam: false,
+      derived: false,
+      status: "completed"
+    });
+    putToolEvent(database, {
+      ...shared,
+      eventId: "nested-event",
+      callHash: "d".repeat(64),
+      completedAtMs: null,
+      toolName: "worldbend.run",
+      toolNamespace: "worldbend",
+      routeClass: "mcp",
+      isOpenAdam: true,
+      derived: true,
+      status: "observed"
+    });
+    putUsageEvent(database, {
+      eventId: "usage-event",
+      provider: "codex",
+      sessionHash,
+      turnHash,
+      occurredAtMs: 2_200,
+      inputTokens: 100,
+      cachedInputTokens: 10,
+      outputTokens: 20,
+      reasoningTokens: 5,
+      totalTokens: 120,
+      durationMs: null,
+      sourceFormat: "codex-session-jsonl",
+      recordedAtMs: 3_000
+    });
+
+    const catalog = listRetainedTaskSources(database, config, { provider: "codex", nowMs: 4_000 });
+    assert.equal(catalog.schemaVersion, "openadam.agent-host-task-source-catalog.v0.1");
+    assert.deepEqual(
+      catalog.sources.map((source) => [source.sessionHash, source.directCalls, source.staticReferences, source.completed, source.outcomeUnknown]),
+      [[sessionHash, 1, 1, 1, 1]]
+    );
+    assert.equal(catalog.observationBoundary.staticReferencesAreExecutionObservations, false);
+
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    addFormats(validator);
+    const validateCatalog = validator.compile(JSON.parse(fs.readFileSync(new URL("../../../schemas/agent-host-task-source-catalog.schema.v0.1.json", import.meta.url), "utf8")));
+    assert.equal(validateCatalog(catalog), true, JSON.stringify(validateCatalog.errors));
+
+    const output = path.join(root, "task-pack.json");
+    const result = exportRetainedTaskActivityPack(database, config, {
+      provider: "codex",
+      sessionHash,
+      output,
+      nowMs: 4_000
+    });
+    assert.equal(result.schemaVersion, "openadam.agent-host-task-activity-pack.v0.1");
+    const pack = JSON.parse(fs.readFileSync(output, "utf8"));
+    const validatePack = validator.compile(JSON.parse(fs.readFileSync(new URL("../../../schemas/agent-host-task-activity-pack.schema.v0.1.json", import.meta.url), "utf8")));
+    assert.equal(validatePack(pack), true, JSON.stringify(validatePack.errors));
+    assert.deepEqual(
+      pack.events.filter((event) => event.kind === "tool-observation").map((event) => event.facts.observationClass),
+      ["direct-execution-observation", "static-reference"]
+    );
+    assert.equal(pack.observationBoundary.nestedChildReceiptsRequireAProviderTraceOrComponentReceipt, true);
+    assert.equal(pack.observationBoundary.adoptionNotRepresented, true);
+    assert.equal(JSON.stringify(pack).includes("fixture-source"), false);
     database.close();
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

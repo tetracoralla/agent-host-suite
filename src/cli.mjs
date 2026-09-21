@@ -1,7 +1,7 @@
 import { doctor } from './doctor.mjs'
 import { asPublicError, AgentHostError } from './errors.mjs'
 import { addHost, hostStatus, recoverServiceInstallation, removeHost, repairInstallation, rollbackInstallation, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation } from './lifecycle.mjs'
-import { disableObservability, enableObservability, exportObservabilityTrace, maintenance, observabilityAdapterPlan, observabilityAdapters, observabilityStatus, observabilitySummary, observabilityTraceSources, refreshObservability } from './observability.mjs'
+import { disableObservability, enableObservability, exportObservabilityTask, exportObservabilityTrace, maintenance, observabilityAdapterPlan, observabilityAdapters, observabilityStatus, observabilitySummary, observabilityTaskSources, observabilityTraceSources, refreshObservability } from './observability.mjs'
 import { readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { loadState, prepareStatePaths, readStatePaths } from './state.mjs'
@@ -85,6 +85,8 @@ const USAGE = `Usage:
   agent-host observability enable|disable|refresh|status [--state-root PATH] [--json]
   agent-host observability trace-sources --provider PROVIDER [--from-ms N] [--to-ms N] [--limit N] [--state-root PATH] [--json]
   agent-host observability export-trace --provider PROVIDER (--file PATH | --session HASH) --output PATH [--from-ms N] [--to-ms N] [--include-selected-content --confirm-sensitive-content] [--max-events N] [--max-output-bytes N] [--state-root PATH] [--json]
+  agent-host observability task-sources --provider PROVIDER [--from-ms N] [--to-ms N] [--limit N] [--state-root PATH] [--json]
+  agent-host observability export-task --provider PROVIDER --session HASH --output PATH [--from-ms N] [--to-ms N] [--max-events N] [--max-output-bytes N] [--state-root PATH] [--json]
   agent-host observability adapters [--state-root PATH] [--json]
   agent-host observability adapter-plan --adapter ID [--state-root PATH] [--json]
   agent-host host add codex|claude|zcode [--workspace-root PATH] [--replace-host-conflicts] [--state-root PATH] [--json]
@@ -135,6 +137,8 @@ const ROUTE_ARGUMENTS = Object.freeze({
   'observability status': ['--state-root', '--json'],
   'observability trace-sources': ['--provider', '--from-ms', '--to-ms', '--limit', '--state-root', '--json'],
   'observability export-trace': ['--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--max-events', '--max-output-bytes', '--include-selected-content', '--confirm-sensitive-content', '--state-root', '--json'],
+  'observability task-sources': ['--provider', '--from-ms', '--to-ms', '--limit', '--state-root', '--json'],
+  'observability export-task': ['--provider', '--session', '--output', '--from-ms', '--to-ms', '--max-events', '--max-output-bytes', '--state-root', '--json'],
   'observability adapters': ['--state-root', '--json'],
   'observability adapter-plan': ['--adapter', '--state-root', '--json'],
   'host add': ['--workspace-root', '--replace-host-conflicts', '--state-root', '--json'],
@@ -304,12 +308,20 @@ function parseArgs(argv) {
   if (route === 'observability trace-sources') {
     if (typeof options.provider !== 'string' || options.provider.length === 0) throw new AgentHostError('CLI_USAGE', 'observability trace-sources requires --provider')
   }
+  if (route === 'observability task-sources') {
+    if (typeof options.provider !== 'string' || options.provider.length === 0) throw new AgentHostError('CLI_USAGE', 'observability task-sources requires --provider')
+  }
   if (route === 'observability export-trace') {
     if (typeof options.provider !== 'string' || typeof options.output !== 'string' || (typeof options.file === 'string') === (typeof options.session === 'string')) {
       throw new AgentHostError('CLI_USAGE', 'observability export-trace requires --provider, exactly one of --file or --session, and --output')
     }
     if (typeof options.file === 'string' && (options.fromMs !== undefined || options.toMs !== undefined)) {
       throw new AgentHostError('CLI_USAGE', '--from-ms and --to-ms require --session')
+    }
+  }
+  if (route === 'observability export-task') {
+    if (typeof options.provider !== 'string' || typeof options.session !== 'string' || typeof options.output !== 'string') {
+      throw new AgentHostError('CLI_USAGE', 'observability export-task requires --provider, --session, and --output')
     }
   }
   if (options.fromMs !== undefined && options.toMs !== undefined && options.fromMs > options.toMs) {
@@ -478,6 +490,17 @@ export function human(result) {
   }
   if (result.schemaVersion === 'openadam.agent-host-trace-source-catalog.v0.1') {
     return `Trace sessions · ${result.sources?.length ?? 0} retained ${result.provider ?? 'Agent'} sessions · completeness unknown`
+  }
+  if (result.schemaVersion === 'openadam.agent-host-task-source-catalog.v0.1') {
+    const sources = result.sources ?? []
+    const direct = sources.reduce((total, source) => total + (source.directCalls ?? 0), 0)
+    const references = sources.reduce((total, source) => total + (source.staticReferences ?? 0), 0)
+    const errors = sources.reduce((total, source) => total + (source.errors ?? 0), 0)
+    const bounded = result.limits?.sourceLimitReached === true ? ' · more retained sessions not shown' : ''
+    return `Task activity · ${sources.length} ${result.provider ?? 'Agent'} session${sources.length === 1 ? '' : 's'} · ${direct} direct call${direct === 1 ? '' : 's'} · ${references} static reference${references === 1 ? '' : 's'} · ${errors} error${errors === 1 ? '' : 's'}${bounded}`
+  }
+  if (result.schemaVersion === 'openadam.agent-host-task-activity-pack.v0.1') {
+    return `Task Activity Pack · ${result.eventsReturned ?? 0} metadata events · interpretation left to the user or selected Agent`
   }
   if (result.schemaVersion === 'openadam.agent-host-service-recovery-result.v0.1') {
     const service = result.service
@@ -716,6 +739,8 @@ async function run(options, dependencies = {}) {
     if (options.action === 'status') return observabilityStatus(options)
     if (options.action === 'trace-sources') return observabilityTraceSources(options)
     if (options.action === 'export-trace') return exportObservabilityTrace(options)
+    if (options.action === 'task-sources') return observabilityTaskSources(options)
+    if (options.action === 'export-task') return exportObservabilityTask(options)
     if (options.action === 'adapters') return observabilityAdapters(options)
     if (options.action === 'adapter-plan') return observabilityAdapterPlan(options)
     throw new AgentHostError('CLI_USAGE', `Unknown observability action: ${options.action}`)
