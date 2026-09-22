@@ -23,13 +23,17 @@ tools; it does not fetch Armorial or other missing inventory.
   `agent-host component preview` / `component import`, inactive by default.
 - Human copy that names the independently released product (Armorial, Math
   Anchor, and so on) and the Host action that installs or selects it.
-- Short visual task cards in setup and Tools that show one recognizable job,
-  expected result shape, and copyable example. They are optional invitations,
-  not ratings, requirements, portable provider metadata, or proof of value.
+- Compact product rows in setup and Tools that use the upstream product mark,
+  one short job label, current availability, and a direct **Use** action. The
+  editable example is handed off after that action. These are optional
+  invitations, not ratings, requirements, portable provider metadata, or proof
+  of value.
 
-v1 is not: search, featured placement scores, product screenshots, ratings, a
-public plugin registry, an Agent-facing import prompt, or a promise that a
-selected tool is loaded in an already open session.
+v1 search filters the compatible catalog already known to Host. It is not
+featured-placement scoring, ratings, a universal public registry, or a promise
+that a repository is compatible merely because it exists. A GitHub URL must
+pass compatibility preview before **Add** becomes available. It also does not
+promise that a selected tool is loaded in an already open session.
 
 ## External path without a public Release
 
@@ -90,7 +94,7 @@ not featured.
 | Choose a local or HTTPS catalog | `source set --release-manifest` / `source set --url`, or Manager Settings. Env `AGENT_HOST_FEATURED_CATALOG_URL` still works. Interrupted, offline, and digest errors keep a retry or local-catalog recovery. This does not publish a GitHub Release. |
 | User-level task readiness (tools, connection, projection; not adoption) | `doctor --featured-readiness` overall `status` / `userStatus`. Recipe name is a separate `recipe.consistency` check. `local-dogfood` plus a healthy Armorial projection is not a user-level failure. |
 | Featured recipe consistency | `recipe.consistency` on the same report records the working set as an experimental variable. It is context for an optional exercise, not a scoring gate, and does not require deleting other healthy tools. |
-| Recognize and try an admitted task | native and browser task cards can copy one editable example and open a connected Agent app; this records no adoption or quality verdict |
+| Recognize and try an admitted tool | native and browser product rows show its mark and availability, then **Use** can copy one editable example and open a connected Agent app; this records no adoption or quality verdict |
 | Observe session discovery | a **new** Agent task after `restartRequired` |
 
 If local monitoring is already enabled, `update --profile featured` keeps the
@@ -99,9 +103,11 @@ release that omits those components fails closed before writing and does not
 turn monitoring off. Tool selection and monitoring remain separate.
 
 Managers present the same featured admission list: choose `featured` at setup,
-or Get featured tools after a Standard install. Their task cards lead with what
-a person may want to accomplish and hand off an editable example to a new Agent
-task. They do not add a third-party plugin market, ranking, or payment flow.
+or Get featured tools after a Standard install. The default page lists local
+inventory first and recommendations second; **Browse** searches the compatible
+catalog and exposes the compatibility-gated GitHub path. Product rows lead with
+what the tool is, whether it is available, and one action that hands an editable
+example to a new Agent task. This does not add ranking or payment flows.
 
 Provider and contributor routes are documented in
 [`ECOSYSTEM_PATHS.md`](ECOSYSTEM_PATHS.md). Those routes meet at exact artifact

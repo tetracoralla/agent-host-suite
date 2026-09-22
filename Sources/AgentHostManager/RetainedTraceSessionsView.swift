@@ -13,7 +13,7 @@ struct RetainedTraceSessionsView: View {
     var body: some View {
         let providers = providerIDs
         let catalog = store.traceSourceCatalog?.provider == provider ? store.traceSourceCatalog : nil
-        Panel {
+        DataSection {
             Text(L10n.text("Retained trace sessions")).font(.headline)
             Text(L10n.text("Choose one Agent app to list locally retained metadata, then export one session for analysis."))
                 .font(.caption)

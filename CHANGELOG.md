@@ -4,14 +4,22 @@
 
 ### Added
 
-- Task-first capability discovery in native and browser Managers: compact
-  visual cards show a recognizable job, expected outcome, and optional
-  copy-to-new-task handoff without adding scores, requirements, or adoption
-  claims. Copying an example explains its next step in both Managers, and
-  connected Agent apps can be opened from the Agents page. Contributor
-  documentation connects the public GitHub Release and
+- Product-first capability discovery in native and browser Managers: compact
+  rows use the tools' upstream product marks, one short job label, availability,
+  and a direct **Use** action. Editable example tasks are handed off only after
+  that action instead of filling the primary UI with explanatory copy. Copying
+  an example explains its next step in both Managers, and connected Agent apps
+  can be opened from the Agents page. Contributor documentation connects the
+  public GitHub Release and
   Developer Kit/private-component paths while keeping provider judgment and
   owner decisions outside Host.
+
+- Manager navigation now starts with local installed tools, keeps its empty
+  state honest, places compatible recommendations below, and provides a
+  searchable Browse surface plus a separate visual Agent-shell connection page.
+  The Agents page keeps a start-work handoff with one next action when something
+  blocks new work, tool-set controls stay visible and state that already-open
+  tasks keep their old tools, and installed tool rows keep their job summary.
 
 - Task activity export: list/export bounded pseudonymous ordinary task
   sessions, keep direct executions separate from nested static references, and

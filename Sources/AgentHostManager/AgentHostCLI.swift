@@ -235,7 +235,16 @@ struct AgentHostCLI: Sendable {
             throw CLIError.failed(code: failure.error.code, message: message)
         }
         guard process.terminationStatus == 0 else {
-            throw CLIError.failed(code: "COMMAND_FAILED", message: String(data: payload, encoding: .utf8) ?? "Agent Host did not complete the action.")
+            let raw = String(data: payload, encoding: .utf8) ?? "Agent Host did not complete the action."
+            // The CLI never started. Present the recovery in product language
+            // instead of surfacing the launcher's raw stderr in an alert.
+            if output.isEmpty, raw.contains("No such file or directory") {
+                throw CLIError.failed(code: "CLI_UNAVAILABLE", message: "The Agent Host command-line component is not installed on this Mac. Reinstall Agent Host, then open the Manager again.")
+            }
+            if raw.hasPrefix("AGENT_HOST_BOOTSTRAP_FAILED") {
+                throw CLIError.failed(code: "CLI_UNAVAILABLE", message: "The Agent Host installation is incomplete. Reinstall Agent Host, then open the Manager again.")
+            }
+            throw CLIError.failed(code: "COMMAND_FAILED", message: raw)
         }
         return try JSONDecoder().decode(T.self, from: output)
     }

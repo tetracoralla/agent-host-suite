@@ -13,3 +13,14 @@ do not change Agent Host Suite's Apache-2.0 license.
 Primary dependency:
 
 - Model Context Protocol TypeScript SDK, Copyright Anthropic, PBC, MIT License
+
+Interface category glyphs:
+
+- IconPark (ByteDance), Apache License 2.0
+  Copyright 2019-present Bytedance Inc.
+  https://github.com/bytedance/IconPark
+  Includes table, file-search, text, and layout-four, rendered by Armorial.
+  Their geometry is unchanged. Size, outline theme and stroke color are render
+  parameters. The upstream license text is included in
+  Sources/AgentHostManager/Resources/ToolLogos/ICONPARK-LICENSE.txt. Product marks are attributed separately in
+  Sources/AgentHostManager/Resources/ToolLogos/SOURCES.md.

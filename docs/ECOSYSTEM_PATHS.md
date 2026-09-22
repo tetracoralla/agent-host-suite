@@ -73,8 +73,12 @@ or granting paths remains a separate owner decision.
 
 ## Decide what the observations mean
 
-The Manager's visual task cards are optional invitations. They give a person a
-recognizable task, expected form of outcome, and copyable starting prompt. They
+The Manager's compact product rows are optional invitations. Local inventory is
+shown first; recommendations and the searchable compatible catalog are separate
+discovery surfaces. Each row gives a person a recognizable product mark, short
+job label, current availability, and one direct action. A GitHub project is not
+addable until its compatibility preview succeeds. A copyable starting prompt
+appears only after the person chooses to use the tool. The labels and examples
 are Host editorial content for the current admitted set—not portable provider
 metadata, a quality certificate, or a requirement for every integration.
 

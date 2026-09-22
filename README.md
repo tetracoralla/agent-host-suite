@@ -86,10 +86,15 @@ setup or Get featured tools (including Armorial) after a Standard install.
 It is not a marketplace. How Codex projections relate to session Skill/MCP
 paths is in [Discovery and projection](docs/DISCOVERY_PROJECTION.md).
 
-Setup and Tools also present optional visual task invitations for the admitted
-set. A person can copy an editable example into a new Agent task, ignore it, or
-remove the tool; the card is not a rating or adoption verdict. Provider authors
-and private contributors can follow the separate
+The Manager opens on tools installed on this machine. An empty installation
+stays visibly empty, with compatible recommendations below it; **Browse** opens
+the complete available catalog and GitHub compatibility preview. **Agents**
+shows local Agent shells and their connection state separately. Product rows
+use each admitted product's recognizable logo, short job label, current
+availability, and one direct action. Choosing **Use** hands an editable example
+to a new Agent task; the prompt does not compete with product identity in the
+main list, and it is not a rating or adoption verdict.
+Provider authors and private contributors can follow the separate
 [ecosystem participation paths](docs/ECOSYSTEM_PATHS.md).
 
 ## Profiles

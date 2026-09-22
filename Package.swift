@@ -10,7 +10,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "AgentHostBootstrap", path: "Sources/AgentHostBootstrap"),
-        .executableTarget(name: "AgentHostManager", dependencies: ["AgentHostBootstrap"], path: "Sources/AgentHostManager"),
+        .executableTarget(
+            name: "AgentHostManager",
+            dependencies: ["AgentHostBootstrap"],
+            path: "Sources/AgentHostManager",
+            resources: [.process("Resources")]
+        ),
         .executableTarget(name: "AgentHostCLIShim", dependencies: ["AgentHostBootstrap"], path: "Sources/AgentHostCLIShim"),
     ]
 )

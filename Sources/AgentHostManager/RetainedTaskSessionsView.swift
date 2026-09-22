@@ -14,7 +14,7 @@ struct RetainedTaskSessionsView: View {
     var body: some View {
         let providers = providerIDs
         let catalog = store.taskSourceCatalog?.provider == provider ? store.taskSourceCatalog : nil
-        Panel {
+        DataSection {
             Text(L10n.text("Task activity")).font(.headline)
             if providers.isEmpty {
                 Text(L10n.text("No retained task activity for this Agent app."))
@@ -28,9 +28,10 @@ struct RetainedTaskSessionsView: View {
                 }
                 if let catalog { sourceList(catalog) }
             }
-            Text(L10n.text("Direct calls are observed execution. Static references are not. Exported details contain metadata only and no Host verdict."))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if let catalog, catalog.sources.contains(where: { $0.staticReferences > 0 }) {
+                Text(L10n.text("Static references do not prove execution."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .fileExporter(
             isPresented: $isPresentingExporter,

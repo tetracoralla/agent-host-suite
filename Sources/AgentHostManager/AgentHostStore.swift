@@ -26,6 +26,7 @@ final class AgentHostStore: ObservableObject {
     // page shows this so the handoff stays explained after the section switch.
     @Published private(set) var exampleTaskHandoff: String?
     @Published var requestedSection: ManagerSection?
+    @Published var exampleTaskDrafts: [String: String] = [:]
     @Published private(set) var isBusy = false
     @Published private(set) var isBlockingWork = false
     @Published private(set) var currentAction: String?
@@ -305,7 +306,7 @@ final class AgentHostStore: ObservableObject {
             )
             return tool(
                 id: id,
-                name: suite?.components?[id]?.displayName ?? metadata.name,
+                name: suite?.components?[id]?.displayName == id ? metadata.name : (suite?.components?[id]?.displayName ?? metadata.name),
                 summary: suite?.components?[id]?.summary ?? metadata.summary,
                 systemImage: metadata.systemImage,
                 author: suite?.components?[id]?.author,
@@ -346,6 +347,22 @@ final class AgentHostStore: ObservableObject {
 
     func isFeaturedToolInstalled(_ id: String) -> Bool {
         suite?.components?[id] != nil
+    }
+
+    func featuredToolVersion(_ id: String) -> String? {
+        suite?.components?[id]?.version
+    }
+
+    func agentAppIcon(_ id: String) -> NSImage? {
+        let app = ManagerAgentApp.named(id)
+        let candidates: [URL?] = [
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier(forHost: id)),
+            alternateBundleIdentifier(forHost: id).flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) },
+            applicationURLIfPresent("/Applications/\(app.name).app"),
+            applicationURLIfPresent("\(NSHomeDirectory())/Applications/\(app.name).app"),
+        ]
+        guard let url = candidates.compactMap({ $0 }).first else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
     }
 
     private var releaseManifestPath: String? {
@@ -862,12 +879,17 @@ final class AgentHostStore: ObservableObject {
     func previewGitHubTool(_ url: String) async {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        githubPreview = nil
         await work("Previewing GitHub project") {
             self.githubPreview = try await self.cli.run(
                 ["tools", "add", "--github", trimmed, "--preview"],
                 as: GitHubProjectPreview.self
             )
         }
+    }
+
+    func clearGitHubPreview() {
+        githubPreview = nil
     }
 
     func addGitHubTool(_ url: String) async {

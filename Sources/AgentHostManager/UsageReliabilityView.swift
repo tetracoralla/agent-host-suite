@@ -30,7 +30,7 @@ struct UsageReliabilityView: View {
                     .frame(maxWidth: .infinity, minHeight: 300)
                 } else if let usage = store.usage {
                     if usage.observationSource == "cached-agent-host-refresh" {
-                        Panel {
+                        DataSection {
                             NoticeView(
                                 title: "Showing the last completed refresh",
                                 message: "The live monitoring snapshot is temporarily unavailable. No stale result is presented as current.",
@@ -61,7 +61,7 @@ struct UsageReliabilityView: View {
     }
 
     @ViewBuilder private func traceCoverage(_ usage: UsageSummary) -> some View {
-        Panel {
+        DataSection {
             Text(L10n.text("Agent trace coverage")).font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: 12) {
                 ActivityMetric(value: usage.trace.modelSteps, label: L10n.text("Model steps"))
@@ -99,7 +99,7 @@ struct UsageReliabilityView: View {
 
     @ViewBuilder private func providerActivity(_ usage: UsageSummary) -> some View {
         let providers = providerIDs(usage)
-        Panel {
+        DataSection {
             Text(L10n.text("Agent activity")).font(.headline)
             if providers.isEmpty {
                 Text(L10n.text("No supported Agent activity was observed in this window."))
@@ -142,7 +142,7 @@ struct UsageReliabilityView: View {
     }
 
     @ViewBuilder private func reliability(_ usage: UsageSummary) -> some View {
-        Panel {
+        DataSection {
             Text(L10n.text("Observed outcomes")).font(.headline)
             HStack(spacing: 26) {
                 ActivityMetric(value: usage.reliability.measuredToolCalls, label: L10n.text("Measured calls"))
@@ -158,7 +158,7 @@ struct UsageReliabilityView: View {
 
     @ViewBuilder private func tools(_ usage: UsageSummary) -> some View {
         let displayed = Array(usage.tools.entries.prefix(showAllTools ? usage.tools.entries.count : 8))
-        Panel {
+        DataSection {
             HStack {
                 Text(L10n.text("Tool activity")).font(.headline)
                 Spacer()
@@ -199,7 +199,7 @@ struct UsageReliabilityView: View {
                     Button(L10n.text(showAllTools ? "Show less" : "Show more tools")) { showAllTools.toggle() }
                         .buttonStyle(.link)
                 }
-                Text(L10n.text("Script references do not prove execution. Binding counts may include older open sessions; unrelated tool updates do not restart this window."))
+                Text(L10n.text("Script references are not execution; open tasks may use older bindings."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -207,9 +207,10 @@ struct UsageReliabilityView: View {
     }
 
     @ViewBuilder private func versionHistory(_ usage: UsageSummary) -> some View {
-        Panel {
+        DataSection {
             HStack {
                 Text(L10n.text("Version history")).font(.headline)
+                    .help(L10n.text("Version totals survive updates and raw-event cleanup; earlier deleted records cannot be recovered."))
                 Spacer()
                 Button(L10n.text(copiedAnalysis ? "Analysis request copied" : "Copy analysis request")) {
                     let prompt = L10n.text("Open the usage report in your Agent.")
@@ -264,8 +265,6 @@ struct UsageReliabilityView: View {
             } else {
                 Text(L10n.text("No version-attributed execution history is available yet.")).foregroundStyle(.secondary)
             }
-            Text(L10n.text("Version totals survive updates and raw-event cleanup. Earlier deleted records cannot be recovered. Paste the analysis request into your Agent to interpret the current data."))
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -293,7 +292,7 @@ struct UsageReliabilityView: View {
     }
 
     @ViewBuilder private func coverage(_ usage: UsageSummary) -> some View {
-        Panel {
+        DataSection {
             Text(L10n.text("What monitoring can tell you")).font(.headline)
             CoverageRow(label: L10n.text("Tool calls"), item: usage.coverage.toolInvocation)
             CoverageRow(label: L10n.text("Runtime outcomes"), item: usage.coverage.runtimeOutcome)

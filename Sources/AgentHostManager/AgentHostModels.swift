@@ -169,37 +169,34 @@ struct ManagerSetupTool: Equatable, Identifiable, Sendable {
     let id: String
     let name: String
     let summary: String
+    let details: String
     let systemImage: String
-    let task: String?
-    let outcome: String?
     let examplePrompt: String?
-    let visualLabel: String?
-    let tone: String?
+    let logoResource: String?
+    let repositoryURL: String?
 
     init(
         id: String,
         name: String,
         summary: String,
+        details: String = "",
         systemImage: String,
-        task: String? = nil,
-        outcome: String? = nil,
         examplePrompt: String? = nil,
-        visualLabel: String? = nil,
-        tone: String? = nil
+        logoResource: String? = nil,
+        repositoryURL: String? = nil
     ) {
         self.id = id
         self.name = name
         self.summary = summary
+        self.details = details
         self.systemImage = systemImage
-        self.task = task
-        self.outcome = outcome
         self.examplePrompt = examplePrompt
-        self.visualLabel = visualLabel
-        self.tone = tone
+        self.logoResource = logoResource
+        self.repositoryURL = repositoryURL
     }
 
     var hasTaskExperience: Bool {
-        task != nil && outcome != nil && examplePrompt != nil && visualLabel != nil
+        examplePrompt != nil
     }
 }
 
@@ -232,35 +229,32 @@ enum ManagerSetupPolicy {
                 ManagerSetupTool(
                     id: "math-anchor",
                     name: "Math Anchor",
-                    summary: "Exact and scientific calculation",
+                    summary: "Exact calculation",
+                    details: "Exact and reliability-sensitive mathematics for Agent work.",
                     systemImage: "function",
-                    task: "Verify exact math without approximation",
-                    outcome: "Exact result with the calculation checked",
                     examplePrompt: "Calculate 9,999,999,999 × 87 exactly, show the result, and verify it.",
-                    visualLabel: "9,999,999,999 × 87",
-                    tone: "indigo"
+                    logoResource: "math-anchor.svg",
+                    repositoryURL: "https://github.com/tetracoralla/math-anchor"
                 ),
                 ManagerSetupTool(
                     id: "migratory-time",
                     name: "Migratory Time",
-                    summary: "Reliable worldwide time conversion",
+                    summary: "World time",
+                    details: "Timezone conversion with calendar and daylight-saving rules.",
                     systemImage: "globe.americas",
-                    task: "Coordinate a time across cities",
-                    outcome: "Local date and time with zone rules applied",
                     examplePrompt: "Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.",
-                    visualLabel: "09:00  SHA → SFO",
-                    tone: "teal"
+                    logoResource: "migratory-time.png",
+                    repositoryURL: "https://github.com/tetracoralla/migratory-time"
                 ),
                 ManagerSetupTool(
                     id: "armorial",
                     name: "Armorial",
-                    summary: "Choose project-aware icons without redrawing them",
+                    summary: "Project icons",
+                    details: "Select and render reusable icons that fit the current project.",
                     systemImage: "shield.lefthalf.filled",
-                    task: "Choose an icon that fits the project",
-                    outcome: "A reusable SVG from the project-aware set",
                     examplePrompt: "Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.",
-                    visualLabel: "◇  ○  ✦",
-                    tone: "orange"
+                    logoResource: "armorial.svg",
+                    repositoryURL: "https://github.com/tetracoralla/armorial"
                 ),
             ]
         case "developer":
@@ -362,8 +356,11 @@ enum ManagerSourcePolicy {
     static func versionSummary(applicationVersion: String?, applicationBuild: String?, environmentVersion: String?) -> String {
         let app = [applicationVersion, applicationBuild.map { "build \($0)" }].compactMap { $0 }.joined(separator: " · ")
         let env = environmentVersion ?? L10n.text("not installed")
+        if app.isEmpty {
+            return L10n.format("Environment {env}", ["env": env])
+        }
         return L10n.format("App {app} · Env {env}", [
-            "app": app.isEmpty ? L10n.text("unknown") : app,
+            "app": app,
             "env": env,
         ])
     }
@@ -1468,14 +1465,14 @@ enum ManagerSection: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Primary sidebar: install → tools → versions → connect → history. Usage is advanced.
-    static var primaryCases: [ManagerSection] { [.overview, .tools, .updates, .agentApps, .activity] }
+    /// Primary sidebar follows the user's objects: installed → discover → Agent apps.
+    static var primaryCases: [ManagerSection] { [.tools, .updates, .agentApps] }
 
     var title: String {
         switch self {
         case .overview: "Overview"
         case .tools: "Tools"
-        case .updates: "Updates"
+        case .updates: "Browse"
         case .agentApps: "Agents"
         case .activity: "History"
         case .usage: "Usage"
@@ -1485,9 +1482,9 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .overview: "house"
-        case .tools: "wrench.and.screwdriver"
-        case .updates: "arrow.triangle.2.circlepath"
-        case .agentApps: "link"
+        case .tools: "square.grid.2x2"
+        case .updates: "shippingbox"
+        case .agentApps: "macwindow.on.rectangle"
         case .activity: "clock"
         case .usage: "chart.bar.xaxis"
         }

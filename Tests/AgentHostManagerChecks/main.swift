@@ -463,8 +463,8 @@ do {
     expect(repairPlan.changed.isEmpty && repairPlan.componentChanges.isEmpty, "repair preview must not propose tool version changes")
     expect(repairPlan.repairs.monitoring && repairPlan.repairs.hosts == ["codex"], "repair preview must name connection and monitoring recovery")
     expect(
-        ManagerSection.primaryCases.map(\.rawValue) == ["overview", "tools", "updates", "agentApps", "activity"],
-        "primary Manager destinations follow Overview → Tools → Updates → Agents → History"
+        ManagerSection.primaryCases.map(\.rawValue) == ["tools", "updates", "agentApps"],
+        "primary Manager destinations follow Installed tools → Browse → Agents"
     )
 
     let usagePayload = Data(#"""
@@ -873,10 +873,12 @@ do {
     expect(faultGuidance.primaryActionID == .reviewRepair, "tool faults recover through Review Repair")
     expect(faultGuidance.primaryActionLabel == "Repair", "repair CTA label must be a short verb")
     expect(!faultGuidance.readyToWork, "tool faults must not report ready-to-work")
+    expect(faultGuidance.statusLine == "Needs repair", "fault status must be product language, not the raw doctor message")
+    expect(faultGuidance.blockingMessage == "Armorial runtime probe failed", "the named fault stays in details")
 
     UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)
     expect(L10n.text("Overview") == "总览", "overview destination must provide Simplified Chinese copy")
-    expect(L10n.text("Agents") == "连接 Agent", "agents destination must provide Simplified Chinese copy")
+    expect(L10n.text("Agents") == "Agent", "agents destination must provide Simplified Chinese copy")
     expect(L10n.text("History") == "记录", "history destination must provide Simplified Chinese copy")
     expect(L10n.text("Advanced") == "高级", "advanced section must provide Simplified Chinese copy")
     expect(L10n.text("Usage") == "使用情况", "the Manager must provide Simplified Chinese product copy")

@@ -341,20 +341,13 @@ enum ManagerPostSetupPolicy {
         return (
             .toolFault,
             "Needs repair",
-            shortReason(first.message, fallback: "Needs repair"),
+            "Needs repair",
             first.message,
             .reviewRepair,
             "Review Repair (or Run Full Check), fix the named fault, then open a new Agent task. Do not keep working in an old task.",
             first.id,
             first.message
         )
-    }
-
-    private static func shortReason(_ message: String, fallback: String) -> String {
-        let one = message.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if one.isEmpty { return fallback }
-        if one.count > 72 { return String(one.prefix(69)) + "…" }
-        return one
     }
 
     private static func label(for action: ManagerPostSetupGuidance.PrimaryActionID, appName: String?) -> String {

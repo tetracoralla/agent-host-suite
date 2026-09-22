@@ -224,26 +224,43 @@ durable objects:
 - **Activity** — bounded local lifecycle history translated into product names
   and human labels rather than raw state-field identifiers.
 
-Before installation, the same app presents one setup path: selected standard
-tools, detected Agent app, preflight review, then installation. After
-installation, Overview leads with a start-work handoff (open a new Agent task
-or connect an Agent), Host-observed facts, remaining gaps, and classified
-recovery paths (`not-connected`, `stale-session`, `permission`, `tool-fault`).
-Green status rows are supporting detail, not the destination. Host confirms
-only what it can observe and does not pretend an already-open task loaded
-tools. Recoverable errors use product language and one next action; raw paths
-and protocol detail remain outside the primary interface.
+Before installation, the same app opens on an honest empty local inventory and
+puts compatible recommendations below it. Installation still receives a
+preflight review. After installation, local tools occupy that first section;
+recommendations move below them. **Agents** exposes connection and repair
+without mixing Agent shells into the tool catalog, and keeps a start-work
+handoff with one next action (and its classified recovery path on demand) when
+something blocks new work. Changing the tool set says plainly that already-open
+tasks keep their old tools. Host confirms only what it
+can observe and does not pretend an already-open task loaded tools. Recoverable
+errors use product language and one next action; raw paths and protocol detail
+remain outside the primary interface.
+
+Tool collections use compact, unframed rows with a product mark, name, short
+purpose, and one availability or attention indicator. Versions, configuration,
+and source links belong in a full-page detail. Returning preserves the search,
+position, and keyboard focus; refresh preserves an edited example task. Normal
+states do not repeat their icon as a caption or legend. Consequential differences
+(such as pausing on-demand tools when the last active tool is turned off) remain
+explicit at the action. Agent connections use aligned rows, lifecycle changes use
+a chronology, and usage uses data sections rather than a universal card layout.
 
 The Manager refreshes stale in-memory state on foreground return and shows when
 visible status was last checked. Automatic refresh does not launch Agent apps;
 mutations remain disabled while current local state is being reacquired. Full
 Check is the explicit current Agent-app binding route.
 
-The primary interface leads with a few task-relevant states and one useful next
-action; history, provenance, and machine detail remain available on demand. It
-does not require a person to read an evidence chain before they can act. It
-may show a short visual task invitation with one editable example; copying it
-remains optional and does not record adoption. It does not show MCP schemas,
+**Tools** is the default destination. It shows tools installed on this machine
+first, including a compact empty state when there are none. Compatible
+recommendations follow that local inventory; a person can search or open
+**Browse** for the complete available catalog.
+
+The primary interface uses recognizable product identity, a short job label,
+current availability, and one useful next action; history, provenance, and
+machine detail remain available on demand. It does not require a person to read
+an evidence chain before acting. An editable example can be handed to a new
+Agent task after the person chooses **Use**; it remains optional and does not
+record adoption. It does not show MCP schemas,
 Agent reasoning, Capability catalogs, protocol metadata, or long marketing
 explanations. Usage &
 Reliability shows recent task activity through direct calls, errors, and static

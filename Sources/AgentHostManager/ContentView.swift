@@ -2,39 +2,17 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var store: AgentHostStore
-    @SceneStorage("managerSection") private var selection: ManagerSection = .overview
+    @SceneStorage("managerSection") private var selection: ManagerSection = .tools
 
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
+                .navigationSplitViewColumnWidth(min: 160, ideal: 176, max: 220)
         } detail: {
             detail
         }
         .toolbar {
-            ToolbarItemGroup {
-                if store.suite?.configured == true {
-                    Button { Task { await store.runDoctor() } } label: {
-                        Label(L10n.text("Check"), systemImage: "stethoscope")
-                    }
-                    .help(L10n.text("Run a full environment check"))
-                    .disabled(store.isBusy)
-
-                    if store.health.needsRepair {
-                        Button { Task { await store.prepareRepair() } } label: {
-                            Label(L10n.text("Repair"), systemImage: "wrench.and.screwdriver")
-                        }
-                        .help(L10n.text("Repair the installed environment"))
-                        .disabled(store.isBusy)
-                    }
-
-                    Button { Task { await store.prepareUpdate() } } label: {
-                        Label(L10n.text("Update"), systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .help(L10n.text("Check for compatible updates"))
-                    .disabled(store.isBusy)
-                }
-
+            ToolbarItem {
                 SettingsLink {
                     Label(L10n.text("Settings"), systemImage: "gearshape")
                 }
@@ -74,6 +52,11 @@ struct ContentView: View {
             }
         }
         .accessibilityElement(children: .contain)
+        .onAppear {
+            // Older builds persisted Overview as the initial destination even
+            // though it is no longer part of the primary navigation.
+            if selection == .overview { selection = .tools }
+        }
         .onChange(of: store.requestedSection) { _, section in
             guard let section else { return }
             selection = section
@@ -83,18 +66,17 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: $selection) {
+            ForEach(ManagerSection.primaryCases) { section in
+                Label(L10n.text(section.title), systemImage: section.systemImage)
+                    .tag(section)
+            }
             if store.suite?.configured == true {
-                ForEach(ManagerSection.primaryCases) { section in
-                    Label(L10n.text(section.title), systemImage: section.systemImage)
-                        .tag(section)
-                }
-                Section(L10n.text("Advanced")) {
+                Section(L10n.text("Activity")) {
+                    Label(L10n.text(ManagerSection.activity.title), systemImage: ManagerSection.activity.systemImage)
+                        .tag(ManagerSection.activity)
                     Label(L10n.text(ManagerSection.usage.title), systemImage: ManagerSection.usage.systemImage)
                         .tag(ManagerSection.usage)
                 }
-            } else {
-                Label(L10n.text(ManagerSection.overview.title), systemImage: ManagerSection.overview.systemImage)
-                    .tag(ManagerSection.overview)
             }
         }
         .listStyle(.sidebar)
@@ -127,24 +109,17 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var detail: some View {
-        if store.suite?.configured == true {
-            switch selection {
-            case .overview: EnvironmentView(store: store)
-            case .tools: ToolsView(store: store)
-            case .updates: UpdatesView(store: store)
-            case .agentApps: AgentAppsView(store: store)
-            case .usage: UsageReliabilityView(store: store)
-            case .activity: ActivityView(store: store)
-            }
-        } else {
-            SetupView(store: store)
+        switch selection {
+        case .overview: ToolsView(store: store)
+        case .tools: ToolsView(store: store)
+        case .updates: ToolLibraryView(store: store)
+        case .agentApps: AgentAppsView(store: store)
+        case .usage:
+            if store.suite?.configured == true { UsageReliabilityView(store: store) }
+            else { ToolsView(store: store) }
+        case .activity:
+            if store.suite?.configured == true { ActivityView(store: store) }
+            else { ToolsView(store: store) }
         }
-    }
-}
-
-private extension ManagerHealth {
-    var needsRepair: Bool {
-        if case .attention = self { return true }
-        return false
     }
 }

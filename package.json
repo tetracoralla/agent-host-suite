@@ -32,6 +32,7 @@
     "schemas/",
     "skills/",
     "src/",
+    "Sources/AgentHostManager/Resources/ToolLogos/",
     "LICENSE",
     "NOTICE",
     "THIRD_PARTY_NOTICES.txt",

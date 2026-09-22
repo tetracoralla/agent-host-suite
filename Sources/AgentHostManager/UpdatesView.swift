@@ -1,187 +1,116 @@
-import AppKit
 import SwiftUI
 
-struct UpdatesView: View {
+/// Keep the collection mounted while a detail is open, so returning preserves
+/// the search, scroll position, and keyboard focus.
+struct ToolsView: View {
     @ObservedObject var store: AgentHostStore
-    @State private var githubURL = ""
+    @SceneStorage("myToolsSearch") private var searchText = ""
+    @State private var selectedID: String?
+    @FocusState private var focusedID: String?
 
     var body: some View {
+        ZStack {
+            collection
+                .opacity(selectedID == nil ? 1 : 0)
+                .allowsHitTesting(selectedID == nil)
+                .accessibilityHidden(selectedID != nil)
+            if let selectedID {
+                ToolDetailView(store: store, toolID: selectedID) {
+                    self.selectedID = nil
+                    focusedID = selectedID
+                }
+                .id(selectedID)
+            }
+        }
+    }
+
+    private var collection: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Updates", subtitle: L10n.text("profiles fetch --carrier downloads an installer. It does not replace Agent Host.")) {
-                    Button(L10n.text("Check for updates")) { Task { await store.checkUpdates() } }
+            VStack(alignment: .leading, spacing: 28) {
+                PageHeader(title: "My tools", subtitle: nil) {
+                    if store.suite?.configured == true {
+                        Menu(L10n.text("Manage")) {
+                            Button(L10n.text("Check for updates")) { Task { await store.checkUpdates() } }
+                            Divider()
+                            if store.suite?.agentToolsPaused == true {
+                                Button(L10n.text("Resume tools")) { Task { await store.resumeTools() } }
+                            } else {
+                                Button(L10n.text("Pause all tools")) { Task { await store.pauseAllTools() } }
+                            }
+                        }
+                        .fixedSize()
                         .disabled(store.isBusy)
-                }
-
-                Panel {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.text("Versions")).font(.headline)
-                        if let items = store.updates?.items, !items.isEmpty {
-                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                if index > 0 { Divider() }
-                                UpdateItemRow(
-                                    item: item,
-                                    isBusy: store.isBusy,
-                                    install: { Task { await store.installUpdate(id: item.id) } }
-                                )
-                            }
-                            if items.contains(where: { $0.kind == "tool" && $0.availability == "update-available" }) {
-                                Button(L10n.text("Install all updates")) { Task { await store.installAllUpdates() } }
-                                    .disabled(store.isBusy)
-                            }
-                        } else {
-                            Text(L10n.text("Check for updates to load current and available versions."))
-                                .foregroundStyle(.secondary)
-                        }
                     }
                 }
-
-                Panel {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.text("Add GitHub project")).font(.headline)
-                        Text(L10n.text("Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it."))
-                            .font(.caption)
+                ToolSearchField(text: $searchText, prompt: "Search tools")
+                if store.suite?.agentToolsPaused == true {
+                    HStack {
+                        Label(L10n.text("All tools are paused."), systemImage: "pause.circle")
                             .foregroundStyle(.secondary)
-                        TextField("https://github.com/owner/repo", text: $githubURL)
-                            .textFieldStyle(.roundedBorder)
-                        HStack {
-                            Button(L10n.text("Preview GitHub project")) {
-                                let url = githubURL
-                                Task { await store.previewGitHubTool(url) }
+                        Spacer()
+                        Button(L10n.text("Resume tools")) { Task { await store.resumeTools() } }
+                            .disabled(store.isBusy)
+                    }
+                }
+                if store.toolSetNeedsFreshTask {
+                    NoticeView(title: "Start a fresh Agent task", message: "", systemImage: "arrow.clockwise.circle", color: .blue)
+                        .help(L10n.text("Open tasks keep their old tools."))
+                }
+                if installedMatches.isEmpty {
+                    ContentUnavailableView(
+                        L10n.text(searchText.isEmpty ? "No installed tools" : "No matching tools"),
+                        systemImage: searchText.isEmpty ? "shippingbox" : "magnifyingglass"
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 150)
+                } else {
+                    LazyVGrid(columns: toolColumns, spacing: 0) {
+                        ForEach(installedMatches) { tool in
+                            ToolRow(name: tool.name, summary: ToolPresentation.summary(tool.id, fallback: tool.summary),
+                                    logo: tool.logo, systemImage: tool.systemImage, toolID: tool.id,
+                                    state: store.suite?.agentToolsPaused == true ? .inactive : tool.state,
+                                    updateAvailable: store.updates?.items?.contains { $0.id == tool.id && $0.availability == "update-available" } == true, paused: store.suite?.agentToolsPaused == true) {
+                                selectedID = tool.id
                             }
-                            .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            Button(L10n.text("Add from GitHub")) {
-                                let url = githubURL
-                                githubURL = ""
-                                Task { await store.addGitHubTool(url) }
-                            }
-                            .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                        if let preview = store.githubPreview {
-                            GitHubPreviewBlock(preview: preview)
+                            .focused($focusedID, equals: tool.id)
                         }
                     }
                 }
+                if !catalogMatches.isEmpty {
+                    HStack {
+                        Text(L10n.text("Recommended")).font(.headline)
+                        Spacer()
+                        Button { store.requestedSection = .updates } label: {
+                            Image(systemName: "arrow.right")
+                        }
+                        .buttonStyle(.plain)
+                        .help(L10n.text("See all"))
+                        .accessibilityLabel(L10n.text("See all"))
+                    }
+                    .padding(.top, 12)
+                    LazyVGrid(columns: toolColumns, spacing: 0) {
+                        ForEach(catalogMatches) { tool in
+                            ToolRow(name: tool.name, summary: tool.summary, logo: nil, systemImage: tool.systemImage,
+                                    toolID: tool.id, state: nil) { selectedID = tool.id }
+                                .focused($focusedID, equals: tool.id)
+                        }
+                    }
+                } else if searchText.isEmpty {
+                    Button(L10n.text("Browse more tools")) { store.requestedSection = .updates }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                }
             }
-            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: 900, alignment: .leading)
             .padding(32)
-        }
-    }
-}
-
-private struct UpdateItemRow: View {
-    let item: UpdateItem
-    let isBusy: Bool
-    let install: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            ToolLogoView(logo: item.logo, systemImage: "shippingbox.fill")
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.displayName ?? item.id).font(.headline)
-                Text(versionLine)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                if let note = item.note ?? item.upgrade {
-                    Text(L10n.text(note)).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 20)
-            VStack(alignment: .trailing, spacing: 8) {
-                Text(L10n.text(availabilityLabel))
-                    .font(.caption)
-                    .foregroundStyle(item.availability == "update-available" ? Color.orange : Color.secondary)
-                if item.availability == "update-available" {
-                    Button(L10n.text("Install update"), action: install)
-                        .disabled(isBusy)
-                }
-            }
-        }
-        .padding(.vertical, 3)
-    }
-
-    private var versionLine: String {
-        let installed = item.installedVersion ?? L10n.text("not installed")
-        if let available = item.availableVersion, available != item.installedVersion {
-            return "\(installed) → \(available)"
-        }
-        return installed
-    }
-
-    private var availabilityLabel: String {
-        switch item.availability {
-        case "update-available": "update available"
-        case "current": "current"
-        case "not-installed": "not installed"
-        case "no-platform-asset": "No asset for this platform"
-        case "check-failed": "check failed"
-        case "compatible-after-host-update": "compatible after Host update"
-        case "installed-official-upgrade": "official upgrade"
-        default: item.availability ?? "—"
-        }
-    }
-}
-
-private struct GitHubPreviewBlock: View {
-    let preview: GitHubProjectPreview
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ToolLogoView(logo: preview.presentation?.logo, systemImage: "shippingbox")
-            VStack(alignment: .leading, spacing: 4) {
-                Text(preview.presentation?.displayName ?? preview.origin?.repository ?? "")
-                    .font(.headline)
-                if let summary = preview.presentation?.summary {
-                    Text(summary).foregroundStyle(.secondary)
-                }
-                Text([preview.origin?.tag, preview.compatibility?.available == true ? L10n.text("This platform") : L10n.text("No asset for this platform")].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if preview.downloadedPackage == true {
-                    Text(L10n.text("Preview does not download the plugin archive."))
-                        .font(.caption)
-                }
-            }
-        }
-        .padding(.top, 8)
-    }
-}
-
-struct ToolLogoView: View {
-    let logo: ToolLogo?
-    let systemImage: String
-
-    var body: some View {
-        if let dataUrl = logo?.dataUrl, let url = URL(string: dataUrl) {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Image(systemName: systemImage)
-            }
-            .frame(width: 28, height: 28)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-        } else if let nsImage = verifiedInstalledImage {
-            Image(nsImage: nsImage)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 28, height: 28)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-        } else {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .foregroundStyle(.blue)
-                .frame(width: 28, height: 28)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
-    private var verifiedInstalledImage: NSImage? {
-        guard let logo else { return nil }
-        let path = logo.absolutePath ?? (logo.path?.hasPrefix("/") == true ? logo.path : nil)
-        guard let path, FileManager.default.fileExists(atPath: path) else { return nil }
-        if let expected = logo.bytes {
-            let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? -1
-            if size != expected { return nil }
-        }
-        return NSImage(contentsOfFile: path)
+    private var installedMatches: [ManagedTool] {
+        store.managedTools.filter { ToolPresentation.matches(searchText, name: $0.name, summary: ToolPresentation.summary($0.id, fallback: $0.summary)) }
+    }
+    private var catalogMatches: [ManagerSetupTool] {
+        Array(store.featuredCatalogTools.filter {
+            !store.isFeaturedToolInstalled($0.id) && ToolPresentation.matches(searchText, name: $0.name, summary: L10n.text($0.summary) + " " + L10n.text($0.details))
+        }.prefix(searchText.isEmpty ? 4 : Int.max))
     }
 }

@@ -62,8 +62,10 @@ if [[ ! -f "${suite_root}/macos/AgentHost.icns" ]]; then
   "${suite_root}/scripts/build-app-icon.sh" >/dev/null
 fi
 cp "${suite_root}/macos/AgentHost.icns" "${staging_path}/Contents/Resources/AgentHost.icns"
+cp -R "${suite_root}/Sources/AgentHostManager/Resources/ToolLogos" "${staging_path}/Contents/Resources/ToolLogos"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${AGENT_HOST_APP_BUILD_VERSION:-1}" "${staging_path}/Contents/Info.plist"
-for item in bin src catalog schemas skills package.json node_modules LICENSE NOTICE THIRD_PARTY_NOTICES.txt; do
+for item in bin src catalog schemas skills Sources/AgentHostManager/Resources/ToolLogos package.json node_modules LICENSE NOTICE THIRD_PARTY_NOTICES.txt; do
+  mkdir -p "${staging_path}/Contents/Resources/agent-host-suite/$(dirname "${item}")"
   cp -R "${suite_root}/${item}" "${staging_path}/Contents/Resources/agent-host-suite/${item}"
 done
 cp "${suite_root}/README.md" "${staging_path}/Contents/Resources/agent-host-suite/README.md"
