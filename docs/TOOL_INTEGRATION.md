@@ -62,6 +62,17 @@ Agent Host owns and generates that forwarding script. The CLI again uses only
 the component executable or verified Suite Node and declares exact version
 arguments. This is a low-context route to an already-installed Provider, not a
 generic provider invocation tool, a ranking, or permission to execute source.
+The generated launcher binds `runtime.workspaceEnvironment` to the same
+explicit canonical Host workspace as MCP, including while MCP is inactive.
+A declared workspace with no grant fails projection preflight. The CLI keeps
+the invoking Agent's working directory and argument semantics; MCP's
+`runtime.cwd` is not a CLI cwd declaration. The CLI locates bundled resources
+independently of the caller's working directory. Workspace authorization is
+not inferred from either working directory. Changed grant values produce a
+new immutable launcher projection rather than reusing stale bytes.
+Existing installations receive regenerated projections through the supported
+Host repair/update route after updating Host code; already-open Agent tasks
+still require the documented fresh-task handoff.
 
 In v0.4, `directCapability` binds one Provider Manifest v0.3, one canonical
 Capability Profile, exact operation schemas, the contained adapter command,

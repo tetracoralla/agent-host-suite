@@ -340,6 +340,7 @@ async function installHost(id, manifest, previous, paths, runner, options, depen
     replaceConflicts: options.replaceHostConflicts,
   })
   await preflightProviderSkills(id, manifest, paths, {
+    workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
     homeRoot: dependencies.hostSkillHome,
     previous: previous?.providerSkills,
     replaceConflicts: options.replaceHostConflicts,
@@ -379,6 +380,7 @@ async function installHost(id, manifest, previous, paths, runner, options, depen
       replaceConflicts: options.replaceHostConflicts,
     })
     providerSkills = await installProviderSkills(id, manifest, paths, previous?.providerSkills, {
+      workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
       homeRoot: dependencies.hostSkillHome,
       replaceConflicts: options.replaceHostConflicts,
     })
@@ -803,6 +805,7 @@ async function inspectActivation(previous, manifest, runner, options, workspaceR
         replaceConflicts: options.replaceHostConflicts,
       })
       const providerSkills = await preflightProviderSkills(id, agents, operationsPaths, {
+        workspaceRoot,
         homeRoot: dependencies.hostSkillHome,
         previous: managed.providerSkills,
         replaceConflicts: options.replaceHostConflicts,

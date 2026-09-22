@@ -140,6 +140,7 @@ try {
   }
   claudeProviderSkills = await installProviderSkills('claude', inactiveManifest, claudePaths, [], {
     homeRoot: join(stateRoot, 'claude-home'),
+    workspaceRoot: stateRoot,
   })
   const claudeArmorial = claudeProviderSkills.find((item) => item.id === 'icon-svg-select')
   assert.notEqual(claudeArmorial, undefined)
@@ -156,6 +157,7 @@ try {
   }
   zcodeProviderSkills = await installProviderSkills('zcode', inactiveManifest, zcodePaths, [], {
     homeRoot: join(stateRoot, 'zcode-home'),
+    workspaceRoot: stateRoot,
   })
   const zcodeArmorial = zcodeProviderSkills.find((item) => item.id === 'icon-svg-select')
   assert.notEqual(zcodeArmorial, undefined)

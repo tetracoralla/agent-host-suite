@@ -1,25 +1,31 @@
 # Architecture
 
 ```text
-Capability / Procedure standards (independent, normative)
-                         |
-Provider releases -------+------ compatibility manifest
-                         |                |
-                         v                v
-                   Agent Host Manager
-                   |       |        |
-             host adapter  |   optional observability
-                   |       |
-     Codex / ZCode / Claude +--- Direct Execution Runtime
-             official              |
-          extension point      provider bindings
-                   |               |
-                   +------ provider artifacts
+Manager (optional UI) ---+
+CLI --------------------+--> Host lifecycle and instance management
+                              |       |                  |
+                       host adapters  |          optional observation
+                              |       +--> configured execution service
+                              v
+                  supported Agent-app extension points
+
+Invocation after configuration (no Manager-window dependency):
+Agent app ---------------------------> Provider MCP / Skill + CLI
+consumer with selected typed work ---> Direct Execution Runtime ---> Provider
+
+Independent Capability / Procedure standards govern bindings that adopt them;
+native Provider integrations do not require semantic standardization first.
 ```
+
+The lifecycle layer admits the selected Provider release bytes and compatibility
+manifest, owns grants and recoverable host configuration, and prepares the
+invocation routes. It is not itself a universal Agent reasoning or scheduling
+loop. The product's stable responsibilities and evolution policy live in
+[`PRODUCT_MODEL.md`](PRODUCT_MODEL.md#stable-responsibilities-evolving-integrations).
 
 ## No Agent app patching
 
-The Manager calls documented Agent-app extension commands and writes only state
+Host adapters call documented Agent-app extension commands and write only state
 owned by those public mechanisms. An Agent-app update may require a fresh
 compatibility check, but it cannot overwrite a patched runtime because Agent
 Host never patches the Agent app.
@@ -41,10 +47,13 @@ exact displaced user entries for restoration, preserves unrelated config, and
 projects Skills from immutable Host storage. It does not patch ZCode, its plugin
 cache, model provider, credentials, or running sessions.
 
-## No central Agent tool
+## Current invocation routes
 
-The model continues to see provider-specific domain tools. It never receives a
-generic `invoke(provider, operation, opaqueInput)` surface. Once a host already
+The model continues to see provider-specific domain tools, not a generic
+`invoke(provider, operation, opaqueInput)` surface. Ordinary Agent-app MCP
+connections call those Providers directly; a generated Skill launcher calls
+its exact installed CLI. Neither route requires the Direct Runtime to be a
+mandatory gateway. Once a consumer already
 has a selected, validated Capability, Procedure, or declared MCP operation and
 structured input, it can send that closed work below the model to Direct
 Execution Runtime. For a broad MCP Provider such as Math Anchor, the suite
@@ -60,7 +69,8 @@ This projection occurs after selection. Current Codex, ZCode, and Claude public
 extension points do not let the suite replace a tool schema dynamically inside
 an already-open model turn, so their initial Agent catalog still uses each
 Provider's compact advertised schema. Agent Host does not patch the Agent app
-to change that limitation.
+to change that limitation. These are the current adapters' supported routes,
+not a requirement that future harnesses use the same catalog or turn model.
 
 Agent Host does expose one management Skill, not a domain invocation tool. Its
 default launcher calls the packaged `agent-host snapshot --json` interface and

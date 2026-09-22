@@ -5,6 +5,11 @@
 Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工具环境。它只使用公开扩展
 入口连接工具，并在本机运行已选择的结构化任务，不修改 Agent 应用自身。
 
+桌面 Manager 是可选的管理界面，CLI 使用同一套生命周期实现。配置完成后，工具通过受支持的
+MCP、Skill 和 CLI 入口供 Agent 调用，不需要一直打开 Manager 窗口。目标是在 Agent 环境变化时
+继续复用有用的能力，而不是承诺今天的适配器永久覆盖所有模型和 Harness；具体边界与演进原则见
+[产品模型](docs/PRODUCT_MODEL.md#stable-responsibilities-evolving-integrations)。
+
 本仓库是 **Agent Host Suite** 的分发单元；npm 包、CLI、schema 等稳定技术标识继续使用
 这个名称。
 

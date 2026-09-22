@@ -51,6 +51,14 @@ Agent Host is a distribution and local operations product. The Agent Host Suite
 is this repository's technical distribution unit. Neither is the Agent-Host
 architecture itself, and Agent Host is not required for standards adoption.
 
+The Manager client is an optional human control surface, not the ecosystem's
+protocol or a task Agent. Its purpose is to make installation, connections,
+grants, updates and recovery convenient. The CLI uses the same lifecycle
+implementation. Once configured, Agent apps invoke the projected Provider
+entrypoints or separately managed execution service without routing each call
+through an open Manager window. This does not make the configured runtime or
+background services optional for calls that depend on them.
+
 Its durable product object is an **Agent environment**: one installed
 compatibility set containing:
 
@@ -99,11 +107,62 @@ quality. Replacing configuration requires a newly built and previewed archive.
 - Agent apps remain independently updated hosts. Agent Host never patches their
   binaries or private implementation files.
 
-Agent Host never exposes a model-facing generic Provider invocation tool.
+Agent-facing domain calls retain Provider identity and typed meaning. Current
+integrations do not expose a generic opaque Provider invocation tool.
 Direct Runtime receives only already-selected, schema-validated structured
-work. Details of that carrier, lifecycle locking, service recovery, process
+work; ordinary native MCP calls do not have to pass through it. Details of
+those routes, lifecycle locking, service recovery, process
 scope, state, and observation projection belong to
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## Stable responsibilities, evolving integrations
+
+The strategic aim is to make useful Provider capabilities cheaper to adopt and
+keep using as Agent apps, models and implementations change. It is not to make
+every participant adopt today's desktop client, tool-call loop, transport or
+execution engine. The current local desktop product is one delivery path, not
+a claim that every future consumer must look like it.
+
+The narrow waist concerns **mandatory shared meaning**, not the breadth of
+useful products. Capability contracts can preserve the meaning, version,
+inputs, outputs and failures of an operation where implementations genuinely
+share them. Host preserves the selected implementation's identity, explicit
+authority, configuration and lifecycle; it must not silently change semantics
+to make an adapter appear compatible. Provider-native features can remain
+native. Procedure contracts apply to settled reusable methods, not to every
+Agent's planning or private working state. None of these standards requires
+the Manager or this Suite as its universal intermediary.
+
+Compatibility is a continuing engineering responsibility, not a promise of no
+future development:
+
+- A model change behind an unchanged supported Agent interface may require no
+  Host change; verify the affected interface rather than inferring compatibility
+  from the model's name or architecture.
+- A changed harness or Provider transport belongs in its adapter when the
+  existing meaning and authority can be preserved. It does not automatically
+  require changing every Provider or the semantic standards.
+- A genuinely new kind of work may need new semantics, lifecycle or authority.
+  Establish it with a concrete consumer and executable cases, then add a
+  versioned contract or a separate binding. Do not disguise missing behavior
+  as a successful legacy call, or add speculative universal fields now.
+
+World models, multimodal agents and large Agent groups are possible consumers,
+not reasons to predefine their memory, scheduling, continuous state or
+coordination in today's mandatory ABI. Current synchronous structured calls
+and the Direct Runtime's read-only, idempotent, closed-world admission scope
+remain actual supported limits, not permanent limits on the whole ecosystem.
+Broadening a safety boundary requires its own implementation and verification;
+this direction does not relax the current checks.
+
+A new integration earns a shared abstraction when real task evidence shows
+preserved meaning and lower adoption or maintenance cost across distinct
+implementations. An adapter name, common JSON envelope or growing catalog
+alone does not establish interoperability. The test is whether useful Provider
+work survives a change of consumer or implementation without rewriting its
+domain behavior or forcing every participant into one Host-specific product
+template. Widespread ecosystem adoption remains an outcome to earn, not a
+property this architecture can declare.
 
 ## Profiles and private overlays
 

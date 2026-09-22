@@ -2,10 +2,17 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-Agent Host installs and manages one compatible local environment for a small
-set of Agent tools. It connects those tools to supported Agent apps through
+Agent Host installs and manages a compatible local environment for Agent
+tools. It connects those tools to supported Agent apps through
 their public extension points and operates local execution without modifying
 the Agent apps themselves.
+
+The desktop Manager is an optional management interface; the CLI uses the same
+lifecycle layer. Configured tools reach Agents through their supported MCP,
+Skill and CLI entrypoints without an open Manager window. The aim is reusable
+capability supply across changing Agent environments, not a promise that
+today's adapters cover every future model or harness. See the
+[product and evolution model](docs/PRODUCT_MODEL.md#stable-responsibilities-evolving-integrations).
 
 This repository contains the **Agent Host Suite** distribution unit. The npm
 package, CLI, schemas, and other stable technical identifiers retain that name.

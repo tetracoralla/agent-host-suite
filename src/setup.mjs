@@ -82,6 +82,7 @@ async function inspectHost(host, manifest, paths, runner, options, dependencies)
     replaceConflicts: options.replaceHostConflicts,
   })
   const providerSkills = await preflightProviderSkills(host, manifest, paths, {
+    workspaceRoot: options.workspaceRoot ?? null,
     homeRoot: dependencies.hostSkillHome,
     replaceConflicts: options.replaceHostConflicts,
   })
@@ -102,6 +103,7 @@ async function installHost(host, manifest, paths, runner, options, dependencies)
     replaceConflicts: options.replaceHostConflicts,
   })
   await preflightProviderSkills(host, manifest, paths, {
+    workspaceRoot: options.workspaceRoot ?? null,
     homeRoot: dependencies.hostSkillHome,
     replaceConflicts: options.replaceHostConflicts,
   })
@@ -138,6 +140,7 @@ async function installHost(host, manifest, paths, runner, options, dependencies)
       replaceConflicts: options.replaceHostConflicts,
     })
     providerSkills = await installProviderSkills(host, manifest, paths, [], {
+      workspaceRoot: options.workspaceRoot ?? null,
       homeRoot: dependencies.hostSkillHome,
       replaceConflicts: options.replaceHostConflicts,
     })

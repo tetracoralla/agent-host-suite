@@ -6,8 +6,9 @@ import { fingerprintRelativeFiles } from '../development-manifest.mjs'
 import { AgentHostError } from '../errors.mjs'
 import { writePrivateJson } from '../json.mjs'
 import { canonicalPathGrants, componentEnvironment } from '../component-environment.mjs'
+import { providerSkillEnvironment, skillLauncherScript } from '../skill-launcher.mjs'
 
-const PROJECTION_SCHEMA = 'openadam.agent-host-codex-projection.v0.2'
+const PROJECTION_SCHEMA = 'openadam.agent-host-codex-projection.v0.3'
 
 function containedRelative(root, candidate, label) {
   const value = relative(root, candidate)
@@ -40,7 +41,7 @@ async function regularFiles(root, current = root, result = []) {
   return result.sort()
 }
 
-function projectionDigest(component, workspaceRoot) {
+function projectionDigest(component, workspaceRoot, launcherScript) {
   const grant = (component.workspaceEnvironment ?? []).length === 0 ? '' : workspaceRoot ?? ''
   const grants = canonicalPathGrants(component.pathGrants)
   const digest = createHash('sha256')
@@ -58,19 +59,11 @@ function projectionDigest(component, workspaceRoot) {
     .update('\0')
   if (Object.keys(grants).length > 0) digest.update(JSON.stringify(grants)).update('\0')
   return digest
+    .update(launcherScript ?? '')
+    .update('\0')
     .update(component.skillOnly === true ? 'skill-only' : 'mcp-active')
     .digest('hex')
     .slice(0, 16)
-}
-
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", `'\\''`)}'`
-}
-
-function batchQuote(value) {
-  const text = String(value)
-  if (/[\u0000\r\n"]/u.test(text)) throw new AgentHostError('CODEX_PROJECTION_INVALID', 'A Windows Skill launcher argument contains unsupported characters')
-  return `"${text.replaceAll('%', '%%')}"`
 }
 
 function projectedLauncherRelativePath(skill) {
@@ -107,7 +100,16 @@ function launcherBinding(component) {
   return null
 }
 
-async function writeSkillLauncher(component, stagingPlugin) {
+function componentLauncherScript(component, workspaceRoot) {
+  const binding = launcherBinding(component)
+  if (binding === null) return null
+  return skillLauncherScript({
+    ...binding,
+    environment: component.providerSkill === undefined ? {} : providerSkillEnvironment(component, workspaceRoot),
+  })
+}
+
+async function writeSkillLauncher(component, stagingPlugin, script) {
   const binding = launcherBinding(component)
   if (binding === null) return
   const { skill } = binding
@@ -118,9 +120,6 @@ async function writeSkillLauncher(component, stagingPlugin) {
   const launcher = join(skillRoot, projectedLauncherRelativePath(skill))
   containedRelative(skillRoot, launcher, `${component.displayName ?? component.plugin} launcher`)
   await mkdir(dirname(launcher), { recursive: true, mode: 0o700 })
-  const script = platform() === 'win32'
-    ? `@echo off\r\nsetlocal DisableDelayedExpansion\r\n${[binding.command, ...binding.args].map(batchQuote).join(' ')} %*\r\n`
-    : `#!/bin/sh\nexec ${shellQuote(binding.command)} ${binding.args.map(shellQuote).join(' ')} "$@"\n`
   await writeFile(launcher, script, { mode: 0o500, flag: 'wx' })
   await chmod(launcher, 0o500)
 }
@@ -164,7 +163,8 @@ async function readMcpProjection(component, workspaceRoot) {
 
 async function materializeComponent(componentId, component, projectionRoot, workspaceRoot) {
   if (component.skillOnly === true && component.providerSkill === undefined) await assertSkillOnlyPlugin(component)
-  const digest = projectionDigest(component, workspaceRoot)
+  const launcherScript = componentLauncherScript(component, workspaceRoot)
+  const digest = projectionDigest(component, workspaceRoot, launcherScript)
   const componentProjectionRoot = join(projectionRoot, componentId, digest)
   const marketplaceRoot = join(componentProjectionRoot, 'marketplace')
   const relativePluginRoot = containedRelative(component.marketplaceRoot, component.pluginRoot, `${componentId} plugin root`)
@@ -199,7 +199,7 @@ async function materializeComponent(componentId, component, projectionRoot, work
       }
       await copyOptionalDirectory(join(component.pluginRoot, 'skills'), join(stagingPlugin, 'skills'))
       await copyOptionalDirectory(join(component.pluginRoot, 'assets'), join(stagingPlugin, 'assets'))
-      await writeSkillLauncher(component, stagingPlugin)
+      await writeSkillLauncher(component, stagingPlugin, launcherScript)
       if (component.skillOnly !== true) await writePrivateJson(join(stagingPlugin, '.mcp.json'), await readMcpProjection(component, workspaceRoot))
       await writePrivateJson(join(stagingRoot, 'projection.json'), {
         schemaVersion: PROJECTION_SCHEMA,

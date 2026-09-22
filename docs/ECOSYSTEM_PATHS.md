@@ -8,6 +8,12 @@ product meaning into Host.
 
 The paths below are deliberately different. They meet at artifact admission
 and lifecycle safety, not at one mandatory product template.
+The desktop Manager is a convenience for managing these paths, not a required
+per-call intermediary. Today's Codex archive import and Skill/MCP projections
+are supported delivery formats, not the definition of all admissible future
+capabilities. See the owning
+[evolution policy](PRODUCT_MODEL.md#stable-responsibilities-evolving-integrations)
+for when a new adapter or semantic contract is warranted.
 
 ## Use a released tool
 

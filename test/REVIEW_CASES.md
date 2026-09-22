@@ -231,7 +231,7 @@ before package or host mutation.
 
 ## Thin host projection
 
-Start with [codex-projection.test.mjs](codex-projection.test.mjs), [codex-config.test.mjs](codex-config.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs).
+Start with [codex-projection.test.mjs](codex-projection.test.mjs), [codex-config.test.mjs](codex-config.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs). For Provider CLI grant propagation, run [provider-skill-execution.test.mjs](provider-skill-execution.test.mjs) and [provider-skill-lifecycle.test.mjs](provider-skill-lifecycle.test.mjs): these execute generated launchers, retain the caller cwd, change the authorized root, and inject a failed state commit.
 
 Host projections contain identity and invocation
 only, never provider runtime. Workspace-dependent tools require one explicit
