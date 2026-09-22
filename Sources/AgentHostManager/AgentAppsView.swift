@@ -11,6 +11,15 @@ struct AgentAppsView: View {
                     EmptyView()
                 }
 
+                if let handoff = store.exampleTaskHandoff {
+                    NoticeView(
+                        title: "Task copied",
+                        message: handoff,
+                        systemImage: "doc.on.clipboard.fill",
+                        color: .blue
+                    )
+                }
+
                 Panel {
                     ForEach(Array(ManagerAgentApp.all.enumerated()), id: \.element.id) { index, app in
                         if index > 0 { Divider() }
@@ -23,6 +32,7 @@ struct AgentAppsView: View {
                             isManaged: store.suite?.hosts?[app.id]?.installed == true,
                             isBusy: store.isBusy,
                             connect: { Task { await store.setHost(app.id, connected: true) } },
+                            open: { store.openConnectedAgentApp(hostID: app.id) },
                             disconnect: { pendingRemoval = app.id }
                         )
                     }
@@ -65,6 +75,7 @@ private struct AgentAppRow: View {
     let isManaged: Bool
     let isBusy: Bool
     let connect: () -> Void
+    let open: () -> Void
     let disconnect: () -> Void
 
     var body: some View {
@@ -85,8 +96,13 @@ private struct AgentAppRow: View {
             } else if status?.appInstalled == false {
                 Text(L10n.text("Not installed")).foregroundStyle(.secondary)
             } else if isManaged {
-                Button(L10n.text("Disconnect"), action: disconnect)
-                    .disabled(isBusy)
+                HStack(spacing: 10) {
+                    Button(L10n.text("Open"), action: open)
+                        .buttonStyle(.bordered)
+                        .disabled(isBusy)
+                    Button(L10n.text("Disconnect"), action: disconnect)
+                        .disabled(isBusy)
+                }
             } else {
                 Button(L10n.text("Connect"), action: connect)
                     .buttonStyle(.borderedProminent)

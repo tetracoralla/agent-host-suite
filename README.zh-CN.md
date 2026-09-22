@@ -60,6 +60,10 @@ GitHub 项目/Release，不必改 Host 源码；见 [GitHub 更新](docs/UPDATES
 不会安装尚未入库的工具。它不是市场。Codex 投影与会话 Skill/MCP 路径见
 [发现与投影](docs/DISCOVERY_PROJECTION.md)。
 
+设置与工具页还会用可选的视觉任务卡片呈现已准入工具。用户可以把示例复制到新的 Agent
+任务中，也可以修改、忽略或移除工具；卡片不是评分，也不代表已经采用。公开发布者与私有
+贡献者分别走[生态参与路径](docs/ECOSYSTEM_PATHS.md)，不必接受一套 Host 统一产品模板。
+
 ## Profile
 
 - `standard`：小型默认 Agent 工具集。

@@ -170,6 +170,37 @@ struct ManagerSetupTool: Equatable, Identifiable, Sendable {
     let name: String
     let summary: String
     let systemImage: String
+    let task: String?
+    let outcome: String?
+    let examplePrompt: String?
+    let visualLabel: String?
+    let tone: String?
+
+    init(
+        id: String,
+        name: String,
+        summary: String,
+        systemImage: String,
+        task: String? = nil,
+        outcome: String? = nil,
+        examplePrompt: String? = nil,
+        visualLabel: String? = nil,
+        tone: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.summary = summary
+        self.systemImage = systemImage
+        self.task = task
+        self.outcome = outcome
+        self.examplePrompt = examplePrompt
+        self.visualLabel = visualLabel
+        self.tone = tone
+    }
+
+    var hasTaskExperience: Bool {
+        task != nil && outcome != nil && examplePrompt != nil && visualLabel != nil
+    }
 }
 
 enum ManagerSetupPolicy {
@@ -198,19 +229,46 @@ enum ManagerSetupPolicy {
         switch profile {
         case "featured":
             [
-                ManagerSetupTool(id: "math-anchor", name: "Math Anchor", summary: "Exact and scientific calculation", systemImage: "function"),
-                ManagerSetupTool(id: "migratory-time", name: "Migratory Time", summary: "Reliable worldwide time conversion", systemImage: "globe.americas"),
-                ManagerSetupTool(id: "armorial", name: "Armorial", summary: "Choose project-aware icons without redrawing them", systemImage: "shield.lefthalf.filled"),
+                ManagerSetupTool(
+                    id: "math-anchor",
+                    name: "Math Anchor",
+                    summary: "Exact and scientific calculation",
+                    systemImage: "function",
+                    task: "Verify exact math without approximation",
+                    outcome: "Exact result with the calculation checked",
+                    examplePrompt: "Calculate 9,999,999,999 × 87 exactly, show the result, and verify it.",
+                    visualLabel: "9,999,999,999 × 87",
+                    tone: "indigo"
+                ),
+                ManagerSetupTool(
+                    id: "migratory-time",
+                    name: "Migratory Time",
+                    summary: "Reliable worldwide time conversion",
+                    systemImage: "globe.americas",
+                    task: "Coordinate a time across cities",
+                    outcome: "Local date and time with zone rules applied",
+                    examplePrompt: "Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.",
+                    visualLabel: "09:00  SHA → SFO",
+                    tone: "teal"
+                ),
+                ManagerSetupTool(
+                    id: "armorial",
+                    name: "Armorial",
+                    summary: "Choose project-aware icons without redrawing them",
+                    systemImage: "shield.lefthalf.filled",
+                    task: "Choose an icon that fits the project",
+                    outcome: "A reusable SVG from the project-aware set",
+                    examplePrompt: "Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.",
+                    visualLabel: "◇  ○  ✦",
+                    tone: "orange"
+                ),
             ]
         case "developer":
             [
                 ManagerSetupTool(id: "agent-tool-development-kit", name: "Developer Kit", summary: "Skill-only kit; this profile adds no Agent MCP tools", systemImage: "hammer.fill"),
             ]
         default:
-            [
-                ManagerSetupTool(id: "math-anchor", name: "Math Anchor", summary: "Exact and scientific calculation", systemImage: "function"),
-                ManagerSetupTool(id: "migratory-time", name: "Migratory Time", summary: "Reliable worldwide time conversion", systemImage: "globe.americas"),
-            ]
+            tools(for: "featured").filter { ["math-anchor", "migratory-time"].contains($0.id) }
         }
     }
 
@@ -303,8 +361,11 @@ enum ManagerSourcePolicy {
 
     static func versionSummary(applicationVersion: String?, applicationBuild: String?, environmentVersion: String?) -> String {
         let app = [applicationVersion, applicationBuild.map { "build \($0)" }].compactMap { $0 }.joined(separator: " · ")
-        let env = environmentVersion ?? "not installed"
-        return "App \(app.isEmpty ? "unknown" : app) · Env \(env)"
+        let env = environmentVersion ?? L10n.text("not installed")
+        return L10n.format("App {app} · Env {env}", [
+            "app": app.isEmpty ? L10n.text("unknown") : app,
+            "env": env,
+        ])
     }
 
     static func recoveryMessage(code: String?) -> String {

@@ -26,9 +26,19 @@ struct SetupView: View {
                 Panel {
                     Label(L10n.text(store.selectedSetupProfileName), systemImage: "shippingbox.fill")
                         .font(.headline)
-                    ForEach(Array(ManagerSetupPolicy.tools(for: store.selectedSetupProfile).enumerated()), id: \.element.id) { index, tool in
-                        if index > 0 { Divider() }
-                        SetupItem(name: tool.name, detail: tool.summary, image: tool.systemImage)
+                    let tools = ManagerSetupPolicy.tools(for: store.selectedSetupProfile)
+                    if tools.contains(where: \.hasTaskExperience) {
+                        Text(L10n.text("Choose by the work you want to do."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(tools) { tool in
+                            CapabilityExperienceCard(tool: tool, state: .preview)
+                        }
+                    } else {
+                        ForEach(Array(tools.enumerated()), id: \.element.id) { index, tool in
+                            if index > 0 { Divider() }
+                            SetupItem(name: tool.name, detail: tool.summary, image: tool.systemImage)
+                        }
                     }
                 }
 

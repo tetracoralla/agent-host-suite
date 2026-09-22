@@ -3,6 +3,7 @@ import SwiftUI
 struct ToolsView: View {
     @ObservedObject var store: AgentHostStore
     @State private var githubURL = ""
+    @State private var copiedTaskName: String?
 
     var body: some View {
         ScrollView {
@@ -21,10 +22,53 @@ struct ToolsView: View {
                     )
                 }
 
+                if let copiedTaskName, store.exampleTaskHandoff == nil {
+                    NoticeView(
+                        title: "Task copied",
+                        message: L10n.format(
+                            "Paste the {tool} task into a new Agent task.",
+                            ["tool": L10n.text(copiedTaskName)]
+                        ),
+                        systemImage: "doc.on.clipboard.fill",
+                        color: .blue
+                    )
+                }
+
                 if let catalog = store.catalogBudgetSummary {
                     Panel {
                         LabeledContent(L10n.text("Context cost"), value: catalog)
                             .accessibilityLabel("\(L10n.text("Context cost")): \(catalog)")
+                    }
+                }
+
+                Panel {
+                    HStack {
+                        Text(L10n.text("Start from a task")).font(.headline)
+                        Spacer()
+                        if store.needsFeaturedInventory {
+                            Button(L10n.text("Get")) {
+                                Task { await store.prepareFeaturedAcquire() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(store.isBusy)
+                        }
+                    }
+                    ForEach(store.featuredCatalogTools) { tool in
+                        let installed = store.isFeaturedToolInstalled(tool.id)
+                        CapabilityExperienceCard(
+                            tool: tool,
+                            state: installed
+                                ? (store.suite?.agentToolsPaused == true ? .paused : .installed)
+                                : .missing,
+                            action: installed && store.suite?.agentToolsPaused != true
+                                ? {
+                                    guard let prompt = tool.examplePrompt else { return }
+                                    if store.beginExampleTask(prompt) {
+                                        copiedTaskName = tool.name
+                                    }
+                                }
+                                : nil
+                        )
                     }
                 }
 
@@ -66,27 +110,6 @@ struct ToolsView: View {
 
                 Panel {
                     HStack {
-                        Text(L10n.text("Featured")).font(.headline)
-                        Spacer()
-                        if store.needsFeaturedInventory {
-                            Button(L10n.text("Get")) {
-                                Task { await store.prepareFeaturedAcquire() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(store.isBusy)
-                        }
-                    }
-                    ForEach(Array(store.featuredCatalogTools.enumerated()), id: \.element.id) { index, tool in
-                        if index > 0 { Divider() }
-                        FeaturedCatalogRow(
-                            tool: tool,
-                            installed: store.isFeaturedToolInstalled(tool.id)
-                        )
-                    }
-                }
-
-                Panel {
-                    HStack {
                         Text(L10n.text("For new tasks")).font(.headline)
                         Spacer()
                         if store.suite?.agentToolsPaused == true {
@@ -120,29 +143,6 @@ struct ToolsView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .padding(32)
         }
-    }
-}
-
-private struct FeaturedCatalogRow: View {
-    let tool: ManagerSetupTool
-    let installed: Bool
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: tool.systemImage)
-                .font(.title3)
-                .foregroundStyle(.blue)
-                .frame(width: 28, height: 28)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(L10n.text(tool.name)).font(.headline)
-                Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 20)
-            Text(L10n.text(installed ? "Installed" : "Missing"))
-                .font(.caption)
-                .foregroundStyle(installed ? Color.secondary : Color.orange)
-        }
-        .padding(.vertical, 3)
     }
 }
 

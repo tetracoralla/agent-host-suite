@@ -86,6 +86,12 @@ setup or Get featured tools (including Armorial) after a Standard install.
 It is not a marketplace. How Codex projections relate to session Skill/MCP
 paths is in [Discovery and projection](docs/DISCOVERY_PROJECTION.md).
 
+Setup and Tools also present optional visual task invitations for the admitted
+set. A person can copy an editable example into a new Agent task, ignore it, or
+remove the tool; the card is not a rating or adoption verdict. Provider authors
+and private contributors can follow the separate
+[ecosystem participation paths](docs/ECOSYSTEM_PATHS.md).
+
 ## Profiles
 
 - `standard` is the small default Agent-visible tool set.
@@ -235,6 +241,7 @@ to the source repository:
 - [Unsigned preview download](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/UNSIGNED_PREVIEW.md) — GitHub Releases / HTTPS DMG and ZIP, Gatekeeper, Host catalog fetch; not notarized.
 - [Featured catalog v1](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) — owner-selected tools through existing
   install APIs, not a marketplace.
+- [Ecosystem participation paths](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ECOSYSTEM_PATHS.md) — public GitHub tools, Developer Kit/private trials, and participant-owned decisions.
 - [Unnamed capability exercise](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md) — optional page situations,
   neutral observations, and participant-owned interpretation.
 - [Review contract](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md) — minimum high-risk review seams,

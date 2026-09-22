@@ -361,7 +361,7 @@ enum ManagerPostSetupPolicy {
         switch action {
         case .connectAgent:
             if let appName, !appName.isEmpty {
-                return "Connect \(appName)"
+                return L10n.format("Connect {name}", ["name": appName])
             }
             return "Connect"
         case .reviewRepair: return "Repair"
@@ -371,7 +371,7 @@ enum ManagerPostSetupPolicy {
         case .grantWorkspace: return "Choose folder"
         case .openApp, .startNewAgentTask:
             if let appName, !appName.isEmpty {
-                return "Open \(appName)"
+                return L10n.format("Open {name}", ["name": appName])
             }
             return "Open Agent"
         }

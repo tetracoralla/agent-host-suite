@@ -242,12 +242,17 @@ Check is the explicit current Agent-app binding route.
 The primary interface leads with a few task-relevant states and one useful next
 action; history, provenance, and machine detail remain available on demand. It
 does not require a person to read an evidence chain before they can act. It
-does not show MCP schemas, Agent reasoning, Capability catalogs, protocol
-metadata, prompts, or marketing explanations. Usage &
+may show a short visual task invitation with one editable example; copying it
+remains optional and does not record adoption. It does not show MCP schemas,
+Agent reasoning, Capability catalogs, protocol metadata, or long marketing
+explanations. Usage &
 Reliability shows recent task activity through direct calls, errors, and static
 references before offering a detail export. It preserves unavailable and
 partial coverage and never derives a non-use reason, correctness, adoption,
 quality, opportunity, or value.
+
+Public-release and private-contributor participation paths, including who owns
+each decision, are defined in [`ECOSYSTEM_PATHS.md`](ECOSYSTEM_PATHS.md).
 
 Canonical product language and its stable-identifier boundary are defined in
 [`TERMINOLOGY.md`](TERMINOLOGY.md).

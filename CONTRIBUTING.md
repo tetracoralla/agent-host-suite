@@ -5,6 +5,10 @@ behavior in its Provider repository, semantic meaning in Capability or
 Procedure Contracts, direct execution mechanics in Direct Execution Runtime,
 and installation/lifecycle behavior here.
 
+Choose the applicable public-release or private-component route in
+[`docs/ECOSYSTEM_PATHS.md`](docs/ECOSYSTEM_PATHS.md). They share exact artifact
+admission, not one mandatory provider architecture or Host-owned quality score.
+
 Before opening a change:
 
 1. run `npm ci` and `npm run check`;

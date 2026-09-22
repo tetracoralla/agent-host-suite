@@ -22,6 +22,9 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var environmentChangePlan: EnvironmentChangePlan?
     @Published private(set) var toolSetNeedsFreshTask = false
     @Published private(set) var justCompletedSetup = false
+    // Copy succeeded but no single connected app could be opened; the Agents
+    // page shows this so the handoff stays explained after the section switch.
+    @Published private(set) var exampleTaskHandoff: String?
     @Published var requestedSection: ManagerSection?
     @Published private(set) var isBusy = false
     @Published private(set) var isBlockingWork = false
@@ -188,14 +191,39 @@ final class AgentHostStore: ObservableObject {
         ]
         if let url = candidates.compactMap({ $0 }).first {
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-                if error != nil {
-                    DispatchQueue.main.async { self.requestedSection = .agentApps }
+                DispatchQueue.main.async {
+                    if error != nil {
+                        self.requestedSection = .agentApps
+                    } else {
+                        self.exampleTaskHandoff = nil
+                    }
                 }
             }
             return
         }
         // Fallback when no GUI bundle is found: open Agents so the user can act.
         requestedSection = .agentApps
+    }
+
+    @discardableResult
+    func beginExampleTask(_ prompt: String) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(prompt, forType: .string) else {
+            errorMessage = L10n.text("Agent Host could not copy the example task.")
+            return false
+        }
+        let connectedApps = connectedAgentAppIDs
+        if connectedApps.count == 1 {
+            exampleTaskHandoff = "Open the connected Agent app, then start a new task and paste."
+            openConnectedAgentApp(hostID: connectedApps[0])
+        } else {
+            exampleTaskHandoff = connectedApps.isEmpty
+                ? "Connect an Agent app, then start a new task and paste."
+                : "Choose an Agent app to open, then start a new task and paste."
+            requestedSection = .agentApps
+        }
+        return true
     }
 
     private func applicationURLIfPresent(_ path: String) -> URL? {

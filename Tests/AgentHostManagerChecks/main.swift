@@ -248,6 +248,19 @@ do {
         ManagerSetupPolicy.tools(for: "featured").map(\.id).contains("armorial"),
         "featured setup preview must include Armorial"
     )
+    let featuredExperiences = ManagerSetupPolicy.tools(for: "featured")
+    expect(
+        featuredExperiences.allSatisfy(\.hasTaskExperience),
+        "each featured tool must have a task, outcome, example, and visual cue"
+    )
+    expect(
+        featuredExperiences.compactMap(\.examplePrompt).allSatisfy { !$0.isEmpty },
+        "task-first discovery must provide usable optional examples rather than scores"
+    )
+    expect(
+        ManagerSetupPolicy.tools(for: "developer").allSatisfy { !$0.hasTaskExperience },
+        "the Developer Kit must keep its own contributor route instead of inheriting consumer task cards"
+    )
     expect(!ManagerSetupPolicy.connectsHost(false), "an undetected Agent app must not block host-later setup")
     expect(!ManagerSetupPolicy.connectsHost(nil), "unknown Agent-app detection must not require a host")
     expect(ManagerSetupPolicy.connectsHost(true), "a detected Agent app may be connected during setup")
@@ -868,6 +881,29 @@ do {
     expect(L10n.text("Advanced") == "高级", "advanced section must provide Simplified Chinese copy")
     expect(L10n.text("Usage") == "使用情况", "the Manager must provide Simplified Chinese product copy")
     expect(L10n.text("Get") == "获取", "featured acquire must provide Simplified Chinese copy")
+    expect(L10n.text("Start from a task") == "从真实任务开始", "task-first discovery must provide Simplified Chinese copy")
+    expect(L10n.text("Task copied") == "任务已复制", "task handoff feedback must provide Simplified Chinese copy")
+    expect(
+        L10n.text("Connect an Agent app, then start a new task and paste.") == "请连接一个 Agent 应用，然后新建任务并粘贴。",
+        "the no-connected-app task handoff must provide Simplified Chinese copy"
+    )
+    expect(
+        L10n.text("Choose an Agent app to open, then start a new task and paste.") == "请选择并打开一个 Agent 应用，然后新建任务并粘贴。",
+        "the multi-app task handoff must provide Simplified Chinese copy"
+    )
+    expect(
+        L10n.text("Open the connected Agent app, then start a new task and paste.") == "请打开已连接的 Agent 应用，然后新建任务并粘贴。",
+        "the failed single-app launch handoff must preserve a localized next step"
+    )
+    expect(L10n.text("Open") == "打开", "opening a connected Agent app must provide Simplified Chinese copy")
+    expect(
+        ManagerSourcePolicy.versionSummary(applicationVersion: "0.2.0", applicationBuild: "3", environmentVersion: "0.1.4")
+            == "应用 0.2.0 · build 3 · 环境 0.1.4",
+        "the version footer must distinguish application build from environment release in Simplified Chinese"
+    )
+    expect(L10n.text("New tasks pick up changes") == "更改会随新任务生效", "steady-state Agent hint must provide Simplified Chinese copy")
+    expect(L10n.format("Connect {name}", ["name": "ZCode"]) == "连接 ZCode", "post-setup connect action must localize its app name")
+    expect(L10n.format("Open {name}", ["name": "Codex"]) == "打开 Codex", "post-setup open action must localize its app name")
     expect(L10n.text("Connect later") == "稍后连接", "host-later setup must provide Simplified Chinese copy")
     expect(L10n.text("For new tasks") == "用于新任务", "working-set copy must stay distinct from inventory install")
     expect(L10n.text("Retained trace sessions") == "保留的轨迹会话", "retained trace controls must provide Simplified Chinese copy")

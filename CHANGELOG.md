@@ -4,6 +4,15 @@
 
 ### Added
 
+- Task-first capability discovery in native and browser Managers: compact
+  visual cards show a recognizable job, expected outcome, and optional
+  copy-to-new-task handoff without adding scores, requirements, or adoption
+  claims. Copying an example explains its next step in both Managers, and
+  connected Agent apps can be opened from the Agents page. Contributor
+  documentation connects the public GitHub Release and
+  Developer Kit/private-component paths while keeping provider judgment and
+  owner decisions outside Host.
+
 - Task activity export: list/export bounded pseudonymous ordinary task
   sessions, keep direct executions separate from nested static references, and
   leave adoption, usefulness, and value judgments with the user or their Agent.

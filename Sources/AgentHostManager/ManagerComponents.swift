@@ -34,6 +34,115 @@ struct Panel<Content: View>: View {
     }
 }
 
+enum CapabilityExperienceState: Equatable {
+    case preview
+    case installed
+    case missing
+    case paused
+}
+
+struct CapabilityExperienceCard: View {
+    let tool: ManagerSetupTool
+    let state: CapabilityExperienceState
+    var action: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 18) {
+            visual
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.text(tool.name))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(L10n.text(tool.task ?? tool.summary))
+                    .font(.title3.weight(.semibold))
+                if let outcome = tool.outcome {
+                    Text(L10n.text(outcome))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(L10n.text(tool.summary))
+                        .foregroundStyle(.secondary)
+                }
+                if let prompt = tool.examplePrompt {
+                    Text(L10n.format("Try: {task}", ["task": L10n.text(prompt)]))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 10) {
+                if let stateLabel {
+                    Text(L10n.text(stateLabel))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(state == .missing ? Color.orange : Color.secondary)
+                }
+                if let action, state == .installed {
+                    Button(L10n.text("Try in a new task"), action: action)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .accessibilityLabel(L10n.format(
+                            "Try {tool} in a new Agent task",
+                            ["tool": L10n.text(tool.name)]
+                        ))
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var visual: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Image(systemName: tool.systemImage)
+                .font(.title2.weight(.semibold))
+                .accessibilityHidden(true)
+            Spacer(minLength: 10)
+            Text(tool.visualLabel ?? "")
+                .font(.system(.callout, design: .rounded).weight(.semibold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.65)
+        }
+        .foregroundStyle(accent)
+        .padding(12)
+        .frame(width: 138, height: 96, alignment: .leading)
+        .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
+        .overlay(alignment: .topTrailing) {
+            Circle()
+                .fill(accent.opacity(0.2))
+                .frame(width: 42, height: 42)
+                .offset(x: 12, y: -12)
+                .accessibilityHidden(true)
+        }
+        .clipped()
+        .accessibilityHidden(true)
+    }
+
+    private var stateLabel: String? {
+        switch state {
+        case .preview: nil
+        case .installed: "Installed"
+        case .missing: "Not installed"
+        case .paused: "Tools paused"
+        }
+    }
+
+    private var accent: Color {
+        switch tool.tone {
+        case "teal": .teal
+        case "orange": .orange
+        default: .indigo
+        }
+    }
+}
+
 struct HealthPill: View {
     let health: ManagerHealth
 
