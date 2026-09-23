@@ -122,6 +122,21 @@ test('trace CLI rejects ambiguous selection before installed state is read', () 
   }
 })
 
+test('task activity CLI rejects incomplete selection before installed state is read', () => {
+  const session = 'b'.repeat(64)
+  const cases = [
+    [['observability', 'task-sources'], 'observability task-sources requires --provider'],
+    [['observability', 'export-task', '--provider', 'codex', '--output', '/tmp/task.json'], 'observability export-task requires --provider, --session, and --output'],
+    [['observability', 'export-task', '--provider', 'codex', '--session', session], 'observability export-task requires --provider, --session, and --output'],
+    [['observability', 'task-sources', '--provider', 'codex', '--from-ms', '2', '--to-ms', '1'], '--from-ms must not be after --to-ms'],
+  ]
+  for (const [arguments_, expected] of cases) {
+    const result = spawnSync(process.execPath, [cliPath, ...arguments_], { encoding: 'utf8' })
+    assert.equal(result.status, 2)
+    assert.equal(result.stderr.trim(), `CLI_USAGE: ${expected}`)
+  }
+})
+
 test('component preview rejects ambiguous standalone and installed-state selection', () => {
   const result = spawnSync(process.execPath, [cliPath, 'component', 'preview', '--artifact', '/tmp/private.tar.gz', '--license-spdx', 'Apache-2.0', '--standalone', '--state-root', '/tmp/state'], { encoding: 'utf8' })
   assert.equal(result.status, 2)
@@ -177,6 +192,23 @@ test('human observability status renders monitoring state instead of crashing on
   assert.equal(disabled, 'Observability disabled · local data preserved.')
   const notInstalled = human({ status: 'ok', configured: false, enabled: false, privacy: {} })
   assert.equal(notInstalled, 'Observability off · no Agent environment installed.')
+})
+
+test('human task activity starts with glanceable facts and leaves interpretation open', () => {
+  const output = human({
+    schemaVersion: 'openadam.agent-host-task-source-catalog.v0.1',
+    provider: 'codex',
+    sources: [
+      { directCalls: 8, staticReferences: 4, errors: 1 },
+      { directCalls: 3, staticReferences: 0, errors: 0 },
+    ],
+    limits: { sourceLimitReached: true },
+  })
+  assert.equal(output, 'Task activity · 2 codex sessions · 11 direct calls · 4 static references · 1 error · more retained sessions not shown')
+  assert.equal(human({
+    schemaVersion: 'openadam.agent-host-task-activity-pack.v0.1',
+    eventsReturned: 12,
+  }), 'Task Activity Pack · 12 metadata events · interpretation left to the user or selected Agent')
 })
 
 test('profiles list names the featured admission set without a store', async () => {

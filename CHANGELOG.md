@@ -4,9 +4,40 @@
 
 ### Added
 
+- Product-first capability discovery in native and browser Managers: compact
+  rows use the tools' upstream product marks, one short job label, availability,
+  and a direct **Use** action. Editable example tasks are handed off only after
+  that action instead of filling the primary UI with explanatory copy. Copying
+  an example explains its next step in both Managers, and connected Agent apps
+  can be opened from the Agents page. Contributor documentation connects the
+  public GitHub Release and
+  Developer Kit/private-component paths while keeping provider judgment and
+  owner decisions outside Host.
+
+- Manager navigation now starts with local installed tools, keeps its empty
+  state honest, places compatible recommendations below, and provides a
+  searchable Browse surface plus a separate visual Agent-shell connection page.
+  The Agents page keeps a start-work handoff with one next action when something
+  blocks new work, tool-set controls stay visible and state that already-open
+  tasks keep their old tools, and installed tool rows keep their job summary.
+
+- Task activity export: list/export bounded pseudonymous ordinary task
+  sessions, keep direct executions separate from nested static references, and
+  leave adoption, usefulness, and value judgments with the user or their Agent.
+
 - Post-setup / Overview success handoff: after install, Manager (native + web) leads with **start work** (open a new Agent task or connect an Agent), Host-observed facts, remaining gaps, and classified recovery paths (`not-connected` / `stale-session` / `permission` / `tool-fault`). Status rows stay supporting detail, not the destination. Setup CLI results include `guidance`.
 
 ### Changed
+
+- The unnamed capability exercise now keeps Host readiness, neutral session
+  observations, rendered work, and participant interpretation separate. It no
+  longer imposes a fixed task quota or Host-owned adoption score.
+
+- Native and browser Managers now surface task activity as a glanceable card:
+  direct calls, errors, and static references appear before an optional
+  metadata-only detail export, without a Host score or adoption verdict.
+  An unavailable or older monitoring component now fails inside this optional
+  card instead of interrupting the native Manager with a global alert.
 
 - Unsigned macOS first-open copy now follows Apple’s macOS 15 Sequoia rule:
   try to open → System Settings → Privacy & Security → Open Anyway. Control-click

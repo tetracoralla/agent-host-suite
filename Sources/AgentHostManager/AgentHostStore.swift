@@ -4,6 +4,7 @@ import Foundation
 enum RecoveryOption: Equatable {
     case replaceHostConflicts
     case replaceHostConnection(String)
+    case replaceToolSelection([String])
 }
 
 @MainActor
@@ -13,6 +14,7 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var observations: ObservabilityStatus?
     @Published private(set) var usage: UsageSummary?
     @Published private(set) var traceSourceCatalog: TraceSourceCatalog?
+    @Published private(set) var taskSourceCatalog: TaskSourceCatalog?
     @Published private(set) var doctor: DoctorResult?
     @Published private(set) var snapshot: SuiteSnapshot?
     @Published private(set) var hostStatuses: [String: HostStatusResult] = [:]
@@ -21,7 +23,11 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var environmentChangePlan: EnvironmentChangePlan?
     @Published private(set) var toolSetNeedsFreshTask = false
     @Published private(set) var justCompletedSetup = false
+    // Copy succeeded but no single connected app could be opened; the Agents
+    // page shows this so the handoff stays explained after the section switch.
+    @Published private(set) var exampleTaskHandoff: String?
     @Published var requestedSection: ManagerSection?
+    @Published var exampleTaskDrafts: [String: String] = [:]
     @Published private(set) var isBusy = false
     @Published private(set) var isBlockingWork = false
     @Published private(set) var currentAction: String?
@@ -34,6 +40,8 @@ final class AgentHostStore: ObservableObject {
     @Published var selectedSetupProfile = ManagerSetupPolicy.defaultProfile
     @Published private(set) var updates: UpdatesReport?
     @Published private(set) var githubPreview: GitHubProjectPreview?
+    @Published private(set) var githubConflictURL: String?
+    @Published private(set) var browseCatalog: ToolBrowseCatalog?
 
     private enum EnvironmentPreparation: Equatable {
         case update(profile: String?, replaceHostConflicts: Bool)
@@ -187,14 +195,39 @@ final class AgentHostStore: ObservableObject {
         ]
         if let url = candidates.compactMap({ $0 }).first {
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-                if error != nil {
-                    DispatchQueue.main.async { self.requestedSection = .agentApps }
+                DispatchQueue.main.async {
+                    if error != nil {
+                        self.requestedSection = .agentApps
+                    } else {
+                        self.exampleTaskHandoff = nil
+                    }
                 }
             }
             return
         }
         // Fallback when no GUI bundle is found: open Agents so the user can act.
         requestedSection = .agentApps
+    }
+
+    @discardableResult
+    func beginExampleTask(_ prompt: String) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(prompt, forType: .string) else {
+            errorMessage = L10n.text("Agent Host could not copy the example task.")
+            return false
+        }
+        let connectedApps = connectedAgentAppIDs
+        if connectedApps.count == 1 {
+            exampleTaskHandoff = "Open the connected Agent app, then start a new task and paste."
+            openConnectedAgentApp(hostID: connectedApps[0])
+        } else {
+            exampleTaskHandoff = connectedApps.isEmpty
+                ? "Connect an Agent app, then start a new task and paste."
+                : "Choose an Agent app to open, then start a new task and paste."
+            requestedSection = .agentApps
+        }
+        return true
     }
 
     private func applicationURLIfPresent(_ path: String) -> URL? {
@@ -276,7 +309,7 @@ final class AgentHostStore: ObservableObject {
             )
             return tool(
                 id: id,
-                name: suite?.components?[id]?.displayName ?? metadata.name,
+                name: suite?.components?[id]?.displayName == id ? metadata.name : (suite?.components?[id]?.displayName ?? metadata.name),
                 summary: suite?.components?[id]?.summary ?? metadata.summary,
                 systemImage: metadata.systemImage,
                 author: suite?.components?[id]?.author,
@@ -307,7 +340,17 @@ final class AgentHostStore: ObservableObject {
     }
 
     var featuredCatalogTools: [ManagerSetupTool] {
-        ManagerSetupPolicy.tools(for: "featured")
+        let builtIn = ManagerSetupPolicy.tools(for: "featured")
+        let known = Set(builtIn.map(\.id))
+        return builtIn + (browseCatalog?.tools ?? []).filter { !known.contains($0.id) }.map { item in
+            ManagerSetupTool(id: item.id, name: item.presentation?.displayName ?? item.id,
+                             summary: item.presentation?.summary ?? "", details: item.presentation?.summary ?? "",
+                             systemImage: "shippingbox", repositoryURL: item.homepage)
+        }
+    }
+
+    func catalogToolAvailable(_ id: String) -> Bool {
+        browseCatalog?.tools.first { $0.id == id }?.compatible ?? ManagerSetupPolicy.featuredToolIDs.contains(id)
     }
 
     var needsFeaturedInventory: Bool {
@@ -317,6 +360,22 @@ final class AgentHostStore: ObservableObject {
 
     func isFeaturedToolInstalled(_ id: String) -> Bool {
         suite?.components?[id] != nil
+    }
+
+    func featuredToolVersion(_ id: String) -> String? {
+        suite?.components?[id]?.version
+    }
+
+    func agentAppIcon(_ id: String) -> NSImage? {
+        let app = ManagerAgentApp.named(id)
+        let candidates: [URL?] = [
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier(forHost: id)),
+            alternateBundleIdentifier(forHost: id).flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) },
+            applicationURLIfPresent("/Applications/\(app.name).app"),
+            applicationURLIfPresent("\(NSHomeDirectory())/Applications/\(app.name).app"),
+        ]
+        guard let url = candidates.compactMap({ $0 }).first else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
     }
 
     private var releaseManifestPath: String? {
@@ -366,6 +425,7 @@ final class AgentHostStore: ObservableObject {
     func refresh() async {
         await work("Checking environment", blocksInterface: suite == nil) {
             self.traceSourceCatalog = nil
+            self.taskSourceCatalog = nil
             let status = try await cli.run(["status"], as: SuiteStatus.self)
             self.suite = status
 
@@ -375,6 +435,7 @@ final class AgentHostStore: ObservableObject {
             async let activity = self.cli.run(["activity"], as: ActivityResult.self)
             async let snapshot = self.cli.run(["snapshot"], as: SuiteSnapshot.self)
             async let usage = self.cli.run(["usage"], as: UsageSummary.self)
+            async let browse = self.cli.run(["tools", "browse"], as: ToolBrowseCatalog.self)
 
             let hostValues = try await [zcode, codex, claude]
             self.hostStatuses = Dictionary(uniqueKeysWithValues: hostValues.map { ($0.host, $0) })
@@ -396,6 +457,7 @@ final class AgentHostStore: ObservableObject {
             self.activity = try await activity.entries
             self.snapshot = try? await snapshot
             self.usage = try? await usage
+            self.browseCatalog = try? await browse
             self.lastSuccessfulRefreshAt = Date()
         }
     }
@@ -551,6 +613,41 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
+    func loadTaskSources(provider: String) async -> String? {
+        guard !isBusy else { return nil }
+        isBusy = true
+        isBlockingWork = false
+        currentAction = "Loading task activity"
+        taskSourceCatalog = nil
+        defer {
+            isBusy = false
+            isBlockingWork = false
+            currentAction = nil
+        }
+        do {
+            let catalog = try await self.cli.run(
+                ["observability", "task-sources", "--provider", provider, "--limit", "25"],
+                as: TaskSourceCatalog.self
+            )
+            guard catalog.isValid(expectedProvider: provider) else {
+                throw CLIError.failed(
+                    code: "TASK_SOURCE_CATALOG_INVALID",
+                    message: "Agent Host returned an invalid task activity catalog."
+                )
+            }
+            self.taskSourceCatalog = catalog
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    func prepareTaskActivityExport(provider: String, sessionHash: String) async -> Data? {
+        await workResult("Preparing task export", blocksInterface: false) {
+            try await self.cli.exportRetainedTaskActivity(provider: provider, sessionHash: sessionHash)
+        }
+    }
+
     func setHost(_ id: String, connected: Bool) async {
         guard connected else {
             await action(["host", "remove", id], label: "Disconnecting Agent app")
@@ -579,12 +676,7 @@ final class AgentHostStore: ObservableObject {
     func setTool(_ id: String, active: Bool) async {
         if suite?.agentToolsPaused == true {
             guard active else { return }
-            await work("Making tool available") {
-                let result = try await self.cli.run(["tools", "set", "--tool", id], as: ToolSetChangeResult.self)
-                self.toolSetNeedsFreshTask = result.restartRequired
-                self.doctor = nil
-                try await self.reloadAll()
-            }
+            await changeToolSelection(["tools", "set", "--tool", id])
             return
         }
         let current = suite?.agentComponents ?? []
@@ -593,34 +685,39 @@ final class AgentHostStore: ObservableObject {
             return
         }
         let next = active ? Array(Set(current + [id])).sorted(by: toolOrderIndex) : current.filter { $0 != id }
-        await work(active ? "Making tool available" : "Removing tool from Agent apps") {
-            var arguments = ["tools", "set"]
-            for component in ManagerToolPolicy.orderedToolIDs(next, preferredOrder: Self.toolOrder) {
-                arguments += ["--tool", component]
+        var arguments = ["tools", "set"]
+        for component in ManagerToolPolicy.orderedToolIDs(next, preferredOrder: Self.toolOrder) {
+            arguments += ["--tool", component]
+        }
+        await changeToolSelection(arguments)
+    }
+
+    private func changeToolSelection(_ arguments: [String]) async {
+        await work("Updating tools") {
+            do {
+                let result = try await self.cli.run(arguments, as: ToolSetChangeResult.self)
+                self.toolSetNeedsFreshTask = result.restartRequired
+            } catch let error as CLIError {
+                if case let CLIError.failed(code, _) = error, Self.isHostConflict(code) {
+                    self.recovery = .replaceToolSelection(arguments)
+                }
+                throw error
             }
-            let result = try await self.cli.run(arguments, as: ToolSetChangeResult.self)
-            self.toolSetNeedsFreshTask = result.restartRequired
             self.doctor = nil
             try await self.reloadAll()
         }
+    }
+
+    func replaceConflictingToolSelection(_ arguments: [String]) async {
+        await changeToolSelection(arguments + ["--replace-host-conflicts"])
     }
 
     func pauseAllTools() async {
-        await work("Pausing tools") {
-            let result = try await self.cli.run(ManagerToolPolicy.pauseArguments, as: ToolSetChangeResult.self)
-            self.toolSetNeedsFreshTask = result.restartRequired
-            self.doctor = nil
-            try await self.reloadAll()
-        }
+        await changeToolSelection(ManagerToolPolicy.pauseArguments)
     }
 
     func resumeTools() async {
-        await work("Resuming tools") {
-            let result = try await self.cli.run(ManagerToolPolicy.resumeArguments, as: ToolSetChangeResult.self)
-            self.toolSetNeedsFreshTask = result.restartRequired
-            self.doctor = nil
-            try await self.reloadAll()
-        }
+        await changeToolSelection(ManagerToolPolicy.resumeArguments)
     }
 
     func uninstall(purgeData: Bool = false) async {
@@ -687,10 +784,12 @@ final class AgentHostStore: ObservableObject {
         try await reloadStatus()
         source = try? await cli.run(ManagerSourcePolicy.statusArguments(), as: SourceStatus.self)
         traceSourceCatalog = nil
+        taskSourceCatalog = nil
         guard suite?.configured == true else {
             observations = nil
             usage = nil
             traceSourceCatalog = nil
+            taskSourceCatalog = nil
             doctor = nil
             snapshot = nil
             hostStatuses = [:]
@@ -703,6 +802,7 @@ final class AgentHostStore: ObservableObject {
         async let activity = cli.run(["activity"], as: ActivityResult.self)
         async let snapshot = cli.run(["snapshot"], as: SuiteSnapshot.self)
         async let usage = cli.run(["usage"], as: UsageSummary.self)
+        async let browse = cli.run(["tools", "browse"], as: ToolBrowseCatalog.self)
         let hosts = await [try? zcode, try? codex, try? claude].compactMap { $0 }
         self.hostStatuses = Dictionary(uniqueKeysWithValues: hosts.map { ($0.host, $0) })
         self.selectDefaultSetupHostIfNeeded()
@@ -715,6 +815,7 @@ final class AgentHostStore: ObservableObject {
         self.activity = (try? await activity.entries) ?? []
         self.snapshot = try? await snapshot
         self.usage = try? await usage
+        self.browseCatalog = try? await browse
         self.lastSuccessfulRefreshAt = Date()
     }
 
@@ -795,6 +896,7 @@ final class AgentHostStore: ObservableObject {
     func previewGitHubTool(_ url: String) async {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        githubPreview = nil
         await work("Previewing GitHub project") {
             self.githubPreview = try await self.cli.run(
                 ["tools", "add", "--github", trimmed, "--preview"],
@@ -803,14 +905,29 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
-    func addGitHubTool(_ url: String) async {
+    func clearGitHubPreview() {
+        githubPreview = nil
+        githubConflictURL = nil
+    }
+
+    func addGitHubTool(_ url: String, replacingHostConflicts: Bool = false) async {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         await work("Adding GitHub tool") {
-            _ = try await self.cli.run(["tools", "add", "--github", trimmed], as: GenericResult.self)
+            do {
+                var arguments = ["tools", "add", "--github", trimmed]
+                if replacingHostConflicts { arguments.append("--replace-host-conflicts") }
+                _ = try await self.cli.run(arguments, as: GenericResult.self)
+            } catch let error as CLIError {
+                if case let CLIError.failed(code, _) = error, Self.isHostConflict(code) {
+                    self.githubConflictURL = trimmed
+                }
+                throw error
+            }
+            self.githubConflictURL = nil
             self.githubPreview = nil
             self.updates = try? await self.cli.run(["updates", "status"], as: UpdatesReport.self)
-            await self.refresh()
+            try await self.reloadAll()
         }
     }
 
@@ -823,12 +940,12 @@ final class AgentHostStore: ObservableObject {
         let active = suite?.agentComponents?.contains(id) ?? false
         if component == nil {
             state = .unavailable
+        } else if componentFailed || hostFailed || runtimeFailed {
+            state = .attention
         } else if !active {
             state = .inactive
         } else if doctor == nil {
             state = .checking
-        } else if componentFailed || hostFailed || runtimeFailed {
-            state = .attention
         } else {
             state = .ready
         }
@@ -851,7 +968,8 @@ final class AgentHostStore: ObservableObject {
             state: state,
             availability: availableHosts.isEmpty ? L10n.text("Not selected for an Agent app") : L10n.format("Selected for {apps}", ["apps": availableHosts.joined(separator: L10n.text(" and "))]),
             ownership: ownership,
-            active: active
+            active: active,
+            onDemandAvailable: component?.onDemandAvailable == true
         )
     }
 
@@ -865,7 +983,7 @@ final class AgentHostStore: ObservableObject {
 
     private static func isHostConflict(_ code: String) -> Bool {
         [
-            "CODEX_PLUGIN_CONFLICT", "CODEX_MARKETPLACE_CONFLICT",
+            "CODEX_PLUGIN_CONFLICT", "CODEX_MARKETPLACE_CONFLICT", "CODEX_BINDING_AMBIGUOUS",
             "CLAUDE_MCP_CONFLICT", "ZCODE_MCP_CONFLICT",
             "DEVELOPER_SKILL_CONFLICT", "PRODUCT_SKILL_CONFLICT",
         ].contains(code)

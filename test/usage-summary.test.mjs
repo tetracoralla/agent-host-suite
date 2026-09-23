@@ -197,3 +197,19 @@ test('usage summary represents uninstalled and monitoring-off environments witho
   assert.equal(disabled.enabled, false)
   assert.equal(disabled.observationSource, 'none')
 })
+
+
+test('independent tools remain queryable without claiming Host ownership or zero in old snapshots', () => {
+  const value = report()
+  value.observedTools = [...value.suiteTools, { provider: 'codex', toolName: 'mcp__decision_table__decision_evaluate', calls: 2, runtime: { measured: 1, completed: 1 } }]
+  const result = projectUsageSummary(state({ enabled: true }), { report: value }, null, { allTools: true, tools: ['decision_table'] })
+  assert.equal(result.toolScope.requested, 'all-observed-tools')
+  assert.equal(result.toolScope.available, true)
+  assert.equal(result.tools.available, 1)
+  assert.equal(result.tools.entries[0].componentId, null)
+  assert.equal(result.tools.entries[0].historicalCalls, 2)
+  assert.equal(result.tools.entries[0].currentReleaseCalls, null)
+  delete value.observedTools
+  const old = projectUsageSummary(state({ enabled: true }), { report: value }, null, { allTools: true })
+  assert.equal(old.toolScope.available, false)
+})

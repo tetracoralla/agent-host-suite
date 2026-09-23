@@ -64,13 +64,27 @@ async function regularFile(path) {
 }
 
 async function runJson(component, args, runner, options = {}) {
-  const result = await runner(component.command, [...component.args, ...args], {
-    cwd: component.root,
-    env: options.env,
-    signal: options.signal,
-    timeoutMs: options.timeoutMs ?? 120_000,
-    maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
-  })
+  let result
+  try {
+    result = await runner(component.command, [...component.args, ...args], {
+      cwd: component.root,
+      env: options.env,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs ?? 120_000,
+      maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
+    })
+  } catch (error) {
+    if (error instanceof AgentHostError && error.code === 'HOST_COMMAND_CANCELLED') {
+      throw new AgentHostError('HOST_COMMAND_CANCELLED', 'The monitoring request was cancelled.')
+    }
+    if (error instanceof AgentHostError && error.code.startsWith('HOST_COMMAND_')) {
+      throw new AgentHostError(
+        'OBSERVABILITY_COMPONENT_COMMAND_FAILED',
+        'The installed monitoring component could not complete this request. Update or repair Agent Host, then try again.',
+      )
+    }
+    throw error
+  }
   let value
   try {
     value = JSON.parse(result.stdout)
@@ -234,8 +248,7 @@ function hostReport(report, providerIds) {
   }
   const semanticTotals = semanticExecutionTotals(report.semanticExecutions)
   const suiteExecutions = report.semanticExecutions.filter((item) => providerIds.has(item.providerId))
-  const suiteTools = report.tools
-    .filter((item) => item.currentAgentHostDeployment?.componentId !== undefined)
+  const observedTools = report.tools
     .sort((left, right) => right.calls - left.calls || left.toolName.localeCompare(right.toolName))
     .map((item) => ({
       provider: item.provider,
@@ -250,6 +263,7 @@ function hostReport(report, providerIds) {
       currentAgentHostDeployment: item.currentAgentHostDeployment,
       currentComponentBinding: item.currentComponentBinding ?? null,
     }))
+  const suiteTools = observedTools.filter((item) => item.currentAgentHostDeployment?.componentId !== undefined)
   const routingObservations = report.routingObservations ?? []
   return {
     schemaVersion: report.schemaVersion,
@@ -267,6 +281,7 @@ function hostReport(report, providerIds) {
     runtimeErrorCodes: report.runtimeErrorCodes ?? [],
     suiteExecutions,
     suiteTools,
+    observedTools,
     routingObservations,
     totals: {
       observedTools: report.tools.length,
@@ -343,7 +358,7 @@ export async function readCurrentObservability(state, runner = runFile, nowMs = 
 async function writeAnalysis(paths, state, runner) {
   const active = new Set(state.agentComponents ?? Object.keys(state.components))
   const activeComponents = Object.fromEntries(Object.entries(state.components).filter(([id]) => active.has(id)))
-  const { snapshot, bindings } = await exportManagedCatalogInventory(activeComponents)
+  const { snapshot, bindings } = await exportManagedCatalogInventory(activeComponents, { workspaceRoot: state.workspaceRoot ?? null })
   const snapshotPath = join(paths.context, 'managed-catalog.snapshot.json')
   const analysisPath = join(paths.context, 'managed-catalog.analysis.json')
   await writePrivateJson(snapshotPath, snapshot)
@@ -676,6 +691,7 @@ async function runObserverConfigurationCommand(options, commandArgs, dependencie
   if (observer === undefined) throw new AgentHostError('OBSERVABILITY_COMPONENT_MISSING', 'The installed Observer component is unavailable')
   return runJson(observer, [...commandArgs, '--json'], runner, {
     env: observerEnvironment(state),
+    signal: options.signal,
     timeoutMs: 30_000,
     maxBuffer: 2 * 1024 * 1024,
   })
@@ -690,6 +706,32 @@ export async function observabilityTraceSources(options, dependencies = {}) {
     throw new AgentHostError('CLI_USAGE', 'observability trace-sources requires --provider')
   }
   const args = ['trace-sources', '--provider', options.provider, '--limit', String(options.limit ?? 50)]
+  if (options.fromMs !== undefined) args.push('--from-ms', String(options.fromMs))
+  if (options.toMs !== undefined) args.push('--to-ms', String(options.toMs))
+  return runObserverConfigurationCommand(options, args, dependencies)
+}
+
+export async function observabilityTaskSources(options, dependencies = {}) {
+  if (typeof options.provider !== 'string' || options.provider.length === 0) {
+    throw new AgentHostError('CLI_USAGE', 'observability task-sources requires --provider')
+  }
+  const args = ['task-sources', '--provider', options.provider, '--limit', String(options.limit ?? 50)]
+  if (options.fromMs !== undefined) args.push('--from-ms', String(options.fromMs))
+  if (options.toMs !== undefined) args.push('--to-ms', String(options.toMs))
+  return runObserverConfigurationCommand(options, args, dependencies)
+}
+
+export async function exportObservabilityTask(options, dependencies = {}) {
+  if (typeof options.provider !== 'string' || typeof options.session !== 'string' || typeof options.output !== 'string') {
+    throw new AgentHostError('CLI_USAGE', 'observability export-task requires --provider, --session, and --output')
+  }
+  const args = [
+    'task-export', '--provider', options.provider,
+    '--session', options.session,
+    '--output', options.output,
+    '--max-events', String(options.maxEvents ?? 500),
+    '--max-output-bytes', String(options.maxOutputBytes ?? 16 * 1024 * 1024),
+  ]
   if (options.fromMs !== undefined) args.push('--from-ms', String(options.fromMs))
   if (options.toMs !== undefined) args.push('--to-ms', String(options.toMs))
   return runObserverConfigurationCommand(options, args, dependencies)

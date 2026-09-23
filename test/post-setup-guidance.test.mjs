@@ -83,7 +83,8 @@ test('post-setup guidance classifies tool faults without faking success', () => 
   assert.equal(guidance.problemClass, PROBLEM_CLASSES.TOOL_FAULT)
   assert.equal(guidance.primaryAction.id, PRIMARY_ACTIONS.REVIEW_REPAIR)
   assert.equal(guidance.primaryAction.label, 'Repair')
-  assert.match(guidance.statusLine, /Armorial runtime probe failed/u)
+  assert.equal(guidance.statusLine, 'Needs repair')
+  assert.equal(guidance.blockingMessage, 'Armorial runtime probe failed')
 })
 
 test('post-setup guidance classifies permission faults', () => {

@@ -340,6 +340,7 @@ async function installHost(id, manifest, previous, paths, runner, options, depen
     replaceConflicts: options.replaceHostConflicts,
   })
   await preflightProviderSkills(id, manifest, paths, {
+    workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
     homeRoot: dependencies.hostSkillHome,
     previous: previous?.providerSkills,
     replaceConflicts: options.replaceHostConflicts,
@@ -379,6 +380,7 @@ async function installHost(id, manifest, previous, paths, runner, options, depen
       replaceConflicts: options.replaceHostConflicts,
     })
     providerSkills = await installProviderSkills(id, manifest, paths, previous?.providerSkills, {
+      workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
       homeRoot: dependencies.hostSkillHome,
       replaceConflicts: options.replaceHostConflicts,
     })
@@ -433,7 +435,11 @@ function hostManifestKeys(id, manifest) {
       .filter((component) => component.plugin !== undefined)
       .map((component) => component.plugin))
   }
-  return new Set(Object.keys(manifest.components))
+  // A retained on-demand Skill is not an active MCP binding in Claude/ZCode.
+  // Match those adapters' targets so suspension retains ownership for resume.
+  return new Set(Object.entries(manifest.components)
+    .filter(([, component]) => component.skillOnly !== true && typeof component.command === 'string' && Array.isArray(component.args))
+    .map(([component]) => component))
 }
 
 function completeHostState(state) {
@@ -486,21 +492,30 @@ async function addHostUnlocked(options, dependencies = {}, preparedPaths = null)
   if (!SUPPORTED_HOSTS.includes(options.target)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported host: ${options.target}`)
   if (previous.hosts[options.target] !== undefined) return { status: 'host-present', host: options.target, changed: false }
   await validateActiveComponentPathGrants({ components: previous.components, agentComponents: previous.agentComponents })
-  let manifest = stateManifest(previous)
-  let workspaceRoot = previous.workspaceRoot ?? null
-  if (options.target === 'codex' || options.target === 'zcode') {
-    workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
-    if (options.target === 'codex') manifest = await materializeCodexProjections(manifest, join(paths.hostProjections, 'codex'), workspaceRoot)
-  }
+  const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? previous.workspaceRoot)
+  const workspaceChanged = workspaceRoot !== (previous.workspaceRoot ?? null)
   let installed = null
   let next = null
   try {
+    // There is one Host workspace grant, not a different implicit grant per
+    // Agent app. Rebind existing consumers in the same recovery transaction
+    // when connecting a new app also explicitly changes that shared grant.
+    const base = workspaceChanged
+      ? { ...previous, ...await activateState(paths, previous, previous, runner, options, workspaceRoot, dependencies), workspaceRoot }
+      : previous
+    let manifest = stateManifest(base)
+    if (options.target === 'codex') manifest = await materializeCodexProjections(manifest, join(paths.hostProjections, 'codex'), workspaceRoot)
     installed = await installHost(options.target, manifest, undefined, paths, runner, { ...options, workspaceRoot }, dependencies)
+    const activatedAt = new Date().toISOString()
     next = {
-      ...previous,
-      hosts: { ...previous.hosts, [options.target]: installed },
+      ...base,
+      hosts: { ...base.hosts, [options.target]: installed },
       ...(workspaceRoot === null ? {} : { workspaceRoot }),
-      updatedAt: new Date().toISOString(),
+      updatedAt: activatedAt,
+      bindingsActivatedAt: activatedAt,
+    }
+    if (workspaceChanged && next.observability?.enabled === true) {
+      await (dependencies.rebindObservability ?? rebindObservabilityState)(next, paths, runner)
     }
     await (dependencies.saveState ?? saveState)(paths, next, { retainCurrent: true })
   } catch (error) {
@@ -520,7 +535,7 @@ async function addHostUnlocked(options, dependencies = {}, preparedPaths = null)
     throw error
   }
   const warnings = []
-  const projectionCleanup = options.target === 'codex'
+  const projectionCleanup = next.hosts.codex !== undefined && (options.target === 'codex' || workspaceChanged)
     ? await committedStep(
         warnings,
         'CODEX_PROJECTION_CLEANUP_FAILED',
@@ -803,6 +818,7 @@ async function inspectActivation(previous, manifest, runner, options, workspaceR
         replaceConflicts: options.replaceHostConflicts,
       })
       const providerSkills = await preflightProviderSkills(id, agents, operationsPaths, {
+        workspaceRoot,
         homeRoot: dependencies.hostSkillHome,
         previous: managed.providerSkills,
         replaceConflicts: options.replaceHostConflicts,
@@ -985,7 +1001,7 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
   })
   if (options.dryRun) {
     try {
-      const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(manifest, activeAgentComponents))
+      const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(manifest, activeAgentComponents), { workspaceRoot })
       const activation = await inspectActivation(previous, manifest, runner, options, workspaceRoot, dependencies)
       return {
         status: 'ready',
@@ -1029,7 +1045,7 @@ async function updateInstallationUnlocked(options, dependencies = {}, preparedPa
         workspaceRoot,
       }, { probe: dependencies.mcpProbe })
     }
-    catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(manifest, activeAgentComponents))
+    catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(manifest, activeAgentComponents), { workspaceRoot })
     activationStarted = true
     const activated = await activateState(paths, previous, manifest, runner, options, workspaceRoot, dependencies)
     const activatedAt = new Date().toISOString()
@@ -1185,11 +1201,11 @@ async function rollbackInstallationUnlocked(options, dependencies = {}, prepared
     componentWarmup = await (dependencies.componentWarmup ?? warmInstalledAgentComponents)({
       manifest: target,
       componentIds,
-      workspaceRoot: target.workspaceRoot ?? null,
+      workspaceRoot,
     }, { probe: dependencies.mcpProbe })
   }
   const targetActiveComponents = target.agentComponents ?? availableAgentComponents(target)
-  const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(target, targetActiveComponents))
+  const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(target, targetActiveComponents), { workspaceRoot })
   let observabilityTeardown = null
   let activated = null
   let restored = null
@@ -1300,13 +1316,14 @@ export async function toolSetStatus(options = {}) {
       origin: state.components[id]?.origin ?? null,
       private: state.privateComponents?.[id]?.current?.component !== undefined,
       active: active.includes(id),
-      exposure: toolExposure(active.includes(id), paused),
+      exposure: toolExposure(active.includes(id), paused, state.components[id]),
+      onDemandAvailable: state.components[id]?.providerSkill !== undefined,
     }))),
     freshSession: {
       requiredAfterChange: true,
       currentSessionUptake: 'not-observed',
     },
-    assessmentBoundary: 'active is MCP plus Skill for new Agent tasks. Inactive tools may stay on-demand Skill-only. paused withholds ordinary MCP and Skill projections; it is not Agent-app cache verification, a current-session Skill path, or adoption.',
+    assessmentBoundary: 'active exposes declared MCP and Skill entrypoints for new Agent tasks. on-demand retains a declared callable CLI Skill; inactive requires MCP activation. paused withholds ordinary MCP and Skill projections; it is not Agent-app cache verification, a current-session Skill path, or adoption.',
   }
 }
 
@@ -1356,7 +1373,7 @@ async function setActiveToolsUnlocked(options, dependencies = {}, preparedPaths 
   if (!changed) {
     return { ...(await toolSetStatus({ stateRoot: paths.root })), status: 'tool-set-unchanged', changed: false, restartRequired: false }
   }
-  const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(previous, active))
+  const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(previous, active), { workspaceRoot })
   if (options.dryRun === true) {
     const activation = await inspectActivation(previous, manifest, runner, options, workspaceRoot, dependencies)
     return {
@@ -1468,7 +1485,7 @@ async function transitionComponentInventoryUnlocked(options, inventory, dependen
     ...pausedManifestFields(paused, resumeAgentComponents),
   }
   await validateActiveComponentPathGrants(manifest)
-  const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(manifest, active))
+  const catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(agentCatalogComponents(manifest, active), { workspaceRoot })
   if (options.dryRun === true) {
     return {
       status: 'ready',

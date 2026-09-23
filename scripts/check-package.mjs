@@ -14,7 +14,7 @@ try {
   const packed = await execFileAsync(process.execPath, [npmExecPath, 'pack', '--json', '--pack-destination', temporary], { cwd: root, maxBuffer: 4 * 1024 * 1024 })
   const report = JSON.parse(packed.stdout)[0]
   const names = new Set(report.files.map((item) => item.path))
-  for (const required of ['bin/agent-host.mjs', 'src/cli.mjs', 'src/service-recovery.mjs', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'README.zh-CN.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md', 'docs/TRACE_PLANE.md', 'docs/TRACE_PLANE.zh-CN.md', 'catalog/profiles/standard.json', 'catalog/profiles/featured.json', 'skills/agent-host-operations/SKILL.md', 'skills/agent-host-operations/scripts/agent-host', 'skills/agent-host-operations/scripts/agent-host.cmd']) {
+  for (const required of ['bin/agent-host.mjs', 'src/cli.mjs', 'src/service-recovery.mjs', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'README.zh-CN.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md', 'docs/TRACE_PLANE.md', 'docs/TRACE_PLANE.zh-CN.md', 'schemas/agent-host-task-source-catalog.schema.v0.1.json', 'schemas/agent-host-task-activity-pack.schema.v0.1.json', 'catalog/profiles/standard.json', 'catalog/profiles/featured.json', 'skills/agent-host-operations/SKILL.md', 'skills/agent-host-operations/scripts/agent-host', 'skills/agent-host-operations/scripts/agent-host.cmd']) {
     if (!names.has(required)) throw new Error(`package is missing ${required}`)
   }
   const packagePath = join(temporary, report.filename)
@@ -24,7 +24,7 @@ try {
   await access(binaryShim)
   const installedEntry = join(installRoot, 'node_modules', '@openadam', 'agent-host-suite', 'bin', 'agent-host.mjs')
   const help = await execFileAsync(process.execPath, [installedEntry, '--help'])
-  if (!help.stdout.includes('agent-host setup') || !help.stdout.includes('agent-host profiles list') || !help.stdout.includes('agent-host profiles fetch') || !help.stdout.includes('agent-host service recover --recovery ID --manifest-sha256 SHA256')) {
+  if (!help.stdout.includes('agent-host setup') || !help.stdout.includes('agent-host profiles list') || !help.stdout.includes('agent-host profiles fetch') || !help.stdout.includes('agent-host observability export-task') || !help.stdout.includes('agent-host service recover --recovery ID --manifest-sha256 SHA256')) {
     throw new Error('installed CLI help is unavailable')
   }
   const installedCliModule = join(installRoot, 'node_modules', '@openadam', 'agent-host-suite', 'src', 'cli.mjs')

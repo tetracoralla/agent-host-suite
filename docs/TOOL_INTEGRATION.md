@@ -54,6 +54,18 @@ semantics. Component status remains path-free and does not disclose granted
 directory names; changing a grant remains an explicit preview, import, or
 rollback input rather than an ambient state-derived action.
 
+Host catalog admission, catalog export, installed health checks and optional
+monitoring use these same explicit grants. They do not substitute the package
+directory or inherit a workspace from the invoking shell. A required workspace
+that is absent or not absolute fails before that Provider starts. Setup,
+working-set changes, update and rollback pass the grant selected for the
+transition; monitoring and diagnostics pass the currently saved grant.
+Connecting an additional Agent app with a different explicit workspace also
+rebinds existing consumers in the same recoverable Host transition; it cannot
+silently give the new app and the saved environment different grants.
+Standalone release probes select their own isolated test workspace explicitly;
+that is not an installed user grant or evidence of a live Agent task.
+
 In v0.3, `discovery.kind: skill-cli` additionally binds one product Skill and
 one direct CLI inside the same immutable component. Its Skill root must be the
 declared Codex plugin's `skills/<id>` directory, its identity includes
@@ -62,6 +74,17 @@ Agent Host owns and generates that forwarding script. The CLI again uses only
 the component executable or verified Suite Node and declares exact version
 arguments. This is a low-context route to an already-installed Provider, not a
 generic provider invocation tool, a ranking, or permission to execute source.
+The generated launcher binds `runtime.workspaceEnvironment` to the same
+explicit canonical Host workspace as MCP, including while MCP is inactive.
+A declared workspace with no grant fails projection preflight. The CLI keeps
+the invoking Agent's working directory and argument semantics; MCP's
+`runtime.cwd` is not a CLI cwd declaration. The CLI locates bundled resources
+independently of the caller's working directory. Workspace authorization is
+not inferred from either working directory. Changed grant values produce a
+new immutable launcher projection rather than reusing stale bytes.
+Existing installations receive regenerated projections through the supported
+Host repair/update route after updating Host code; already-open Agent tasks
+still require the documented fresh-task handoff.
 
 In v0.4, `directCapability` binds one Provider Manifest v0.3, one canonical
 Capability Profile, exact operation schemas, the contained adapter command,
@@ -112,6 +135,27 @@ and logo come from `package.json` / `plugin.json` / `package.json.openadam`
 fields already in the plugin, not from Host source maps. See
 [`UPDATES.md`](UPDATES.md). GitHub catalog data cannot carry commands to
 execute.
+
+## Repository-carried plugins
+
+A self-contained plugin committed to a public repository can be admitted even
+when its owner does not publish a separate Release asset. The GitHub catalog
+pins the exact commit, contained plugin directory, compressed archive SHA-256,
+byte length, plugin version and verified platforms. Admission verifies the whole
+archive before extracting only the plugin into the ordinary immutable component.
+It never runs repository build scripts or installs package dependencies. Missing
+runtime bytes, a changed digest/version, moving ref, unsafe path or unsupported
+platform fails admission. The origin remains `github-repository`, separate from
+`github-release`; update, rollback and removal preserve that source identity.
+
+The provider still owns its CLI and Skill. A repository plugin with MCP only
+can be activated normally; deactivation makes it `inactive`, not `on-demand`.
+If an Agent app already has an independent binding, activation stops at the
+conflict. Review the existing connection before retrying with
+`--replace-host-conflicts`; Host saves the displaced connection for restoration
+on removal. The Managers expose the same explicit takeover action.
+To offer an immediate cold path, the provider must ship its own direct CLI and
+its declared Skill. The Host does not invent a generic model-facing dispatcher.
 
 ## Execution-path boundary
 

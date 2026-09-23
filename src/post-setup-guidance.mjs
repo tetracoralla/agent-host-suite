@@ -74,7 +74,7 @@ function classifyDoctorFault(errors) {
     return {
       problemClass: PROBLEM_CLASSES.TOOL_FAULT,
       primaryActionId: PRIMARY_ACTIONS.REVIEW_REPAIR,
-      statusLine: shortReason(tool.message, 'Needs repair'),
+      statusLine: 'Needs repair',
       title: 'Needs repair',
       summary: tool.message || 'Host observed a tool or runtime fault.',
       recoveryPath: 'Review Repair (or Run Full Check), fix the named fault, then open a new Agent task.',
@@ -86,7 +86,7 @@ function classifyDoctorFault(errors) {
     return {
       problemClass: PROBLEM_CLASSES.TOOL_FAULT,
       primaryActionId: PRIMARY_ACTIONS.RUN_FULL_CHECK,
-      statusLine: shortReason(errors[0].message, 'Needs check'),
+      statusLine: 'Needs check',
       title: 'Needs check',
       summary: errors[0].message || 'Host observed a blocking environment check.',
       recoveryPath: 'Run Full Check, follow the recovery for the named check, then open a new Agent task.',
@@ -95,12 +95,6 @@ function classifyDoctorFault(errors) {
     }
   }
   return null
-}
-
-function shortReason(message, fallback) {
-  if (typeof message !== 'string' || message.trim() === '') return fallback
-  const one = message.trim().split(/[\r\n]/u)[0]
-  return one.length > 72 ? `${one.slice(0, 69)}…` : one
 }
 
 function actionFor(id, appName, extras = {}) {

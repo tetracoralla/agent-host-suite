@@ -13,12 +13,21 @@ these product commands, not a development checkout or private database query.
 
 - `usage --json`: tool activity, Agent-reported Tokens, runtime failures,
   version history, and coverage. This is the primary route for reviewing whether
-  installed tools are being used and how observed execution behaves.
+  Host-managed tools are being used and how observed execution behaves.
+  For independently installed tools, use `usage --all-tools --json`; use
+  `--tool NAME` to select a tool-name substring or exact Host component id.
+  Check `toolScope.available`: an older snapshot without this scope is missing
+  evidence, not zero usage. An unmapped tool is not proof of installation ownership.
 - `snapshot --json`: environment, active tools, storage, lifecycle, collection
   health and compact historical activity.
 - `doctor --json`: current executable health; add `--deep` when actual provider
   readiness matters. These are diagnostic executions, not ordinary Agent tasks.
 - `tools status --json`: active versus installed inventory.
+  `on-demand` requires a retained callable Skill; `inactive` requires enabling
+  MCP and starting a fresh task. The Host inventory excludes independent installs.
+- `tools inventory --json`: compare that inventory with public Codex plugin
+  and Claude/ZCode user-level MCP configuration, including independent entries.
+  Configuration presence is not runtime readiness or current-session discovery.
 - `activity --json`: bounded environment lifecycle events.
 - `observability status --json`: a named detail missing from the compact report.
   Select the needed fields before returning it to context. Follow gaps that are
@@ -65,7 +74,7 @@ that affect the decision; counts alone do not choose a repair or retirement.
 Authorized implementation work follows the owning repository's instructions.
 It does not make private runtime storage a substitute for a missing product API.
 
-## Authorized operations and selected trace analysis
+## Authorized operations, task activity, and selected trace analysis
 
 Run refresh, update, rollback, cleanup, tool-set changes or uninstall only within
 the user's requested scope. Preserve current component versions and private
@@ -82,6 +91,22 @@ FILE --json`. Add `--from-ms`/`--to-ms` only for the selected time range. Export
 metadata-only and does not establish complete trace coverage. Start with its
 bounded summary; expand content-addressed tool catalogs only when needed.
 A temporary analysis does not authorize updating Agent memory.
+
+For a question about what happened in one task, do not stop at aggregate
+`usage` totals. Use `observability task-sources --provider
+PROVIDER --json` to find the pseudonymous ordinary task session, then export
+one selected session with `observability export-task --provider PROVIDER
+--session HASH --output FILE --json`. The pack deliberately distinguishes
+`direct-execution-observation` from `static-reference`; an orchestration source
+mention is not a child execution receipt. Start with the human-readable summary
+and open the detailed JSON only when the decision needs it.
+
+Interpret the selected activity together with the task-native artifact and
+relevant tests. Provider-reported rationale presence or stable completion
+reasons are optional source reports, not Host conclusions. Do not require an
+Agent to explain every choice, infer a reason from silence, or convert activity
+into an adoption, quality, or value score. The user may accept, challenge, or
+ignore an interpretation.
 
 If setup/update/rollback returns `SERVICE_INSTALL_ROLLBACK_FAILED`, preserve its
 recovery details and report that rollback did not succeed. For authorized recovery,

@@ -16,6 +16,7 @@ import { wrapGitHubPluginArchive } from './github-plugin-wrap.mjs'
 import { currentReleasePlatform } from './release-manifest.mjs'
 import { githubOrigin } from './tool-sources.mjs'
 import { fetchRemotePreviewImage } from './tool-presentation.mjs'
+import { admitRepositoryPlugin, repositoryPluginPreview } from './repository-plugin.mjs'
 
 export const GITHUB_PROJECT_PREVIEW_SCHEMA = 'openadam.agent-host-github-project-preview.v0.1'
 const CHECKSUM_MAX_BYTES = 4096
@@ -39,6 +40,14 @@ export async function previewGitHubProject(url, {
   platform = supportedReleasePlatform(),
 } = {}) {
   const parsed = parseGitHubResource(url)
+  const pinned = (await loadGitHubToolCatalog({ fetch, signal })).tools.find((tool) => tool.repository === parsed.repository)
+  if (pinned?.source?.kind === 'repository-plugin') {
+    const preview = repositoryPluginPreview(pinned, platform)
+    if (parsed.tag !== null && parsed.tag !== pinned.source.commit) {
+      return { ...preview, status: 'unavailable', compatibility: { platform, available: false, reason: 'GITHUB_SOURCE_UNPINNED' } }
+    }
+    return preview
+  }
   const repository = await fetchGitHubRepository(parsed.repository, { fetch, signal })
   const tag = parsed.tag ?? 'latest'
   let release
@@ -189,7 +198,10 @@ export async function admitGitHubRelease({
 }) {
   const parsed = parseGitHubResource(url)
   const registration = (await findRegisteredToolFromRepo(parsed.repository))
-  const catalogEntry = (await loadGitHubToolCatalog()).tools.find((tool) => tool.repository === parsed.repository)
+  const catalogEntry = (await loadGitHubToolCatalog({ fetch, signal })).tools.find((tool) => tool.repository === parsed.repository)
+  if (catalogEntry?.source?.kind === 'repository-plugin') return admitRepositoryPlugin(catalogEntry, {
+    tag: tag ?? parsed.tag, fetch, signal, platform, nodeCommand, probe, expectedComponentId, outputPath, workRoot,
+  })
   const selectedTag = tag ?? parsed.tag ?? catalogEntry?.tag
   let assetUrl
   let assetName

@@ -30,7 +30,7 @@ sizes, and provider-reported token values. It never persists prompt or message
 text, reasoning, tool arguments or results, headers, provider options,
 credentials, commands, error messages, or paths.
 
-### Explicit Trace Analysis Pack
+### Explicit Trace and Task Activity Packs
 
 There are two explicit export routes. The user can select one exact supported
 ZCode model-I/O file and destination. That v0.1 pack is metadata-only by
@@ -57,12 +57,26 @@ the pack. Listing and exporting do not trigger collection.
 The pack is material for the user's selected Agent. It is not an Observer
 recommendation, evaluation, approval, or proof of correctness or adoption.
 
+Observer also exposes ordinary retained task sessions from its existing
+`tool_event` and `usage_event` metadata. This closes the anonymous
+session-association gap for providers such as Codex whose ordinary activity
+does not populate detailed trace tables. A Task Activity Pack labels each tool
+record as either `direct-execution-observation` or `static-reference`.
+`functions.exec` source text that names a nested tool is only a static
+reference; completion of the outer call is not manufactured into a child
+receipt. A provider trace or component execution receipt is required to upgrade
+that child invocation. The task pack does not assess adoption.
+
 With monitoring enabled, the public Agent Host commands are:
 
 ```sh
 agent-host observability adapters --json
 agent-host observability adapter-plan --adapter openadam.gemini-cli-otel --json
 agent-host observability trace-sources --provider zcode --limit 25 --json
+agent-host observability task-sources --provider codex --limit 25 --json
+agent-host observability export-task --provider codex \
+  --session 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  --output /new/task-activity-pack.json --json
 agent-host observability export-trace --provider zcode \
   --session 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   --output /new/retained-trace-pack.json --json
@@ -70,10 +84,13 @@ agent-host observability export-trace --provider zcode \
   --file /exact/model-io-file.jsonl --output /new/trace-pack.json --json
 ```
 
-`adapters` is a path-free capability catalog. `trace-sources` is a path-free,
-bounded catalog of retained pseudonymous sessions for one provider. The
-Manager exposes the same listing and metadata-only download flow under Usage &
-Reliability. If a browser download is abandoned, Manager cancels the installed
+`adapters` is a path-free capability catalog. `trace-sources` and
+`task-sources` are path-free, bounded catalogs of retained pseudonymous
+sessions for one provider. Under Usage & Reliability, Manager exposes the
+same listing and metadata-only download flow for retained trace sessions.
+Native and browser Managers show task activity through direct-call, error, and
+static-reference counts, with detail exported only on request. If a browser
+download is abandoned, Manager cancels the installed
 Observer process and removes its private temporary output. Completed exports
 are published only as new files, so interruption cannot expose a partial pack.
 `adapter-plan` returns the exact
@@ -143,6 +160,8 @@ not a quality judgment.
 
 No passive adapter can prove Skill activation, semantic effect, result
 adoption, non-use reason, task quality, opportunity, or product value. A user
-or their Agent may analyze an explicitly selected pack and author a proposal,
-but that proposal remains a separate assessment with its own provenance and
-uncertainty.
+or their Agent may analyze an explicitly selected pack, combine it with the
+task-native artifact, write their own interpretation, or ignore it. When a
+Provider exposes bounded signals such as rationale presence or a stable turn
+reason, Observer records them as source-reported context. It does not require
+such feedback, infer its absence, or turn it into a Host verdict.

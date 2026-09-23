@@ -44,8 +44,16 @@ export async function validateComponentPathGrants(component) {
 }
 
 export function componentEnvironment(component, workspaceRoot) {
+  // Every delivery and observation surface uses the same explicit Host grant.
+  // A process working directory (or an inherited variable) is not authority.
+  const variables = component.workspaceEnvironment ?? []
+  if (variables.length > 0 && (typeof workspaceRoot !== 'string' || !isAbsolute(workspaceRoot))) {
+    throw new AgentHostError('WORKSPACE_GRANT_REQUIRED', `${component.displayName ?? component.plugin ?? component.componentId ?? 'Provider'} requires an explicit absolute Host workspace`, {
+      variables,
+    })
+  }
   const environment = Object.fromEntries(
-    (component.workspaceEnvironment ?? []).map((name) => [name, workspaceRoot]),
+    variables.map((name) => [name, workspaceRoot]),
   )
   for (const [name, roots] of Object.entries(component.pathGrants ?? {})) {
     environment[name] = roots.join(delimiter)

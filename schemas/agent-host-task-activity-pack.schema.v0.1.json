@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-task-activity-pack.schema.v0.1.json",
+  "title": "Agent Host Observer Task Activity Pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "source", "privacy", "retention", "limits", "observations", "events", "observationBoundary", "unknowns", "interpretationStatus"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-task-activity-pack.v0.1" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "selectionKind", "sessionHash", "requestedRange", "retainedRange", "observedTurns", "retainedEventCount", "completeness"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/provider" },
+        "selectionKind": { "const": "observer-retained-task-session" },
+        "sessionHash": { "$ref": "#/$defs/hash" },
+        "requestedRange": { "$ref": "#/$defs/range" },
+        "retainedRange": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sessionStartedAtMs", "firstEventAtMs", "lastEventAtMs"],
+          "properties": {
+            "sessionStartedAtMs": { "$ref": "#/$defs/nullableTime" },
+            "firstEventAtMs": { "$ref": "#/$defs/time" },
+            "lastEventAtMs": { "$ref": "#/$defs/time" }
+          }
+        },
+        "observedTurns": { "type": "integer", "minimum": 0 },
+        "retainedEventCount": { "type": "integer", "minimum": 1 },
+        "completeness": { "const": "unknown" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentPolicy", "sourcePathIncluded", "rawConversationContentIncluded", "toolArgumentsIncluded", "toolResultsIncluded", "observerPackRetained", "sourceUsesObserverRetainedMetadata"],
+      "properties": {
+        "contentPolicy": { "const": "metadata-only" },
+        "sourcePathIncluded": { "const": false },
+        "rawConversationContentIncluded": { "const": false },
+        "toolArgumentsIncluded": { "const": false },
+        "toolResultsIncluded": { "const": false },
+        "observerPackRetained": { "const": false },
+        "sourceUsesObserverRetainedMetadata": { "const": true }
+      }
+    },
+    "retention": { "$ref": "#/$defs/retention" },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxEvents", "maxOutputBytes", "eventLimitReached", "outputTruncated", "eventsAvailable", "eventsReturned"],
+      "properties": {
+        "maxEvents": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "maxOutputBytes": { "type": "integer", "minimum": 4096, "maximum": 67108864 },
+        "eventLimitReached": { "type": "boolean" },
+        "outputTruncated": { "type": "boolean" },
+        "eventsAvailable": { "type": "integer", "minimum": 1 },
+        "eventsReturned": { "type": "integer", "minimum": 0, "maximum": 5000 }
+      }
+    },
+    "observations": { "$ref": "#/$defs/sourceObservation" },
+    "events": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/event" } },
+    "observationBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directCallsAreExecutionObservations", "staticReferencesAreExecutionObservations", "nestedChildReceiptsRequireAProviderTraceOrComponentReceipt", "adoptionNotRepresented"],
+      "properties": {
+        "directCallsAreExecutionObservations": { "const": true },
+        "staticReferencesAreExecutionObservations": { "const": false },
+        "nestedChildReceiptsRequireAProviderTraceOrComponentReceipt": { "const": true },
+        "adoptionNotRepresented": { "const": true }
+      }
+    },
+    "unknowns": { "$ref": "#/$defs/unknowns" },
+    "interpretationStatus": { "const": "not-performed" }
+  },
+  "$defs": {
+    "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nullableHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "time": { "type": "integer", "minimum": 0 },
+    "nullableTime": { "type": ["integer", "null"], "minimum": 0 },
+    "nullableNumber": { "type": ["number", "null"], "minimum": 0 },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromMs", "toMs"],
+      "properties": { "fromMs": { "$ref": "#/$defs/nullableTime" }, "toMs": { "$ref": "#/$defs/nullableTime" } }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retentionDays", "currentCutoffMs", "eventsBeforeCutoffMayHaveBeenRemoved", "collectionBeforeMonitoringWasEnabled"],
+      "properties": {
+        "retentionDays": { "type": "integer", "minimum": 1 },
+        "currentCutoffMs": { "$ref": "#/$defs/time" },
+        "eventsBeforeCutoffMayHaveBeenRemoved": { "const": true },
+        "collectionBeforeMonitoringWasEnabled": { "const": "unavailable" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "required": ["contentPolicy", "sourcePathIncluded", "rawConversationContentIncluded", "toolArgumentsIncluded", "toolResultsIncluded"],
+      "properties": {
+        "contentPolicy": { "const": "metadata-only" },
+        "sourcePathIncluded": { "const": false },
+        "rawConversationContentIncluded": { "const": false },
+        "toolArgumentsIncluded": { "const": false },
+        "toolResultsIncluded": { "const": false }
+      }
+    },
+    "sourceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionHash", "sessionStartedAtMs", "firstEventAtMs", "lastEventAtMs", "observedTurns", "toolObservations", "directCalls", "staticReferences", "completed", "errors", "cancelled", "outcomeUnknown", "usageRecords", "completeness"],
+      "properties": {
+        "sessionHash": { "$ref": "#/$defs/hash" },
+        "sessionStartedAtMs": { "$ref": "#/$defs/nullableTime" },
+        "firstEventAtMs": { "$ref": "#/$defs/time" },
+        "lastEventAtMs": { "$ref": "#/$defs/time" },
+        "observedTurns": { "type": "integer", "minimum": 0 },
+        "toolObservations": { "type": "integer", "minimum": 0 },
+        "directCalls": { "type": "integer", "minimum": 0 },
+        "staticReferences": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "cancelled": { "type": "integer", "minimum": 0 },
+        "outcomeUnknown": { "type": "integer", "minimum": 0 },
+        "usageRecords": { "type": "integer", "minimum": 0 },
+        "completeness": { "const": "unknown" }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordinal", "kind", "eventHash", "sessionHash", "turnHash", "callHash", "occurredAtMs", "completedAtMs", "sourceFormat", "facts"],
+      "properties": {
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "kind": { "enum": ["tool-observation", "usage-observation"] },
+        "eventHash": { "$ref": "#/$defs/hash" },
+        "sessionHash": { "$ref": "#/$defs/hash" },
+        "turnHash": { "$ref": "#/$defs/nullableHash" },
+        "callHash": { "$ref": "#/$defs/nullableHash" },
+        "occurredAtMs": { "$ref": "#/$defs/nullableTime" },
+        "completedAtMs": { "$ref": "#/$defs/nullableTime" },
+        "sourceFormat": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "facts": {}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": { "const": "tool-observation" },
+            "facts": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["observationClass", "toolName", "toolNamespace", "routeClass", "isOpenAdam", "status", "durationMs", "retryCount", "requestBytes", "responseBytes"],
+              "properties": {
+                "observationClass": { "enum": ["direct-execution-observation", "static-reference"] },
+                "toolName": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "toolNamespace": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+                "routeClass": { "enum": ["mcp", "native-shell", "host-builtin", "orchestration", "unknown"] },
+                "isOpenAdam": { "type": "boolean" },
+                "status": { "enum": ["observed", "completed", "error", "cancelled", "unknown"] },
+                "durationMs": { "$ref": "#/$defs/nullableNumber" },
+                "retryCount": { "$ref": "#/$defs/nullableNumber" },
+                "requestBytes": { "$ref": "#/$defs/nullableNumber" },
+                "responseBytes": { "$ref": "#/$defs/nullableNumber" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "const": "usage-observation" },
+            "facts": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["durationMs", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningTokens", "totalTokens"],
+              "properties": {
+                "durationMs": { "$ref": "#/$defs/nullableNumber" },
+                "inputTokens": { "$ref": "#/$defs/nullableNumber" },
+                "cachedInputTokens": { "$ref": "#/$defs/nullableNumber" },
+                "outputTokens": { "$ref": "#/$defs/nullableNumber" },
+                "reasoningTokens": { "$ref": "#/$defs/nullableNumber" },
+                "totalTokens": { "$ref": "#/$defs/nullableNumber" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "unknowns": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["authoritative-skill-activation", "nested-reference-execution", "semantic-correctness", "result-adoption", "discovery-cause", "task-quality", "comparative-value"] }
+    }
+  }
+}

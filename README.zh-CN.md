@@ -5,6 +5,11 @@
 Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工具环境。它只使用公开扩展
 入口连接工具，并在本机运行已选择的结构化任务，不修改 Agent 应用自身。
 
+桌面 Manager 是可选的管理界面，CLI 使用同一套生命周期实现。配置完成后，工具通过受支持的
+MCP、Skill 和 CLI 入口供 Agent 调用，不需要一直打开 Manager 窗口。目标是在 Agent 环境变化时
+继续复用有用的能力，而不是承诺今天的适配器永久覆盖所有模型和 Harness；具体边界与演进原则见
+[产品模型](docs/PRODUCT_MODEL.md#stable-responsibilities-evolving-integrations)。
+
 本仓库是 **Agent Host Suite** 的分发单元；npm 包、CLI、schema 等稳定技术标识继续使用
 这个名称。
 
@@ -60,6 +65,10 @@ GitHub 项目/Release，不必改 Host 源码；见 [GitHub 更新](docs/UPDATES
 不会安装尚未入库的工具。它不是市场。Codex 投影与会话 Skill/MCP 路径见
 [发现与投影](docs/DISCOVERY_PROJECTION.md)。
 
+设置与工具页还会用可选的视觉任务卡片呈现已准入工具。用户可以把示例复制到新的 Agent
+任务中，也可以修改、忽略或移除工具；卡片不是评分，也不代表已经采用。公开发布者与私有
+贡献者分别走[生态参与路径](docs/ECOSYSTEM_PATHS.md)，不必接受一套 Host 统一产品模板。
+
 ## Profile
 
 - `standard`：小型默认 Agent 工具集。
@@ -96,12 +105,21 @@ agent-host doctor --deep --json
 tools-dev 路径，不是 featured。详见
 [精选目录 v1](docs/FEATURED_CATALOG.md)。
 
-## 不点名采用验收
+## 任务活动
 
-本 checkout **没有**记录一次已完成的真人采用。没有 Host GUI / 完整 Agent 会话的
-Linux 施工环境也不能替它打分。在已经装好 Agent Host 并连接 Agent 应用的机器上，按
-[不点名采用验收](docs/ADOPTION_ACCEPTANCE.md) 把页面夹具拷出仓库、开**新会话**、
-看图标是否进入作品，且提示里不出现 Armorial。
+`observability task-sources` 先给出容易扫读的会话数、直接调用、静态引用和
+错误数量；`observability export-task` 可再导出一个有界、匿名化的任务记录。
+它把直接执行与仅出现在编排输入里的工具名分开，但不替用户判断结果是否被
+采用、是否有用、是否优于其他方案。原生和浏览器 Manager 也以“任务活动”
+卡片呈现同样的关键数字，只有用户主动操作时才导出详情。详见
+[轨迹平面](docs/TRACE_PLANE.zh-CN.md)。
+
+## 不点名能力练习
+
+本 checkout 不会把 Host 检查或调用次数变成对 Agent 的判决。在已经装好 Agent Host
+并连接 Agent 应用的机器上，可按[不点名能力练习](docs/ADOPTION_ACCEPTANCE.md) 把页面
+夹具拷出仓库、开**新会话**，观察未点名 Armorial 时什么真正进入作品，再由参与者判断
+这一次任务对自己意味着什么。
 
 ```text
 agent-host doctor --featured-readiness --json
@@ -109,7 +127,7 @@ agent-host doctor --featured-readiness --json
 
 该命令报告用户级就绪（所需工具、连接、投影），与 `recipe.consistency` 配方检查分开，
 并且 `adoptionEvidence` 恒为 `false`。仅因 profile 名为 `local-dogfood` 不会让用户级
-诊断失败。Host status 与调用次数不能当采用证据。
+诊断失败。这个练习没有固定任务配额，也没有 Host 统一评分。
 
 ## 常用流程
 
@@ -135,7 +153,7 @@ Agent Host 私有状态上使用其中的不透明恢复标识和 manifest 摘�
 Agent Host 默认保留用户拥有的应用配置与数据。本机监测需要主动开启，被动采集只保存元数据。
 `uninstall --purge-data` 会删除 Suite 拥有的快照与历史，但 Observer 共享数据库有独立的数据
 生命周期，因此会被保留。观测到工具调用或工具曾被提供，不能证明 Skill 已激活、结果被采用、
-结果正确、任务质量或价值。完整边界见
+结果正确、任务质量或价值。观察与显式导出边界见
 [`docs/TRACE_PLANE.zh-CN.md`](docs/TRACE_PLANE.zh-CN.md)。
 
 `update` 上明确给出的 manifest 用于选择新的 release catalog；不带该参数的 `update` 只适用于
@@ -166,4 +184,4 @@ npm 包分发；请从源码仓库阅读
 [`DISCOVERY_PROJECTION.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/DISCOVERY_PROJECTION.md)、
 [`FEATURED_CATALOG.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md)、
 [`UNSIGNED_PREVIEW.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/UNSIGNED_PREVIEW.md) 与
-[`ADOPTION_ACCEPTANCE.md`](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md)。
+可选的[不点名能力练习](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md)。

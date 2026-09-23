@@ -18,11 +18,16 @@ function emptyRecord() {
   return { schemaVersion: TOOL_SOURCES_SCHEMA, updatedAt: null, tools: {} }
 }
 
+export function isGitHubOrigin(value) {
+  return ['github-release', 'github-repository'].includes(value?.kind)
+}
+
 function validOrigin(value) {
   return value !== null
     && typeof value === 'object'
     && !Array.isArray(value)
-    && value.kind === 'github-release'
+    && isGitHubOrigin(value)
+    && (value.kind !== 'github-repository' || (/^[0-9a-f]{40}$/u.test(value.commit ?? '') && value.tag === value.commit && typeof value.pluginPath === 'string'))
     && typeof value.repository === 'string'
     && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(value.repository)
     && typeof value.tag === 'string'
@@ -78,7 +83,7 @@ export async function writeToolSources(stateRoot, record) {
 }
 
 export function originIdentity(origin) {
-  return origin?.kind === 'github-release' ? `github:${origin.repository}` : origin?.kind ?? 'unknown'
+  return isGitHubOrigin(origin) ? `github:${origin.repository}` : origin?.kind ?? 'unknown'
 }
 
 export function assertCompatibleOrigin(previous, next, { replaceSource = false } = {}) {
@@ -122,9 +127,9 @@ export async function recordToolSourceAfterRemove(stateRoot, id, {
   const current = await readToolSources(stateRoot)
   const tools = { ...(current.recoveredInvalid === true ? {} : current.tools) }
   const previous = tools[id]
-  const origin = removedOrigin?.kind === 'github-release'
+  const origin = isGitHubOrigin(removedOrigin)
     ? removedOrigin
-    : (previous?.origin?.kind === 'github-release' ? previous.origin : null)
+    : (isGitHubOrigin(previous?.origin) ? previous.origin : null)
   if (origin === null) {
     if (previous !== undefined) delete tools[id]
     else return current

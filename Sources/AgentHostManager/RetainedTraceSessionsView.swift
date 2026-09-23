@@ -6,14 +6,14 @@ struct RetainedTraceSessionsView: View {
     let usage: UsageSummary
 
     @State private var provider = "zcode"
-    @State private var document: TraceAnalysisDocument?
+    @State private var document: JSONExportDocument?
     @State private var filename = "agent-host-trace.json"
     @State private var isPresentingExporter = false
 
     var body: some View {
         let providers = providerIDs
         let catalog = store.traceSourceCatalog?.provider == provider ? store.traceSourceCatalog : nil
-        Panel {
+        DataSection {
             Text(L10n.text("Retained trace sessions")).font(.headline)
             Text(L10n.text("Choose one Agent app to list locally retained metadata, then export one session for analysis."))
                 .font(.caption)
@@ -124,7 +124,7 @@ struct RetainedTraceSessionsView: View {
         Task {
             guard let data = await store.prepareTraceExport(provider: provider, sessionHash: source.sessionHash) else { return }
             filename = "agent-host-\(provider)-trace-\(source.sessionHash.prefix(12)).json"
-            document = TraceAnalysisDocument(data: data)
+            document = JSONExportDocument(data: data)
             isPresentingExporter = true
         }
     }

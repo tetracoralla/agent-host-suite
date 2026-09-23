@@ -3,7 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { configuredSemanticProviderIds, contextAnalyzerInvocation, disableObservability, enableObservability, exportObservabilityTrace, maintenance, observabilityAdapterPlan, observabilityAdapters, observabilitySummary, observabilityTraceSources, readCurrentObservability, refreshObservability, semanticExecutionTotals } from '../src/observability.mjs'
+import { configuredSemanticProviderIds, contextAnalyzerInvocation, disableObservability, enableObservability, exportObservabilityTask, exportObservabilityTrace, maintenance, observabilityAdapterPlan, observabilityAdapters, observabilitySummary, observabilityTaskSources, observabilityTraceSources, readCurrentObservability, refreshObservability, semanticExecutionTotals } from '../src/observability.mjs'
+import { AgentHostError } from '../src/errors.mjs'
 import { assessManagedCatalog, MANAGED_CATALOG_BUDGETS, retryableCatalogError, validateManagedToolBindings } from '../src/context-exporter.mjs'
 import { loadState, prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 
@@ -567,6 +568,104 @@ test('Agent Host lists and exports retained trace sessions only through the inst
   ])
   assert.equal(calls.every((item) => item.options.cwd === '/private/observer'), true)
   assert.equal(calls.every((item) => item.options.env.ATO_STATE_DIR === '/private/observer-state'), true)
+})
+
+test('Agent Host lists and exports retained task activity only through the installed Observer', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-retained-task-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  const paths = await prepareStatePaths(stateRoot)
+  await saveState(paths, {
+    schemaVersion: STATE_SCHEMA,
+    suiteVersion: '0.2.0',
+    channel: 'release',
+    profile: 'observability',
+    installedAt: '2026-09-21T00:00:00.000Z',
+    updatedAt: '2026-09-21T00:00:00.000Z',
+    components: {
+      'agent-tool-observer': { command: '/private/node', args: ['/private/observer/cli.mjs'], root: '/private/observer' },
+    },
+    hosts: {},
+    runtime: { observationLog: '/private/direct-runtime.jsonl' },
+    observability: { enabled: true, observer: { stateDir: '/private/observer-state' } },
+  })
+  const calls = []
+  const runner = async (command, args, options) => {
+    calls.push({ command, args, options })
+    return {
+      status: 0,
+      stdout: JSON.stringify(args.includes('task-sources')
+        ? { status: 'ok', schemaVersion: 'openadam.agent-host-task-source-catalog.v0.1', provider: 'codex', sources: [] }
+        : { status: 'completed', schemaVersion: 'openadam.agent-host-task-activity-pack.v0.1', eventsReturned: 3, contentPolicy: 'metadata-only' }),
+      stderr: '',
+    }
+  }
+  await observabilityTaskSources({ stateRoot, provider: 'codex', fromMs: 10, toMs: 20, limit: 25 }, { runner })
+  const signal = new AbortController().signal
+  await exportObservabilityTask({
+    stateRoot,
+    provider: 'codex',
+    session: 'b'.repeat(64),
+    output: '/selected/task.json',
+    fromMs: 10,
+    toMs: 20,
+    signal,
+  }, { runner })
+  assert.deepEqual(calls.map((item) => item.args), [
+    ['/private/observer/cli.mjs', 'task-sources', '--provider', 'codex', '--limit', '25', '--from-ms', '10', '--to-ms', '20', '--json'],
+    ['/private/observer/cli.mjs', 'task-export', '--provider', 'codex', '--session', 'b'.repeat(64), '--output', '/selected/task.json', '--max-events', '500', '--max-output-bytes', '16777216', '--from-ms', '10', '--to-ms', '20', '--json'],
+  ])
+  assert.equal(calls.every((item) => item.options.cwd === '/private/observer'), true)
+  assert.equal(calls.every((item) => item.options.env.ATO_STATE_DIR === '/private/observer-state'), true)
+  assert.equal(calls[1].options.signal, signal)
+})
+
+test('Observer command failures do not expose installed paths or command details', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-observer-command-failure-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  const paths = await prepareStatePaths(stateRoot)
+  await saveState(paths, {
+    schemaVersion: STATE_SCHEMA,
+    suiteVersion: '0.2.0',
+    channel: 'release',
+    profile: 'observability',
+    installedAt: '2026-09-21T00:00:00.000Z',
+    updatedAt: '2026-09-21T00:00:00.000Z',
+    components: {
+      'agent-tool-observer': { command: '/private/node', args: ['/private/observer/cli.mjs'], root: '/private/observer' },
+    },
+    hosts: {},
+    runtime: { observationLog: '/private/direct-runtime.jsonl' },
+    observability: { enabled: true, observer: { stateDir: '/private/observer-state' } },
+  })
+
+  await assert.rejects(
+    observabilityTaskSources({ stateRoot, provider: 'codex' }, {
+      runner: async () => {
+        throw new AgentHostError('HOST_COMMAND_FAILED', '/private/node /private/observer/cli.mjs task-sources failed', {
+          stderr: 'unknown command at /private/observer/cli.mjs',
+        })
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, 'OBSERVABILITY_COMPONENT_COMMAND_FAILED')
+      assert.equal(error.message, 'The installed monitoring component could not complete this request. Update or repair Agent Host, then try again.')
+      assert.equal(error.details, undefined)
+      assert.doesNotMatch(error.message, /\/private/u)
+      return true
+    },
+  )
+
+  await assert.rejects(
+    observabilityTaskSources({ stateRoot, provider: 'codex' }, {
+      runner: async () => {
+        throw new AgentHostError('HOST_COMMAND_CANCELLED', '/private/node was cancelled')
+      },
+    }),
+    {
+      code: 'HOST_COMMAND_CANCELLED',
+      message: 'The monitoring request was cancelled.',
+    },
+  )
 })
 
 test('Agent Host exposes adapter negotiation and non-mutating plans through the installed Observer', async (t) => {

@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { hostFacingManifest } from '../src/profile.mjs'
+import { hostFacingManifest, toolExposure } from '../src/profile.mjs'
+
+test('reported exposure agrees with whether an inactive Provider has a callable projection', () => {
+  const plain = { plugin: 'plain' }
+  const discovery = { plugin: 'discovery', providerSkill: { id: 'use-discovery' } }
+  const manifest = { components: { plain, discovery } }
+  const projected = hostFacingManifest(manifest, [])
+  assert.equal(projected.components.plain, undefined)
+  assert.equal(toolExposure(false, false, plain), 'inactive')
+  assert.equal(projected.components.discovery.skillOnly, true)
+  assert.equal(toolExposure(false, false, discovery), 'on-demand')
+  assert.equal(toolExposure(true, false, plain), 'active')
+  assert.equal(toolExposure(false, true, discovery), 'paused')
+})
 
 test('host manifest keeps inactive discovery Providers Skill-only without changing the active set', () => {
   const manifest = {

@@ -10,7 +10,7 @@ import { doctor as runDoctorChecks } from './doctor.mjs'
 import { resolveExecutable } from './process.mjs'
 import { resolveZcodeExecutable } from './hosts/zcode.mjs'
 import { openAgentApp } from './open-agent-app.mjs'
-import { disableObservability, enableObservability, exportObservabilityTrace, observabilityTraceSources, readCurrentObservability } from './observability.mjs'
+import { disableObservability, enableObservability, exportObservabilityTask, exportObservabilityTrace, observabilityTaskSources, observabilityTraceSources, readCurrentObservability } from './observability.mjs'
 import { operationsSnapshot } from './operations-snapshot.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { setup } from './setup.mjs'
@@ -38,6 +38,21 @@ const REQUEST_LIMIT = 8 * 1024
 const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000
 const HOSTS = new Set(['zcode', 'codex', 'claude'])
 const PROFILES = new Set(MANAGER_SETUP_PROFILES)
+const BUNDLED_TOOL_LOGOS = new Map([
+  ['fallback-table', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/fallback-table.svg', import.meta.url), mediaType: 'image/svg+xml' }],
+  ['fallback-file-search', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/fallback-file-search.svg', import.meta.url), mediaType: 'image/svg+xml' }],
+  ['fallback-text', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/fallback-text.svg', import.meta.url), mediaType: 'image/svg+xml' }],
+  ['fallback-layout-four', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/fallback-layout-four.svg', import.meta.url), mediaType: 'image/svg+xml' }],
+
+  ['laniakea', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/laniakea.png', import.meta.url), mediaType: 'image/png' }],
+  ['worldbend', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/worldbend.png', import.meta.url), mediaType: 'image/png' }],
+  ['calligram', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/calligram.png', import.meta.url), mediaType: 'image/png' }],
+  ['equatorium', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/equatorium.svg', import.meta.url), mediaType: 'image/svg+xml' }],
+
+  ['math-anchor', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/math-anchor.svg', import.meta.url), mediaType: 'image/svg+xml' }],
+  ['migratory-time', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/migratory-time.png', import.meta.url), mediaType: 'image/png' }],
+  ['armorial', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/armorial.svg', import.meta.url), mediaType: 'image/svg+xml' }],
+])
 
 async function configuredReleaseManifest(stateRoot, env = process.env) {
   const value = env.AGENT_HOST_RELEASE_MANIFEST
@@ -46,6 +61,8 @@ async function configuredReleaseManifest(stateRoot, env = process.env) {
 }
 const TRACE_SOURCE_CATALOG_VERSION = 'openadam.agent-host-trace-source-catalog.v0.1'
 const RETAINED_TRACE_PACK_VERSION = 'openadam.agent-host-trace-analysis-pack.v0.2'
+const TASK_SOURCE_CATALOG_VERSION = 'openadam.agent-host-task-source-catalog.v0.1'
+const TASK_ACTIVITY_PACK_VERSION = 'openadam.agent-host-task-activity-pack.v0.1'
 const SESSION_HASH = /^[a-f0-9]{64}$/u
 
 function fixedEqual(left, right) {
@@ -127,11 +144,21 @@ async function serveToolLogo(stateRoot, id) {
   const paths = await readStatePaths(resolveStateRoot(stateRoot))
   const state = await loadState(paths)
   const component = state?.components?.[id]
-  if (component?.logo === undefined || typeof component.root !== 'string') return null
+  if (component?.logo === undefined || typeof component.root !== 'string') return readBundledToolLogo(id)
   try {
     const verified = await readVerifiedLogoBytes(component.root, component.logo)
-    if (verified === null) return null
+    if (verified === null) return readBundledToolLogo(id)
     return verified
+  } catch {
+    return readBundledToolLogo(id)
+  }
+}
+
+async function readBundledToolLogo(id) {
+  const asset = BUNDLED_TOOL_LOGOS.get(id)
+  if (asset === undefined) return null
+  try {
+    return { bytes: await readFile(asset.url), mediaType: asset.mediaType }
   } catch {
     return null
   }
@@ -270,7 +297,7 @@ function exactObject(value, allowed) {
 }
 
 async function action(value, stateRoot, dependencies = {}) {
-  exactObject(value, ['action', 'host', 'connected', 'enabled', 'profile', 'tools', 'pause', 'resume', 'purgeData', 'language', 'url', 'path', 'check', 'clear', 'github', 'preview', 'id', 'all', 'includeApp'])
+  exactObject(value, ['action', 'host', 'connected', 'enabled', 'profile', 'tools', 'pause', 'resume', 'purgeData', 'language', 'url', 'path', 'check', 'clear', 'github', 'preview', 'id', 'all', 'includeApp', 'replaceHostConflicts'])
   if (typeof value.action !== 'string') throw new AgentHostError('MANAGER_REQUEST_INVALID', 'The Manager action is missing')
   if (value.action === 'setup') {
     if (!PROFILES.has(value.profile)) throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a supported Agent app and tool set')
@@ -296,16 +323,18 @@ async function action(value, stateRoot, dependencies = {}) {
     return value.connected ? addHost({ stateRoot, target: value.host }) : removeHost({ stateRoot, target: value.host })
   }
   if (value.action === 'tools') {
+    if (value.replaceHostConflicts !== undefined && typeof value.replaceHostConflicts !== 'boolean') throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose whether to take over the existing tool connection')
+    const replacement = { replaceHostConflicts: value.replaceHostConflicts === true }
     if (value.pause === true && value.resume === true) {
       throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Pause and resume cannot be combined')
     }
-    if (value.pause === true) return setActiveTools({ stateRoot, pauseTools: true })
-    if (value.resume === true) return setActiveTools({ stateRoot, resumeTools: true })
+    if (value.pause === true) return setActiveTools({ stateRoot, pauseTools: true, ...replacement })
+    if (value.resume === true) return setActiveTools({ stateRoot, resumeTools: true, ...replacement })
     if (!Array.isArray(value.tools) || value.tools.some((item) => typeof item !== 'string')) {
       throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose installed Agent tools, or pause all tools')
     }
-    if (value.tools.length === 0) return setActiveTools({ stateRoot, pauseTools: true })
-    return setActiveTools({ stateRoot, tools: [...new Set(value.tools)] })
+    if (value.tools.length === 0) return setActiveTools({ stateRoot, pauseTools: true, ...replacement })
+    return setActiveTools({ stateRoot, tools: [...new Set(value.tools)], ...replacement })
   }
   if (value.action === 'update') {
     if (value.profile !== undefined && !PROFILES.has(value.profile)) {
@@ -338,6 +367,9 @@ async function action(value, stateRoot, dependencies = {}) {
     throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a local catalog path or an HTTPS catalog URL')
   }
   if (value.action === 'github') {
+    if (value.replaceHostConflicts !== undefined && typeof value.replaceHostConflicts !== 'boolean') {
+      throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose whether to take over the existing tool connection')
+    }
     if (typeof value.github !== 'string' || value.github.trim() === '') {
       throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Paste a GitHub repository or Release URL')
     }
@@ -345,6 +377,7 @@ async function action(value, stateRoot, dependencies = {}) {
       stateRoot,
       github: value.github.trim(),
       preview: value.preview === true,
+      replaceHostConflicts: value.replaceHostConflicts === true,
     })
   }
   if (value.action === 'updates-check') return updatesCheck({ stateRoot })
@@ -427,6 +460,66 @@ async function traceSources(url, stateRoot, reader) {
     || privacy?.toolResultsIncluded !== false
     || !sourcesValid) {
     throw new AgentHostError('TRACE_SOURCE_CATALOG_INVALID', 'The monitoring component returned an invalid retained trace catalog')
+  }
+  return catalog
+}
+
+async function taskSources(url, stateRoot, reader) {
+  const unexpected = [...url.searchParams.keys()].filter((key) => !['provider', 'fromMs', 'toMs', 'limit'].includes(key))
+  if (unexpected.length > 0) throw new AgentHostError('MANAGER_REQUEST_INVALID', 'The task query contains unsupported fields', { fields: unexpected })
+  const provider = url.searchParams.get('provider')
+  if (typeof provider !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(provider)) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose one task provider')
+  }
+  const catalog = await reader({
+    stateRoot,
+    provider,
+    fromMs: integerQuery(url.searchParams.get('fromMs'), 'fromMs', 0, Number.MAX_SAFE_INTEGER),
+    toMs: integerQuery(url.searchParams.get('toMs'), 'toMs', 0, Number.MAX_SAFE_INTEGER),
+    limit: integerQuery(url.searchParams.get('limit'), 'limit', 1, 50) ?? 25,
+  })
+  const privacy = catalog?.privacy
+  const boundary = catalog?.observationBoundary
+  const limits = catalog?.limits
+  const retention = catalog?.retention
+  const sourcesValid = Array.isArray(catalog?.sources) && catalog.sources.every((source) => {
+    const outcomes = source?.completed + source?.errors + source?.cancelled + source?.outcomeUnknown
+    return SESSION_HASH.test(source?.sessionHash)
+      && (source?.sessionStartedAtMs === null || (Number.isSafeInteger(source?.sessionStartedAtMs) && source.sessionStartedAtMs >= 0))
+      && Number.isSafeInteger(source?.firstEventAtMs) && source.firstEventAtMs >= 0
+      && Number.isSafeInteger(source?.lastEventAtMs) && source.lastEventAtMs >= source.firstEventAtMs
+      && Number.isSafeInteger(source?.observedTurns) && source.observedTurns >= 0
+      && Number.isSafeInteger(source?.toolObservations) && source.toolObservations >= 0
+      && Number.isSafeInteger(source?.directCalls) && source.directCalls >= 0
+      && Number.isSafeInteger(source?.staticReferences) && source.staticReferences >= 0
+      && source.directCalls + source.staticReferences === source.toolObservations
+      && Number.isSafeInteger(outcomes) && outcomes === source.toolObservations
+      && Number.isSafeInteger(source?.usageRecords) && source.usageRecords >= 0
+      && source.toolObservations + source.usageRecords >= 1
+      && source?.completeness === 'unknown'
+  })
+  if (catalog?.schemaVersion !== TASK_SOURCE_CATALOG_VERSION
+    || catalog?.status !== 'ok'
+    || catalog?.provider !== provider
+    || catalog?.interpretationStatus !== 'not-performed'
+    || privacy?.contentPolicy !== 'metadata-only'
+    || privacy?.sourcePathIncluded !== false
+    || privacy?.rawConversationContentIncluded !== false
+    || privacy?.toolArgumentsIncluded !== false
+    || privacy?.toolResultsIncluded !== false
+    || boundary?.directCallsAreExecutionObservations !== true
+    || boundary?.staticReferencesAreExecutionObservations !== false
+    || boundary?.terminalStatusMayBePartial !== true
+    || !Number.isSafeInteger(limits?.maxSources) || limits.maxSources < 1 || limits.maxSources > 50
+    || !Number.isSafeInteger(limits?.sourcesReturned) || limits.sourcesReturned !== catalog?.sources?.length
+    || limits.sourcesReturned > limits.maxSources
+    || typeof limits?.sourceLimitReached !== 'boolean'
+    || !Number.isSafeInteger(retention?.retentionDays) || retention.retentionDays < 1
+    || !Number.isSafeInteger(retention?.currentCutoffMs) || retention.currentCutoffMs < 0
+    || retention?.eventsBeforeCutoffMayHaveBeenRemoved !== true
+    || retention?.collectionBeforeMonitoringWasEnabled !== 'unavailable'
+    || !sourcesValid) {
+    throw new AgentHostError('TASK_SOURCE_CATALOG_INVALID', 'The monitoring component returned an invalid task activity catalog')
   }
   return catalog
 }
@@ -516,6 +609,92 @@ async function exportTraceDownload(value, stateRoot, exporter, signal) {
   }
 }
 
+function validateTaskActivityDownload(receipt, body, output, provider, session) {
+  let pack
+  try {
+    pack = JSON.parse(body.toString('utf8'))
+  } catch {
+    throw new AgentHostError('TASK_EXPORT_CONTENT_INVALID', 'The task activity export is not valid JSON')
+  }
+  const privacy = pack?.privacy
+  const boundary = pack?.observationBoundary
+  const countsValid = Number.isSafeInteger(receipt?.eventsReturned)
+    && receipt.eventsReturned >= 0
+    && Number.isSafeInteger(receipt?.eventsAvailable)
+    && receipt.eventsAvailable >= receipt.eventsReturned
+    && receipt.eventsReturned === pack?.limits?.eventsReturned
+    && receipt.eventsAvailable === pack?.limits?.eventsAvailable
+    && Array.isArray(pack?.events)
+    && pack.events.length === receipt.eventsReturned
+  if (receipt?.status !== 'completed'
+    || receipt?.schemaVersion !== TASK_ACTIVITY_PACK_VERSION
+    || receipt?.outputPath !== output
+    || receipt?.outputBytes !== body.length
+    || receipt?.contentPolicy !== 'metadata-only'
+    || receipt?.observerPackRetained !== false
+    || receipt?.interpretationStatus !== 'not-performed'
+    || pack?.schemaVersion !== TASK_ACTIVITY_PACK_VERSION
+    || pack?.source?.provider !== provider
+    || pack?.source?.selectionKind !== 'observer-retained-task-session'
+    || pack?.source?.sessionHash !== session
+    || privacy?.contentPolicy !== 'metadata-only'
+    || privacy?.observerPackRetained !== false
+    || privacy?.sourceUsesObserverRetainedMetadata !== true
+    || privacy?.sourcePathIncluded !== false
+    || privacy?.rawConversationContentIncluded !== false
+    || privacy?.toolArgumentsIncluded !== false
+    || privacy?.toolResultsIncluded !== false
+    || boundary?.directCallsAreExecutionObservations !== true
+    || boundary?.staticReferencesAreExecutionObservations !== false
+    || boundary?.nestedChildReceiptsRequireAProviderTraceOrComponentReceipt !== true
+    || boundary?.adoptionNotRepresented !== true
+    || pack?.interpretationStatus !== 'not-performed'
+    || !countsValid) {
+    throw new AgentHostError('TASK_EXPORT_CONTENT_INVALID', 'The monitoring component returned an invalid task activity export')
+  }
+}
+
+async function exportTaskActivityDownload(value, stateRoot, exporter, signal) {
+  exactObject(value, ['provider', 'session', 'fromMs', 'toMs'])
+  if (typeof value.provider !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value.provider)) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose one task provider')
+  }
+  if (typeof value.session !== 'string' || !SESSION_HASH.test(value.session)) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose one retained task session')
+  }
+  for (const [name, selected] of [['fromMs', value.fromMs], ['toMs', value.toMs]]) {
+    if (selected !== undefined && (!Number.isSafeInteger(selected) || selected < 0)) {
+      throw new AgentHostError('MANAGER_REQUEST_INVALID', `${name} is outside the supported range`)
+    }
+  }
+  if (value.fromMs !== undefined && value.toMs !== undefined && value.fromMs > value.toMs) {
+    throw new AgentHostError('MANAGER_REQUEST_INVALID', 'The task range start must not be after its end')
+  }
+  const temporary = await mkdtemp(join(tmpdir(), 'agent-host-task-download-'))
+  const output = join(temporary, 'task-activity-pack.json')
+  try {
+    const receipt = await exporter({
+      stateRoot,
+      provider: value.provider,
+      session: value.session,
+      output,
+      fromMs: value.fromMs,
+      toMs: value.toMs,
+      maxEvents: 500,
+      maxOutputBytes: 8 * 1024 * 1024,
+      signal,
+    })
+    const body = await readFile(output)
+    validateTaskActivityDownload(receipt, body, output, value.provider, value.session)
+    return {
+      body,
+      filename: `agent-host-${value.provider}-task-${value.session.slice(0, 12)}.json`,
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true })
+  }
+}
+
 function openBrowser(url) {
   const command = platform() === 'win32' ? 'cmd.exe' : platform() === 'darwin' ? '/usr/bin/open' : 'xdg-open'
   const args = platform() === 'win32' ? ['/d', '/s', '/c', 'start', '""', url] : [url]
@@ -528,17 +707,32 @@ function cookieToken(request) {
   return match?.[1] ?? null
 }
 
-function managerDocument() {
+export function managerDocument() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agent Host</title><style>
-:root{color-scheme:light dark;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f6f8;color:#15171a;--status-action:#15171a;--status-ready:#1769e0;--status-paused:#995500;--status-fault:#b42318}*{box-sizing:border-box}body{margin:0}button,select{font:inherit}.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}.side{padding:28px 18px;background:#111318;color:#f7f7f8}.brand{font-size:20px;font-weight:700;margin:0 10px 28px}.nav{display:grid;gap:6px}.nav button,.side-footer button{border:0;background:transparent;color:#aeb4bf;text-align:left;padding:10px 12px;border-radius:9px}.nav button[aria-current=true]{background:#292d35;color:white}.nav button:focus-visible,.side-footer button:focus-visible,button.action:focus-visible,select:focus-visible{outline:3px solid #75a9ff;outline-offset:2px}.side-footer{position:fixed;bottom:16px;margin-left:10px;display:grid;gap:2px}.side-footer button{padding:4px 0;font-size:12px}.version{color:#777f8c;font-size:12px}.main{padding:36px;max-width:1080px;width:100%}h1{font-size:30px;margin:0}h2{font-size:17px;margin:0 0 14px}.sub{color:#69707b;margin:4px 0 26px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}.card{background:white;border:1px solid #e2e5e9;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px #00000008}.metric{font-size:25px;font-weight:700}.muted{color:#747b86}.row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #eceef1}.tool-logo{width:28px;height:28px;border-radius:6px;object-fit:cover;background:#e8eaee}.logo-fallback{width:28px;height:28px;border-radius:6px;background:#d9e5f7;display:inline-block}.row:first-of-type{border-top:0}.row .grow{flex:1}.pill{font-size:12px;padding:3px 8px;border-radius:20px;background:#edf5ee;color:#26733a}.pill.warn{background:#fff2de;color:#995500}button.action{border:1px solid #cfd4da;background:#fff;color:#17191c;padding:8px 12px;border-radius:9px}button.primary{background:#1769e0;border-color:#1769e0;color:#fff}button.danger{color:#b42318}button:disabled{opacity:.5}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions select{min-width:180px;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit}.hidden{display:none!important}.notice{padding:12px 14px;border-radius:10px;background:#fff4df;color:#7a4c00;margin-bottom:16px}.empty{padding:70px 20px;text-align:center;color:#737a84}.check{display:flex;gap:8px;align-items:center}.tool-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 18px}.heat{display:grid;grid-template-columns:repeat(30,minmax(5px,1fr));gap:4px;margin:12px 0 4px}.heat i{display:block;aspect-ratio:1;border-radius:3px;background:#d9e5f7}.heat i.on{background:#1769e0}dialog{width:min(420px,calc(100% - 32px));border:1px solid #d9dde3;border-radius:14px;padding:20px;background:#fff;color:#17191c}dialog::backdrop{background:#11131888}.setting-row{display:grid;gap:7px;margin:20px 0}.setting-row select,.setting-row input,dialog input{width:100%;padding:8px;border:1px solid #cfd4da;border-radius:9px;background:transparent;color:inherit;margin:6px 0}.busy{position:fixed;inset:0;background:#ffffffaa;display:grid;place-items:center;backdrop-filter:blur(2px)}.busy div{background:#111318;color:white;padding:14px 20px;border-radius:12px}.start-work{padding:20px 18px}.start-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.start-status{font-size:22px;font-weight:700}.start-status[data-tone=ready]{color:var(--status-ready)}.start-status[data-tone=paused]{color:var(--status-paused)}.start-status[data-tone=fault]{color:var(--status-fault)}.start-status[data-tone=action]{color:var(--status-action)}.start-hint{margin:8px 0 0}.start-work details,.main>details{margin-top:12px}.start-work summary,.main>details>summary{cursor:pointer;color:#747b86;font-size:13px}.start-details{margin-top:8px;display:grid;gap:4px}@media(max-width:760px){.shell{grid-template-columns:1fr;grid-template-rows:auto 1fr}.side{padding:15px}.brand{margin-bottom:12px}.nav{grid-template-columns:repeat(5,1fr)}.nav button{text-align:center;padding:8px 4px;font-size:12px}.side-footer{position:absolute;right:14px;top:11px;bottom:auto;margin:0}.side-footer button{padding:4px 8px}.version{display:none}.main{padding:22px}.heat{grid-template-columns:repeat(15,minmax(7px,1fr))}}
-@media(prefers-color-scheme:dark){:root{background:#0d0f12;color:#f1f2f4;--status-action:#f1f2f4;--status-ready:#7eb0ff;--status-paused:#ffb020;--status-fault:#ff6b5a}.side{background:#08090b}.card,dialog{background:#17191e;border-color:#2b2f36;color:#f1f2f4}.row{border-color:#2b2f36}button.action,.setting-row select{background:#202329;border-color:#3a3f48;color:#f1f2f4}.muted,.sub{color:#9da4af}.busy{background:#0d0f12aa}}
-</style></head><body><div class="shell"><aside class="side"><div class="brand">Agent Host</div><nav class="nav" id="nav"><button data-page="environment" aria-current="true"></button><button data-page="tools"></button><button data-page="updates"></button><button data-page="activity"></button><button data-page="usage"></button></nav><div class="side-footer"><button id="refreshButton"></button><button id="settingsButton"></button><div class="version" id="version"></div></div></aside><main class="main"><div id="error" class="notice hidden" role="alert"></div><section id="environment"></section><section id="tools" class="hidden"></section><section id="updates" class="hidden"></section><section id="usage" class="hidden"></section><section id="activity" class="hidden"></section></main></div><dialog id="settingsDialog"><h2 id="settingsTitle"></h2><label class="setting-row"><span id="languageLabel"></span><select id="languageSelect"></select></label><div id="versionPlanes"></div><div id="sourceSettings"></div><div class="actions"><button class="action primary" id="settingsDone"></button></div></dialog><div id="busy" class="busy hidden" role="status" aria-live="polite"><div id="busyText"></div></div>
+:root{color-scheme:light dark;font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;color:#242628;--canvas:#fff;--side:#f5f5f4;--line:#e8e9e8;--muted:#6c7172;--hover:#f7f7f6;--accent:#286cd6;--status-action:#242628;--status-ready:#286cd6;--status-paused:#9b691f;--status-fault:#bd4537}
+*{box-sizing:border-box}body{margin:0}button,input,select,textarea{font:inherit;color:inherit}button,summary{cursor:pointer}button:disabled{cursor:default;opacity:.45}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px}input[type=checkbox]{accent-color:var(--accent)}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.shell{display:grid;grid-template-columns:176px minmax(0,1fr);min-height:100vh}.side{padding:28px 14px;background:var(--side);position:sticky;top:0;height:100vh;display:flex;flex-direction:column}.brand{font-size:15px;font-weight:650;margin:0 10px 34px}.nav{display:grid;gap:5px}.nav button,.side-footer button{border:0;background:transparent;text-align:left;padding:9px 12px;border-radius:6px;color:var(--muted)}.nav button[aria-current=true]{background:var(--line);color:inherit;font-weight:600}.nav button:hover,.side-footer button:hover{color:inherit}.side-footer{margin-top:auto;padding:20px 10px 0;display:grid;gap:8px}.side-footer button{padding:0;font-size:12px}.version{font-size:10px;color:var(--muted);overflow-wrap:anywhere;max-width:134px}.main{padding:36px 34px;max-width:1080px;width:100%;min-width:0}.page-head,.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.page-head{margin-bottom:28px}h1{font-size:25px;line-height:1.25;font-weight:650;letter-spacing:-.6px;margin:0}h2{font-size:14px;margin:0 0 16px;font-weight:600}p{margin:8px 0 16px}.muted,.sub{color:var(--muted)}.sub{margin:8px 0 28px}.search-field{display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--line);margin-bottom:24px;padding:9px 0}.search-field input{min-width:0;flex:1;padding:0;border:0;background:transparent;outline-offset:8px}.search-icon{font-size:22px;line-height:1;color:var(--muted)}.clear-search{border:0;background:transparent;color:var(--muted)}input[type=search]::-webkit-search-cancel-button{display:none}
+.tool-collection{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:30px}.tool-row{display:flex;align-items:center;gap:13px;text-align:left;border:0;border-bottom:1px solid var(--line);background:transparent;min-height:76px;padding:16px 4px;width:100%;min-width:0}.tool-row:hover{background:var(--hover)}.tool-copy{display:grid;gap:4px;min-width:0;flex:1}.tool-copy strong{font-weight:600}.tool-copy>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tool-copy .muted{font-size:12px}.tool-state{flex:none;width:18px;text-align:center;font-size:13px;color:var(--muted)}.attention{color:var(--status-paused)}.tool-logo,.logo-fallback{width:38px;height:38px;flex:none;object-fit:contain}.logo-fallback{display:grid;place-items:center;border-radius:8px;background:var(--side);color:var(--muted)}.logo-fallback:after{content:'◇';font-size:22px}.logo-fallback.has-glyph:after{content:none}.logo-fallback img{width:24px;height:24px}.recommendations{margin-top:38px}.section-head{margin-bottom:8px}.section-head h2{margin:0}.browse-more{margin-top:28px}.empty{grid-column:1/-1;color:var(--muted);text-align:center;padding:48px 12px}.pause-note{display:flex;justify-content:space-between;align-items:center;margin:16px 0;color:var(--muted)}
+button.action{border:1px solid var(--line);background:var(--canvas);border-radius:6px;padding:6px 12px;white-space:nowrap}.action:hover{background:var(--hover)}button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.primary:hover{filter:brightness(1.08)}button.danger{color:var(--status-fault)}.text-action{border:0;background:transparent;padding:0;color:var(--muted)}.text-action:hover{color:inherit}.back{margin-bottom:34px}.back:before{content:'‹';margin-right:8px}.detail-head{display:flex;align-items:center;justify-content:space-between;gap:20px}.detail-identity{display:flex;align-items:center;gap:18px;min-width:0}.detail-identity h1{overflow-wrap:anywhere}.detail-identity p{margin:8px 0 0}.detail-identity .tool-logo,.detail-identity .logo-fallback{width:64px;height:64px}.detail-description{margin:32px 0;max-width:600px}.task-example{margin-top:38px}.task-example textarea{display:block;resize:vertical;width:100%;min-height:128px;line-height:1.65;padding:18px;border:1px solid transparent;background:var(--side);border-radius:9px}.detail-metadata{margin-top:32px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted)}.detail-metadata a{display:inline-block;margin:18px 0}.detail-metadata .row{border:0;padding:10px 0}.detail-metadata input{width:18px;height:18px}
+.management{position:relative}.management>summary{list-style:none;padding:5px 10px;border:1px solid var(--line);border-radius:6px;font-size:12px}.management>summary::-webkit-details-marker{display:none}.management-actions{position:absolute;right:0;top:calc(100% + 8px);width:max-content;z-index:5;padding:6px;display:grid;gap:4px;background:var(--canvas);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px #0002}.management-actions .action{border:0;text-align:left}.agent-row{display:flex;align-items:center;gap:16px;padding:22px 0;border-bottom:1px solid var(--line)}.agent-row .grow{flex:1}.agent-symbol{width:40px;height:40px;display:grid;place-items:center;font-size:30px;color:var(--muted)}.agent-row .muted{font-size:12px;margin-top:3px}.agent-list{margin:26px 0 32px}.agent-list>button{margin-top:20px}
+.card{padding:24px 0;margin-bottom:12px;border:0;border-top:1px solid var(--line);background:transparent}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:24px}.grid .card{border:0}.metric{font-size:28px;letter-spacing:-.6px;font-variant-numeric:tabular-nums}.row{display:flex;align-items:center;gap:12px;padding:13px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.row:first-of-type{border-top:0}.row .grow{flex:1;min-width:0}.row .tool-logo{width:28px;height:28px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.actions select,dialog select,dialog input,#github-import input{padding:8px;border:1px solid var(--line);background:transparent;border-radius:6px;max-width:100%}#github-import{margin-top:32px}#github-import input{width:100%}.task-row{align-items:flex-start}.task-title{font-weight:600}.task-stats{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;font-size:12px}.task-errors{color:var(--status-fault)}.pill{font-size:12px;color:var(--muted)}.pill.warn{color:var(--status-paused)}.heat{display:grid;grid-template-columns:repeat(30,minmax(5px,1fr));gap:4px;margin:16px 0}.heat i{aspect-ratio:1;background:var(--line);border-radius:2px}.heat i.on{background:var(--accent)}.check{display:flex;align-items:center;gap:8px}.hidden{display:none!important}.notice{padding:12px 14px;border-left:2px solid var(--status-paused);background:var(--side);color:var(--status-paused);margin-bottom:20px;overflow-wrap:anywhere}.notice[data-tone=info]{color:var(--muted);border-color:var(--accent)}.notice[data-tone=error]{color:var(--status-fault);border-color:var(--status-fault)}.handoff-note{color:var(--muted);margin-top:20px}.start-row{display:flex;align-items:center;justify-content:space-between;gap:16px}.start-status{font-size:18px;font-weight:600}.start-status[data-tone=action]{color:var(--status-action)}.start-status[data-tone=fault]{color:var(--status-fault)}.start-status[data-tone=paused]{color:var(--status-paused)}.start-details{display:grid;gap:6px;margin:12px 0}.start-hint{color:var(--muted)}summary{color:var(--muted)}dialog{width:min(520px,calc(100% - 32px));max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:24px;background:var(--canvas)}dialog::backdrop{background:#0006}.setting-row{display:grid;gap:8px}.busy{position:fixed;inset:0;z-index:10;background:#8882;display:grid;place-items:center;backdrop-filter:blur(2px)}.busy div{background:var(--canvas);padding:18px 24px;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 30px #0002}
+#activity .card{border:0}#activity .row{position:relative;padding:20px 0 20px 24px;align-items:flex-start}#activity .row:before{content:'';width:6px;height:6px;border:1px solid var(--muted);border-radius:50%;position:absolute;left:0;top:27px}#activity .row>div:last-child{font-size:12px;color:var(--muted);text-align:right}
+@media(prefers-color-scheme:dark){:root{--canvas:#222323;--side:#272828;--line:#393a3a;--muted:#a1a4a4;--hover:#2b2c2c;--accent:#6da1ef;background:var(--canvas);color:#e9eaea;--status-action:#e9eaea;--status-ready:#6da1ef;--status-paused:#e2b369;--status-fault:#f08f82}button.primary{color:#15243b}}
+@media(max-width:780px){.shell{grid-template-columns:152px minmax(0,1fr)}.main{padding:30px 24px}.tool-collection{grid-template-columns:1fr}.detail-head{align-items:flex-start;flex-wrap:wrap}.tool-row{min-height:72px}}
+@media(max-width:540px){.shell{display:block}.side{position:relative;height:auto;padding:18px 16px}.brand{margin:0 0 18px 6px}.nav{display:flex;justify-content:space-between;gap:2px}.nav button{padding:7px 9px;font-size:12px}.side-footer{position:absolute;right:20px;top:20px;display:flex;padding:0;gap:14px}.version{display:none}.main{padding:28px 22px}.agent-row{flex-wrap:wrap;gap:12px}.agent-row .grow{min-width:120px}.agent-row button{margin-left:auto}.task-row{flex-wrap:wrap}.row{flex-wrap:wrap}.detail-identity h1{font-size:23px}.detail-identity .tool-logo{width:52px;height:52px}.heat{grid-template-columns:repeat(15,minmax(5px,1fr))}.start-row{flex-wrap:wrap}}
+</style></head><body><div class="shell"><aside class="side"><div class="brand">Agent Host</div><nav class="nav" id="nav"><button data-page="tools" aria-current="true"></button><button data-page="updates"></button><button data-page="environment"></button><button data-page="activity"></button><button data-page="usage"></button></nav><div class="side-footer"><button id="refreshButton"></button><button id="settingsButton"></button><div class="version" id="version"></div></div></aside><main class="main"><div id="error" class="notice hidden" role="alert"></div><section id="tools"></section><section id="updates" class="hidden"></section><section id="environment" class="hidden"></section><section id="usage" class="hidden"></section><section id="activity" class="hidden"></section><section id="tool-detail" class="hidden"></section></main></div><dialog id="settingsDialog"><h2 id="settingsTitle"></h2><label class="setting-row"><span id="languageLabel"></span><select id="languageSelect"></select></label><div id="versionPlanes"></div><div id="sourceSettings"></div><div class="actions"><button class="action primary" id="settingsDone"></button></div></dialog><div id="busy" class="busy hidden" role="status" aria-live="polite"><div id="busyText"></div></div>
 <script>
-const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};let data,languageSelection='system',changing=false,lastPreview=null,lastUpdates=null,lastGithubTarget='',lastGithubPreviewed='',lastDoctor=null;
+const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};let data,languageSelection='system',changing=false,lastPreview=null,lastUpdates=null,lastGithubTarget='',lastGithubPreviewed='',githubConflictURL=null,lastDoctor=null;
+const view={page:'tools',queries:{tools:'',updates:''},detail:null,returnPage:'tools',scroll:0,drafts:{},githubOpen:false,managementOpen:false};
 const names={zcode:'ZCode',codex:'Codex',claude:'Claude Code','deepseek-harness':'DeepSeek Harness','gemini-cli':'Gemini CLI','github-copilot-cli':'GitHub Copilot CLI'};
 const zh={
+'Decision rules':'决策规则','State transitions':'状态流转','Schedule calculation':'日程计算',
+'Take over existing connections':'接管现有连接','Previous connections are saved and restored when the tools are removed.':'原连接会被保存，并在移除工具时恢复。',
+'Tool activity':'工具使用情况','Calls mapped to tools managed by Agent Host. Independently configured tools are outside this view.':'此处统计映射到 Host 管理工具的调用，不包含独立配置的工具。','Take over connection and add':'接管连接并添加','This tool is already configured independently. Agent Host can take over its connection and restore the previous configuration when you remove it.':'这个工具已有独立配置。Agent Host 可以接管连接，并在移除工具时恢复原配置。',
+'My tools':'我的工具','Install Agent Host before adding a GitHub tool.':'请先安装 Agent Host，再添加 GitHub 工具。','Collection details':'采集详情','Static references do not prove execution.':'静态引用不代表执行。','Script references are not execution; open tasks may use older bindings.':'脚本引用不代表执行；未关闭的任务可能仍使用旧绑定。','Pause all tools? On-demand tools will also pause.':'暂停全部工具？按需工具也将暂停。','Disconnect this Agent app?':'断开此 Agent 的连接？','Tool options':'更多操作','Inspection unavailable':'无法检查','Error report copied':'已复制错误报告','Open':'打开','Manage':'管理','Back':'返回','Try a task':'试一试','Example task':'示例任务','Enable by default':'默认启用','Version':'版本','Project website':'项目网站','Use in Agent':'在 Agent 中使用','Clear search':'清除搜索','No matching tools':'没有匹配的工具','Connected, not checked':'已连接，尚未检查','Copy error report':'复制错误报告','Browse more tools':'浏览更多工具','Tool status unavailable':'工具状态暂不可用','Structured data':'结构化数据','Mind maps':'思维导图','Projective layouts':'投影布局','Standard expressions':'标准表达式','File inspection':'文件检查','Spatial composition':'空间编排','Unicode inspection':'Unicode 检查','Responsive layouts':'响应式布局','Visual documents':'可视化文档','Task copied':'任务已复制',
+
 "Tool activity":"工具使用情况",
 "Version history":"版本历史",
 "All tools":"全部工具",
@@ -562,32 +756,63 @@ const zh={
 "Script references do not prove execution. Binding counts can include older open sessions.":"脚本引用不能证明实际执行。绑定期间统计可能包括尚未关闭的旧会话。",
 "Use the installed Agent Host operations skill to analyze the current usage report, version history, runtime errors and coverage. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; counts alone do not establish adoption or correctness.":"请使用已安装的 Agent Host operations 技能分析当前使用报告、版本历史、运行错误和采集覆盖。区分真实任务与健康检查、脚本引用与实际执行。结合当前任务提出改进，不要仅凭次数推断采纳或正确性。",
 
-  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','On-demand Skill only; MCP stays off until you include this tool in the working set.':'仅按需 Skill；在重新加入工作集之前不会提供 MCP。','Fully paused: no MCP and no on-demand Skill.':'完全暂停：无 MCP，也无按需 Skill。','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源',
-  'Overview':'总览','Environment':'环境','Tools':'工具','Updates':'更新','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…','Browse recommended tools':'浏览推荐工具','Add GitHub project':'添加 GitHub 项目','GitHub repository or Release URL':'GitHub 仓库或 Release 地址','Preview GitHub project':'预览 GitHub 项目','Add from GitHub':'从 GitHub 添加','Previewing GitHub project…':'正在预览 GitHub 项目…','Adding GitHub tool…':'正在添加 GitHub 工具…','Check for updates':'检查更新','Checking updates…':'正在检查更新…','This platform':'当前平台','No asset for this platform':'当前平台无安装包','profiles fetch --carrier downloads an installer. It does not replace Agent Host.':'profiles fetch --carrier 只下载安装包，不会替换或重启 Agent Host。',
+  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','Off keeps an on-demand Skill. Pause all withholds both.':'关闭单项仍保留按需 Skill；全部暂停则两者都不投影。','All tools are paused.':'所有工具已暂停。','Enable to use':'启用后使用','Enable this tool, then start a fresh Agent task to use it.':'启用此工具后，在新的 Agent 任务中使用。','On-demand':'按需','Paused':'已暂停','Use':'使用','Use {tool} in a new Agent task':'在新的 Agent 任务中使用 {tool}','For new tasks':'用于新任务','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源','Task provider':'任务来源',
+  'Overview':'总览','Environment':'环境','Tools':'工具','Browse':'浏览','Agents':'Agent','Updates':'更新','Tool Library':'工具库','Installed':'已安装','Recommended':'推荐','See all':'查看更多','No installed tools':'本机还没有安装工具','No installed tools match this search.':'已安装工具中没有匹配项。','No compatible tools match this search.':'兼容工具中没有匹配项。','Choose a compatible tool below, or browse the full library.':'可从下方选择兼容工具，也可浏览完整工具库。','Search tools':'搜索工具','Search compatible tools':'搜索兼容工具','Install featured tools':'安装精选工具','Install missing':'安装缺少项','Available to install':'可安装','Available to Agent apps':'对 Agent 可用','Compatible':'兼容','Not compatible':'不兼容','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…','Browse recommended tools':'浏览推荐工具','Add GitHub project':'添加 GitHub 项目','GitHub repository or Release URL':'GitHub 仓库或 Release 地址','Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it.':'粘贴 GitHub 仓库或 Release 地址。预览只读取项目元数据；通过兼容性检查后才能添加。','Preview GitHub project':'预览 GitHub 项目','Add from GitHub':'从 GitHub 添加','Previewing GitHub project…':'正在预览 GitHub 项目…','Adding GitHub tool…':'正在添加 GitHub 工具…','Check for updates':'检查更新','Checking updates…':'正在检查更新…','This platform':'当前平台','No asset for this platform':'当前平台无安装包','profiles fetch --carrier downloads an installer. It does not replace Agent Host.':'profiles fetch --carrier 只下载安装包，不会替换或重启 Agent Host。',
   'Versions':'版本','Application':'应用','Environment release':'环境兼容版本','Catalog source':'目录来源','Catalog assets are unpublished.':'目录资产尚未发布。','Not Apple-notarized. Not a store.':'未经 Apple 公证，也不是应用商店。','Check source':'检查来源','Checking source…':'正在检查来源…','Use local catalog':'使用本地目录','Set HTTPS catalog':'设置 HTTPS 目录','Clear source':'清除来源','Last check':'最近检查','Retry':'重试','HTTPS catalog URL':'HTTPS 目录 URL','Local catalog path':'本地目录路径','not installed':'未安装','source-checkout':'源码 checkout','The Manager application and the installed Agent environment can share this product name with different payloads. Application build, environment release, and tool versions are separate.':'管理器应用与已安装的 Agent 环境可以同名但载荷不同。应用 build、环境兼容版本和工具版本是分开的。','Install update':'安装更新','Install all updates':'安装全部更新','update available':'可更新','Check for updates to load current and available versions.':'请检查更新以查看当前版本和可用版本。','compatible after Host update':'需先更新 Host','official upgrade':'官方升级','installed, version unread':'已安装，未能读取版本','check failed':'检查失败',
 
   'Agent environment':'Agent 环境','Installed locally on this PC':'已安装在这台电脑上','Set up a compatible local tool environment':'设置兼容的本地工具环境','Set up tools':'设置工具','Standard tools':'标准工具','Featured tools':'精选工具','Developer Kit':'开发者 Kit','Standard + monitoring':'标准工具 + 监控','Set up':'设置','Setting up tools…':'正在设置工具…','Check again':'重新检测','Connect later':'稍后连接','Detected on this PC':'已在这台电脑上检测到','Math Anchor':'Math Anchor','Migratory Time':'Migratory Time','Armorial':'Armorial','Exact and scientific calculation':'精确与科学计算','Reliable worldwide time conversion':'可靠的全球时区转换','Choose project-aware icons without redrawing them':'按项目选用图标，无需重绘','Skill-only kit; this profile adds no Agent MCP tools':'仅 Skill；此配置不添加 Agent MCP 工具','Choose a tool set, then install.':'先选择工具集并安装 Agent Host；受支持的 Agent 应用可以现在连接，也可以稍后连接。','Install now; connect later.':'安装时可以不连接 Agent 应用。若未检测到受支持应用，可先安装 Agent Host，稍后再从“Agent 应用”连接。','Install complete — start work':'安装完成 — 可以开始工作','Ready to start work':'可以开始工作','Ready — start work in a new Agent task':'已就绪 — 请在新的 Agent 任务中开始工作','Install finished — connect an Agent to start work':'安装已完成 — 请连接 Agent 以开始工作','Open a new Agent task to start work':'打开新的 Agent 任务以开始工作','Connect an Agent app':'连接 Agent 应用','Review Repair':'查看修复','What Host confirmed':'Host 已确认的内容','Still open':'仍需注意','Next step':'下一步','Recovery path':'继续路径','Problem class':'问题类别','not-connected':'未连接','stale-session':'旧会话','permission':'权限','tool-fault':'工具故障','tools-paused':'工具已暂停','unverified':'尚未核验','Health details':'健康详情','Start work':'开始工作','Details':'详情','Ready':'就绪','Connect Agent to use':'连接 Agent 后即可使用','Tools paused':'工具已暂停','No tools selected':'尚未选择工具','Needs repair':'需要修复','Needs check':'需要检查','Permission blocked':'权限受阻','Bindings need repair':'绑定需要修复','Connect':'连接','Resume':'恢复','Repair':'修复','Check':'检查','Fix access':'修复访问','Choose folder':'选择文件夹','Need a project folder':'需要项目文件夹','Choose a project folder':'选择项目文件夹','Absolute folder path':'项目文件夹的绝对路径','Enter path':'输入路径','Grant folder':'授予文件夹','Granting folder…':'正在授予文件夹…','Open Agent Host on this computer to choose a folder.':'请在本机打开 Agent Host 以选择文件夹。','Folder granted. Start a new Agent task so tools see it.':'已授予文件夹。请启动新的 Agent 任务，工具才能看到它。','Check found a problem':'检查发现问题','Check passed':'检查通过','app-missing':'应用缺失','Connect Codex':'连接 Codex','Connect ZCode':'连接 ZCode','Connect Claude Code':'连接 Claude Code','Choose Agent':'选择 Agent','{name} is not installed':'{name} 未安装','Install {name}, or connect a different installed app.':'请安装 {name}，或改连另一个已安装的应用。','Start a new Agent task so tools see the folder.':'请启动新的 Agent 任务，工具才能看到该文件夹。','Open Agent':'打开 Agent','Open Codex':'打开 Codex','Open ZCode':'打开 ZCode','Open Claude Code':'打开 Claude Code','Start a new task in the app':'在应用中开始新任务','Opening…':'正在打开…','Repairing…':'正在修复…','Checking…':'正在检查…','Set up':'设置','Set up tools':'设置工具','Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.':'Host 已确认它能观察到的本地环境。下一步是打开新的 Agent 任务开始真实工作，而不是停留在状态清单。','Host cannot confirm that an already-open Agent task has loaded these tools.':'Host 无法确认已经打开的 Agent 任务已载入这些工具。','Tools are on this machine, but no Agent app is connected yet.':'工具已在本机，但尚未连接 Agent 应用。','Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.':'打开「Agent 应用」→ 连接受支持的应用 → 在该应用中启动新任务。旧任务不会自动获得这些工具。','Public download is not configured.':'尚未配置公开下载。','Featured catalog download':'精选目录下载','Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, try to open Agent Host.app (or the app inside the DMG). If macOS blocks it, open System Settings → Privacy & Security and choose Open Anyway. That warning is expected for this preview. On macOS 14, Control-click → Open may still work; it does not on macOS 15 Sequoia and later. Do not turn off Gatekeeper.':'未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请先尝试打开 Agent Host.app（或 DMG 中的应用）。若 macOS 拦截，请打开系统设置 → 隐私与安全性，选择“仍要打开”。该提示是此预览的预期步骤。macOS 14 仍可用按住 Control 点击 → 打开；macOS 15 Sequoia 及之后不能再靠这一步覆盖 Gatekeeper。不要关闭系统防护。','Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.':'未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。',
+  'Choose another tool set':'选择其他工具集','Exact calculation':'精确计算','World time':'全球时间','Project icons':'项目图标',
+  'Choose by the work you want to do.':'从你想完成的事情开始选择。','Start from a task':'从真实任务开始','Verify exact math without approximation':'核验精确计算，不接受近似猜测','Exact result with the calculation checked':'得到精确结果，并完成计算核验','Coordinate a time across cities':'协调不同城市之间的时间','Local date and time with zone rules applied':'得到已应用时区规则的当地日期与时间','Choose an icon that fits the project':'选择真正适合项目的图标','A reusable SVG from the project-aware set':'得到来自项目语境图标集的可复用 SVG','Calculate 9,999,999,999 × 87 exactly, show the result, and verify it.':'精确计算 9,999,999,999 × 87，给出结果并核验。','Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.':'把 2026 年 10 月 15 日上海上午 9:00 换算成旧金山当地时间，并说明当地日期。','Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.':'为主要的“开始”操作选择并渲染一个符合项目语境的图标，并简要说明视觉上为何合适。','Try: {task}':'试试看：{task}','Try in a new task':'在新任务中试用','Task copied':'任务已复制','Task copied. Paste it into a new Agent task.':'任务已复制，请粘贴到新的 Agent 任务中。','Task copied. Connect an Agent app to continue.':'任务已复制，请先连接 Agent 应用再继续。','Task copied. Choose an Agent app to continue.':'任务已复制，请选择一个 Agent 应用继续。','The example task could not be copied.':'未能复制示例任务。',
   'Installed components':'已安装组件','Connected Agent apps':'已连接的 Agent 应用','Allocated bytes':'占用空间（字节）','Local monitoring':'本地监控','On':'已开启','Off':'已关闭','Agent apps':'Agent 应用','Not installed':'未安装','Connected':'已连接','Available':'可连接','Disconnect':'断开连接','Connect':'连接','Disconnecting…':'正在断开连接…','Connecting…':'正在连接…',
   'Tool environment actions':'工具环境操作','Update tools':'更新工具','Restore previous tools':'恢复上一版工具','Clean old packages':'清理旧软件包','Disconnect, keep data':'断开并保留数据','Disconnect, remove Host data':'断开并移除 Host 数据','Updating tools…':'正在更新工具…','Restoring tools…':'正在恢复工具…','Cleaning storage…':'正在清理存储…','Disconnecting tools…':'正在断开工具…','Disconnect tools and remove Agent Host private Suite data? Observer history remains separately owned.':'断开工具并移除 Agent Host 私有数据？Observer 历史记录仍由其独立保留。','On Windows, application restore and uninstall are also available in the openAdam Start menu folder.':'在 Windows 上，也可从“开始”菜单的 openAdam 文件夹恢复或卸载应用。',
-  'Working set for new tasks':'新任务的工作集','Get featured tools':'获取精选工具','Getting featured tools…':'正在获取精选工具…','Installed':'已安装','Not installed in this environment':'此环境尚未安装','Featured':'所有者精选的工具；不是应用市场、商店、排行或付费目录。','No Agent environment is installed.':'尚未安装 Agent 环境。','Available tools':'可用工具','Changes take effect in a fresh Agent task.':'更改会在新的 Agent 任务中生效。','Apply tool set':'应用工具集',
+  'Working set for new tasks':'新任务的工作集','Get featured tools':'获取精选工具','Getting featured tools…':'正在获取精选工具…','Not installed in this environment':'此环境尚未安装','Featured':'所有者精选的工具；不是应用市场、商店、排行或付费目录。','No Agent environment is installed.':'尚未安装 Agent 环境。','Available tools':'可用工具','Changes take effect in a fresh Agent task.':'更改会在新的 Agent 任务中生效。','Apply tool set':'应用工具集',
   'Usage & Reliability':'使用情况与可靠性','Local monitoring is off':'本地监控已关闭','{days} day local metadata window':'最近 {days} 天的本地元数据','Monitoring':'监控','Collect metadata-only activity, Token, and runtime outcome observations. No prompts, arguments, results, source paths, network calls, or model calls are used.':'仅采集活动、Token 与运行结果的元数据。不使用提示词、参数、结果、源码路径、网络请求或模型调用。','Turn on monitoring':'开启监控','Turning on monitoring…':'正在开启监控…','Live snapshots are unavailable; showing the last completed refresh.':'实时快照不可用，当前显示上次完成的刷新结果。',
-  'Measured tool calls':'已测量工具调用','Completed':'已完成','Errors':'错误','Cancelled':'已取消','Provider-reported Tokens':'Provider 报告的 Token','Peak observed UTC day':'单日 Token 峰值（UTC）','Observed sessions':'已观测会话','Observed turns':'已观测轮次','Current UTC-day streak':'当前连续活跃天数（UTC）','Longest UTC-day streak':'最长连续活跃天数（UTC）','{date} · {tokens} Tokens · {calls} tool calls':'{date} · {tokens} Token · {calls} 次工具调用','{days} active UTC days · longest session metadata span is not chat duration.':'{days} 个活跃 UTC 日；最长会话元数据跨度不等于聊天时长。','Agent activity':'Agent 活动','No supported Agent activity was observed.':'未观测到受支持的 Agent 活动。','Most used Agent Host tools':'最常用的 Agent Host 工具','Unknown':'未知','{calls} calls · {errors} errors · {cancelled} cancelled':'{calls} 次调用 · {errors} 次错误 · {cancelled} 次取消','No mapped calls were observed.':'未观测到已映射的调用。','Counts do not establish Skill activation, non-use reasons, adoption, correctness, task quality, or value. Provider Token semantics remain separate.':'这些计数不能证明 Skill 已激活、未使用原因、结果采纳、正确性、任务质量或价值；不同 Provider 的 Token 语义仍分别呈现。','Turn off monitoring':'关闭监控','Turning off monitoring…':'正在关闭监控…','Agent trace coverage':'Agent 轨迹覆盖','Model steps':'模型步骤','Tool offers':'工具已提供','Trace tool calls':'轨迹工具调用','Trace tool results':'轨迹工具结果','Turn endings':'轮次结束','Public events':'公开事件','Official hooks':'官方 Hook','Local records':'本机记录','Aggregate usage':'聚合用量','Current':'当前','Partial':'部分','Needs attention':'需要处理','Not configured':'未配置','Offered, called, and returned are separate recorded facts. They do not establish why a tool was chosen, whether its result was adopted, or whether the work was correct.':'工具已提供、已调用和已返回是彼此独立的记录事实；它们不能说明为何选择工具、结果是否被采纳，也不能证明工作正确。','Trace sessions':'轨迹会话','Load sessions':'加载会话','Loading trace sessions…':'正在加载轨迹会话…','Export metadata':'导出元数据','Preparing trace export…':'正在准备轨迹导出…','No retained sessions for this provider.':'此 Provider 没有保留的会话。','Retained metadata may be partial because older observations expire and monitoring may have started mid-session.':'由于较早观测会过期，而且监控可能在会话中途启用，因此保留的元数据可能不完整。','{events} events · last observed {date}':'{events} 个事件 · 最近观测于 {date}','Trace export failed':'轨迹导出失败','Trace session list failed':'轨迹会话列表加载失败',
+  'Measured tool calls':'已测量工具调用','Completed':'已完成','Errors':'错误','Cancelled':'已取消','Provider-reported Tokens':'Provider 报告的 Token','Peak observed UTC day':'单日 Token 峰值（UTC）','Observed sessions':'已观测会话','Observed turns':'已观测轮次','Current UTC-day streak':'当前连续活跃天数（UTC）','Longest UTC-day streak':'最长连续活跃天数（UTC）','{date} · {tokens} Tokens · {calls} tool calls':'{date} · {tokens} Token · {calls} 次工具调用','{days} active UTC days · longest session metadata span is not chat duration.':'{days} 个活跃 UTC 日；最长会话元数据跨度不等于聊天时长。','Agent activity':'Agent 活动','No supported Agent activity was observed.':'未观测到受支持的 Agent 活动。','Most used Agent Host tools':'最常用的 Agent Host 工具','Unknown':'未知','{calls} calls · {errors} errors · {cancelled} cancelled':'{calls} 次调用 · {errors} 次错误 · {cancelled} 次取消','No mapped calls were observed.':'未观测到已映射的调用。','Counts do not establish Skill activation, non-use reasons, adoption, correctness, task quality, or value. Provider Token semantics remain separate.':'这些计数不能证明 Skill 已激活、未使用原因、结果采纳、正确性、任务质量或价值；不同 Provider 的 Token 语义仍分别呈现。','Turn off monitoring':'关闭监控','Turning off monitoring…':'正在关闭监控…','Agent trace coverage':'Agent 轨迹覆盖','Model steps':'模型步骤','Tool offers':'工具已提供','Trace tool calls':'轨迹工具调用','Trace tool results':'轨迹工具结果','Turn endings':'轮次结束','Public events':'公开事件','Official hooks':'官方 Hook','Local records':'本机记录','Aggregate usage':'聚合用量','Current':'当前','Partial':'部分','Needs attention':'需要处理','Not configured':'未配置','Offered, called, and returned are separate recorded facts. They do not establish why a tool was chosen, whether its result was adopted, or whether the work was correct.':'工具已提供、已调用和已返回是彼此独立的记录事实；它们不能说明为何选择工具、结果是否被采纳，也不能证明工作正确。','Trace sessions':'轨迹会话','Load sessions':'加载会话','Loading trace sessions…':'正在加载轨迹会话…','Export metadata':'导出元数据','Preparing trace export…':'正在准备轨迹导出…','No retained sessions for this provider.':'此 Provider 没有保留的会话。','Retained metadata may be partial because older observations expire and monitoring may have started mid-session.':'由于较早观测会过期，而且监控可能在会话中途启用，因此保留的元数据可能不完整。','{events} events · last observed {date}':'{events} 个事件 · 最近观测于 {date}','Trace export failed':'轨迹导出失败','Trace session list failed':'轨迹会话列表加载失败','Task activity':'任务活动','Show recent tasks':'显示最近任务','Loading task activity…':'正在加载任务活动…','Export details':'导出详情','Preparing task export…':'正在准备任务导出…','No retained task activity for this Agent app.':'此 Agent 应用没有保留的任务活动。','direct calls':'次直接调用','errors':'个错误','static references':'个静态引用','Showing the newest {count} retained tasks.':'正在显示最近的 {count} 个保留任务。','Direct calls are observed execution. Static references are not. Exported details contain metadata only and no Host verdict.':'直接调用是已观测的执行；静态引用只是出现过，并不是执行。导出详情仅含元数据，不包含 Host 判断。','Task export failed':'任务导出失败','Task activity list failed':'任务活动列表加载失败',
   'No retained trace metadata matches this provider and session':'没有与此 Provider 和会话匹配的保留轨迹元数据。','The retained session has no events in the requested time range':'保留的会话在所选时间范围内没有事件。','Observer trace metadata schema is unavailable':'Observer 的轨迹元数据结构不可用。','Observability is not enabled':'本地监控尚未开启。',
-  'Changes made to this environment':'此环境的变更','Recent changes':'最近变更','No lifecycle changes yet.':'尚无生命周期变更。','Agent Host is unavailable':'Agent Host 当前不可用','The action failed':'操作失败'
+  'Changes made to this environment':'此环境的变更','Recent changes':'最近变更','No lifecycle changes yet.':'尚无生命周期变更。','Agent Host is unavailable':'Agent Host 当前不可用','The action failed':'操作失败','The installed monitoring component could not complete this request. Update or repair Agent Host, then try again.':'当前安装的监控组件无法完成这项请求。请更新或修复 Agent Host 后重试。','The monitoring request was cancelled.':'监控请求已取消。'
 };
 function activeLanguage(){if(languageSelection==='zh-Hans')return'zh-Hans';if(languageSelection==='en')return'en';return(navigator.languages?.[0]||navigator.language||'en').toLowerCase().startsWith('zh')?'zh-Hans':'en'}
 function t(key){return activeLanguage()==='zh-Hans'?(zh[key]||key):key}
 function f(key,values){let value=t(key);for(const[name,replacement]of Object.entries(values))value=value.replaceAll('{'+name+'}',String(replacement));return value}
 function number(v){if(v==null)return'—';if(typeof v!=='number'&&typeof v!=='bigint')return String(v);return new Intl.NumberFormat(activeLanguage()==='zh-Hans'?'zh-CN':'en-US').format(v)}
-function applyChrome(){document.documentElement.lang=activeLanguage()==='zh-Hans'?'zh-Hans':'en';for(const b of document.querySelectorAll('#nav button'))b.textContent=t({environment:'Overview',tools:'Tools',updates:'Updates',usage:'Usage',activity:'History'}[b.dataset.page]);$('#settingsButton').textContent=t('Settings');$('#refreshButton').textContent=t('Refresh');$('#settingsTitle').textContent=t('Settings');$('#languageLabel').textContent=t('Language');$('#settingsDone').textContent=t('Done');const select=$('#languageSelect'),selected=languageSelection;select.replaceChildren();for(const[id,label]of[['system','System default'],['en','English'],['zh-Hans','Simplified Chinese']]){const o=el('option',t(label));o.value=id;o.selected=id===selected;select.append(o)}}
+function applyChrome(){document.documentElement.lang=activeLanguage()==='zh-Hans'?'zh-Hans':'en';for(const b of document.querySelectorAll('#nav button'))b.textContent=t({environment:'Agents',tools:'Tools',updates:'Browse',usage:'Usage',activity:'History'}[b.dataset.page]);$('#settingsButton').textContent=t('Settings');$('#refreshButton').textContent=t('Refresh');$('#settingsTitle').textContent=t('Settings');$('#languageLabel').textContent=t('Language');$('#settingsDone').textContent=t('Done');const select=$('#languageSelect'),selected=languageSelection;select.replaceChildren();for(const[id,label]of[['system','System default'],['en','English'],['zh-Hans','Simplified Chinese']]){const o=el('option',t(label));o.value=id;o.selected=id===selected;select.append(o)}}
 function card(title){const c=el('div',undefined,'card');c.append(el('h2',t(title)));return c}
 function row(label,value){const r=el('div',undefined,'row');r.append(el('div',label,'grow'),el('div',value));return r}
 function button(label,run,cls='action'){const b=el('button',t(label),cls);b.onclick=run;return b}
-function setPage(page){for(const s of document.querySelectorAll('main section'))s.classList.toggle('hidden',s.id!==page);for(const b of document.querySelectorAll('#nav button'))b.setAttribute('aria-current',b.dataset.page===page)}
+function setPage(page){
+  if(page!==view.page&&page!=='tool-detail')window.scrollTo(0,0);view.page=page;if(page!=='tool-detail')view.detail=null;
+  for(const section of document.querySelectorAll('main section'))section.classList.toggle('hidden',section.id!==page);
+  for(const b of document.querySelectorAll('#nav button'))b.setAttribute('aria-current',b.dataset.page===(page==='tool-detail'?view.returnPage:page));
+}
+function pageHead(root,title,action){const head=el('div',undefined,'page-head');head.append(el('h1',t(title)));if(action)head.append(action);root.append(head)}
+function searchField(root,page,renderList){
+  const field=el('div',undefined,'search-field'),search=el('input'),clear=button('×',()=>{search.value='';view.queries[page]='';renderList('');search.focus()},'clear-search');
+  search.type='search';search.value=view.queries[page];search.placeholder=t('Search tools');search.setAttribute('aria-label',t('Search tools'));clear.setAttribute('aria-label',t('Clear search'));
+  const update=()=>{view.queries[page]=search.value;clear.hidden=!search.value;renderList(search.value.trim().toLocaleLowerCase())};
+  search.oninput=update;field.append(el('span','⌕','search-icon'),search,clear);root.append(field);update();
+}
+function openToolDetail(id){view.returnPage=view.page;view.scroll=window.scrollY;view.detail=id;renderToolDetail();setPage('tool-detail');window.scrollTo(0,0);$('#tool-detail .back').focus()}
+function closeToolDetail(){const id=view.detail;setPage(view.returnPage);window.scrollTo(0,view.scroll);document.querySelector('#'+view.returnPage+' [data-tool-id="'+CSS.escape(id)+'"]')?.focus({preventScroll:true})}
+document.addEventListener('click',event=>{for(const menu of document.querySelectorAll('.management[open]'))if(!menu.contains(event.target))menu.open=false});
+window.addEventListener('keydown',event=>{if(event.key==='Escape'){view.managementOpen=false;for(const menu of document.querySelectorAll('.management[open]'))menu.open=false}if(event.key==='Escape'&&view.detail&&!$('#settingsDialog').open){event.preventDefault();closeToolDetail()}});
+
 for(const b of document.querySelectorAll('#nav button'))b.onclick=()=>setPage(b.dataset.page);
 $('#settingsButton').onclick=()=>$('#settingsDialog').showModal();$('#settingsDone').onclick=()=>$('#settingsDialog').close();$('#languageSelect').onchange=()=>call({action:'preferences',language:$('#languageSelect').value},t('Saving language…'));
-function notice(message){$('#error').textContent=message;$('#error').classList.toggle('hidden',!message)}
-function busy(active,label){changing=active;$('#busyText').textContent=label||'';$('#busy').classList.toggle('hidden',!active);$('.shell').inert=active;$('#settingsDialog').inert=active}
+function notice(message,tone='info'){const node=$('#error');node.textContent=message;node.dataset.tone=tone;node.setAttribute('role',tone==='error'?'alert':'status');node.classList.toggle('hidden',!message)}
+function busy(active,label){
+  if(active)view.focus=document.activeElement;
+  changing=active;$('#busyText').textContent=label||'';$('#busy').classList.toggle('hidden',!active);$('.shell').inert=active;$('#settingsDialog').inert=active;
+  if(!active&&view.focus){
+    const old=view.focus;let target=old.isConnected&&old.getClientRects().length?old:null;
+    if(!target&&old.dataset.focusKey)target=document.querySelector('[data-focus-key="'+CSS.escape(old.dataset.focusKey)+'"]');
+    if(!target&&old.id)target=document.getElementById(old.id);
+    if(!target&&old.tagName==='BUTTON'){
+      const matches=[...document.querySelectorAll('#'+view.page+' button')].filter(item=>item.textContent===old.textContent);
+      if(matches.length===1)target=matches[0];
+    }
+    if(target?.getClientRects().length)target.focus({preventScroll:true});view.focus=null;
+  }
+}
 function grantPathRow(){
   const box=el('div',undefined,'row');box.dataset.testid='grant-folder';
   const input=el('input');input.type='text';input.placeholder=t('Absolute folder path');input.setAttribute('aria-label',t('Choose a project folder'));
@@ -604,12 +829,19 @@ function revealGrantPathFallback(){
 function acceptDashboard(value){data=value;languageSelection=data.preferences?.language||'system';if('doctor' in value)lastDoctor=value.doctor;render()}
 async function call(action,label){
   if(changing)return;
+  const menu=document.activeElement?.closest('.management');if(menu)menu.querySelector('summary')?.focus();
+  view.managementOpen=false;for(const item of document.querySelectorAll('.management[open]'))item.open=false;
   busy(true,label);notice('');let confirmed=false;
   try{
     const r=await fetch('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(action)});
     const v=await r.json();
     if(!r.ok){
-      notice((v.error?.message&&t(v.error.message))||t('The action failed'));
+      notice((v.error?.message&&t(v.error.message))||t('The action failed'),'error');
+      if(action.action==='github'&&!action.preview&&['CODEX_PLUGIN_CONFLICT','CODEX_MARKETPLACE_CONFLICT','CODEX_BINDING_AMBIGUOUS','CLAUDE_MCP_CONFLICT','ZCODE_MCP_CONFLICT','PRODUCT_SKILL_CONFLICT','DEVELOPER_SKILL_CONFLICT'].includes(v.error?.code)){githubConflictURL=action.github.trim();view.githubOpen=true;renderUpdates()}
+      if(action.action==='tools'&&['CODEX_PLUGIN_CONFLICT','CODEX_MARKETPLACE_CONFLICT','CODEX_BINDING_AMBIGUOUS','CLAUDE_MCP_CONFLICT','ZCODE_MCP_CONFLICT','PRODUCT_SKILL_CONFLICT','DEVELOPER_SKILL_CONFLICT'].includes(v.error?.code)){
+        const recovery=button('Take over existing connections',()=>call({...action,replaceHostConflicts:true},t('Updating tools…')));
+        $('#error').append(el('p',t('Previous connections are saved and restored when the tools are removed.')),recovery);
+      }
       if(action.action==='pick-workspace'&&v.error?.code==='DIRECTORY_PICKER_UNAVAILABLE') revealGrantPathFallback();
       return
     }
@@ -617,12 +849,12 @@ async function call(action,label){
     if(action.action==='preferences'){languageSelection=action.language;applyChrome()}
     if(action.action==='doctor') lastDoctor=v.result;
     if(v.dashboard)acceptDashboard(v.dashboard);
-    if(action.action==='github'&&action.preview){ lastPreview=v.result; lastGithubTarget=action.github; lastGithubPreviewed=action.github }
-    if(action.action==='github'&&!action.preview) lastPreview=null;
+    if(action.action==='github'&&action.preview){ lastPreview=v.result; lastGithubTarget=action.github.trim(); lastGithubPreviewed=action.github.trim() }
+    if(action.action==='github'&&!action.preview){lastPreview=null;githubConflictURL=null}
     if(action.action==='updates-check'||action.action==='updates-install') lastUpdates=v.result;
     if(v.dashboard)render();
     const warnings=(v.result?.warnings||[]).slice(0,8).map(w=>f('Completed with a warning: {message}',{message:w.message||w.code}));
-    if(v.result?.presentation) notice([v.result.presentation.displayName,v.result.origin?.tag,v.result.compatibility?.available?'compatible asset listed':'no compatible asset'].filter(Boolean).join(' · '));
+    if(v.result?.presentation) notice('');
     else if(v.result?.items) notice(t('Check for updates')+' · '+(v.result.items.filter(i=>i.availability==='update-available').length)+' '+t('update-available'));
     else if(action.action==='doctor'){
       const failed=(v.result?.checks||[]).filter(item=>item.status==='error');
@@ -631,7 +863,7 @@ async function call(action,label){
     }
     else if(action.action==='workspace'||(action.action==='pick-workspace'&&v.result?.status==='workspace-granted')) notice(t(v.result?.nextStep||'Start a new Agent task so tools see the folder.'));
     else if(v.refreshError||!v.dashboard)warnings.push(t('Change completed; the current status could not be refreshed. Use Refresh to try again.'));
-    if(warnings.length && action.action!=='doctor' && action.action!=='workspace' && action.action!=='pick-workspace') notice(warnings.join(' '));
+    if(warnings.length && action.action!=='doctor' && action.action!=='workspace' && action.action!=='pick-workspace') notice(warnings.join(' '),'warning');
   }catch{
     notice(t(confirmed?'Change completed; the current status could not be refreshed. Use Refresh to try again.':'The request ended without a confirmed result. Refresh the environment before repeating the action.'));
   }finally{busy(false)}
@@ -639,11 +871,16 @@ async function call(action,label){
 async function refresh(){if(changing)return;busy(true,t('Refreshing…'));try{await load();notice('')}catch(e){notice(e.message)}finally{busy(false)}}
 $('#refreshButton').onclick=refresh;
 async function load(){const r=await fetch('/api/dashboard');if(!r.ok)throw new Error(t('Agent Host is unavailable'));acceptDashboard(await r.json())}
-function render(){applyChrome();const s=data.snapshot,u=data.usage;const source=data.source||{};const app=source.application||{};const env=source.environment||s.environment||{};$('#version').textContent=[app.version?t('Application')+' '+app.version+(app.build?' ('+app.build+')':''):'',env.suiteVersion?t('Environment release')+' '+env.suiteVersion:''].filter(Boolean).join(' · ')|| (s.configured?s.environment.suiteVersion:'');renderEnvironment(s,u);renderTools(data.tools);renderUpdates();renderUsage(u);renderActivity(s.recentActivity||[]);renderSourceSettings(source)}
+function render(){applyChrome();const s=data.snapshot,u=data.usage;const source=data.source||{};const app=source.application||{};const env=source.environment||s.environment||{};$('#version').textContent=[app.version?t('Application')+' '+app.version+(app.build?' ('+app.build+')':''):'',env.suiteVersion?t('Environment release')+' '+env.suiteVersion:''].filter(Boolean).join(' · ')|| (s.configured?s.environment.suiteVersion:'');renderEnvironment(s,u);renderTools(data.tools);renderUpdates();renderUsage(u);renderActivity(s.recentActivity||[]);renderSourceSettings(source);for(const link of document.querySelectorAll('#nav button'))link.hidden=!s.configured&&['usage','activity'].includes(link.dataset.page);if(!s.configured&&['usage','activity'].includes(view.page))view.page='tools';if(view.detail)renderToolDetail();setPage(view.page)}
 function logoNode(logo,id){
-  if(logo?.dataUrl){const i=el('img');i.src=logo.dataUrl;i.alt='';i.className='tool-logo';return i}
-  if(id&&(logo?.path||logo?.mediaType)){const i=el('img');i.src='/api/tool-logo?id='+encodeURIComponent(id);i.alt='';i.className='tool-logo';i.onerror=()=>{i.replaceWith(el('span','','logo-fallback'))};return i}
-  return el('span','','logo-fallback');
+  const fallback=()=>{
+    const box=el('span','','logo-fallback');box.setAttribute('aria-hidden','true');
+    const glyph={'data-transformer':'table','file-vitals':'file-search','text-integrity':'text','layout-contract-conformance':'layout-four','projective':'layout-four'}[id];
+    if(glyph){const image=el('img');image.src='/api/tool-logo?id=fallback-'+glyph;image.alt='';box.append(image);box.classList.add('has-glyph')}
+    return box;
+  };
+  if(logo?.dataUrl||id){const image=el('img');image.src=logo?.dataUrl||'/api/tool-logo?id='+encodeURIComponent(id);image.alt='';image.className='tool-logo';image.onerror=()=>image.replaceWith(fallback());return image}
+  return fallback();
 }
 function availabilityLabel(value){
   return t({
@@ -659,7 +896,45 @@ function availabilityLabel(value){
 }
 function renderUpdates(){
   const root=$('#updates');if(!root)return;
-  root.replaceChildren(el('h1',t('Updates')),el('p',t('profiles fetch --carrier downloads an installer. It does not replace Agent Host.'),'sub'));
+  root.replaceChildren();
+  const github=button('+ GitHub',()=>{const details=$('#github-import');details.open=!details.open;if(details.open)details.querySelector('input').focus()});
+  pageHead(root,'Browse',github);
+  const list=el('div',undefined,'tool-collection');
+  searchField(root,'updates',query=>{
+    list.replaceChildren();
+    for(const item of catalogTools().filter(item=>matchesTool(item,query)))list.append(toolRow(item));
+    if(!list.children.length)list.append(el('p',t('No matching tools'),'empty'));
+  });root.append(list);
+
+  const add=el('div',undefined,'card');
+  const input=el('input');input.type='url';input.placeholder='https://github.com/owner/repo';input.setAttribute('aria-label',t('GitHub repository or Release URL'));
+  input.value=lastGithubTarget;
+  const previewActions=el('div',undefined,'actions');
+  const addButton=button('Add from GitHub',()=>call({action:'github',github:input.value||lastGithubTarget},t('Adding GitHub tool…')),'action primary');
+  const updateAddState=()=>{addButton.disabled=!data.snapshot.configured||!(lastPreview?.compatibility?.available===true&&input.value.trim()===lastGithubPreviewed)};
+  input.addEventListener('input',()=>{
+    lastGithubTarget=input.value;
+    if(input.value.trim()!==githubConflictURL){githubConflictURL=null;add.querySelector('[data-conflict]')?.remove()}
+    if(lastPreview&&input.value.trim()!==lastGithubPreviewed){lastPreview=null;add.querySelector('[data-preview]')?.remove()}
+    updateAddState();
+  });
+  previewActions.append(button('Preview GitHub project',()=>{const target=(input.value||lastGithubTarget).trim();lastPreview=null;lastGithubPreviewed='';lastGithubTarget=target;updateAddState();call({action:'github',github:target,preview:true},t('Previewing GitHub project…'))}),addButton);
+  add.append(input,previewActions);
+  if(githubConflictURL===input.value.trim()){
+    const recovery=el('div');recovery.dataset.conflict='current';
+    recovery.append(el('p',t('This tool is already configured independently. Agent Host can take over its connection and restore the previous configuration when you remove it.'),'muted'),button('Take over connection and add',()=>{if(input.value.trim()===githubConflictURL)call({action:'github',github:githubConflictURL,replaceHostConflicts:true},t('Adding GitHub tool…'))}));
+    add.append(recovery);
+  }
+  if(!data.snapshot.configured)add.append(el('p',t('Install Agent Host before adding a GitHub tool.'),'muted'));
+  if(lastPreview?.presentation){
+    const p=el('div',undefined,'row');p.dataset.preview='current';
+    const body=el('div',undefined,'grow');
+    body.append(el('div',lastPreview.presentation.displayName||lastPreview.origin?.repository||''),el('div',[lastPreview.origin?.tag,lastPreview.presentation.summary,t(lastPreview.compatibility?.available?'Compatible':'Not compatible')].filter(Boolean).join(' · '),'muted'));
+    p.append(logoNode(lastPreview.presentation.logo),body);
+    add.append(p);
+  }
+  updateAddState();const imports=el('details');imports.id='github-import';imports.open=view.githubOpen;imports.ontoggle=()=>{view.githubOpen=imports.open};imports.append(el('summary',t('Add GitHub project')),add);root.append(imports);
+
   const report=lastUpdates&&lastUpdates.items?lastUpdates:(data.updates||{});
   const items=report.items||[];
   const versions=card('Versions');
@@ -679,33 +954,7 @@ function renderUpdates(){
   actions.append(button('Check for updates',()=>call({action:'updates-check'},t('Checking updates…')),'action primary'));
   if(updatable.length) actions.append(button('Install all updates',()=>call({action:'updates-install',all:true},t('Adding GitHub tool…'))));
   versions.append(actions);
-  const rec=card('Browse recommended tools');
-  for(const tool of (data.recommended?.tools||[])){
-    const r=el('div',undefined,'row');
-    const label=el('div',undefined,'grow');
-    label.append(el('div',(tool.presentation?.displayName||tool.id)+' · '+(tool.version||'—')),el('div',t(tool.compatible?'This platform':'No asset for this platform'),'muted'));
-    r.append(logoNode(tool.presentation?.logo,tool.id),label);
-    rec.append(r);
-  }
-  const add=card('Add GitHub project');
-  const input=el('input');input.type='url';input.placeholder='https://github.com/owner/repo';input.setAttribute('aria-label',t('GitHub repository or Release URL'));
-  input.value=lastGithubTarget;
-  input.addEventListener('input',()=>{
-    lastGithubTarget=input.value;
-    if(lastPreview&&input.value.trim()!==lastGithubPreviewed) lastPreview=null;
-  });
-  const previewActions=el('div',undefined,'actions');
-  previewActions.append(button('Preview GitHub project',()=>call({action:'github',github:input.value||lastGithubTarget,preview:true},t('Previewing GitHub project…'))));
-  previewActions.append(button('Add from GitHub',()=>call({action:'github',github:input.value||lastGithubTarget},t('Adding GitHub tool…')),'action primary'));
-  add.append(input,previewActions,el('p',t('Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it.'),'muted'));
-  if(lastPreview?.presentation){
-    const p=el('div',undefined,'row');
-    const body=el('div',undefined,'grow');
-    body.append(el('div',lastPreview.presentation.displayName||lastPreview.origin?.repository||''),el('div',[lastPreview.origin?.tag,lastPreview.presentation.summary].filter(Boolean).join(' · '),'muted'));
-    p.append(logoNode(lastPreview.presentation.logo),body);
-    add.append(p);
-  }
-  root.append(versions,rec,add);
+  const updateDetails=el('details');updateDetails.append(el('summary',t('Updates')),versions);root.append(updateDetails);
 }
 function renderSourceSettings(source){
   const versions=$('#versionPlanes'),box=$('#sourceSettings');
@@ -735,41 +984,20 @@ function renderSourceSettings(source){
   box.append(c);
 }
 function featuredToolName(id){return({ 'math-anchor':'Math Anchor','migratory-time':'Migratory Time','armorial':'Armorial','data-transformer':'BatchTicket','laniakea':'Laniakea','projective':'Projective','equatorium':'Equatorium','file-vitals':'File Vitals' }[id])||id}
-function renderSetup(root){
-  const c=card('Set up tools');
-  c.append(el('p',t('Choose a tool set, then install.'),'muted'));
-  const profile=el('select');profile.setAttribute('aria-label',t('Tool profile'));
-  for(const[id,label]of[['featured','Featured tools'],['standard','Standard tools'],['developer','Developer Kit'],['observability','Standard + monitoring']]){const o=el('option',t(label));o.value=id;profile.append(o)}
-  const tools=el('div');
-  const renderProfileTools=()=>{
-    tools.replaceChildren();
-    const listed=profile.value==='featured'?[['Math Anchor','Exact and scientific calculation'],['Migratory Time','Reliable worldwide time conversion'],['Armorial','Choose project-aware icons without redrawing them']]:profile.value==='developer'?[['Developer Kit','Skill-only kit; this profile adds no Agent MCP tools']]:[['Math Anchor','Exact and scientific calculation'],['Migratory Time','Reliable worldwide time conversion']];
-    for(const[name,detail]of listed){const r=el('div',undefined,'row');r.append(el('div',t(name),'grow'),el('div',t(detail),'muted'));tools.append(r)}
-    
-  };
-  profile.onchange=renderProfileTools;renderProfileTools();
-  const p=el('select');p.setAttribute('aria-label',t('Agent app'));
-  const later=el('option',t('Connect later'));later.value='';p.append(later);
-  for(const id of['zcode','codex','claude']){
-    const host=(data.hosts||[]).find(h=>h.host===id);
-    const detected=host?.appInstalled===true;
-    const o=el('option',names[id]+' · '+t(detected?'Detected on this PC':'Not installed'));o.value=id;p.append(o);
-    if(detected&&!p.dataset.selectedDetected){p.value=id;p.dataset.selectedDetected='1'}
-  }
-  const a=el('div',undefined,'actions');
-  a.append(p,profile,button('Check again',()=>refresh()),button('Set up',()=>{
-    const action={action:'setup',profile:profile.value};
-    if(p.value)action.host=p.value;
-    call(action,t('Setting up tools…'));
-  },'action primary'));
-  c.append(tools,a,el('p',t('Install now; connect later.'),'muted'));
-  const download=data.catalog?.download;
-  if(download?.configured&&download.url){
-    c.append(el('p',t('Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.'),'muted'));
-  }else{
-    c.append(el('p',t('Public download is not configured.'),'muted'));
-  }
-  root.append(c);
+const featuredExperiences=[
+  {id:'math-anchor',name:'Math Anchor',summary:'Exact calculation',prompt:'Calculate 9,999,999,999 × 87 exactly, show the result, and verify it.'},
+  {id:'migratory-time',name:'Migratory Time',summary:'World time',prompt:'Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.'},
+  {id:'armorial',name:'Armorial',summary:'Project icons',prompt:'Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.'},
+];
+async function copyCapabilityTask(experience,trigger){
+  try{
+    if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(experience.prompt);
+    else{const copy=document.createElement('textarea');copy.value=experience.prompt;copy.setAttribute('readonly','');copy.style.position='fixed';copy.style.opacity='0';document.body.append(copy);copy.select();const copied=document.execCommand('copy');copy.remove();if(!copied)throw new Error('copy failed')}
+  }catch{notice(t('The example task could not be copied.'));return}
+  trigger.textContent=t('Task copied');if(view.detail)view.copiedTool=view.detail;
+  const hostIds=Object.keys(data.snapshot?.environment?.hosts||{}).filter(id=>data.snapshot.environment.hosts[id]);
+  if(hostIds.length===1){await call({action:'open-app',host:hostIds[0]},t('Opening…'));return}
+  view.handoff=t(hostIds.length>1?'Task copied. Choose an Agent app to continue.':'Task copied. Connect an Agent app to continue.');renderEnvironment(data.snapshot,data.usage);setPage('environment');
 }
 function navigatePage(page){
   const nav=document.querySelector('#nav button[data-page="'+page+'"]');
@@ -849,20 +1077,33 @@ function renderPostSetupGuidance(root, guidance){
 }
 function renderEnvironment(s,u){
   const root=$('#environment');root.replaceChildren();
-  root.append(el('h1',t('Overview')));
-  if(!s.configured){
-    root.append(el('p',t('Set up a compatible local tool environment'),'sub'));
-    renderSetup(root);renderSourceSettings(data.source||{});return
-  }
-  renderPostSetupGuidance(root, data.guidance);
-  const hc=el('div',undefined,'card');hc.id='agent-apps';hc.append(el('h2',t('Agent apps')));
+  root.append(el('h1',t('Agents')));
+  if(view.handoff)root.append(el('p',view.handoff,'handoff-note'));
+  const hc=el('div',undefined,'agent-list');hc.id='agent-apps';
   for(const h of data.hosts){
-    const connected=Boolean(s.environment.hosts[h.host]);
-    const r=row(names[h.host],t(h.appInstalled===false?'Not installed':connected?'Connected':'Available'));
-    r.append(button(connected?'Disconnect':'Connect',()=>call({action:'host',host:h.host,connected:!connected},t(connected?'Disconnecting…':'Connecting…'))));
-    hc.append(r)
+    const connected=Boolean(s.environment?.hosts?.[h.host]),installed=h.appInstalled===true;
+    const check=(data.doctor?.checks||[]).find(item=>item.id==='host.'+h.host),health=check?check.status==='ok':h.healthy;
+    const label=h.error?'Inspection unavailable':!installed?'Not installed':connected?(health===false?'Needs repair':health===true?'Connected':'Connected, not checked'):'Installed';
+    const r=el('div',undefined,'agent-row'),identity=el('div',undefined,'grow'),mark=el('span',h.error||health===false?'!':connected?(health===true?'✓':'↗'):'○','tool-state');
+    mark.title=t(label);mark.setAttribute('aria-label',t(label));identity.append(el('strong',names[h.host]||h.host));
+    if(h.error||!installed||health===false)identity.append(el('div',t(label),'muted'));else if(h.version)identity.append(el('div',h.version,'muted'));
+    const icon=el('span',{'codex':'✳','claude':'✺','zcode':'Z'}[h.host]||'◇','agent-symbol');icon.setAttribute('aria-hidden','true');
+    r.append(icon,identity,mark);
+    if(h.error){r.append(button('Copy error report',async()=>{try{await navigator.clipboard.writeText(JSON.stringify({agent:h.host,error:h.error},null,2));notice(t('Error report copied'))}catch{notice(t('Clipboard unavailable'),'error')}}));if(s.configured)r.append(button('Repair',()=>call({action:'repair'},t('Repairing…')),'action primary'))}
+    else if(installed&&!s.configured)r.append(button('Set up',()=>call({action:'setup',profile:'featured',host:h.host},t('Setting up tools…')),'action primary'));
+    else if(installed){
+      if(connected){
+        if(health===false)r.append(button('Repair',()=>call({action:'repair'},t('Repairing…')),'action primary'));
+        else r.append(button('Open',()=>call({action:'open-app',host:h.host},t('Opening…'))));
+        const menu=el('details',undefined,'management');menu.append(el('summary','···'));menu.querySelector('summary').setAttribute('aria-label',t('Tool options'));
+        const actions=el('div',undefined,'management-actions');actions.append(button('Disconnect',()=>{if(confirm(t('Disconnect this Agent app?')))call({action:'host',host:h.host,connected:false},t('Disconnecting…'))}));menu.append(actions);r.append(menu);
+      }else r.append(button('Connect',()=>call({action:'host',host:h.host,connected:true},t('Connecting…'))));
+    }hc.append(r);
   }
+  if(s.configured)hc.append(button('Check',()=>call({action:'doctor'},t('Checking…'))));
   root.append(hc);
+  if(!s.configured)return;
+  if(data.guidance&&!data.guidance.readyToWork&&data.guidance.problemClass!=='not-connected')renderPostSetupGuidance(root,data.guidance);
   const source=data.source||{},app=source.application||{},env=source.environment||s.environment||{},loc=source.source||{};
   const more=el('details');more.append(el('summary',t('Details')));
   const moreBody=el('div');
@@ -885,45 +1126,104 @@ function renderEnvironment(s,u){
   more.append(moreBody);
   root.append(more);
 }
+const shortJobs={'decision-table':'Decision rules','state-machine':'State transitions','schedule-algebra':'Schedule calculation','math-anchor':'Exact calculation','migratory-time':'World time','armorial':'Project icons','data-transformer':'Structured data','laniakea':'Mind maps','projective':'Projective layouts','equatorium':'Standard expressions','file-vitals':'File inspection','worldbend':'Spatial composition','text-integrity':'Unicode inspection','layout-contract-conformance':'Responsive layouts','calligram':'Visual documents'};
+function catalogTools(){
+  const remote=data.recommended?.tools||[],byId=Object.fromEntries(remote.map(item=>[item.id,item]));
+  return [...featuredExperiences.map(item=>({id:item.id,name:item.name,summary:item.summary,prompt:item.prompt,compatible:byId[item.id]?.compatible!==false,homepage:byId[item.id]?.homepage,...byId[item.id]?.presentation})),
+    ...remote.filter(item=>!featuredExperiences.some(x=>x.id===item.id)).map(item=>({id:item.id,homepage:item.homepage,...item.presentation,name:item.presentation?.displayName||item.id,compatible:item.compatible}))];
+}
+function installedTools(){
+  if(data.tools?.status==='error')return [];
+  const meta=Object.fromEntries((data.tools?.tools||[]).map(item=>[item.id,item]));
+  return (data.tools?.availableAgentComponents||[]).map(id=>({id,...meta[id],name:meta[id]?.displayName&&meta[id].displayName!==id?meta[id].displayName:featuredToolName(id),summary:shortJobs[id]||meta[id]?.summary||''}));
+}
+function matchesTool(item,query){return !query||(item.name+' '+t(shortJobs[item.id]||item.summary||'')).toLocaleLowerCase().includes(query)}
+function toolState(id){
+  const installed=(data.tools?.availableAgentComponents||[]).includes(id);
+  if(!installed)return {symbol:'↓',label:'Available to install'};
+  if(data.tools?.paused)return {symbol:'Ⅱ',label:'Paused'};
+  const update=(lastUpdates?.items||data.updates?.items||[]).find(item=>item.id===id&&item.availability==='update-available');
+  if(update)return {symbol:'↑',label:'update available',tone:'attention'};
+  return (data.tools?.activeAgentComponents||[]).includes(id)?{symbol:'✓',label:'Available to Agent apps'}:{symbol:'○',label:data.tools?.tools?.find(tool=>tool.id===id)?.exposure==='on-demand'?'On-demand':'Enable to use'};
+}
+function toolRow(item){
+  const state=toolState(item.id),r=el('button',undefined,'tool-row');r.type='button';r.dataset.toolId=item.id;r.onclick=()=>openToolDetail(item.id);
+  const content=el('span',undefined,'tool-copy');content.append(el('strong',item.name),el('span',t(shortJobs[item.id]||item.summary||''),'muted'));
+  const mark=el('span',state.symbol,'tool-state '+(state.tone||''));mark.title=t(state.label);mark.setAttribute('aria-label',t(state.label));
+  r.append(logoNode(item.logo,item.id),content,mark);return r;
+}
+function acquireFeatured(){
+  if(data.snapshot.configured){call({action:'update',profile:'featured'},t('Getting featured tools…'));return}
+  const detected=(data.hosts||[]).find(host=>host.appInstalled===true),request={action:'setup',profile:'featured'};
+  if(detected)request.host=detected.host;call(request,t('Setting up tools…'));
+}
 function renderTools(value){
-  const root=$('#tools');root.replaceChildren(el('h1',t('Tools')));
-  if(value.status==='error'){root.append(el('div',t('No Agent environment is installed.'),'empty'));return}
-  const byId=Object.fromEntries((value.tools||[]).map(item=>[item.id,item]));
-  const featured=(data.catalog?.profiles||[]).find(p=>p.featured===true);
-  const admitted=featured?.agentComponents||featured?.defaultAgentComponents||[];
-  const installed=new Set(value.availableAgentComponents||[]);
-  const missing=admitted.filter(id=>!installed.has(id));
-  const catalog=card('Get featured tools');
-    for(const id of admitted){
-    const name=byId[id]?.displayName||value.components?.[id]?.displayName||featuredToolName(id);
-    catalog.append(row(t(name),t(installed.has(id)?'Installed':'Not installed in this environment')));
+  const root=$('#tools');root.replaceChildren();
+  const management=el('details',undefined,'management');management.open=view.managementOpen;management.ontoggle=()=>{view.managementOpen=management.open};management.append(el('summary',t('Manage')));management.querySelector('summary').dataset.focusKey='tools-management';
+  const controls=el('div',undefined,'management-actions');
+  controls.append(button('Check for updates',()=>call({action:'updates-check'},t('Checking updates…'))));
+  if(data.snapshot.configured)controls.append(value?.paused?button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…'))):button('Pause all tools',()=>call({action:'tools',pause:true},t('Pausing tools…'))));
+  management.append(controls);pageHead(root,'My tools',data.snapshot.configured?management:null);
+  const list=el('div',undefined,'tool-collection'),recommended=el('div',undefined,'recommendations'),recommendedList=el('div',undefined,'tool-collection');
+  const installed=installedTools(),ids=new Set(installed.map(item=>item.id)),missing=catalogTools().filter(item=>!ids.has(item.id));
+  searchField(root,'tools',query=>{
+    list.replaceChildren();recommendedList.replaceChildren();
+    for(const item of installed.filter(item=>matchesTool(item,query)))list.append(toolRow(item));
+    if(!list.children.length)list.append(el('p',t(value?.status==='error'&&data.snapshot.configured?'Tool status unavailable':query?'No matching tools':'No installed tools'),'empty'));
+    for(const item of missing.filter(item=>matchesTool(item,query)).slice(0,query?undefined:4))recommendedList.append(toolRow(item));
+    recommended.hidden=!recommendedList.children.length;
+  });
+  if(value?.paused){const pause=el('div',undefined,'pause-note');pause.append(el('span',t('All tools are paused.')),button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…'))));root.append(pause)}
+  root.append(list);
+  const heading=el('div',undefined,'section-head');const more=button('→',()=>setPage('updates'),'text-action');more.setAttribute('aria-label',t('See all'));heading.append(el('h2',t('Recommended')),more);recommended.append(heading,recommendedList);root.append(recommended);
+  if(!missing.length)root.append(button('Browse more tools',()=>setPage('updates'),'text-action browse-more'));
+}
+function renderToolDetail(){
+  const id=view.detail;if(!id)return;
+  const installed=installedTools().find(item=>item.id===id),catalog=catalogTools().find(item=>item.id===id),item=installed||catalog;
+  if(!item){closeToolDetail();return}
+  const root=$('#tool-detail');root.replaceChildren(button('Back',closeToolDetail,'text-action back'));
+  const head=el('div',undefined,'detail-head'),identity=el('div',undefined,'detail-identity'),title=el('div');
+  title.append(el('h1',item.name),el('p',t(shortJobs[id]||item.summary||''),'muted'));identity.append(logoNode(item.logo,id),title);head.append(identity);
+  let useButton;
+  if(!installed){const featured=featuredExperiences.some(x=>x.id===id);const install=button(featured?'Install featured tools':'Add from GitHub',featured?acquireFeatured:()=>{lastGithubTarget=catalog.homepage||'';view.githubOpen=true;setPage('updates');renderUpdates();$('#github-import input')?.focus()},'action primary');install.disabled=catalog?.compatible===false;head.append(install)}
+  else if(data.tools.paused)head.append(button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…')),'action primary'));
+  else if(!(data.tools.activeAgentComponents||[]).includes(id)&&!installed.onDemandAvailable)head.append(button('Enable to use',()=>call({action:'tools',tools:[...new Set([...(data.tools.activeAgentComponents||[]),id])]},t('Updating tools…')),'action primary'));
+  else if(catalog?.prompt){
+    useButton=button('Use in Agent',()=>copyCapabilityTask({...catalog,prompt:view.drafts[id]},useButton),'action primary');head.append(useButton);
   }
-  if(missing.length)catalog.append(button('Get featured tools',()=>call({action:'update',profile:'featured'},t('Getting featured tools…')),'action primary'));
-  else if(!data.catalog?.download?.configured){
-    const actions=el('div',undefined,'actions');
-    actions.append(button('Catalog source',()=>$('#settingsButton').click()));
-    catalog.append(el('p',t('Public download is not configured.'),'muted'),actions);
+  root.append(head);
+  if(!installed&&catalog?.compatible===false)root.append(el('p',t('No asset for this platform'),'muted'));
+  if(data.tools?.paused&&installed)root.append(el('p',t('All tools are paused.'),'muted'));
+  if(catalog?.prompt){
+    const example=el('div',undefined,'task-example'),input=el('textarea');input.setAttribute('aria-label',t('Example task'));
+    if(view.drafts[id]===undefined)view.drafts[id]=t(catalog.prompt);input.value=view.drafts[id];
+    const update=()=>{view.drafts[id]=input.value;if(useButton)useButton.disabled=!input.value.trim()};input.oninput=()=>{view.copiedTool=null;example.querySelector('p')?.remove();update()};update();
+    example.append(el('h2',t('Try a task')),input);if(view.copiedTool===id)example.append(el('p',t('Task copied'),'muted'));root.append(example);
+  }else if(item.summary)root.append(el('p',t(item.summary),'detail-description'));
+  const metadata=el('div',undefined,'detail-metadata');
+  if(installed){
+    const label=el('label',undefined,'row'),toggle=el('input');toggle.type='checkbox';toggle.dataset.focusKey='tool-toggle-'+id;toggle.setAttribute('role','switch');toggle.checked=(data.tools.activeAgentComponents||[]).includes(id);toggle.disabled=data.tools.paused===true;
+    toggle.title=t(data.tools?.tools?.find(tool=>tool.id===id)?.onDemandAvailable===true?'Off keeps an on-demand Skill. Pause all withholds both.':'Enable this tool, then start a fresh Agent task to use it.');
+    toggle.onchange=async()=>{const ids=new Set(data.tools.activeAgentComponents||[]);if(toggle.checked)ids.add(id);else ids.delete(id);if(!ids.size&&!confirm(t('Pause all tools? On-demand tools will also pause.'))){toggle.checked=true;return}await call({action:'tools',tools:[...ids]},t('Updating tools…'));if(toggle.isConnected)toggle.checked=(data.tools.activeAgentComponents||[]).includes(id)};
+    label.append(el('span',t('Enable by default'),'grow'),toggle);metadata.append(label);
+    if(installed.version)metadata.append(row(t('Version'),installed.version));
   }
-  root.append(catalog);
-  const c=card('Working set for new tasks'),available=value.availableAgentComponents||[];
-  if(!available.length){c.append(el('p',t('This environment has no Agent tools to activate. Its developer Skill remains available.'),'muted'));root.append(c);return}
-  if(value.paused===true)c.append(el('p',t('All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.'),'muted'));
-  const form=el('div',undefined,'tool-grid'),hint=el('p',undefined,'muted');
-  const selected=()=>[...form.querySelectorAll('input:checked')].map(x=>x.value);
-  const apply=button('Apply tool set',()=>{const ids=selected();call({action:'tools',tools:ids},t(ids.length?'Updating tools…':'Pausing tools…'))},'action primary');
-  const update=()=>{const ids=selected();const same=JSON.stringify([...ids].sort())===JSON.stringify([...(value.activeAgentComponents||[])].sort())&&Boolean(value.paused)===!ids.length;apply.disabled=same;hint.textContent=t(ids.length?'Changes take effect in a fresh Agent task.':'Empty selection pauses all ordinary tools.')};
-  for(const id of available){const label=el('label',undefined,'check'),box=document.createElement('input');box.type='checkbox';box.value=id;box.checked=value.paused!==true&&(value.activeAgentComponents||[]).includes(id);box.onchange=update;const name=el('span',byId[id]?.displayName||value.components?.[id]?.displayName||id);label.append(box,name);if(value.paused===true)label.append(el('div',t('Fully paused: no MCP and no on-demand Skill.'),'muted'));else if(!(value.activeAgentComponents||[]).includes(id))label.append(el('div',t('On-demand Skill only; MCP stays off until you include this tool in the working set.'),'muted'));form.append(label)}
-  const actions=el('div',undefined,'actions');
-  if(value.paused===true)actions.append(button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…')),'action primary'));
-  else actions.append(button('Pause all tools',()=>call({action:'tools',pause:true},t('Pausing tools…'))));
-  actions.append(apply);
-  c.append(form,hint,actions);root.append(c);update();
+  const homepage=item.homepage||catalog?.homepage||({'math-anchor':'https://github.com/tetracoralla/math-anchor','migratory-time':'https://github.com/tetracoralla/migratory-time','armorial':'https://github.com/tetracoralla/armorial'}[id]);
+  if(homepage){try{const url=new URL(homepage);if(['https:','http:'].includes(url.protocol)){const link=el('a',url.hostname+' ↗');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';metadata.append(link)}}catch{}}
+  const update=(lastUpdates?.items||data.updates?.items||[]).find(item=>item.id===id&&item.availability==='update-available');
+  if(update)metadata.append(button('Install update',()=>call({action:'updates-install',id},t('Updating tools…'))));
+  root.append(metadata);
 }
 async function downloadTrace(provider,session){$('#busyText').textContent=t('Preparing trace export…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/trace-export',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider,session})});if(!r.ok){const v=await r.json();throw new Error(t(v.error?.message||'Trace export failed'))}const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='agent-host-'+provider+'-trace-'+session.slice(0,12)+'.json';document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}catch(e){$('#error').textContent=e.message;$('#error').classList.remove('hidden')}finally{$('#busy').classList.add('hidden')}}
 async function loadTraceSessions(provider,container){$('#busyText').textContent=t('Loading trace sessions…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/trace-sources?provider='+encodeURIComponent(provider)+'&limit=25'),v=await r.json();if(!r.ok)throw new Error(t(v.error?.message||'Trace session list failed'));container.replaceChildren();for(const item of v.sources){const line=el('div',undefined,'row'),label=el('div',undefined,'grow');label.append(el('div',(names[provider]||provider)+' · '+item.sessionHash.slice(0,12)+'…'),el('div',f('{events} events · last observed {date}',{events:number(item.totalEvents),date:new Date(item.lastEventAtMs).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US')}),'muted'));line.append(label,button('Export metadata',()=>downloadTrace(provider,item.sessionHash)));container.append(line)}if(!v.sources.length)container.append(el('p',t('No retained sessions for this provider.'),'muted'))}catch(e){container.replaceChildren(el('p',e.message||t('Trace session list failed'),'notice'))}finally{$('#busy').classList.add('hidden')}}
 function renderTraceSessions(trace,root){const providers=[...new Set((trace.adapters||[]).map(x=>x.provider).filter(Boolean))];const c=card('Trace sessions');if(!providers.length){c.append(el('p',t('No retained sessions for this provider.'),'muted'));root.append(c);return}const actions=el('div',undefined,'actions'),select=document.createElement('select'),list=el('div');select.setAttribute('aria-label',t('Trace provider'));for(const provider of providers){const option=el('option',names[provider]||provider);option.value=provider;select.append(option)}actions.append(select,button('Load sessions',()=>loadTraceSessions(select.value,list),'action primary'));c.append(actions,el('p',t('Retained metadata may be partial because older observations expire and monitoring may have started mid-session.'),'muted'),list);root.append(c)}
+async function downloadTask(provider,session){$('#busyText').textContent=t('Preparing task export…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/task-export',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider,session})});if(!r.ok){const v=await r.json();throw new Error(t(v.error?.message||'Task export failed'))}const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='agent-host-'+provider+'-task-'+session.slice(0,12)+'.json';document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}catch(e){$('#error').textContent=e.message;$('#error').classList.remove('hidden')}finally{$('#busy').classList.add('hidden')}}
+async function loadTaskSessions(provider,container){$('#busyText').textContent=t('Loading task activity…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/task-sources?provider='+encodeURIComponent(provider)+'&limit=25'),v=await r.json();if(!r.ok)throw new Error(t(v.error?.message||'Task activity list failed'));container.replaceChildren();for(const item of v.sources){const line=el('div',undefined,'row task-row'),label=el('div',undefined,'grow'),title=el('div',(names[provider]||provider)+' · '+new Date(item.lastEventAtMs).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US'),'task-title'),stats=el('div',undefined,'task-stats'),direct=el('span'),errors=el('span',undefined,item.errors>0?'task-errors':undefined),references=el('span',undefined,'muted');direct.append(el('strong',number(item.directCalls)),' '+t('direct calls'));errors.append(el('strong',number(item.errors)),' '+t('errors'));references.append(el('strong',number(item.staticReferences)),' '+t('static references'));stats.append(direct,errors,references);label.append(title,stats);line.append(label,button('Export details',()=>downloadTask(provider,item.sessionHash)));container.append(line)}if(!v.sources.length)container.append(el('p',t('No retained task activity for this Agent app.'),'muted'));if(v.limits?.sourceLimitReached)container.append(el('p',f('Showing the newest {count} retained tasks.',{count:number(v.limits.sourcesReturned)}),'muted'))}catch(e){container.replaceChildren(el('p',e.message||t('Task activity list failed'),'notice'))}finally{$('#busy').classList.add('hidden')}}
+function renderTaskSessions(u,root){const providers=[...new Set((u.providerActivity||[]).map(x=>x.provider).filter(Boolean))],c=card('Task activity');if(!providers.length){c.append(el('p',t('No retained task activity for this Agent app.'),'muted'));root.append(c);return}const actions=el('div',undefined,'actions'),select=document.createElement('select'),list=el('div');select.setAttribute('aria-label',t('Task provider'));for(const provider of providers){const option=el('option',names[provider]||provider);option.value=provider;select.append(option)}actions.append(select,button('Show recent tasks',()=>loadTaskSessions(select.value,list),'action primary'));c.append(actions,list,el('p',t('Static references do not prove execution.'),'muted'));root.append(c)}
 function renderToolHistory(u,root){
   const tools=card('Tool activity');
+  tools.append(el('p',t('Calls mapped to tools managed by Agent Host. Independently configured tools are outside this view.'),'muted'));
   const toolList=el('div'),toolCount=el('p',undefined,'muted');let expanded=false;
   const renderTools=()=>{toolList.replaceChildren();const displayed=u.tools.entries.slice(0,expanded?u.tools.entries.length:8);toolCount.textContent=f('Showing {shown} of {available} groups',{shown:displayed.length,available:u.tools.available});for(const item of displayed){
     const title=(item.toolName||t('Unknown')).replace(/^mcp__/,'').replaceAll('__',' · ');
@@ -934,7 +1234,7 @@ function renderToolHistory(u,root){
   if(u.tools.entries.length>8){const toggle=button('Show more tools',()=>{expanded=!expanded;toggle.textContent=t(expanded?'Show less':'Show more tools');renderTools()});tools.append(toggle)}
   if(!u.tools.entries.length)tools.append(el('p',t('No mapped calls were observed.'),'muted'));
   tools.append(toolCount);
-  tools.append(el('p',t('Script references do not prove execution. Binding counts can include older open sessions.'),'muted'));root.append(tools);
+  tools.append(el('p',t('Script references are not execution; open tasks may use older bindings.'),'muted'));root.append(tools);
   const history=u.versionHistory,c=card('Version history'),entries=history?.entries||[],list=el('div');
   const providerName=id=>({'io.github.tetracoralla.math-anchor':'Math Anchor','io.github.tetracoralla.migratory-time':'Migratory Time','io.github.tetracoralla.batchticket':'Data Transformer','io.github.tetracoralla.file-vitals':'File Vitals'}[id]||id?.split('.').pop()?.replaceAll('-',' ')||t('Unknown'));
   const select=document.createElement('select');select.setAttribute('aria-label',t('Tool'));
@@ -948,10 +1248,10 @@ function renderToolHistory(u,root){
   }};select.onchange=render;render();c.append(select,list);
   if(history?.truncated)c.append(el('p',f('Showing {shown} of {available} groups',{shown:history.returned,available:history.available}),'muted'));
   const copied=el('p',undefined,'muted');copied.setAttribute('aria-live','polite');
-  c.append(el('p',t('Version totals survive updates and raw-event cleanup; earlier deleted records cannot be recovered.'),'muted'));
+  c.querySelector('h2').title=t('Version totals survive updates and raw-event cleanup; earlier deleted records cannot be recovered.');
   c.append(button('Copy analysis request',async()=>{try{await navigator.clipboard.writeText(t('Use the installed Agent Host operations skill to analyze the current usage report, version history, runtime errors and coverage. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; counts alone do not establish adoption or correctness.'));copied.textContent=t('Analysis request copied')}catch{copied.textContent=t('Clipboard unavailable')}}),copied);root.append(c);
 }
-function renderUsage(u){const root=$('#usage');root.replaceChildren(el('h1',t('Usage')),el('p',u.enabled?f('{days} day local metadata window',{days:u.windowDays||'—'}):t('Local monitoring is off'),'sub'));if(!u.enabled){const c=card('Monitoring');c.append(el('p',t('Collect metadata-only activity, Token, and runtime outcome observations. No prompts, arguments, results, source paths, network calls, or model calls are used.'),'muted'),button('Turn on monitoring',()=>call({action:'monitoring',enabled:true},t('Turning on monitoring…')),'action primary'));root.append(c);return}if(u.observationSource==='cached-agent-host-refresh')root.append(el('div',t('Live snapshots are unavailable; showing the last completed refresh.'),'notice'));const grid=el('div',undefined,'grid');for(const[v,label]of[[u.reliability.measuredToolCalls,'Measured tool calls'],[u.reliability.completedToolCalls,'Completed'],[u.reliability.toolErrors,'Errors'],[u.reliability.toolCancellations,'Cancelled']]){const c=card(label);c.append(el('div',number(v),'metric'));grid.append(c)}root.append(grid);renderToolHistory(u,root);const trace=u.trace||{adapters:[]},traceCard=card('Agent trace coverage'),traceGrid=el('div',undefined,'grid');for(const[v,label]of[[trace.modelSteps,'Model steps'],[trace.toolOffers,'Tool offers'],[trace.toolCalls,'Trace tool calls'],[trace.toolResults,'Trace tool results'],[trace.turnEnds,'Turn endings']]){const m=el('div');m.append(el('div',number(v),'metric'),el('div',t(label),'muted'));traceGrid.append(m)}traceCard.append(traceGrid);for(const a of trace.adapters||[]){const transport={'public-events':'Public events',opentelemetry:'OpenTelemetry','official-hooks':'Official hooks','stable-local-records':'Local records','aggregate-store':'Aggregate usage'}[a.transport]||'Unknown',status={ok:'Current',partial:'Partial',error:'Needs attention',missing:'Unavailable',unavailable:'Unavailable',unconfigured:'Not configured'}[a.status]||'Unknown';traceCard.append(row((names[a.provider]||a.provider)+' · '+t(transport),t(status)))}traceCard.append(el('p',t('Offered, called, and returned are separate recorded facts. They do not establish why a tool was chosen, whether its result was adopted, or whether the work was correct.'),'muted'));root.append(traceCard);renderTraceSessions(trace,root);for(const a of u.providerActivity){const p=u.providerUsage.find(x=>x.provider===a.provider)||{};const c=card(names[a.provider]||a.provider);const g=el('div',undefined,'grid');for(const[v,label]of[[p.totalTokens,'Provider-reported Tokens'],[p.peakObservedDailyTokens,'Peak observed UTC day'],[a.observedSessions,'Observed sessions'],[a.observedTurns,'Observed turns'],[a.currentObservedDayStreak,'Current UTC-day streak'],[a.longestObservedDayStreak,'Longest UTC-day streak']]){const m=el('div');m.append(el('div',number(v),'metric'),el('div',t(label),'muted'));g.append(m)}c.append(g);const days=u.dailyActivity.entries.filter(x=>x.provider===a.provider).slice(-30),heat=el('div',undefined,'heat'),max=Math.max(1,...days.map(x=>x.totalTokens??x.toolCalls??0));for(const d of days){const i=el('i');const v=d.totalTokens??d.toolCalls??0;i.className=v>0?'on':'';i.style.opacity=String(.2+.8*v/max);i.title=f('{date} · {tokens} Tokens · {calls} tool calls',{date:d.utcDate,tokens:number(d.totalTokens),calls:number(d.toolCalls)});heat.append(i)}c.append(heat,el('p',f('{days} active UTC days · longest session metadata span is not chat duration.',{days:number(a.observedActiveDays)}),'muted'));root.append(c)}if(!u.providerActivity.length){const ac=card('Agent activity');ac.append(el('p',t('No supported Agent activity was observed.'),'muted'));root.append(ac)}const controls=card('Monitoring');controls.append(button('Turn off monitoring',()=>call({action:'monitoring',enabled:false},t('Turning off monitoring…'))));root.append(controls)}
+function renderUsage(u){const root=$('#usage');root.replaceChildren(el('h1',t('Usage')),el('p',u.enabled?f('{days} day local metadata window',{days:u.windowDays||'—'}):t('Local monitoring is off'),'sub'));if(!u.enabled){const c=card('Monitoring');c.append(el('p',t('Collect metadata-only activity, Token, and runtime outcome observations. No prompts, arguments, results, source paths, network calls, or model calls are used.'),'muted'),button('Turn on monitoring',()=>call({action:'monitoring',enabled:true},t('Turning on monitoring…')),'action primary'));root.append(c);return}if(u.observationSource==='cached-agent-host-refresh')root.append(el('div',t('Live snapshots are unavailable; showing the last completed refresh.'),'notice'));const grid=el('div',undefined,'grid');for(const[v,label]of[[u.reliability.measuredToolCalls,'Measured tool calls'],[u.reliability.completedToolCalls,'Completed'],[u.reliability.toolErrors,'Errors'],[u.reliability.toolCancellations,'Cancelled']]){const c=card(label);c.append(el('div',number(v),'metric'));grid.append(c)}root.append(grid);renderTaskSessions(u,root);renderToolHistory(u,root);const trace=u.trace||{adapters:[]},traceCard=card('Agent trace coverage'),traceGrid=el('div',undefined,'grid');for(const[v,label]of[[trace.modelSteps,'Model steps'],[trace.toolOffers,'Tool offers'],[trace.toolCalls,'Trace tool calls'],[trace.toolResults,'Trace tool results'],[trace.turnEnds,'Turn endings']]){const m=el('div');m.append(el('div',number(v),'metric'),el('div',t(label),'muted'));traceGrid.append(m)}traceCard.append(traceGrid);for(const a of trace.adapters||[]){const transport={'public-events':'Public events',opentelemetry:'OpenTelemetry','official-hooks':'Official hooks','stable-local-records':'Local records','aggregate-store':'Aggregate usage'}[a.transport]||'Unknown',status={ok:'Current',partial:'Partial',error:'Needs attention',missing:'Unavailable',unavailable:'Unavailable',unconfigured:'Not configured'}[a.status]||'Unknown';traceCard.append(row((names[a.provider]||a.provider)+' · '+t(transport),t(status)))}traceCard.append(el('p',t('Offered, called, and returned are separate recorded facts. They do not establish why a tool was chosen, whether its result was adopted, or whether the work was correct.'),'muted'));const traceDetails=el('details');traceDetails.append(el('summary',t('Collection details')));const traceBody=el('div');traceBody.append(traceCard);renderTraceSessions(trace,traceBody);traceDetails.append(traceBody);for(const a of u.providerActivity){const p=u.providerUsage.find(x=>x.provider===a.provider)||{};const c=card(names[a.provider]||a.provider);const g=el('div',undefined,'grid');for(const[v,label]of[[p.totalTokens,'Provider-reported Tokens'],[p.peakObservedDailyTokens,'Peak observed UTC day'],[a.observedSessions,'Observed sessions'],[a.observedTurns,'Observed turns'],[a.currentObservedDayStreak,'Current UTC-day streak'],[a.longestObservedDayStreak,'Longest UTC-day streak']]){const m=el('div');m.append(el('div',number(v),'metric'),el('div',t(label),'muted'));g.append(m)}c.append(g);const days=u.dailyActivity.entries.filter(x=>x.provider===a.provider).slice(-30),heat=el('div',undefined,'heat'),max=Math.max(1,...days.map(x=>x.totalTokens??x.toolCalls??0));for(const d of days){const i=el('i');const v=d.totalTokens??d.toolCalls??0;i.className=v>0?'on':'';i.style.opacity=String(.2+.8*v/max);i.title=f('{date} · {tokens} Tokens · {calls} tool calls',{date:d.utcDate,tokens:number(d.totalTokens),calls:number(d.toolCalls)});heat.append(i)}c.append(heat,el('p',f('{days} active UTC days · longest session metadata span is not chat duration.',{days:number(a.observedActiveDays)}),'muted'));root.append(c)}if(!u.providerActivity.length){const ac=card('Agent activity');ac.append(el('p',t('No supported Agent activity was observed.'),'muted'));root.append(ac)}const controls=card('Monitoring');controls.append(button('Turn off monitoring',()=>call({action:'monitoring',enabled:false},t('Turning off monitoring…'))));root.append(traceDetails,controls)}
 function renderActivity(items){const root=$('#activity');root.replaceChildren(el('h1',t('History')));const c=card('Recent changes');for(const item of items)c.append(row(item.summary,new Date(item.occurredAt).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US')));if(!items.length)c.append(el('p',t('No lifecycle changes yet.'),'muted'));root.append(c)}
 applyChrome();load().catch(e=>{$('#error').textContent=e.message;$('#error').classList.remove('hidden')});
 </script></body></html>`
@@ -966,6 +1266,8 @@ export async function startWebManager(options = {}) {
   let doctorFreshness = 'none'
   const traceSourceReader = options.traceSourceReader ?? observabilityTraceSources
   const traceExporter = options.traceExporter ?? exportObservabilityTrace
+  const taskSourceReader = options.taskSourceReader ?? observabilityTaskSources
+  const taskExporter = options.taskExporter ?? exportObservabilityTask
   const pickDirectory = options.pickDirectory ?? pickLocalDirectory
   const actionDependencies = { openAgentApp: options.openAgentApp, pickDirectory, fetch: options.fetch }
   const dashboardDoctor = () => ({ doctor: lastDoctor, doctorFreshness })
@@ -1048,6 +1350,10 @@ export async function startWebManager(options = {}) {
         json(response, 200, await traceSources(url, stateRoot, traceSourceReader))
         return
       }
+      if (request.method === 'GET' && url.pathname === '/api/task-sources') {
+        json(response, 200, await taskSources(url, stateRoot, taskSourceReader))
+        return
+      }
       if (request.method === 'POST' && url.pathname === '/api/trace-export') {
         if (request.headers.origin !== origin || !String(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
           json(response, 403, { status: 'error', error: { code: 'MANAGER_ORIGIN_REJECTED', message: 'The Manager export did not come from this local app.' } })
@@ -1059,6 +1365,24 @@ export async function startWebManager(options = {}) {
         response.once('close', cancel)
         try {
           const exported = await exportTraceDownload(await bodyJson(request), stateRoot, traceExporter, controller.signal)
+          traceDownload(response, exported.body, exported.filename)
+        } finally {
+          request.off('aborted', cancel)
+          response.off('close', cancel)
+        }
+        return
+      }
+      if (request.method === 'POST' && url.pathname === '/api/task-export') {
+        if (request.headers.origin !== origin || !String(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+          json(response, 403, { status: 'error', error: { code: 'MANAGER_ORIGIN_REJECTED', message: 'The Manager export did not come from this local app.' } })
+          return
+        }
+        const controller = new AbortController()
+        const cancel = () => controller.abort()
+        request.once('aborted', cancel)
+        response.once('close', cancel)
+        try {
+          const exported = await exportTaskActivityDownload(await bodyJson(request), stateRoot, taskExporter, controller.signal)
           traceDownload(response, exported.body, exported.filename)
         } finally {
           request.off('aborted', cancel)

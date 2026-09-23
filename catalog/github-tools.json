@@ -16,6 +16,33 @@
       "platforms": {
         "darwin-arm64": "macos-arm64"
       }
+    },
+    {
+      "id": "decision-table",
+      "repository": "tetracoralla/decision-table",
+      "featured": true,
+      "source": {
+        "kind": "repository-plugin",
+        "pluginPath": "plugins/decision-table"
+      }
+    },
+    {
+      "id": "state-machine",
+      "repository": "tetracoralla/state-machine",
+      "featured": true,
+      "source": {
+        "kind": "repository-plugin",
+        "pluginPath": "plugins/state-machine"
+      }
+    },
+    {
+      "id": "schedule-algebra",
+      "repository": "tetracoralla/schedule-algebra",
+      "featured": true,
+      "source": {
+        "kind": "repository-plugin",
+        "pluginPath": "plugins/schedule-algebra"
+      }
     }
   ]
 }

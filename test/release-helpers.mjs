@@ -78,7 +78,7 @@ async function component(catalogRoot, fixtureRoot, definition, marker) {
   }
 }
 
-export async function createReleaseFixture(root, { suiteVersion, releaseId, marker, includeObservability = false, includeDeveloper = false, includeArmorial = false, componentVersions = {} }) {
+export async function createReleaseFixture(root, { suiteVersion, releaseId, marker, includeObservability = false, includeDeveloper = false, includeArmorial = false, armorialWorkspace = false, componentVersions = {} }) {
   const catalogRoot = join(root, 'catalog')
   await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
   const nodeEntrypoint = platform() === 'win32' ? 'bin/node.exe' : 'bin/node'
@@ -201,8 +201,16 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
         [`${pluginRoot}/.codex-plugin/plugin.json`, ['{"name":"armorial","version":"0.7.0","skills":"./skills/","mcpServers":"./.mcp.json"}\n', false]],
         [`${pluginRoot}/.mcp.json`, ['{"mcpServers":{"armorial":{"command":"./server.mjs","args":[],"cwd":"."}}}\n', false]],
         [`${pluginRoot}/skills/use-armorial/SKILL.md`, ['---\nname: use-armorial\n---\n', false]],
-        [`${pluginRoot}/server.mjs`, [`// ${marker}\nprocess.stdin.resume()\n`, false]],
-        [`${pluginRoot}/cli.mjs`, ["process.stdout.write('0.7.0\\n')\n", false]],
+        [`${pluginRoot}/server.mjs`, [armorialWorkspace
+          ? `// ${marker}\n${await readFile(new URL('./fixtures/workspace-provider.mjs', import.meta.url), 'utf8')}`
+          : `// ${marker}\nprocess.stdin.resume()\n`, false]],
+        [`${pluginRoot}/cli.mjs`, [armorialWorkspace
+          ? `import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+console.log(process.argv.includes('--read')
+  ? readFileSync(join(process.env.PROVIDER_FIXTURE_WORKSPACE, 'input.txt'), 'utf8')
+  : '0.7.0');\n`
+          : "process.stdout.write('0.7.0\\n')\n", false]],
       ],
       identityFiles: ['marketplace/.agents/plugins/marketplace.json', ...identityFiles.map((path) => `${pluginRoot}/${path}`)],
       entrypoints: { server: `${pluginRoot}/server.mjs` },
@@ -223,7 +231,7 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
           command: `${pluginRoot}/server.mjs`,
           args: [],
           cwd: pluginRoot,
-          workspaceEnvironment: [],
+          workspaceEnvironment: armorialWorkspace ? ['PROVIDER_FIXTURE_WORKSPACE'] : [],
           expectedTools: ['armorial.select'],
           timeoutMs: 5000,
         },

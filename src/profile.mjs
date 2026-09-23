@@ -132,6 +132,7 @@ export async function featuredCatalog(env = process.env) {
 
 export const TOOL_EXPOSURE_ACTIVE = 'active'
 export const TOOL_EXPOSURE_ON_DEMAND = 'on-demand'
+export const TOOL_EXPOSURE_INACTIVE = 'inactive'
 export const TOOL_EXPOSURE_PAUSED = 'paused'
 
 export function isAgentToolsPaused(value) {
@@ -173,9 +174,10 @@ export function selectAgentComponents(availableComponents, requestedComponents) 
   return available.filter((id) => requested.includes(id))
 }
 
-export function toolExposure(active, paused) {
+export function toolExposure(active, paused, component) {
   if (paused === true) return TOOL_EXPOSURE_PAUSED
-  return active === true ? TOOL_EXPOSURE_ACTIVE : TOOL_EXPOSURE_ON_DEMAND
+  if (active === true) return TOOL_EXPOSURE_ACTIVE
+  return component?.providerSkill !== undefined ? TOOL_EXPOSURE_ON_DEMAND : TOOL_EXPOSURE_INACTIVE
 }
 
 export function selectProfileManifest(manifest, profile) {

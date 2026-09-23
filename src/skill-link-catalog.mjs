@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { AgentHostError } from './errors.mjs'
 import { canonicalJson, readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
@@ -54,8 +53,7 @@ function activeToolComponents(state) {
 }
 
 async function listMcpTools(component, workspaceRoot) {
-  const env = getDefaultEnvironment()
-  Object.assign(env, componentEnvironment(component, workspaceRoot ?? component.cwd))
+  const env = componentEnvironment(component, workspaceRoot)
   const transport = new ManagedMcpStdioTransport({
     command: component.command,
     args: component.args,

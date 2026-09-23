@@ -110,7 +110,8 @@ test('Codex projection exposes a Developer Kit Skill with a version-locked CLI a
   }
   const projected = await materializeCodexProjections({ components: { 'agent-tool-development-kit': component } }, join(root, 'projections'), null)
   const result = projected.components['agent-tool-development-kit']
-  const expectedDigest = createHash('sha256')
+  // A projection created before launch context was bound must not be reused.
+  const legacyDigest = createHash('sha256')
     .update('openadam.agent-host-codex-projection.v0.2')
     .update('\0')
     .update(component.fingerprint)
@@ -122,7 +123,7 @@ test('Codex projection exposes a Developer Kit Skill with a version-locked CLI a
     .update('skill-only')
     .digest('hex')
     .slice(0, 16)
-  assert.equal(basename(dirname(result.marketplaceRoot)), expectedDigest)
+  assert.notEqual(basename(dirname(result.marketplaceRoot)), legacyDigest)
   await assert.rejects(readFile(join(result.pluginRoot, '.mcp.json')), (error) => error.code === 'ENOENT')
   const launcher = await readFile(result.developerSkill.launcherPath, 'utf8')
   if (process.platform === 'win32') {

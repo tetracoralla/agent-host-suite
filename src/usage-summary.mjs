@@ -313,7 +313,20 @@ function enforceBudget(result) {
   return output
 }
 
-function emptyResult(configured, enabled) {
+function toolScope(options, available) {
+  const filters = options.tools ?? []
+  if (!Array.isArray(filters) || filters.length > 20 || filters.some((value) => typeof value !== 'string' || value.length === 0 || value.length > TEXT_LIMIT)) {
+    throw new AgentHostError('USAGE_FILTER_INVALID', 'Choose at most 20 tool filters, each between 1 and 180 characters')
+  }
+  return {
+    requested: options.allTools === true ? 'all-observed-tools' : 'host-managed-tools',
+    available,
+    filters: [...new Set(filters)],
+    unboundMeaning: 'No current Host deployment mapping; this does not prove who installed the tool.',
+  }
+}
+
+function emptyResult(configured, enabled, options) {
   return enforceBudget({
     schemaVersion: USAGE_SUMMARY_SCHEMA,
     status: 'ok',
@@ -321,6 +334,7 @@ function emptyResult(configured, enabled) {
     configured,
     enabled,
     windowDays: null,
+    toolScope: toolScope(options, false),
     observationSource: 'none',
     freshness: null,
     collection: null,
@@ -349,12 +363,18 @@ function emptyResult(configured, enabled) {
   })
 }
 
-export function projectUsageSummary(state, current, currentErrorCode = null) {
+export function projectUsageSummary(state, current, currentErrorCode = null, options = {}) {
   const currentAvailable = current !== null && current?.status !== 'unavailable'
   const cached = state.observability?.latest ?? null
   const source = currentAvailable ? current : cached
   const report = source?.report ?? null
-  const rawTools = Array.isArray(report?.suiteTools) ? report.suiteTools : []
+  const allObserved = options.allTools === true
+  const selectedTools = allObserved ? report?.observedTools : report?.suiteTools
+  const scope = toolScope(options, Array.isArray(selectedTools))
+  const filters = scope.filters
+  const rawTools = (Array.isArray(selectedTools) ? selectedTools : []).filter((item) =>
+    filters.length === 0 || filters.some((filter) => item.toolName?.includes(filter)
+      || item.currentAgentHostDeployment?.componentId === filter))
   const rawSemanticExecutions = Array.isArray(report?.suiteExecutions) ? report.suiteExecutions : []
   const allTools = rawTools
     .filter((item) => Number.isFinite(item?.calls) && item.calls > 0)
@@ -378,6 +398,7 @@ export function projectUsageSummary(state, current, currentErrorCode = null) {
     configured: true,
     enabled: true,
     windowDays: nonNegativeIntegerOrNull(report?.windowDays),
+    toolScope: scope,
     versionHistory: compactVersionHistory(report?.versionHistory),
     runtimeErrorCodes: compactErrorCodes(report?.runtimeErrorCodes),
     observationSource: currentAvailable ? 'current-observer-snapshots' : cached === null ? 'none' : 'cached-agent-host-refresh',
@@ -426,15 +447,15 @@ export function projectUsageSummary(state, current, currentErrorCode = null) {
 export async function usageSummary(options = {}, dependencies = {}) {
   const paths = await readStatePaths(resolveStateRoot(options.stateRoot))
   const state = await loadState(paths)
-  if (state === null) return emptyResult(false, false)
-  if (state.observability?.enabled !== true) return emptyResult(true, false)
+  if (state === null) return emptyResult(false, false, options)
+  if (state.observability?.enabled !== true) return emptyResult(true, false, options)
   try {
     const current = Object.prototype.hasOwnProperty.call(dependencies, 'currentObservability')
       ? await dependencies.currentObservability
       : await (dependencies.readCurrentObservability ?? readCurrentObservability)(state, dependencies.runner)
-    return projectUsageSummary(state, current)
+    return projectUsageSummary(state, current, null, options)
   } catch (error) {
     const errorCode = error instanceof AgentHostError ? error.code : 'OBSERVABILITY_CURRENT_READ_FAILED'
-    return projectUsageSummary(state, null, errorCode)
+    return projectUsageSummary(state, null, errorCode, options)
   }
 }

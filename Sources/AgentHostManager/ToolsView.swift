@@ -1,199 +1,171 @@
 import SwiftUI
 
-struct ToolsView: View {
+struct ToolLibraryView: View {
     @ObservedObject var store: AgentHostStore
-    @State private var githubURL = ""
+    @SceneStorage("browseToolsSearch") private var searchText = ""
+    @State private var selectedID: String?
+    @State private var isAddingGitHubProject = false
+    @FocusState private var focusedID: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: "Tools", subtitle: nil) {
-                    Button(L10n.text("Check All")) { Task { await store.runDoctor() } }
-                        .disabled(store.isBusy)
-                }
-
-                if store.toolSetNeedsFreshTask {
-                    NoticeView(
-                        title: "Start a fresh Agent task",
-                        message: "Open tasks keep their old tools.",
-                        systemImage: "arrow.clockwise.circle",
-                        color: .blue
-                    )
-                }
-
-                if let catalog = store.catalogBudgetSummary {
-                    Panel {
-                        LabeledContent(L10n.text("Context cost"), value: catalog)
-                            .accessibilityLabel("\(L10n.text("Context cost")): \(catalog)")
-                    }
-                }
-
-                Panel {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.text("Add GitHub project")).font(.headline)
-                        Text(L10n.text("Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it."))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("https://github.com/owner/repo", text: $githubURL)
-                            .textFieldStyle(.roundedBorder)
-                        HStack {
-                            Button(L10n.text("Preview GitHub project")) {
-                                let url = githubURL
-                                Task { await store.previewGitHubTool(url) }
-                            }
-                            .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            Button(L10n.text("Add GitHub project")) {
-                                let url = githubURL
-                                githubURL = ""
-                                Task { await store.addGitHubTool(url) }
-                            }
-                            .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                        if let preview = store.githubPreview {
-                            HStack(alignment: .top, spacing: 12) {
-                                ToolLogoView(logo: preview.presentation?.logo, systemImage: "shippingbox")
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(preview.presentation?.displayName ?? preview.origin?.repository ?? "")
-                                        .font(.headline)
-                                    if let summary = preview.presentation?.summary {
-                                        Text(summary).foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
+        ZStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    PageHeader(title: "Browse", subtitle: nil) {
+                        Button { isAddingGitHubProject = true } label: {
+                            Label(L10n.text("GitHub"), systemImage: "plus")
                         }
                     }
-                }
-
-                Panel {
-                    HStack {
-                        Text(L10n.text("Featured")).font(.headline)
-                        Spacer()
-                        if store.needsFeaturedInventory {
-                            Button(L10n.text("Get")) {
-                                Task { await store.prepareFeaturedAcquire() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(store.isBusy)
-                        }
-                    }
-                    ForEach(Array(store.featuredCatalogTools.enumerated()), id: \.element.id) { index, tool in
-                        if index > 0 { Divider() }
-                        FeaturedCatalogRow(
-                            tool: tool,
-                            installed: store.isFeaturedToolInstalled(tool.id)
-                        )
-                    }
-                }
-
-                Panel {
-                    HStack {
-                        Text(L10n.text("For new tasks")).font(.headline)
-                        Spacer()
-                        if store.suite?.agentToolsPaused == true {
-                            Button(L10n.text("Resume")) { Task { await store.resumeTools() } }
-                                .disabled(store.isBusy)
-                        } else if !store.managedTools.isEmpty {
-                            Button(L10n.text("Pause all")) { Task { await store.pauseAllTools() } }
-                                .disabled(store.isBusy)
-                        }
-                    }
-                    if store.suite?.agentToolsPaused == true {
-                        Text(L10n.text("Fully paused: no MCP and no on-demand Skill."))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    ToolSearchField(text: $searchText, prompt: "Search tools")
+                    if filteredTools.isEmpty {
+                        ContentUnavailableView.search(text: searchText)
                     } else {
-                        Text(L10n.text("Off keeps an on-demand Skill. Pause all withholds both."))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        LazyVGrid(columns: toolColumns, spacing: 0) {
+                            ForEach(filteredTools) { tool in
+                                let installed = store.managedTools.first { $0.id == tool.id }
+                                ToolRow(name: tool.name, summary: ToolPresentation.summary(tool.id, fallback: tool.summary), logo: nil,
+                                        systemImage: tool.systemImage, toolID: tool.id,
+                                        state: installed?.state,
+                                        updateAvailable: store.updates?.items?.contains { $0.id == tool.id && $0.availability == "update-available" } == true,
+                                        paused: installed != nil && store.suite?.agentToolsPaused == true, onDemandAvailable: installed?.onDemandAvailable == true,
+                                        platformUnavailable: installed == nil && !store.catalogToolAvailable(tool.id)) {
+                                    selectedID = tool.id
+                                }
+                                .focused($focusedID, equals: tool.id)
+                            }
+                        }
                     }
-                    ForEach(Array(store.managedTools.enumerated()), id: \.element.id) { index, tool in
-                        ToolRow(
-                            tool: tool,
-                            isBusy: store.isBusy,
-                            paused: store.suite?.agentToolsPaused == true,
-                            onChange: { value in Task { await store.setTool(tool.id, active: value) } }
+                }
+                .frame(maxWidth: 900, alignment: .leading)
+                .padding(32)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .opacity(selectedID == nil ? 1 : 0)
+            .allowsHitTesting(selectedID == nil)
+            .accessibilityHidden(selectedID != nil)
+            if let selectedID {
+                ToolDetailView(store: store, toolID: selectedID) {
+                    self.selectedID = nil
+                    focusedID = selectedID
+                }
+                .id(selectedID)
+            }
+        }
+        .sheet(isPresented: $isAddingGitHubProject) { GitHubToolImportView(store: store) }
+    }
+
+    private var filteredTools: [ManagerSetupTool] {
+        store.featuredCatalogTools.filter {
+            ToolPresentation.matches(searchText, name: $0.name, summary: L10n.text($0.summary) + " " + L10n.text($0.details))
+        }
+    }
+}
+
+struct GitHubToolImportView: View {
+    @ObservedObject var store: AgentHostStore
+    var initialURL = ""
+    @State private var githubURL = ""
+    @State private var previewedURL = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text(L10n.text("Add from GitHub"))
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                Button(L10n.text("Close")) { dismiss() }
+            }
+
+            TextField(L10n.text("GitHub repository or Release URL"), text: $githubURL)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Button(L10n.text("Check compatibility")) {
+                    let target = normalizedURL
+                    Task {
+                        await store.previewGitHubTool(target)
+                        if store.githubPreview != nil && normalizedURL == target {
+                            previewedURL = target
+                        } else {
+                            store.clearGitHubPreview()
+                        }
+                    }
+                }
+                .disabled(store.isBusy || githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Spacer()
+            }
+
+            if let preview = store.githubPreview {
+                Divider()
+                HStack(alignment: .top, spacing: 14) {
+                    ToolLogoView(logo: preview.presentation?.logo, systemImage: "shippingbox", size: 52)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(preview.presentation?.displayName ?? preview.origin?.repository ?? L10n.text("GitHub project"))
+                            .font(.headline)
+                        if let summary = preview.presentation?.summary {
+                            Text(summary).foregroundStyle(.secondary)
+                        }
+                        Label(
+                            L10n.text(preview.compatibility?.available == true ? "Compatible" : "Not compatible"),
+                            systemImage: preview.compatibility?.available == true ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
                         )
-                        if index < store.managedTools.count - 1 { Divider() }
+                        .foregroundStyle(preview.compatibility?.available == true ? Color.green : Color.orange)
                     }
                 }
+                if let reason = preview.compatibility?.reason, preview.compatibility?.available != true {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .frame(maxWidth: 760, alignment: .leading)
-            .padding(32)
-        }
-    }
-}
 
-private struct FeaturedCatalogRow: View {
-    let tool: ManagerSetupTool
-    let installed: Bool
+            Spacer()
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: tool.systemImage)
-                .font(.title3)
-                .foregroundStyle(.blue)
-                .frame(width: 28, height: 28)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(L10n.text(tool.name)).font(.headline)
-                Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
+            if let message = store.errorMessage {
+                Text(message).font(.callout).foregroundStyle(.red).textSelection(.enabled)
             }
-            Spacer(minLength: 20)
-            Text(L10n.text(installed ? "Installed" : "Missing"))
-                .font(.caption)
-                .foregroundStyle(installed ? Color.secondary : Color.orange)
-        }
-        .padding(.vertical, 3)
-    }
-}
+            if store.githubConflictURL == normalizedURL {
+                Text(L10n.text("This tool is already configured independently. Agent Host can take over its connection and restore the previous configuration when you remove it."))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
 
-private struct ToolRow: View {
-    let tool: ManagedTool
-    let isBusy: Bool
-    let paused: Bool
-    let onChange: @Sendable (Bool) -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            ToolLogoView(logo: tool.logo, systemImage: tool.systemImage)
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text(tool.name).font(.headline)
-                    if let version = tool.version {
-                        Text(version.split(separator: "+", maxSplits: 1).first.map(String.init) ?? version)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
+            HStack {
+                Spacer()
+                if store.suite?.configured == true {
+                    Button(L10n.text(store.githubConflictURL == normalizedURL ? "Take over connection and add" : "Add tool")) {
+                        Task {
+                            await store.addGitHubTool(githubURL, replacingHostConflicts: store.githubConflictURL == normalizedURL)
+                            if store.errorMessage == nil && store.githubPreview == nil { dismiss() }
+                        }
                     }
-                }
-                Text(L10n.text(tool.summary)).foregroundStyle(.secondary)
-                if let author = tool.author, !author.isEmpty {
-                    Text(author)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        store.isBusy
+                            || store.githubPreview?.compatibility?.available != true
+                            || normalizedURL != previewedURL
+                    )
+                } else {
+                    Text(L10n.text("Install Agent Host before adding a GitHub tool."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if paused {
-                    Text(L10n.text("Fully paused: no MCP and no on-demand Skill."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if !tool.active {
-                    Text(L10n.text("On-demand Skill only"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 20)
-            VStack(alignment: .trailing, spacing: 8) {
-                ItemStatePill(state: tool.state)
-                Toggle(L10n.text("Available"), isOn: Binding(
-                    get: { !paused && tool.active },
-                    set: onChange
-                ))
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .disabled(isBusy)
-                .accessibilityLabel(L10n.format("Include {tool} in new Agent tasks", ["tool": tool.name]))
             }
         }
-        .padding(.vertical, 3)
+        .padding(24)
+        .frame(width: 560, height: 500)
+        .onAppear {
+            store.clearGitHubPreview()
+            store.errorMessage = nil
+            githubURL = initialURL
+            previewedURL = ""
+        }
+        .onChange(of: normalizedURL) { _, value in
+            if value != previewedURL { store.clearGitHubPreview() }
+        }
+    }
+
+    private var normalizedURL: String {
+        githubURL.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

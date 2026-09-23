@@ -1,9 +1,13 @@
 {
   "schemaVersion": "openadam.agent-host-github-catalog.v0.1",
-  "catalogId": "github-tools-2026-09-15-armorial-0.8.0",
-  "createdAt": "2026-09-15T00:00:00.000Z",
+  "catalogId": "github-tools-2026-09-23-provider-skills",
+  "createdAt": "2026-09-23T06:45:39.000Z",
   "channel": "stable",
-  "incompletePlatforms": ["darwin-x86_64", "win32-x64", "win32-arm64"],
+  "incompletePlatforms": [
+    "darwin-x86_64",
+    "win32-x64",
+    "win32-arm64"
+  ],
   "tools": [
     {
       "id": "armorial",
@@ -19,6 +23,93 @@
           "url": "https://github.com/tetracoralla/armorial/releases/download/v0.8.0/armorial-0.8.0-codex-plugin-macos-arm64.tar.gz",
           "sha256": "sha256:db2cd4acb1b1e0ba96ece12d03f1d2d4d1fc8f5fabc1b1c6999ea3cb07b87fcd",
           "bytes": 4997635
+        }
+      }
+    },
+    {
+      "id": "decision-table",
+      "version": "0.1.2",
+      "repository": "tetracoralla/decision-table",
+      "tag": "a94c0045257e4afa66419615a13b4eb901360829",
+      "releaseUrl": "https://github.com/tetracoralla/decision-table/tree/a94c0045257e4afa66419615a13b4eb901360829",
+      "commit": "a94c0045257e4afa66419615a13b4eb901360829",
+      "featured": true,
+      "source": {
+        "kind": "repository-plugin",
+        "commit": "a94c0045257e4afa66419615a13b4eb901360829",
+        "pluginPath": "plugins/decision-table"
+      },
+      "presentation": {
+        "displayName": "Decision Table",
+        "summary": "Make deterministic decisions from explicit facts.",
+        "author": "openAdam",
+        "homepage": "https://github.com/tetracoralla/decision-table",
+        "license": "Apache-2.0"
+      },
+      "platforms": {
+        "darwin-arm64": {
+          "assetName": "decision-table-a94c0045257e4afa66419615a13b4eb901360829.tar.gz",
+          "url": "https://codeload.github.com/tetracoralla/decision-table/tar.gz/a94c0045257e4afa66419615a13b4eb901360829",
+          "sha256": "sha256:15d2fe747ee26cdfc2e829efdfac4fb535fe550b963918799c4ece44f4cd5c5b",
+          "bytes": 271092
+        }
+      }
+    },
+    {
+      "id": "state-machine",
+      "version": "0.1.1",
+      "repository": "tetracoralla/state-machine",
+      "tag": "5112b9544dd76dab78411c84f0141f9fa9618df6",
+      "releaseUrl": "https://github.com/tetracoralla/state-machine/tree/5112b9544dd76dab78411c84f0141f9fa9618df6",
+      "commit": "5112b9544dd76dab78411c84f0141f9fa9618df6",
+      "featured": true,
+      "source": {
+        "kind": "repository-plugin",
+        "commit": "5112b9544dd76dab78411c84f0141f9fa9618df6",
+        "pluginPath": "plugins/state-machine"
+      },
+      "presentation": {
+        "displayName": "Step Switch",
+        "summary": "Make state transitions deterministic.",
+        "author": "openAdam",
+        "homepage": "https://github.com/tetracoralla/state-machine",
+        "license": "Apache-2.0"
+      },
+      "platforms": {
+        "darwin-arm64": {
+          "assetName": "state-machine-5112b9544dd76dab78411c84f0141f9fa9618df6.tar.gz",
+          "url": "https://codeload.github.com/tetracoralla/state-machine/tar.gz/5112b9544dd76dab78411c84f0141f9fa9618df6",
+          "sha256": "sha256:5f035ecbd91db73e23666bae64efeb2ae28b4d6cbb968e6aebc01fc510e80c04",
+          "bytes": 258763
+        }
+      }
+    },
+    {
+      "id": "schedule-algebra",
+      "version": "0.1.7",
+      "repository": "tetracoralla/schedule-algebra",
+      "tag": "ebebcd69c72ade047758f6ff5c5a6297b461597d",
+      "releaseUrl": "https://github.com/tetracoralla/schedule-algebra/tree/ebebcd69c72ade047758f6ff5c5a6297b461597d",
+      "commit": "ebebcd69c72ade047758f6ff5c5a6297b461597d",
+      "featured": true,
+      "source": {
+        "kind": "repository-plugin",
+        "commit": "ebebcd69c72ade047758f6ff5c5a6297b461597d",
+        "pluginPath": "plugins/schedule-algebra"
+      },
+      "presentation": {
+        "displayName": "Schedule Algebra",
+        "summary": "Compute exact bounded schedule intervals.",
+        "author": "openAdam",
+        "homepage": "https://github.com/tetracoralla/schedule-algebra",
+        "license": "Apache-2.0"
+      },
+      "platforms": {
+        "darwin-arm64": {
+          "assetName": "schedule-algebra-ebebcd69c72ade047758f6ff5c5a6297b461597d.tar.gz",
+          "url": "https://codeload.github.com/tetracoralla/schedule-algebra/tar.gz/ebebcd69c72ade047758f6ff5c5a6297b461597d",
+          "sha256": "sha256:b297ed312bfa7ba7bf4c0e5a1a90ca0845fd54bc20dcdefa4e9ccfabee2fb8a0",
+          "bytes": 610139
         }
       }
     }

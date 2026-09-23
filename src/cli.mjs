@@ -1,7 +1,7 @@
 import { doctor } from './doctor.mjs'
 import { asPublicError, AgentHostError } from './errors.mjs'
 import { addHost, hostStatus, recoverServiceInstallation, removeHost, repairInstallation, rollbackInstallation, setActiveTools, toolSetStatus, uninstallInstallation, updateInstallation } from './lifecycle.mjs'
-import { disableObservability, enableObservability, exportObservabilityTrace, maintenance, observabilityAdapterPlan, observabilityAdapters, observabilityStatus, observabilitySummary, observabilityTraceSources, refreshObservability } from './observability.mjs'
+import { disableObservability, enableObservability, exportObservabilityTask, exportObservabilityTrace, maintenance, observabilityAdapterPlan, observabilityAdapters, observabilityStatus, observabilitySummary, observabilityTaskSources, observabilityTraceSources, refreshObservability } from './observability.mjs'
 import { readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { loadState, prepareStatePaths, readStatePaths } from './state.mjs'
@@ -12,6 +12,7 @@ import { operationsSnapshot } from './operations-snapshot.mjs'
 import { importLocalComponent, localComponentStatus, previewLocalComponent, removeLocalComponent, rollbackLocalComponent } from './local-components.mjs'
 import { exportSkillLinkCatalog } from './skill-link-catalog.mjs'
 import { usageSummary } from './usage-summary.mjs'
+import { toolInventory } from './tool-inventory.mjs'
 import { startWebManager } from './web-manager.mjs'
 import { defaultToolsForProfile, featuredCatalog, FEATURED_CATALOG_SCHEMA } from './profile.mjs'
 import { fetchPreviewRelease, PREVIEW_FETCH_SCHEMA } from './preview-download.mjs'
@@ -52,7 +53,7 @@ const USAGE = `Usage:
   agent-host source set (--url URL | --release-manifest PATH) [--state-root PATH] [--json]
   agent-host source clear [--state-root PATH] [--json]
   agent-host activity [--state-root PATH] [--json]
-  agent-host usage [--state-root PATH] [--json]
+  agent-host usage [--all-tools] [--tool NAME] [--state-root PATH] [--json]
   agent-host manager [--no-open] [--state-root PATH]
   agent-host storage [--state-root PATH] [--json]
   agent-host cleanup [--dry-run] [--state-root PATH] [--json]
@@ -61,8 +62,9 @@ const USAGE = `Usage:
   agent-host update [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--workspace-root PATH] [--release-manifest PATH] [--enable-observability] [--replace-host-conflicts] [--plan-id SHA256] [--dry-run] [--state-root PATH] [--json]
   agent-host repair [--workspace-root PATH] [--replace-host-conflicts] [--plan-id SHA256] [--dry-run] [--state-root PATH] [--json]
   agent-host tools status [--state-root PATH] [--json]
+  agent-host tools inventory [--state-root PATH] [--json]
   agent-host tools browse [--json]
-  agent-host tools add --github URL [--tag TAG] [--preview] [--activate] [--replace-source] [--dry-run] [--state-root PATH] [--json]
+  agent-host tools add --github URL [--tag TAG] [--preview] [--activate] [--replace-source] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools update [--tool COMPONENT | --all] [--dry-run] [--state-root PATH] [--json]
   agent-host tools set (--tool COMPONENT [--tool COMPONENT] | --profile PROFILE) [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host tools pause [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
@@ -85,6 +87,8 @@ const USAGE = `Usage:
   agent-host observability enable|disable|refresh|status [--state-root PATH] [--json]
   agent-host observability trace-sources --provider PROVIDER [--from-ms N] [--to-ms N] [--limit N] [--state-root PATH] [--json]
   agent-host observability export-trace --provider PROVIDER (--file PATH | --session HASH) --output PATH [--from-ms N] [--to-ms N] [--include-selected-content --confirm-sensitive-content] [--max-events N] [--max-output-bytes N] [--state-root PATH] [--json]
+  agent-host observability task-sources --provider PROVIDER [--from-ms N] [--to-ms N] [--limit N] [--state-root PATH] [--json]
+  agent-host observability export-task --provider PROVIDER --session HASH --output PATH [--from-ms N] [--to-ms N] [--max-events N] [--max-output-bytes N] [--state-root PATH] [--json]
   agent-host observability adapters [--state-root PATH] [--json]
   agent-host observability adapter-plan --adapter ID [--state-root PATH] [--json]
   agent-host host add codex|claude|zcode [--workspace-root PATH] [--replace-host-conflicts] [--state-root PATH] [--json]
@@ -105,7 +109,7 @@ const ROUTE_ARGUMENTS = Object.freeze({
   'source set': ['--url', '--release-manifest', '--state-root', '--json'],
   'source clear': ['--state-root', '--json'],
   activity: ['--state-root', '--json'],
-  usage: ['--state-root', '--json'],
+  usage: ['--state-root', '--json', '--all-tools', '--tool'],
   manager: ['--state-root', '--no-open'],
   storage: ['--state-root', '--json'],
   cleanup: ['--state-root', '--dry-run', '--json'],
@@ -116,8 +120,9 @@ const ROUTE_ARGUMENTS = Object.freeze({
   uninstall: ['--purge-data', '--state-root', '--json'],
   maintenance: ['--state-root', '--json'],
   'tools status': ['--state-root', '--json'],
+  'tools inventory': ['--state-root', '--json'],
   'tools browse': ['--json', '--state-root'],
-  'tools add': ['--github', '--tag', '--preview', '--activate', '--replace-source', '--dry-run', '--state-root', '--json'],
+  'tools add': ['--github', '--tag', '--preview', '--activate', '--replace-source', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   'tools update': ['--tool', '--all', '--dry-run', '--state-root', '--json'],
   'tools set': ['--tool', '--profile', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   'tools pause': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
@@ -135,6 +140,8 @@ const ROUTE_ARGUMENTS = Object.freeze({
   'observability status': ['--state-root', '--json'],
   'observability trace-sources': ['--provider', '--from-ms', '--to-ms', '--limit', '--state-root', '--json'],
   'observability export-trace': ['--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--max-events', '--max-output-bytes', '--include-selected-content', '--confirm-sensitive-content', '--state-root', '--json'],
+  'observability task-sources': ['--provider', '--from-ms', '--to-ms', '--limit', '--state-root', '--json'],
+  'observability export-task': ['--provider', '--session', '--output', '--from-ms', '--to-ms', '--max-events', '--max-output-bytes', '--state-root', '--json'],
   'observability adapters': ['--state-root', '--json'],
   'observability adapter-plan': ['--adapter', '--state-root', '--json'],
   'host add': ['--workspace-root', '--replace-host-conflicts', '--state-root', '--json'],
@@ -208,6 +215,7 @@ function parseArgs(argv) {
     ['--preview', 'preview'],
     ['--replace-source', 'replaceSource'],
     ['--all', 'all'],
+    ['--all-tools', 'allTools'],
     ['--include-app', 'includeApp'],
   ])
   const start = options.command === 'host' ? 3 : options.command === 'component' && options.target !== undefined ? 3 : ACTION_COMMANDS.has(options.command) ? 2 : 1
@@ -304,12 +312,20 @@ function parseArgs(argv) {
   if (route === 'observability trace-sources') {
     if (typeof options.provider !== 'string' || options.provider.length === 0) throw new AgentHostError('CLI_USAGE', 'observability trace-sources requires --provider')
   }
+  if (route === 'observability task-sources') {
+    if (typeof options.provider !== 'string' || options.provider.length === 0) throw new AgentHostError('CLI_USAGE', 'observability task-sources requires --provider')
+  }
   if (route === 'observability export-trace') {
     if (typeof options.provider !== 'string' || typeof options.output !== 'string' || (typeof options.file === 'string') === (typeof options.session === 'string')) {
       throw new AgentHostError('CLI_USAGE', 'observability export-trace requires --provider, exactly one of --file or --session, and --output')
     }
     if (typeof options.file === 'string' && (options.fromMs !== undefined || options.toMs !== undefined)) {
       throw new AgentHostError('CLI_USAGE', '--from-ms and --to-ms require --session')
+    }
+  }
+  if (route === 'observability export-task') {
+    if (typeof options.provider !== 'string' || typeof options.session !== 'string' || typeof options.output !== 'string') {
+      throw new AgentHostError('CLI_USAGE', 'observability export-task requires --provider, --session, and --output')
     }
   }
   if (options.fromMs !== undefined && options.toMs !== undefined && options.fromMs > options.toMs) {
@@ -479,6 +495,17 @@ export function human(result) {
   if (result.schemaVersion === 'openadam.agent-host-trace-source-catalog.v0.1') {
     return `Trace sessions · ${result.sources?.length ?? 0} retained ${result.provider ?? 'Agent'} sessions · completeness unknown`
   }
+  if (result.schemaVersion === 'openadam.agent-host-task-source-catalog.v0.1') {
+    const sources = result.sources ?? []
+    const direct = sources.reduce((total, source) => total + (source.directCalls ?? 0), 0)
+    const references = sources.reduce((total, source) => total + (source.staticReferences ?? 0), 0)
+    const errors = sources.reduce((total, source) => total + (source.errors ?? 0), 0)
+    const bounded = result.limits?.sourceLimitReached === true ? ' · more retained sessions not shown' : ''
+    return `Task activity · ${sources.length} ${result.provider ?? 'Agent'} session${sources.length === 1 ? '' : 's'} · ${direct} direct call${direct === 1 ? '' : 's'} · ${references} static reference${references === 1 ? '' : 's'} · ${errors} error${errors === 1 ? '' : 's'}${bounded}`
+  }
+  if (result.schemaVersion === 'openadam.agent-host-task-activity-pack.v0.1') {
+    return `Task Activity Pack · ${result.eventsReturned ?? 0} metadata events · interpretation left to the user or selected Agent`
+  }
   if (result.schemaVersion === 'openadam.agent-host-service-recovery-result.v0.1') {
     const service = result.service
     return `Service restored · ${service.running === true ? 'running' : service.loaded === true ? 'loaded' : 'configured'} · ${service.ready === true ? 'ready' : 'not ready'}`
@@ -564,6 +591,7 @@ async function status(options) {
     bindingsActivatedAt: state.bindingsActivatedAt ?? state.releaseActivatedAt ?? null,
     components: Object.fromEntries(Object.entries(state.components).map(([id, component]) => [id, {
       version: component.version,
+      onDemandAvailable: component.providerSkill !== undefined,
       private: state.privateComponents?.[id]?.current?.component !== undefined,
       ...(component.displayName === undefined ? {} : { displayName: component.displayName, summary: component.summary }),
       ...(component.author === undefined ? {} : { author: component.author }),
@@ -660,6 +688,7 @@ async function run(options, dependencies = {}) {
   }
   if (options.command === 'tools') {
     if (options.action === 'status') return toolSetStatus(options)
+    if (options.action === 'inventory') return toolInventory(options, dependencies)
     if (options.action === 'browse') return browseRecommendedTools()
     if (options.action === 'add') return installGitHubTool(options, dependencies)
     if (options.action === 'update') {
@@ -716,6 +745,8 @@ async function run(options, dependencies = {}) {
     if (options.action === 'status') return observabilityStatus(options)
     if (options.action === 'trace-sources') return observabilityTraceSources(options)
     if (options.action === 'export-trace') return exportObservabilityTrace(options)
+    if (options.action === 'task-sources') return observabilityTaskSources(options)
+    if (options.action === 'export-task') return exportObservabilityTask(options)
     if (options.action === 'adapters') return observabilityAdapters(options)
     if (options.action === 'adapter-plan') return observabilityAdapterPlan(options)
     throw new AgentHostError('CLI_USAGE', `Unknown observability action: ${options.action}`)

@@ -22,6 +22,7 @@ import {
 } from './github-plugin-contract.mjs'
 import { bindPresentationLogo, logoMediaType, sanitizeSvg, LOGO_MAX_BYTES } from './tool-presentation.mjs'
 import { runFile } from './process.mjs'
+import { integrationRelativePath } from './tool-integration.mjs'
 
 const execFileAsync = promisify(execFile)
 const COMPONENT_SCHEMA = 'openadam.agent-host-component.v0.2'
@@ -168,6 +169,8 @@ export async function wrapGitHubPluginArchive({
   origin,
   expectedTools,
   expectedComponentId,
+  expectedVersion,
+  pluginPath,
   nodeCommand,
   probe = true,
   runner = runFile,
@@ -198,7 +201,10 @@ export async function wrapGitHubPluginArchive({
       runner,
       targetFilesystem: 'portable-case-sensitive',
     })
-    const contract = await inspectGitHubPluginRoot(extracted.extractedRoot)
+    const pluginSource = pluginPath === undefined ? extracted.extractedRoot
+      : join(extracted.extractedRoot, integrationRelativePath(pluginPath, 'repository plugin path'))
+    const contract = await inspectGitHubPluginRoot(pluginSource)
+    if (expectedVersion !== undefined && contract.version !== expectedVersion) fail('GITHUB_TOOL_IDENTITY_DRIFT', 'Plugin version differs from its catalog pin')
     if (typeof expectedComponentId === 'string'
       && expectedComponentId.length > 0
       && contract.id !== expectedComponentId) {
@@ -212,7 +218,7 @@ export async function wrapGitHubPluginArchive({
     let tools = expectedTools ?? contract.expectedTools
     let health = null
     if (probe === true || tools.length === 0) {
-      health = await probeExtractedPlugin(contract, extracted.extractedRoot, nodeCommand)
+      health = await probeExtractedPlugin(contract, pluginSource, nodeCommand)
       if (tools.length === 0) tools = health.tools
       const missing = tools.filter((name) => !health.tools.includes(name))
       if (missing.length > 0) {
@@ -221,7 +227,7 @@ export async function wrapGitHubPluginArchive({
     }
     const pluginRootRelative = `marketplace/plugins/${contract.id}`
     const pluginDest = join(stage, pluginRootRelative)
-    await copyTree(extracted.extractedRoot, pluginDest)
+    await copyTree(pluginSource, pluginDest)
     const marketplace = `${contract.id}-github`
     await writeJson(join(stage, 'marketplace/.agents/plugins/marketplace.json'), {
       name: marketplace,
@@ -233,27 +239,27 @@ export async function wrapGitHubPluginArchive({
         category: 'Productivity',
       }],
     })
-    const licenseName = await existingPluginFile(extracted.extractedRoot, ['LICENSE', 'LICENSE.txt', 'LICENSE.md'])
-    const noticeName = await existingPluginFile(extracted.extractedRoot, ['NOTICE', 'NOTICE.txt'])
-    const thirdPartyName = await existingPluginFile(extracted.extractedRoot, [
+    const licenseName = await existingPluginFile(pluginSource, ['LICENSE', 'LICENSE.txt', 'LICENSE.md'])
+    const noticeName = await existingPluginFile(pluginSource, ['NOTICE', 'NOTICE.txt'])
+    const thirdPartyName = await existingPluginFile(pluginSource, [
       'THIRD_PARTY_NOTICES.txt', 'THIRD_PARTY_NOTICES.md', 'legal/THIRD_PARTY_NOTICES.txt',
     ])
     if (licenseName === null) fail('GITHUB_PLUGIN_INVALID', 'Plugin archive is missing a LICENSE file')
-    await copyTree(join(extracted.extractedRoot, licenseName), join(stage, 'LICENSE'))
+    await copyTree(join(pluginSource, licenseName), join(stage, 'LICENSE'))
     if (noticeName === null) {
       await writeText(join(stage, 'NOTICE'), `${contract.presentation.displayName} ${contract.version}\n\nThis Agent Host component wraps the upstream GitHub plugin archive without modifying plugin bytes.\n`)
     } else {
-      await copyTree(join(extracted.extractedRoot, noticeName), join(stage, 'NOTICE'))
+      await copyTree(join(pluginSource, noticeName), join(stage, 'NOTICE'))
     }
     if (thirdPartyName === null) {
       await writeText(join(stage, 'THIRD_PARTY_NOTICES.txt'), `# Third-Party Notices\n\n${contract.presentation.displayName} declares no separately bundled third-party package notices in this integration artifact.\n`)
     } else {
-      await copyTree(join(extracted.extractedRoot, thirdPartyName), join(stage, 'THIRD_PARTY_NOTICES.txt'))
+      await copyTree(join(pluginSource, thirdPartyName), join(stage, 'THIRD_PARTY_NOTICES.txt'))
     }
     await writeJson(join(stage, 'sbom.spdx.json'), sbom(contract.id, contract.version, contract.licenseSpdx, origin))
     const files = await inventory(stage)
     const fileSet = new Set(files.map((item) => item.path))
-    const presentation = await logoRecord(pluginRootRelative, extracted.extractedRoot, contract.presentation, new Set([
+    const presentation = await logoRecord(pluginRootRelative, pluginSource, contract.presentation, new Set([
       ...contract.files,
       ...[...fileSet].map((path) => path.startsWith(`${pluginRootRelative}/`) ? path.slice(pluginRootRelative.length + 1) : path),
     ]))

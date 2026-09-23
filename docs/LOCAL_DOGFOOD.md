@@ -24,8 +24,9 @@ stable boundary only. Session discovery vs Host working-set status is in
   separate public carriers. Provider/model credentials remain user-owned and
   are not changed by Agent Host.
 - The installed inventory is distinct from the active Agent-visible set.
-  Inactive tools retain their immutable Skills and direct launchers without
-  adding MCP schemas to the current model catalog.
+  Providers with a declared CLI Skill retain it on demand without adding MCP
+  schemas. Other inactive Providers require activation; they are not advertised
+  as callable on demand.
 - Direct Runtime remains the structured fast path after Capability selection.
   It does not replace task discovery or Agent judgment and makes no model call.
 - Observer is opt-in, local, bounded, short-lived, and metadata-only. It may
@@ -74,9 +75,9 @@ agent-host cleanup --dry-run --json
 
 Default Manager refresh does not launch an Agent app. `doctor --deep` without
 `--skip-agent-apps` and **Run Full Check** are explicit current binding probes.
-A real fresh Agent task is still required to assess discovery and natural
-selection; an installed binding, historical call, or offered tool is not an
-adoption result. Runnable unnamed tasks live in
+A real fresh Agent task is still required to observe current discovery and
+natural selection; an installed binding, historical call, or offered tool is
+not a task result. Optional runnable unnamed situations live in
 [`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md). `doctor --featured-readiness`
 only checks the featured working set and projection receipts.
 

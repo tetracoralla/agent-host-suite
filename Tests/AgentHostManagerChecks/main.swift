@@ -248,6 +248,19 @@ do {
         ManagerSetupPolicy.tools(for: "featured").map(\.id).contains("armorial"),
         "featured setup preview must include Armorial"
     )
+    let featuredExperiences = ManagerSetupPolicy.tools(for: "featured")
+    expect(
+        featuredExperiences.allSatisfy(\.hasTaskExperience),
+        "each featured tool must have a task, outcome, example, and visual cue"
+    )
+    expect(
+        featuredExperiences.compactMap(\.examplePrompt).allSatisfy { !$0.isEmpty },
+        "task-first discovery must provide usable optional examples rather than scores"
+    )
+    expect(
+        ManagerSetupPolicy.tools(for: "developer").allSatisfy { !$0.hasTaskExperience },
+        "the Developer Kit must keep its own contributor route instead of inheriting consumer task cards"
+    )
     expect(!ManagerSetupPolicy.connectsHost(false), "an undetected Agent app must not block host-later setup")
     expect(!ManagerSetupPolicy.connectsHost(nil), "unknown Agent-app detection must not require a host")
     expect(ManagerSetupPolicy.connectsHost(true), "a detected Agent app may be connected during setup")
@@ -450,8 +463,8 @@ do {
     expect(repairPlan.changed.isEmpty && repairPlan.componentChanges.isEmpty, "repair preview must not propose tool version changes")
     expect(repairPlan.repairs.monitoring && repairPlan.repairs.hosts == ["codex"], "repair preview must name connection and monitoring recovery")
     expect(
-        ManagerSection.primaryCases.map(\.rawValue) == ["overview", "tools", "updates", "agentApps", "activity"],
-        "primary Manager destinations follow Overview → Tools → Updates → Agents → History"
+        ManagerSection.primaryCases.map(\.rawValue) == ["tools", "updates", "agentApps"],
+        "primary Manager destinations follow Installed tools → Browse → Agents"
     )
 
     let usagePayload = Data(#"""
@@ -521,6 +534,30 @@ do {
     let emptyTraceSources = try JSONDecoder().decode(TraceSourceCatalog.self, from: emptyTraceSourcePayload)
     expect(!emptyTraceSources.isValid(expectedProvider: "zcode"), "a retained trace catalog must not expose an empty session")
 
+    let taskSourcePayload = Data(#"""
+    {
+      "schemaVersion": "openadam.agent-host-task-source-catalog.v0.1",
+      "status": "ok",
+      "generatedAt": "2026-09-21T00:00:00.000Z",
+      "provider": "codex",
+      "requestedRange": {"fromMs": null, "toMs": null},
+      "retention": {"retentionDays": 30, "currentCutoffMs": 1, "eventsBeforeCutoffMayHaveBeenRemoved": true, "collectionBeforeMonitoringWasEnabled": "unavailable"},
+      "privacy": {"contentPolicy": "metadata-only", "sourcePathIncluded": false, "rawConversationContentIncluded": false, "toolArgumentsIncluded": false, "toolResultsIncluded": false},
+      "limits": {"maxSources": 25, "sourceLimitReached": false, "sourcesReturned": 1},
+      "sources": [{"sessionHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sessionStartedAtMs": 5, "firstEventAtMs": 10, "lastEventAtMs": 20, "observedTurns": 1, "toolObservations": 3, "directCalls": 2, "staticReferences": 1, "completed": 1, "errors": 1, "cancelled": 0, "outcomeUnknown": 1, "usageRecords": 1, "completeness": "unknown"}],
+      "observationBoundary": {"directCallsAreExecutionObservations": true, "staticReferencesAreExecutionObservations": false, "terminalStatusMayBePartial": true},
+      "unknowns": ["result-adoption", "comparative-value"],
+      "interpretationStatus": "not-performed"
+    }
+    """#.utf8)
+    let taskSources = try JSONDecoder().decode(TaskSourceCatalog.self, from: taskSourcePayload)
+    expect(taskSources.sources.first?.directCalls == 2, "task activity must preserve direct-call counts")
+    expect(taskSources.sources.first?.staticReferences == 1, "task activity must keep static references separate")
+    expect(taskSources.isValid(expectedProvider: "codex"), "task activity must preserve its metadata-only observation boundary")
+    let misclassifiedTaskSourcePayload = Data(String(data: taskSourcePayload, encoding: .utf8)!.replacingOccurrences(of: "\"staticReferences\": 1", with: "\"staticReferences\": 2").utf8)
+    let misclassifiedTaskSources = try JSONDecoder().decode(TaskSourceCatalog.self, from: misclassifiedTaskSourcePayload)
+    expect(!misclassifiedTaskSources.isValid(expectedProvider: "codex"), "task activity must reject counts that manufacture execution from static references")
+
     let retainedPackData = Data(#"{"schemaVersion":"openadam.agent-host-trace-analysis-pack.v0.2","source":{"provider":"zcode","selectionKind":"observer-retained-session","sessionHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"privacy":{"contentPolicy":"metadata-only","selectedConversationContentIncluded":false,"sensitiveContentConfirmed":false,"transportSecretsExcluded":true,"selectedContentMayContainUserSecrets":false,"observerPackRetained":false,"sourceUsesObserverRetainedMetadata":true,"sourcePathIncluded":false,"toolArgumentsIncluded":false,"toolResultsIncluded":false},"limits":{"eventsReturned":0,"eventsAvailable":0},"events":[],"interpretationStatus":"not-performed"}"#.utf8)
     let retainedReceipt = TraceExportReceipt(
         status: "completed",
@@ -543,6 +580,50 @@ do {
             sessionHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         ),
         "the saved trace bytes must agree with their receipt and metadata-only promise"
+    )
+
+    let taskPackData = Data(#"{"schemaVersion":"openadam.agent-host-task-activity-pack.v0.1","source":{"provider":"codex","selectionKind":"observer-retained-task-session","sessionHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"privacy":{"contentPolicy":"metadata-only","observerPackRetained":false,"sourceUsesObserverRetainedMetadata":true,"sourcePathIncluded":false,"rawConversationContentIncluded":false,"toolArgumentsIncluded":false,"toolResultsIncluded":false},"limits":{"eventsReturned":0,"eventsAvailable":1},"events":[],"observationBoundary":{"directCallsAreExecutionObservations":true,"staticReferencesAreExecutionObservations":false,"nestedChildReceiptsRequireAProviderTraceOrComponentReceipt":true,"adoptionNotRepresented":true},"interpretationStatus":"not-performed"}"#.utf8)
+    let taskReceipt = TaskExportReceipt(
+        status: "completed",
+        schemaVersion: TaskActivityContractValidator.retainedPackVersion,
+        outputPath: "/private/task.json",
+        outputBytes: taskPackData.count,
+        eventsReturned: 0,
+        eventsAvailable: 1,
+        contentPolicy: "metadata-only",
+        observerPackRetained: false,
+        interpretationStatus: "not-performed"
+    )
+    expect(
+        TaskActivityContractValidator.isValidRetainedExport(
+            data: taskPackData,
+            receipt: taskReceipt,
+            outputPath: "/private/task.json",
+            provider: "codex",
+            sessionHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ),
+        "the saved task activity bytes must agree with their receipt and neutral observation boundary"
+    )
+    let selfCertifyingTaskPack = Data(String(data: taskPackData, encoding: .utf8)!.replacingOccurrences(of: "\"nestedChildReceiptsRequireAProviderTraceOrComponentReceipt\":true", with: "\"nestedChildReceiptsRequireAProviderTraceOrComponentReceipt\":false").utf8)
+    expect(
+        !TaskActivityContractValidator.isValidRetainedExport(
+            data: selfCertifyingTaskPack,
+            receipt: TaskExportReceipt(
+                status: taskReceipt.status,
+                schemaVersion: taskReceipt.schemaVersion,
+                outputPath: taskReceipt.outputPath,
+                outputBytes: selfCertifyingTaskPack.count,
+                eventsReturned: taskReceipt.eventsReturned,
+                eventsAvailable: taskReceipt.eventsAvailable,
+                contentPolicy: taskReceipt.contentPolicy,
+                observerPackRetained: taskReceipt.observerPackRetained,
+                interpretationStatus: taskReceipt.interpretationStatus
+            ),
+            outputPath: "/private/task.json",
+            provider: "codex",
+            sessionHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ),
+        "task activity must not treat a nested reference as its own execution receipt"
     )
     let selectedContentPack = Data(String(data: retainedPackData, encoding: .utf8)!.replacingOccurrences(of: "metadata-only", with: "selected-content").utf8)
     expect(
@@ -792,14 +873,39 @@ do {
     expect(faultGuidance.primaryActionID == .reviewRepair, "tool faults recover through Review Repair")
     expect(faultGuidance.primaryActionLabel == "Repair", "repair CTA label must be a short verb")
     expect(!faultGuidance.readyToWork, "tool faults must not report ready-to-work")
+    expect(faultGuidance.statusLine == "Needs repair", "fault status must be product language, not the raw doctor message")
+    expect(faultGuidance.blockingMessage == "Armorial runtime probe failed", "the named fault stays in details")
 
     UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)
     expect(L10n.text("Overview") == "总览", "overview destination must provide Simplified Chinese copy")
-    expect(L10n.text("Agents") == "连接 Agent", "agents destination must provide Simplified Chinese copy")
+    expect(L10n.text("Agents") == "Agent", "agents destination must provide Simplified Chinese copy")
     expect(L10n.text("History") == "记录", "history destination must provide Simplified Chinese copy")
     expect(L10n.text("Advanced") == "高级", "advanced section must provide Simplified Chinese copy")
     expect(L10n.text("Usage") == "使用情况", "the Manager must provide Simplified Chinese product copy")
     expect(L10n.text("Get") == "获取", "featured acquire must provide Simplified Chinese copy")
+    expect(L10n.text("Start from a task") == "从真实任务开始", "task-first discovery must provide Simplified Chinese copy")
+    expect(L10n.text("Task copied") == "任务已复制", "task handoff feedback must provide Simplified Chinese copy")
+    expect(
+        L10n.text("Connect an Agent app, then start a new task and paste.") == "请连接一个 Agent 应用，然后新建任务并粘贴。",
+        "the no-connected-app task handoff must provide Simplified Chinese copy"
+    )
+    expect(
+        L10n.text("Choose an Agent app to open, then start a new task and paste.") == "请选择并打开一个 Agent 应用，然后新建任务并粘贴。",
+        "the multi-app task handoff must provide Simplified Chinese copy"
+    )
+    expect(
+        L10n.text("Open the connected Agent app, then start a new task and paste.") == "请打开已连接的 Agent 应用，然后新建任务并粘贴。",
+        "the failed single-app launch handoff must preserve a localized next step"
+    )
+    expect(L10n.text("Open") == "打开", "opening a connected Agent app must provide Simplified Chinese copy")
+    expect(
+        ManagerSourcePolicy.versionSummary(applicationVersion: "0.2.0", applicationBuild: "3", environmentVersion: "0.1.4")
+            == "应用 0.2.0 · build 3 · 环境 0.1.4",
+        "the version footer must distinguish application build from environment release in Simplified Chinese"
+    )
+    expect(L10n.text("New tasks pick up changes") == "更改会随新任务生效", "steady-state Agent hint must provide Simplified Chinese copy")
+    expect(L10n.format("Connect {name}", ["name": "ZCode"]) == "连接 ZCode", "post-setup connect action must localize its app name")
+    expect(L10n.format("Open {name}", ["name": "Codex"]) == "打开 Codex", "post-setup open action must localize its app name")
     expect(L10n.text("Connect later") == "稍后连接", "host-later setup must provide Simplified Chinese copy")
     expect(L10n.text("For new tasks") == "用于新任务", "working-set copy must stay distinct from inventory install")
     expect(L10n.text("Retained trace sessions") == "保留的轨迹会话", "retained trace controls must provide Simplified Chinese copy")

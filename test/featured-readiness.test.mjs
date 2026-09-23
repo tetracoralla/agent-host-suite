@@ -69,7 +69,7 @@ test('featured readiness requires the featured working set and does not claim ad
   assert.match(human(ok), /Host precondition only/u)
   assert.match(human(ok), /not adoption/u)
   assert.match(human(ok), /User readiness: ok/u)
-  assert.match(ok.nextSteps.completedWork, /not adoption evidence/u)
+  assert.match(ok.nextSteps.completedWork, /not evidence that an Agent chose a tool/u)
 
   const standard = await inspectFeaturedReadiness(featuredState({ profile: 'standard' }), {
     inspectAgentApps: false,
@@ -192,8 +192,9 @@ async function missingArmorialSkillState(t, hostId) {
   }
   const configPath = join(root, '.zcode', 'cli', 'config.json')
   await mkdir(join(root, '.zcode', 'cli'), { recursive: true })
+  const binding = { type: 'stdio', command, args, enabled: true }
   await writeFile(configPath, JSON.stringify({
-    mcp: { servers: { armorial: { type: 'stdio', command, args, enabled: true } } },
+    mcp: { servers: { armorial: binding } },
   }))
   return {
     root, missingSkill, providerSkills,
@@ -203,7 +204,8 @@ async function missingArmorialSkillState(t, hostId) {
         'migratory-time': { version: '2.0.0', identityFiles: [], plugin: 'migratory-time' },
         armorial,
       },
-      hosts: { zcode: { configPath, entries: [{ component: 'armorial', created: true }], providerSkills } },
+      // A real Host-owned receipt retains the exact binding written by installZcode.
+      hosts: { zcode: { configPath, entries: [{ component: 'armorial', created: true, binding }], providerSkills } },
     }),
   }
 }
@@ -251,7 +253,7 @@ test('doctor --featured-readiness is a Host-only route and fails closed without 
   assert.equal(deep.stderr.trim(), 'CLI_USAGE: doctor --featured-readiness does not accept --deep')
 })
 
-test('adoption fixtures never name an icon product and the protocol remains honest', async () => {
+test('unnamed capability fixtures stay unsteered and interpretation stays participant-owned', async () => {
   const protocol = await readFile(protocolPath, 'utf8')
   assert.match(protocol, /fresh Agent task/u)
   assert.match(protocol, /are not adoption evidence/u)
@@ -259,6 +261,9 @@ test('adoption fixtures never name an icon product and the protocol remains hone
   assert.match(protocol, /docs\/fixtures\/adoption/u)
   assert.match(protocol, /Lucide/u)
   assert.match(protocol, /Host `status`/u)
+  assert.match(protocol, /Participant interpretation \(optional\)/u)
+  assert.match(protocol, /not when a fixed number of tasks or fields has been filled/u)
+  assert.doesNotMatch(protocol, /Two tasks are enough to score|## Scorecard|without a scorecard is not a result/u)
 
   const forbidden = /\barmorial\b|\blucide\b|\biconpark\b|请使用/iu
   async function files(directory) {

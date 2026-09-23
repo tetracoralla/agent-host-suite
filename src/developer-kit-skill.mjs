@@ -8,9 +8,11 @@ import { AgentHostError } from './errors.mjs'
 import { moveEnvironmentPath, setEnvironmentLink } from './environment-resources.mjs'
 import { afterEnvironmentCommit } from './environment-change.mjs'
 import { runFile } from './process.mjs'
+import { skillLauncherScript } from './skill-launcher.mjs'
+import { componentEnvironment } from './component-environment.mjs'
 
 const COMPONENT_ID = 'agent-tool-development-kit'
-const PROJECTION_SCHEMA = 'openadam.agent-host-developer-skill-projection.v0.1'
+const PROJECTION_SCHEMA = 'openadam.agent-host-developer-skill-projection.v0.2'
 
 function componentFrom(manifest) {
   return manifest.components?.[COMPONENT_ID] ?? null
@@ -68,16 +70,6 @@ function isContained(root, candidate) {
   return value === '' || (value !== '..' && !value.startsWith(`..${sep}`) && !isAbsolute(value))
 }
 
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", `'\\''`)}'`
-}
-
-function batchQuote(value) {
-  const text = String(value)
-  if (/[\u0000\r\n"]/u.test(text)) throw new AgentHostError('DEVELOPER_SKILL_PROJECTION_INVALID', 'A Windows Skill launcher argument contains unsupported characters')
-  return `"${text.replaceAll('%', '%%')}"`
-}
-
 function projectedLauncherRelativePath(skill) {
   return platform() === 'win32' ? `${skill.launcherRelativePath}.cmd` : skill.launcherRelativePath
 }
@@ -131,7 +123,7 @@ async function fingerprint(root, files) {
   return `sha256:${hash.digest('hex')}`
 }
 
-function projectionDigest(component) {
+function projectionDigest(component, launcherScript) {
   return createHash('sha256')
     .update(PROJECTION_SCHEMA)
     .update('\0')
@@ -140,6 +132,8 @@ function projectionDigest(component) {
     .update(component.command ?? '')
     .update('\0')
     .update(JSON.stringify(component.args ?? []))
+    .update('\0')
+    .update(launcherScript ?? '')
     .digest('hex')
     .slice(0, 16)
 }
@@ -166,10 +160,14 @@ async function verifyComponent(component) {
   return { ...skill, root }
 }
 
-async function materializeLinkedDeveloperSkill(component, paths, host) {
+async function materializeLinkedDeveloperSkill(component, paths, host, workspaceRoot) {
   const skill = await verifyComponent(component)
+  const launcherScript = component.plainSkill === true ? null : skillLauncherScript({
+    command: component.command, args: component.args,
+    environment: component.providerSkill === undefined ? {} : componentEnvironment(component, workspaceRoot),
+  })
   const componentRoot = join(paths.hostProjections, component.projectionCollection ?? 'developer-skills', host, skill.id)
-  const projectionRoot = join(componentRoot, projectionDigest(component))
+  const projectionRoot = join(componentRoot, projectionDigest(component, launcherScript))
   const projectionInfo = await existing(projectionRoot)
   if (projectionInfo !== null && (projectionInfo.isSymbolicLink() || !projectionInfo.isDirectory())) {
     throw new AgentHostError('DEVELOPER_SKILL_PROJECTION_INVALID', 'The Developer Skill projection is unsafe')
@@ -184,10 +182,7 @@ async function materializeLinkedDeveloperSkill(component, paths, host) {
         const launcher = join(staging, launcherRelativePath)
         if (!isContained(staging, launcher) || launcher === staging) throw new AgentHostError('DEVELOPER_SKILL_PROJECTION_INVALID', 'The projected Developer Skill launcher escapes its Skill root')
         await mkdir(dirname(launcher), { recursive: true, mode: 0o700 })
-        const contents = platform() === 'win32'
-          ? `@echo off\r\nsetlocal DisableDelayedExpansion\r\n${[component.command, ...component.args].map(batchQuote).join(' ')} %*\r\n`
-          : `#!/bin/sh\nexec ${shellQuote(component.command)} ${component.args.map(shellQuote).join(' ')} "$@"\n`
-        await writeFile(launcher, contents, { mode: 0o500, flag: 'wx' })
+        await writeFile(launcher, launcherScript, { mode: 0o500, flag: 'wx' })
         await chmod(launcher, 0o500)
       }
       await rename(staging, projectionRoot)
@@ -220,7 +215,7 @@ async function preflightLinked(host, manifest, paths, previous, options) {
 }
 
 async function preflightLinkedComponent(host, component, paths, previous, options) {
-  const projection = await materializeLinkedDeveloperSkill(component, paths, host)
+  const projection = await materializeLinkedDeveloperSkill(component, paths, host, options.workspaceRoot)
   const exposurePath = previous?.exposurePath ?? join(resolveLinkedSkillsRoot(host, options), projection.id)
   const info = await existing(exposurePath)
   const managedTarget = await resolvedSymlink(exposurePath, info)

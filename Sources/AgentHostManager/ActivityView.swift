@@ -14,7 +14,7 @@ struct ActivityView: View {
                     ContentUnavailableView(L10n.text("No activity yet"), systemImage: "clock", description: Text(L10n.text("Install, update, repair, and connection changes appear here.")))
                         .frame(maxWidth: .infinity, minHeight: 300)
                 } else {
-                    Panel {
+                    VStack(spacing: 0) {
                         ForEach(Array(store.activity.enumerated()), id: \.element.id) { index, entry in
                             ActivityRow(
                                 entry: entry,
@@ -22,7 +22,7 @@ struct ActivityView: View {
                                     ($0.key, $0.value.displayName ?? $0.key)
                                 })
                             )
-                            if index < store.activity.count - 1 { Divider() }
+                            if index < store.activity.count - 1 { Divider().padding(.leading, 34) }
                         }
                     }
                 }
@@ -42,25 +42,41 @@ private struct ActivityRow: View {
             Image(systemName: icon)
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.localizedSummary)
-                if let date = entry.date {
-                    Text(L10n.relativeAge(since: date))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(Array(entry.humanDetail(componentNames: componentNames).enumerated()), id: \.offset) { _, item in
-                    Text("\(L10n.text(item.label)): \(L10n.text(item.value))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                }
+                .accessibilityHidden(true)
+            let details = entry.humanDetail(componentNames: componentNames)
+            if details.isEmpty {
+                summary
+            } else {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(details.enumerated()), id: \.offset) { _, item in
+                            Text("\(L10n.text(item.label)): \(L10n.text(item.value))")
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 10)
+                } label: { summary }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 18)
+    }
+
+    private var summary: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(entry.localizedSummary)
+            Spacer(minLength: 8)
+            if let date = entry.date {
+                Text(L10n.relativeAge(since: date))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize()
+                    .help(date.formatted(date: .complete, time: .shortened))
+            }
+        }
     }
 
     private var icon: String {
-        if entry.type.contains("installed") || entry.type.contains("added") { return "plus.circle.fill" }
+        if entry.type.contains("installed") || entry.type.contains("added") || entry.type.contains("imported") { return "plus.circle.fill" }
         if entry.type.contains("removed") || entry.type.contains("uninstalled") { return "minus.circle.fill" }
         if entry.type.contains("rolled-back") { return "arrow.uturn.backward.circle.fill" }
         if entry.type.contains("monitoring") { return "waveform.path.ecg" }

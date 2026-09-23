@@ -125,6 +125,55 @@ struct AgentHostCLI: Sendable {
         }.value
     }
 
+    func exportRetainedTaskActivity(provider: String, sessionHash: String) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            let fileManager = FileManager.default
+            let directory = fileManager.temporaryDirectory
+                .appendingPathComponent("agent-host-task-\(UUID().uuidString)", isDirectory: true)
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            defer { try? fileManager.removeItem(at: directory) }
+            let output = directory.appendingPathComponent("task-activity.json", isDirectory: false)
+            let receipt = try self.runSynchronously(
+                [
+                    "observability", "export-task",
+                    "--provider", provider,
+                    "--session", sessionHash,
+                    "--output", output.path,
+                ],
+                as: TaskExportReceipt.self
+            )
+            guard receipt.status == "completed",
+                  receipt.schemaVersion == TaskActivityContractValidator.retainedPackVersion,
+                  receipt.contentPolicy == "metadata-only",
+                  receipt.observerPackRetained == false,
+                  receipt.interpretationStatus == "not-performed",
+                  receipt.outputPath == output.path else {
+                throw CLIError.failed(
+                    code: "TASK_EXPORT_RECEIPT_INVALID",
+                    message: "Agent Host returned an invalid task activity export receipt."
+                )
+            }
+            let data = try Data(contentsOf: output)
+            guard TaskActivityContractValidator.isValidRetainedExport(
+                data: data,
+                receipt: receipt,
+                outputPath: output.path,
+                provider: provider,
+                sessionHash: sessionHash
+            ) else {
+                throw CLIError.failed(
+                    code: "TASK_EXPORT_CONTENT_INVALID",
+                    message: "Agent Host returned an invalid task activity export."
+                )
+            }
+            return data
+        }.value
+    }
+
     private func runSynchronously<T: Decodable>(_ arguments: [String], as type: T.Type) throws -> T {
         let process = Process()
         let stdout = Pipe()
@@ -186,7 +235,16 @@ struct AgentHostCLI: Sendable {
             throw CLIError.failed(code: failure.error.code, message: message)
         }
         guard process.terminationStatus == 0 else {
-            throw CLIError.failed(code: "COMMAND_FAILED", message: String(data: payload, encoding: .utf8) ?? "Agent Host did not complete the action.")
+            let raw = String(data: payload, encoding: .utf8) ?? "Agent Host did not complete the action."
+            // The CLI never started. Present the recovery in product language
+            // instead of surfacing the launcher's raw stderr in an alert.
+            if output.isEmpty, raw.contains("No such file or directory") {
+                throw CLIError.failed(code: "CLI_UNAVAILABLE", message: "The Agent Host command-line component is not installed on this Mac. Reinstall Agent Host, then open the Manager again.")
+            }
+            if raw.hasPrefix("AGENT_HOST_BOOTSTRAP_FAILED") {
+                throw CLIError.failed(code: "CLI_UNAVAILABLE", message: "The Agent Host installation is incomplete. Reinstall Agent Host, then open the Manager again.")
+            }
+            throw CLIError.failed(code: "COMMAND_FAILED", message: raw)
         }
         return try JSONDecoder().decode(T.self, from: output)
     }

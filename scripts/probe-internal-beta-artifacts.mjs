@@ -44,7 +44,7 @@ try {
     }
     if (component.toolIntegrationSchema !== undefined) {
       try {
-        const probe = await probeMcpToolsFirstAndRepeat(component)
+        const probe = await probeMcpToolsFirstAndRepeat({ ...component, healthWorkspaceRoot: stateRoot })
         results.push({
           id,
           version: component.version,

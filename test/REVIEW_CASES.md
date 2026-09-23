@@ -197,6 +197,9 @@ commands. `tools set --profile` only selects the working set of already
 installed tools. A tracked `draft-unbound` catalog and `--development-root`
 setup still fail closed. Setup `--no-host` installs inventory without
 connecting an Agent app.
+Manager task cards remain owner-authored invitations over that same admitted
+set: they may copy an editable example and open a connected Agent app, but do
+not mutate inventory, record adoption, or define portable Provider metadata.
 An update onto `featured` while local monitoring is already enabled must
 materialize the consented monitoring components together with the featured
 tool set when the bound release contains them. A release that omits those
@@ -228,7 +231,14 @@ before package or host mutation.
 
 ## Thin host projection
 
-Start with [codex-projection.test.mjs](codex-projection.test.mjs), [codex-config.test.mjs](codex-config.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs).
+Start with [codex-projection.test.mjs](codex-projection.test.mjs), [codex-config.test.mjs](codex-config.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs). For Provider CLI grant propagation, run [provider-skill-execution.test.mjs](provider-skill-execution.test.mjs) and [provider-skill-lifecycle.test.mjs](provider-skill-lifecycle.test.mjs): these execute generated launchers, retain the caller cwd, change the authorized root, and inject a failed state commit.
+
+[provider-grant-probes.test.mjs](provider-grant-probes.test.mjs) starts real
+Providers through catalog admission, health, export, doctor and monitoring;
+missing authority must not become a package-cwd grant. Lifecycle coverage also
+checks that Claude/ZCode on-demand Skills do not retain an active MCP binding
+or lose ownership, and that adding an app with a changed shared grant updates
+existing consumers atomically.
 
 Host projections contain identity and invocation
 only, never provider runtime. Workspace-dependent tools require one explicit
@@ -444,7 +454,11 @@ live configuration changes, content export or publication.
   produces no protected-folder request, while Full Check still detects a broken
   Agent-app binding;
 - exercise keyboard/accessibility and inspect the rendered surface separately
-  from build results.
+  from build results;
+- at setup and in Tools, verify task cards remain glanceable at narrow and wide
+  sizes, expose useful accessibility labels, distinguish installed/paused/
+  missing state, and copy an optional example without presenting a rating or
+  recording adoption;
 - on Windows, distinguish application install/update/restore/uninstall from the
   tool environment's setup/update/rollback/disconnect actions; exercise Start
   menu entry points, loopback authentication, narrow and wide layouts, and both

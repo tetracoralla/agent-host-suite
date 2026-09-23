@@ -2,10 +2,17 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-Agent Host installs and manages one compatible local environment for a small
-set of Agent tools. It connects those tools to supported Agent apps through
+Agent Host installs and manages a compatible local environment for Agent
+tools. It connects those tools to supported Agent apps through
 their public extension points and operates local execution without modifying
 the Agent apps themselves.
+
+The desktop Manager is an optional management interface; the CLI uses the same
+lifecycle layer. Configured tools reach Agents through their supported MCP,
+Skill and CLI entrypoints without an open Manager window. The aim is reusable
+capability supply across changing Agent environments, not a promise that
+today's adapters cover every future model or harness. See the
+[product and evolution model](docs/PRODUCT_MODEL.md#stable-responsibilities-evolving-integrations).
 
 This repository contains the **Agent Host Suite** distribution unit. The npm
 package, CLI, schemas, and other stable technical identifiers retain that name.
@@ -86,6 +93,17 @@ setup or Get featured tools (including Armorial) after a Standard install.
 It is not a marketplace. How Codex projections relate to session Skill/MCP
 paths is in [Discovery and projection](docs/DISCOVERY_PROJECTION.md).
 
+The Manager opens on tools installed on this machine. An empty installation
+stays visibly empty, with compatible recommendations below it; **Browse** opens
+the complete available catalog and GitHub compatibility preview. **Agents**
+shows local Agent shells and their connection state separately. Product rows
+use each admitted product's recognizable logo, short job label, current
+availability, and one direct action. Choosing **Use** hands an editable example
+to a new Agent task; the prompt does not compete with product identity in the
+main list, and it is not a rating or adoption verdict.
+Provider authors and private contributors can follow the separate
+[ecosystem participation paths](docs/ECOSYSTEM_PATHS.md).
+
 ## Profiles
 
 - `standard` is the small default Agent-visible tool set.
@@ -128,14 +146,26 @@ Tracked `draft-unbound` setup fails closed. `--development-root` is the
 tools-dev path, not featured. Details:
 [Featured catalog v1](docs/FEATURED_CATALOG.md).
 
-## Unnamed adoption acceptance
+## Task activity
 
-This checkout does not record a completed live adoption. A Linux construction
-box without Host GUI or a full Agent session cannot score it. On a machine
-that already has Agent Host and a supported Agent app, follow
-[Unnamed adoption acceptance](docs/ADOPTION_ACCEPTANCE.md): copy the page
-fixtures out of this repository, start a **fresh Agent task**, and judge
-whether icons entered the work without naming Armorial.
+`observability task-sources` gives a glanceable session, direct-call,
+static-reference, and error summary. `observability export-task` exports one
+bounded pseudonymous task record for closer inspection. It separates direct
+execution observations from tool names found only inside orchestration input;
+it does not decide whether a result was adopted, useful, or better than an
+alternative. The native and browser Managers expose the same facts as a
+visual-first Task activity card, with detail exported only on request. Those
+judgments remain with the user or the Agent they select. See
+[Trace Plane](docs/TRACE_PLANE.md).
+
+## Unnamed capability exercise
+
+This checkout does not turn a Host check or call count into a verdict about an
+Agent. On a machine that already has Agent Host and a supported Agent app, the
+optional [unnamed capability exercise](docs/ADOPTION_ACCEPTANCE.md) lets a
+participant copy a page fixture out of this repository, start a **fresh Agent
+task**, inspect what entered the work without naming Armorial, and decide what
+that particular task means to them.
 
 ```text
 agent-host doctor --featured-readiness --json
@@ -144,7 +174,7 @@ agent-host doctor --featured-readiness --json
 That command reports user-level Host readiness (required tools, connection,
 projection) separately from `recipe.consistency`. It always reports
 `adoptionEvidence: false`. A `local-dogfood` profile is not itself a
-user-level failure. Host status and call counts are not adoption.
+user-level failure. The exercise has no fixed task quota or Host-owned score.
 
 ## Typical operator flow
 
@@ -172,8 +202,9 @@ Agent Host preserves user-owned host entries and data by default. Monitoring is
 opt-in and passive collection is metadata-only. `uninstall --purge-data`
 removes Suite-owned snapshots and history, but the Observer's shared database
 has its own data lifecycle and is retained. A recorded call or offered tool
-does not establish Skill activation, result adoption, correctness, quality, or value. See
-[Trace Plane](docs/TRACE_PLANE.md) for the observation and export boundary.
+does not by itself establish Skill activation, result adoption, correctness,
+quality, or value. See [Trace Plane](docs/TRACE_PLANE.md) for the observation
+and explicit-export boundary.
 
 The explicit manifest on `update` selects a new release catalog. An
 unparameterized `update` is appropriate only for a packaged carrier whose
@@ -222,8 +253,9 @@ to the source repository:
 - [Unsigned preview download](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/UNSIGNED_PREVIEW.md) — GitHub Releases / HTTPS DMG and ZIP, Gatekeeper, Host catalog fetch; not notarized.
 - [Featured catalog v1](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/FEATURED_CATALOG.md) — owner-selected tools through existing
   install APIs, not a marketplace.
-- [Unnamed adoption acceptance](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md) — page tasks and a Host-only
-  readiness probe; not a live-adoption claim from this checkout.
+- [Ecosystem participation paths](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ECOSYSTEM_PATHS.md) — public GitHub tools, Developer Kit/private trials, and participant-owned decisions.
+- [Unnamed capability exercise](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/ADOPTION_ACCEPTANCE.md) — optional page situations,
+  neutral observations, and participant-owned interpretation.
 - [Review contract](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/REVIEW_CONTRACT.md) — minimum high-risk review seams,
   not a completion claim.
 - [Terminology](https://github.com/tetracoralla/agent-host-suite/blob/main/docs/TERMINOLOGY.md) — canonical product language and stable

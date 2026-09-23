@@ -1,14 +1,16 @@
-# Featured catalog v1
+# Featured profile and tool browsing
 
 A featured catalog is an owner-selected, version-locked subset of independently
 released Agent tools that already have a closed tool-integration record in a
 **bound** compatibility release. It is a Host admission list, not a public marketplace,
 store, ranking, review, payment, or third-party plugin index.
 
-This source checkout does not operate a catalog service and does not ship a
-browseable store. v1 is the named `featured` profile plus `profiles list` /
+The bundled installation route is the named `featured` profile plus `profiles list` /
 `setup --profile featured` / `update --profile featured` over the installation
-APIs that already exist. Browser and native Managers use those same APIs.
+APIs that already exist. Browser and native Managers use those same APIs for the featured bundle.
+Their Browse pages also read `tools browse`: individually admitted GitHub
+plugins use their own preview and install action, rather than reinstalling the
+featured bundle. The browseable inventory is not limited to that default bundle.
 `tools set --profile` only selects the working set of **already installed**
 tools; it does not fetch Armorial or other missing inventory.
 
@@ -23,20 +25,25 @@ tools; it does not fetch Armorial or other missing inventory.
   `agent-host component preview` / `component import`, inactive by default.
 - Human copy that names the independently released product (Armorial, Math
   Anchor, and so on) and the Host action that installs or selects it.
+- Compact product rows in setup and Tools that use the upstream product mark,
+  one short job label, current availability, and a direct **Use** action. The
+  editable example is handed off after that action. These are optional
+  invitations, not ratings, requirements, portable provider metadata, or proof
+  of value.
 
-v1 is not: search, featured placement scores, screenshots, ratings, a public
-plugin registry, an Agent-facing import prompt, or a promise that a selected
-tool is loaded in an already open session.
+v1 search filters the compatible catalog already known to Host. It is not
+featured-placement scoring, ratings, a universal public registry, or a promise
+that a repository is compatible merely because it exists. A GitHub URL must
+pass compatibility preview before **Add** becomes available. It also does not
+promise that a selected tool is loaded in an already open session.
 
-## External path without a public Release
+## Distributing a bound installation
 
-This checkout has no GitHub Release assets and no Apple-notarized DMG. Apple
-Developer ID signing is not part of this product. Strangers download an
-**unsigned** macOS DMG or Windows ZIP from a published GitHub Release or a
-self-hosted HTTPS URL, then open it with Gatekeeper / SmartScreen as documented
-in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md). Until an owner publishes those
-assets, Host reports **public download is not configured** instead of pretending
-there is a store.
+The unsigned preview route uses a macOS DMG or Windows ZIP from a published
+GitHub Release or a self-hosted HTTPS URL, as documented in
+[`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md). A source checkout is not evidence
+that an external download is available. Host resolves the configured published
+index and reports when a compatible download is unavailable.
 
 Obtain a **bound** compatibility catalog (manifest, artifacts, and
 `build-provenance.json`) from that Release index or another owner-issued
@@ -86,7 +93,8 @@ not featured.
 | Application build, environment release, tool versions, and catalog source | `agent-host source status` / Manager Settings. Distinguishes the Manager app from the installed environment. Catalog assets are unpublished until an owner publishes a Release or an HTTPS index. |
 | Choose a local or HTTPS catalog | `source set --release-manifest` / `source set --url`, or Manager Settings. Env `AGENT_HOST_FEATURED_CATALOG_URL` still works. Interrupted, offline, and digest errors keep a retry or local-catalog recovery. This does not publish a GitHub Release. |
 | User-level task readiness (tools, connection, projection; not adoption) | `doctor --featured-readiness` overall `status` / `userStatus`. Recipe name is a separate `recipe.consistency` check. `local-dogfood` plus a healthy Armorial projection is not a user-level failure. |
-| Featured recipe consistency | `recipe.consistency` on the same report records the working set as an experimental variable. Unnamed adoption scoring uses user-level `ok` and does not require deleting other healthy tools. |
+| Featured recipe consistency | `recipe.consistency` on the same report records the working set as an experimental variable. It is context for an optional exercise, not a scoring gate, and does not require deleting other healthy tools. |
+| Recognize and try an admitted tool | native and browser product rows show its mark and availability, then **Use** can copy one editable example and open a connected Agent app; this records no adoption or quality verdict |
 | Observe session discovery | a **new** Agent task after `restartRequired` |
 
 If local monitoring is already enabled, `update --profile featured` keeps the
@@ -95,8 +103,15 @@ release that omits those components fails closed before writing and does not
 turn monitoring off. Tool selection and monitoring remain separate.
 
 Managers present the same featured admission list: choose `featured` at setup,
-or Get featured tools after a Standard install. They do not add a third-party
-plugin market, ranking, or payment flow.
+or Get featured tools after a Standard install. The default page lists local
+inventory first and recommendations second; **Browse** searches the compatible
+catalog and exposes the compatibility-gated GitHub path. Product rows lead with
+what the tool is, whether it is available, and one action that hands an editable
+example to a new Agent task. This does not add ranking or payment flows.
+
+Provider and contributor routes are documented in
+[`ECOSYSTEM_PATHS.md`](ECOSYSTEM_PATHS.md). Those routes meet at exact artifact
+admission; they do not force every provider into one Host-owned product model.
 
 tools-dev dogfood is a different audience: `docs/LOCAL_DOGFOOD.md`, profile
 `local-dogfood`, and sibling checkouts as **build inputs**. Those paths are
@@ -110,16 +125,15 @@ in the working set:
 1. Host materializes the Agent-app projection (Codex: content-addressed plugin
    plus public `plugin add`; Claude/ZCode: public MCP/Skill links).
 2. The Agent app must start a **fresh** task to load Skill and MCP catalogs.
-3. Natural adoption on a suitable task (for example Armorial for icon work)
-   remains Agent judgment. Host status, doctor, and observation counts do not
-   establish adoption.
+3. Natural use on a suitable task (for example Armorial for icon work) remains
+   Agent choice. Host status, doctor, and observation counts do not establish
+   why it was chosen or whether it helped.
 
 See [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md) for the Codex cache
-generations and the Host vs session honesty boundary. Unnamed page tasks,
-copy-out fixtures, and a Host-only readiness probe are in
-[`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md). That protocol is for a
-machine with Host plus Agent; this checkout does not record a completed live
-adoption.
+generations and the Host vs session honesty boundary. Optional unnamed page
+situations, copy-out fixtures, and a Host-only readiness probe are in
+[`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md). The participant decides
+what a live exercise means; this checkout does not claim one was completed.
 
 ## Non-goals for v1
 

@@ -3,6 +3,7 @@ import { AgentHostError } from './errors.mjs'
 import { canonicalJson, sha256 } from './json.mjs'
 import { ManagedMcpStdioTransport } from './managed-mcp-stdio-transport.mjs'
 import { closeMcpProbeTransport } from './mcp-probe-cleanup.mjs'
+import { componentEnvironment } from './component-environment.mjs'
 
 // Context Surface Analyzer snapshot contract the Host actually writes and
 // analyzes (`packages/context-surface-analyzer/src/constants.js`): 512 KiB
@@ -29,11 +30,12 @@ export const MANAGED_CATALOG_BUDGETS = Object.freeze({
   maxResultUtf8Bytes: 65_536,
 })
 
-async function listProviderToolsOnce(id, component) {
+async function listProviderToolsOnce(id, component, workspaceRoot) {
   const transport = new ManagedMcpStdioTransport({
     command: component.command,
     args: component.args,
     cwd: component.cwd ?? component.pluginRoot,
+    env: componentEnvironment(component, workspaceRoot),
     stderr: 'pipe',
   })
   const client = new Client({ name: 'agent-host-context-exporter', version: '0.1.0' })
@@ -95,23 +97,23 @@ export function validateManagedToolBindings(bindings) {
   return bindings
 }
 
-async function listProviderTools(id, component) {
+async function listProviderTools(id, component, workspaceRoot) {
   try {
-    return await listProviderToolsOnce(id, component)
+    return await listProviderToolsOnce(id, component, workspaceRoot)
   } catch (error) {
     if (!retryableCatalogError(error)) throw error
-    return await listProviderToolsOnce(id, component)
+    return await listProviderToolsOnce(id, component, workspaceRoot)
   }
 }
 
-export async function exportManagedCatalogInventory(components) {
+export async function exportManagedCatalogInventory(components, { workspaceRoot = null } = {}) {
   const providerComponents = Object.entries(components)
     .filter(([, component]) => component.pluginRoot !== undefined && component.command !== undefined && Array.isArray(component.args))
     .sort(([left], [right]) => left.localeCompare(right))
   const catalogs = []
   const bindings = []
   for (const [id, component] of providerComponents) {
-    const tools = await listProviderTools(id, component)
+    const tools = await listProviderTools(id, component, workspaceRoot)
     catalogs.push(...tools)
     bindings.push({
       id,
@@ -134,8 +136,8 @@ export async function exportManagedCatalogInventory(components) {
   } }
 }
 
-export async function exportManagedCatalog(components) {
-  return (await exportManagedCatalogInventory(components)).snapshot
+export async function exportManagedCatalog(components, options = {}) {
+  return (await exportManagedCatalogInventory(components, options)).snapshot
 }
 
 function limitBreaches(rows) {
@@ -181,8 +183,8 @@ export function assessManagedCatalog(snapshot) {
   }
 }
 
-export async function preflightManagedCatalog(components) {
-  const { bindings, snapshot } = await exportManagedCatalogInventory(components)
+export async function preflightManagedCatalog(components, options = {}) {
+  const { bindings, snapshot } = await exportManagedCatalogInventory(components, options)
   const expected = Object.keys(components).sort()
   const measured = bindings.map((binding) => binding.id).sort()
   if (JSON.stringify(expected) !== JSON.stringify(measured)) {

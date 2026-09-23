@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-task-source-catalog.schema.v0.1.json",
+  "title": "Agent Host Task Source Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "generatedAt", "provider", "requestedRange", "retention", "privacy", "limits", "sources", "observationBoundary", "unknowns", "interpretationStatus"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-task-source-catalog.v0.1" },
+    "status": { "const": "ok" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "provider": { "$ref": "#/$defs/provider" },
+    "requestedRange": { "$ref": "#/$defs/range" },
+    "retention": { "$ref": "#/$defs/retention" },
+    "privacy": { "$ref": "#/$defs/privacy" },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxSources", "sourceLimitReached", "sourcesReturned"],
+      "properties": {
+        "maxSources": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "sourceLimitReached": { "type": "boolean" },
+        "sourcesReturned": { "type": "integer", "minimum": 0, "maximum": 500 }
+      }
+    },
+    "sources": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/source" } },
+    "observationBoundary": { "$ref": "#/$defs/observationBoundary" },
+    "unknowns": { "$ref": "#/$defs/unknowns" },
+    "interpretationStatus": { "const": "not-performed" }
+  },
+  "$defs": {
+    "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "time": { "type": "integer", "minimum": 0 },
+    "nullableTime": { "type": ["integer", "null"], "minimum": 0 },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromMs", "toMs"],
+      "properties": { "fromMs": { "$ref": "#/$defs/nullableTime" }, "toMs": { "$ref": "#/$defs/nullableTime" } }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retentionDays", "currentCutoffMs", "eventsBeforeCutoffMayHaveBeenRemoved", "collectionBeforeMonitoringWasEnabled"],
+      "properties": {
+        "retentionDays": { "type": "integer", "minimum": 1 },
+        "currentCutoffMs": { "$ref": "#/$defs/time" },
+        "eventsBeforeCutoffMayHaveBeenRemoved": { "const": true },
+        "collectionBeforeMonitoringWasEnabled": { "const": "unavailable" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentPolicy", "sourcePathIncluded", "rawConversationContentIncluded", "toolArgumentsIncluded", "toolResultsIncluded"],
+      "properties": {
+        "contentPolicy": { "const": "metadata-only" },
+        "sourcePathIncluded": { "const": false },
+        "rawConversationContentIncluded": { "const": false },
+        "toolArgumentsIncluded": { "const": false },
+        "toolResultsIncluded": { "const": false }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionHash", "sessionStartedAtMs", "firstEventAtMs", "lastEventAtMs", "observedTurns", "toolObservations", "directCalls", "staticReferences", "completed", "errors", "cancelled", "outcomeUnknown", "usageRecords", "completeness"],
+      "properties": {
+        "sessionHash": { "$ref": "#/$defs/hash" },
+        "sessionStartedAtMs": { "$ref": "#/$defs/nullableTime" },
+        "firstEventAtMs": { "$ref": "#/$defs/time" },
+        "lastEventAtMs": { "$ref": "#/$defs/time" },
+        "observedTurns": { "type": "integer", "minimum": 0 },
+        "toolObservations": { "type": "integer", "minimum": 0 },
+        "directCalls": { "type": "integer", "minimum": 0 },
+        "staticReferences": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "cancelled": { "type": "integer", "minimum": 0 },
+        "outcomeUnknown": { "type": "integer", "minimum": 0 },
+        "usageRecords": { "type": "integer", "minimum": 0 },
+        "completeness": { "const": "unknown" }
+      }
+    },
+    "observationBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directCallsAreExecutionObservations", "staticReferencesAreExecutionObservations", "terminalStatusMayBePartial"],
+      "properties": {
+        "directCallsAreExecutionObservations": { "const": true },
+        "staticReferencesAreExecutionObservations": { "const": false },
+        "terminalStatusMayBePartial": { "const": true }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["authoritative-skill-activation", "nested-reference-execution", "semantic-correctness", "result-adoption", "discovery-cause", "task-quality", "comparative-value"] }
+    }
+  }
+}

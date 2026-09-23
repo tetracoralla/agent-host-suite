@@ -12,6 +12,7 @@ struct ToolLogo: Decodable, Equatable, Sendable {
 
 struct ComponentSummary: Decodable, Equatable, Sendable {
     let version: String
+    let onDemandAvailable: Bool?
     let displayName: String?
     let summary: String?
     let author: String?
@@ -20,6 +21,7 @@ struct ComponentSummary: Decodable, Equatable, Sendable {
 
     init(
         version: String,
+        onDemandAvailable: Bool? = nil,
         displayName: String? = nil,
         summary: String? = nil,
         author: String? = nil,
@@ -27,6 +29,7 @@ struct ComponentSummary: Decodable, Equatable, Sendable {
         logo: ToolLogo? = nil
     ) {
         self.version = version
+        self.onDemandAvailable = onDemandAvailable
         self.displayName = displayName
         self.summary = summary
         self.author = author
@@ -94,6 +97,17 @@ struct GitHubCompatibility: Decodable, Equatable, Sendable {
 
 struct GitHubPermissions: Decodable, Equatable, Sendable {
     let message: String?
+}
+
+struct ToolBrowseCatalog: Decodable, Sendable {
+    let tools: [ToolBrowseEntry]
+}
+
+struct ToolBrowseEntry: Decodable, Sendable {
+    let id: String
+    let homepage: String
+    let compatible: Bool
+    let presentation: GitHubPresentation?
 }
 
 struct HostEntrySummary: Decodable, Equatable, Sendable {
@@ -169,7 +183,35 @@ struct ManagerSetupTool: Equatable, Identifiable, Sendable {
     let id: String
     let name: String
     let summary: String
+    let details: String
     let systemImage: String
+    let examplePrompt: String?
+    let logoResource: String?
+    let repositoryURL: String?
+
+    init(
+        id: String,
+        name: String,
+        summary: String,
+        details: String = "",
+        systemImage: String,
+        examplePrompt: String? = nil,
+        logoResource: String? = nil,
+        repositoryURL: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.summary = summary
+        self.details = details
+        self.systemImage = systemImage
+        self.examplePrompt = examplePrompt
+        self.logoResource = logoResource
+        self.repositoryURL = repositoryURL
+    }
+
+    var hasTaskExperience: Bool {
+        examplePrompt != nil
+    }
 }
 
 enum ManagerSetupPolicy {
@@ -198,19 +240,43 @@ enum ManagerSetupPolicy {
         switch profile {
         case "featured":
             [
-                ManagerSetupTool(id: "math-anchor", name: "Math Anchor", summary: "Exact and scientific calculation", systemImage: "function"),
-                ManagerSetupTool(id: "migratory-time", name: "Migratory Time", summary: "Reliable worldwide time conversion", systemImage: "globe.americas"),
-                ManagerSetupTool(id: "armorial", name: "Armorial", summary: "Choose project-aware icons without redrawing them", systemImage: "shield.lefthalf.filled"),
+                ManagerSetupTool(
+                    id: "math-anchor",
+                    name: "Math Anchor",
+                    summary: "Exact calculation",
+                    details: "Exact and reliability-sensitive mathematics for Agent work.",
+                    systemImage: "function",
+                    examplePrompt: "Calculate 9,999,999,999 × 87 exactly, show the result, and verify it.",
+                    logoResource: "math-anchor.svg",
+                    repositoryURL: "https://github.com/tetracoralla/math-anchor"
+                ),
+                ManagerSetupTool(
+                    id: "migratory-time",
+                    name: "Migratory Time",
+                    summary: "World time",
+                    details: "Timezone conversion with calendar and daylight-saving rules.",
+                    systemImage: "globe.americas",
+                    examplePrompt: "Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.",
+                    logoResource: "migratory-time.png",
+                    repositoryURL: "https://github.com/tetracoralla/migratory-time"
+                ),
+                ManagerSetupTool(
+                    id: "armorial",
+                    name: "Armorial",
+                    summary: "Project icons",
+                    details: "Select and render reusable icons that fit the current project.",
+                    systemImage: "shield.lefthalf.filled",
+                    examplePrompt: "Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.",
+                    logoResource: "armorial.svg",
+                    repositoryURL: "https://github.com/tetracoralla/armorial"
+                ),
             ]
         case "developer":
             [
                 ManagerSetupTool(id: "agent-tool-development-kit", name: "Developer Kit", summary: "Skill-only kit; this profile adds no Agent MCP tools", systemImage: "hammer.fill"),
             ]
         default:
-            [
-                ManagerSetupTool(id: "math-anchor", name: "Math Anchor", summary: "Exact and scientific calculation", systemImage: "function"),
-                ManagerSetupTool(id: "migratory-time", name: "Migratory Time", summary: "Reliable worldwide time conversion", systemImage: "globe.americas"),
-            ]
+            tools(for: "featured").filter { ["math-anchor", "migratory-time"].contains($0.id) }
         }
     }
 
@@ -303,8 +369,14 @@ enum ManagerSourcePolicy {
 
     static func versionSummary(applicationVersion: String?, applicationBuild: String?, environmentVersion: String?) -> String {
         let app = [applicationVersion, applicationBuild.map { "build \($0)" }].compactMap { $0 }.joined(separator: " · ")
-        let env = environmentVersion ?? "not installed"
-        return "App \(app.isEmpty ? "unknown" : app) · Env \(env)"
+        let env = environmentVersion ?? L10n.text("not installed")
+        if app.isEmpty {
+            return L10n.format("Environment {env}", ["env": env])
+        }
+        return L10n.format("App {app} · Env {env}", [
+            "app": app,
+            "env": env,
+        ])
     }
 
     static func recoveryMessage(code: String?) -> String {
@@ -1120,6 +1192,88 @@ struct TraceSourceCatalog: Decodable, Equatable, Sendable {
     }
 }
 
+struct TaskSourceObservationBoundary: Decodable, Equatable, Sendable {
+    let directCallsAreExecutionObservations: Bool
+    let staticReferencesAreExecutionObservations: Bool
+    let terminalStatusMayBePartial: Bool
+}
+
+struct TaskSourceEntry: Decodable, Equatable, Identifiable, Sendable {
+    let sessionHash: String
+    let sessionStartedAtMs: Int64?
+    let firstEventAtMs: Int64
+    let lastEventAtMs: Int64
+    let observedTurns: Int
+    let toolObservations: Int
+    let directCalls: Int
+    let staticReferences: Int
+    let completed: Int
+    let errors: Int
+    let cancelled: Int
+    let outcomeUnknown: Int
+    let usageRecords: Int
+    let completeness: String
+
+    var id: String { sessionHash }
+}
+
+struct TaskSourceCatalog: Decodable, Equatable, Sendable {
+    let schemaVersion: String
+    let status: String
+    let generatedAt: String
+    let provider: String
+    let requestedRange: TraceSourceRange
+    let retention: TraceSourceRetention
+    let privacy: TraceSourcePrivacy
+    let limits: TraceSourceLimits
+    let sources: [TaskSourceEntry]
+    let observationBoundary: TaskSourceObservationBoundary
+    let unknowns: [String]
+    let interpretationStatus: String
+
+    func isValid(expectedProvider: String) -> Bool {
+        schemaVersion == "openadam.agent-host-task-source-catalog.v0.1"
+            && status == "ok"
+            && provider == expectedProvider
+            && privacy.contentPolicy == "metadata-only"
+            && !privacy.sourcePathIncluded
+            && !privacy.rawConversationContentIncluded
+            && !privacy.toolArgumentsIncluded
+            && !privacy.toolResultsIncluded
+            && observationBoundary.directCallsAreExecutionObservations
+            && !observationBoundary.staticReferencesAreExecutionObservations
+            && observationBoundary.terminalStatusMayBePartial
+            && interpretationStatus == "not-performed"
+            && limits.maxSources > 0
+            && limits.maxSources <= 500
+            && limits.sourcesReturned == sources.count
+            && sources.count <= limits.maxSources
+            && retention.retentionDays > 0
+            && retention.currentCutoffMs >= 0
+            && retention.eventsBeforeCutoffMayHaveBeenRemoved
+            && retention.collectionBeforeMonitoringWasEnabled == "unavailable"
+            && sources.allSatisfy { source in
+                source.sessionHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+                    && (source.sessionStartedAtMs.map { $0 >= 0 } ?? true)
+                    && source.firstEventAtMs >= 0
+                    && source.lastEventAtMs >= source.firstEventAtMs
+                    && source.observedTurns >= 0
+                    && source.toolObservations >= 0
+                    && source.directCalls >= 0
+                    && source.staticReferences >= 0
+                    && source.directCalls + source.staticReferences == source.toolObservations
+                    && source.completed >= 0
+                    && source.errors >= 0
+                    && source.cancelled >= 0
+                    && source.outcomeUnknown >= 0
+                    && source.completed + source.errors + source.cancelled + source.outcomeUnknown == source.toolObservations
+                    && source.usageRecords >= 0
+                    && source.toolObservations + source.usageRecords >= 1
+                    && source.completeness == "unknown"
+            }
+    }
+}
+
 struct TraceExportReceipt: Decodable, Equatable, Sendable {
     let status: String
     let schemaVersion: String
@@ -1171,6 +1325,68 @@ enum TraceContractValidator {
               privacy["sourcePathIncluded"] as? Bool == false,
               privacy["toolArgumentsIncluded"] as? Bool == false,
               privacy["toolResultsIncluded"] as? Bool == false,
+              let limits = value["limits"] as? [String: Any],
+              limits["eventsReturned"] as? Int == receipt.eventsReturned,
+              limits["eventsAvailable"] as? Int == receipt.eventsAvailable,
+              let events = value["events"] as? [Any],
+              events.count == receipt.eventsReturned else {
+            return false
+        }
+        return true
+    }
+}
+
+struct TaskExportReceipt: Decodable, Equatable, Sendable {
+    let status: String
+    let schemaVersion: String
+    let outputPath: String
+    let outputBytes: Int
+    let eventsReturned: Int
+    let eventsAvailable: Int
+    let contentPolicy: String
+    let observerPackRetained: Bool
+    let interpretationStatus: String
+}
+
+enum TaskActivityContractValidator {
+    static let retainedPackVersion = "openadam.agent-host-task-activity-pack.v0.1"
+
+    static func isValidRetainedExport(
+        data: Data,
+        receipt: TaskExportReceipt,
+        outputPath: String,
+        provider: String,
+        sessionHash: String
+    ) -> Bool {
+        guard receipt.status == "completed",
+              receipt.schemaVersion == retainedPackVersion,
+              receipt.outputPath == outputPath,
+              receipt.outputBytes == data.count,
+              receipt.eventsReturned >= 0,
+              receipt.eventsAvailable >= receipt.eventsReturned,
+              receipt.contentPolicy == "metadata-only",
+              receipt.observerPackRetained == false,
+              receipt.interpretationStatus == "not-performed",
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value["schemaVersion"] as? String == retainedPackVersion,
+              value["interpretationStatus"] as? String == "not-performed",
+              let source = value["source"] as? [String: Any],
+              source["provider"] as? String == provider,
+              source["selectionKind"] as? String == "observer-retained-task-session",
+              source["sessionHash"] as? String == sessionHash,
+              let privacy = value["privacy"] as? [String: Any],
+              privacy["contentPolicy"] as? String == "metadata-only",
+              privacy["observerPackRetained"] as? Bool == false,
+              privacy["sourceUsesObserverRetainedMetadata"] as? Bool == true,
+              privacy["sourcePathIncluded"] as? Bool == false,
+              privacy["rawConversationContentIncluded"] as? Bool == false,
+              privacy["toolArgumentsIncluded"] as? Bool == false,
+              privacy["toolResultsIncluded"] as? Bool == false,
+              let boundary = value["observationBoundary"] as? [String: Any],
+              boundary["directCallsAreExecutionObservations"] as? Bool == true,
+              boundary["staticReferencesAreExecutionObservations"] as? Bool == false,
+              boundary["nestedChildReceiptsRequireAProviderTraceOrComponentReceipt"] as? Bool == true,
+              boundary["adoptionNotRepresented"] as? Bool == true,
               let limits = value["limits"] as? [String: Any],
               limits["eventsReturned"] as? Int == receipt.eventsReturned,
               limits["eventsAvailable"] as? Int == receipt.eventsAvailable,
@@ -1263,14 +1479,14 @@ enum ManagerSection: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Primary sidebar: install → tools → versions → connect → history. Usage is advanced.
-    static var primaryCases: [ManagerSection] { [.overview, .tools, .updates, .agentApps, .activity] }
+    /// Primary sidebar follows the user's objects: installed → discover → Agent apps.
+    static var primaryCases: [ManagerSection] { [.tools, .updates, .agentApps] }
 
     var title: String {
         switch self {
         case .overview: "Overview"
         case .tools: "Tools"
-        case .updates: "Updates"
+        case .updates: "Browse"
         case .agentApps: "Agents"
         case .activity: "History"
         case .usage: "Usage"
@@ -1280,9 +1496,9 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .overview: "house"
-        case .tools: "wrench.and.screwdriver"
-        case .updates: "arrow.triangle.2.circlepath"
-        case .agentApps: "link"
+        case .tools: "square.grid.2x2"
+        case .updates: "shippingbox"
+        case .agentApps: "macwindow.on.rectangle"
         case .activity: "clock"
         case .usage: "chart.bar.xaxis"
         }
@@ -1302,6 +1518,7 @@ struct ManagedTool: Identifiable, Equatable {
     let availability: String
     let ownership: String
     let active: Bool
+    var onDemandAvailable: Bool = false
 }
 
 enum ManagedItemState: Equatable {

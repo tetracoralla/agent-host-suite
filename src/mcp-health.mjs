@@ -1,5 +1,4 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createHash } from 'node:crypto'
 import { AgentHostError } from './errors.mjs'
 import { componentEnvironment } from './component-environment.mjs'
@@ -11,8 +10,7 @@ export async function probeMcpTools(component) {
     throw new AgentHostError('TOOL_HEALTH_CONFIG_INVALID', 'The installed tool health configuration is incomplete')
   }
   const timeoutMs = component.healthTimeoutMs ?? 10000
-  const env = getDefaultEnvironment()
-  Object.assign(env, componentEnvironment(component, component.healthWorkspaceRoot ?? component.cwd))
+  const env = componentEnvironment(component, component.healthWorkspaceRoot)
   const transport = new ManagedMcpStdioTransport({
     command: component.command,
     args: component.args,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
 import test from 'node:test'
 import { AgentHostError } from '../src/errors.mjs'
-import { buildDashboardGuidance, environmentActionInvalidatesDoctor, MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
+import { buildDashboardGuidance, environmentActionInvalidatesDoctor, MANAGER_SETUP_PROFILES, managerDocument, startWebManager } from '../src/web-manager.mjs'
 import { loadState, prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 import { setup } from '../src/setup.mjs'
 import { compatibleApplicationState, createCodexRunner, createDevelopmentWorkspace, healthyCatalogPreflight } from './helpers.mjs'
@@ -22,19 +22,23 @@ async function withFakeHostOnPath(t, name = 'codex') {
   })
 }
 
-test('browser Updates keeps a successful GitHub preview target for Add from GitHub', async () => {
+test('browser Browse keeps only the current successful GitHub preview eligible for Add', async () => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
   assert.match(page, /lastGithubTarget/u)
   assert.match(page, /input\.value=lastGithubTarget/u)
   assert.match(page, /github:input\.value\|\|lastGithubTarget/u)
+  assert.match(page, /lastPreview=null;lastGithubPreviewed='';lastGithubTarget=target/u)
+  assert.match(page, /lastGithubPreviewed=action\.github\.trim\(\)/u)
 })
 
 test('local Manager pause and empty tool set are distinct from on-demand Skills', async (t) => {
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  const renderTools = page.match(/function renderTools[\s\S]*?^function renderToolDetail/mu)?.[0] || ''
   assert.match(page, /Pause all tools/u)
   assert.match(page, /Resume tools/u)
-  assert.match(page, /Fully paused: no MCP and no on-demand Skill/u)
-  assert.match(page, /On-demand Skill only/u)
+  assert.match(renderTools, /All tools are paused\./u)
+  assert.doesNotMatch(renderTools, /Off keeps an on-demand Skill/u)
+  assert.match(page, /exposure==='on-demand'\?'On-demand':'Enable to use'/u)
   assert.match(page, /pause:true/u)
   assert.match(page, /resume:true/u)
 })
@@ -67,13 +71,30 @@ test('local Manager requires its one-session cookie and same-origin action reque
   const document = await page.text()
   assert.match(document, /Usage & Reliability/u)
   assert.match(document, /featured/u)
-  assert.match(document, /Get featured tools/u)
+  assert.match(document, /Install featured tools/u)
+  assert.match(document, /tool-row/u)
+  assert.match(document, /detail-head/u)
+  assert.match(document, /pageHead\(root,'My tools'/u)
+  assert.match(document, /el\('h2',t\('Recommended'\)/u)
+  assert.match(document, /data-page="tools" aria-current="true"/u)
+  assert.match(document, /environment:'Agents',tools:'Tools',updates:'Browse'/u)
+  assert.match(document, /button\('Use in Agent'/u)
+  assert.match(document, /hostIds\.length===1/u)
+  assert.match(document, /Task copied\. Choose an Agent app to continue/u)
+  assert.doesNotMatch(document, /catalog\.append\(el\('p',t\('Public download is not configured\.'/u)
+  assert.doesNotMatch(document, /9,999,999,999\\n× 87/u)
+  assert.match(document, /Calculate 9,999,999,999 × 87 exactly/u)
   assert.match(document, /Add GitHub project/u)
   assert.match(document, /Check for updates/u)
   assert.match(document, /Install all updates/u)
   assert.match(document, /updates-install/u)
-  assert.match(document, /Connect later/u)
+  assert.match(document, /Enable by default/u)
   assert.equal(document.includes(url.split('/').at(-1)), false)
+
+  const logo = await fetch(`${origin}/api/tool-logo?id=math-anchor`, { headers: { cookie } })
+  assert.equal(logo.status, 200)
+  assert.equal(logo.headers.get('content-type'), 'image/svg+xml')
+  assert.match(await logo.text(), /<svg/u)
 
   const dashboard = await fetch(`${origin}/api/dashboard`, { headers: { cookie } })
   assert.equal(dashboard.status, 200)
@@ -285,6 +306,140 @@ test('local Manager lists retained sessions and downloads one metadata-only pack
   await running
 })
 
+test('local Manager shows task activity facts and downloads one neutral metadata pack', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-task-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  const session = 'b'.repeat(64)
+  const calls = []
+  let exportedPath
+  let readyResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const running = startWebManager({
+    stateRoot,
+    open: false,
+    idleTimeoutMs: 60_000,
+    onReady: readyResolve,
+    taskSourceReader: async (options) => {
+      calls.push(['sources', options])
+      return {
+        schemaVersion: 'openadam.agent-host-task-source-catalog.v0.1',
+        status: 'ok',
+        provider: options.provider,
+        retention: { retentionDays: 30, currentCutoffMs: 0, eventsBeforeCutoffMayHaveBeenRemoved: true, collectionBeforeMonitoringWasEnabled: 'unavailable' },
+        privacy: { contentPolicy: 'metadata-only', sourcePathIncluded: false, rawConversationContentIncluded: false, toolArgumentsIncluded: false, toolResultsIncluded: false },
+        limits: { maxSources: options.limit, sourceLimitReached: false, sourcesReturned: 1 },
+        sources: [{ sessionHash: session, sessionStartedAtMs: null, firstEventAtMs: 1, lastEventAtMs: 2, observedTurns: 1, toolObservations: 3, directCalls: 2, staticReferences: 1, completed: 1, errors: 1, cancelled: 0, outcomeUnknown: 1, usageRecords: 1, completeness: 'unknown' }],
+        observationBoundary: { directCallsAreExecutionObservations: true, staticReferencesAreExecutionObservations: false, terminalStatusMayBePartial: true },
+        interpretationStatus: 'not-performed',
+      }
+    },
+    taskExporter: async (options) => {
+      calls.push(['export', options])
+      exportedPath = options.output
+      const body = `${JSON.stringify({
+        schemaVersion: 'openadam.agent-host-task-activity-pack.v0.1',
+        source: { provider: options.provider, selectionKind: 'observer-retained-task-session', sessionHash: options.session },
+        privacy: { contentPolicy: 'metadata-only', observerPackRetained: false, sourceUsesObserverRetainedMetadata: true, sourcePathIncluded: false, rawConversationContentIncluded: false, toolArgumentsIncluded: false, toolResultsIncluded: false },
+        limits: { eventsReturned: 0, eventsAvailable: 1 },
+        events: [],
+        observationBoundary: { directCallsAreExecutionObservations: true, staticReferencesAreExecutionObservations: false, nestedChildReceiptsRequireAProviderTraceOrComponentReceipt: true, adoptionNotRepresented: true },
+        interpretationStatus: 'not-performed',
+      })}\n`
+      await writeFile(options.output, body, { mode: 0o600 })
+      return { status: 'completed', schemaVersion: 'openadam.agent-host-task-activity-pack.v0.1', outputPath: options.output, outputBytes: Buffer.byteLength(body), eventsReturned: 0, eventsAvailable: 1, contentPolicy: 'metadata-only', observerPackRetained: false, interpretationStatus: 'not-performed' }
+    },
+  })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+
+  const listed = await fetch(`${origin}/api/task-sources?provider=codex&limit=25`, { headers: { cookie } })
+  assert.equal(listed.status, 200)
+  const catalog = await listed.json()
+  assert.equal(catalog.sources[0].directCalls, 2)
+  assert.equal(catalog.sources[0].staticReferences, 1)
+  const invalid = await fetch(`${origin}/api/task-sources?provider=codex&privatePath=/tmp`, { headers: { cookie } })
+  assert.equal(invalid.status, 400)
+
+  const rejected = await fetch(`${origin}/api/task-export`, {
+    method: 'POST',
+    headers: { cookie, origin: 'https://example.invalid', 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'codex', session }),
+  })
+  assert.equal(rejected.status, 403)
+  const exported = await fetch(`${origin}/api/task-export`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'codex', session }),
+  })
+  assert.equal(exported.status, 200)
+  assert.match(exported.headers.get('content-disposition'), /agent-host-codex-task-bbbbbbbbbbbb\.json/u)
+  assert.equal((await exported.json()).observationBoundary.adoptionNotRepresented, true)
+  await assert.rejects(access(exportedPath))
+  assert.equal(calls[0][1].limit, 25)
+  assert.equal(calls[1][0], 'export')
+  assert.equal(calls[1][1].maxOutputBytes, 8 * 1024 * 1024)
+  assert.equal(calls[1][1].signal instanceof AbortSignal, true)
+
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
+test('local Manager cancels an abandoned task activity export and removes its temporary output', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-task-cancel-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  let readyResolve
+  let exportStartedResolve
+  const ready = new Promise((resolve) => { readyResolve = resolve })
+  const exportStarted = new Promise((resolve) => { exportStartedResolve = resolve })
+  let exportedPath
+  const running = startWebManager({
+    stateRoot,
+    open: false,
+    idleTimeoutMs: 60_000,
+    onReady: readyResolve,
+    taskExporter: async (options) => {
+      exportedPath = options.output
+      await writeFile(options.output, '{}\n', { mode: 0o600 })
+      exportStartedResolve()
+      await new Promise((resolve, reject) => {
+        if (options.signal.aborted) {
+          reject(new Error('cancelled'))
+          return
+        }
+        options.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true })
+      })
+    },
+  })
+  const { origin, url, server } = await ready
+  t.after(() => server.close())
+  const auth = await fetch(url, { redirect: 'manual' })
+  const cookie = auth.headers.get('set-cookie').split(';')[0]
+  const controller = new AbortController()
+  const pending = fetch(`${origin}/api/task-export`, {
+    method: 'POST',
+    headers: { cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'codex', session: 'b'.repeat(64) }),
+    signal: controller.signal,
+  })
+  await exportStarted
+  controller.abort()
+  await assert.rejects(pending, { name: 'AbortError' })
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await access(exportedPath)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    } catch {
+      break
+    }
+  }
+  await assert.rejects(access(exportedPath))
+
+  await new Promise((resolve) => server.close(resolve))
+  await running
+})
+
 test('local Manager rejects a retained export whose file contradicts its metadata-only receipt', async (t) => {
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-web-trace-invalid-'))
   t.after(() => rm(stateRoot, { recursive: true, force: true }))
@@ -441,9 +596,9 @@ test('browser Overview success handoff is sparse and wires real CTA paths', asyn
   assert.match(page, /action:'pick-workspace'/u)
   assert.match(page, /action.id==='grant-workspace'\)\{\s*call\(\{action:'pick-workspace'/u)
   assert.match(page, /action:'repair'/u)
-  assert.doesNotMatch(page, /t\(''\)/u)
+  assert.doesNotMatch(page, /\bt\(''\)/u)
   assert.doesNotMatch(page, /'':/u)
-  assert.match(page, /--status-action:#f1f2f4/u)
+  assert.match(page, /--status-action:#e9eaea/u)
   assert.equal(page.includes('[data-tone=action]{color:var(--status-action)}'), true)
   assert.match(page, /data-page/u)
   assert.match(page, /t\('Details'\)/u)
@@ -756,7 +911,7 @@ test('Chinese tools and history pages drop empty translation keys and catalog es
   const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
   const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/gui)].map((match) => match[1])
   const source = scripts.join('\n')
-  assert.doesNotMatch(source, /t\(''\)/u)
+  assert.doesNotMatch(source, /\bt\(''\)/u)
   const zhMatch = source.match(/const zh=\{[\s\S]*?\n\};/u)
   assert.ok(zhMatch, 'expected zh dictionary')
   const zh = new Function(`${zhMatch[0]}; return zh`)()
@@ -1184,4 +1339,95 @@ test('embedded Manager browser scripts parse without SyntaxError', async () => {
       assert.fail(`embedded <script> #${index + 1} failed to parse: ${error.message}`)
     }
   }
+})
+
+test('tool details keep edited tasks across refresh and bind controls to current inventory', async () => {
+  const page = await readFile(new URL('../src/web-manager.mjs', import.meta.url), 'utf8')
+  const renderer = page.match(/const shortJobs=[\s\S]*?(?=async function downloadTrace)/u)?.[0]
+  assert.ok(renderer)
+  const nodes = []
+  const el = (tag, text, className = '') => {
+    const node = { tag, textContent: text, className, children: [], dataset: {}, isConnected: true,
+      append(...items) { this.children.push(...items) },
+      replaceChildren(...items) { this.children = items },
+      setAttribute(key, value) { this[key] = value },
+      querySelector(tag) { return this.children.find(x => x.tag === tag) ?? null },
+    }
+    nodes.push(node)
+    return node
+  }
+  const root = el('section')
+  const button = (label, onclick, cls) => Object.assign(el('button', label, cls), { onclick })
+  const data = {
+    snapshot: { configured: true }, recommended: { tools: [] },
+    tools: { status: 'ok', availableAgentComponents: ['math-anchor', 'custom'], activeAgentComponents: ['math-anchor', 'custom'], tools: [
+      { id: 'math-anchor', displayName: 'Math Anchor', version: '1' },
+      { id: 'custom', displayName: 'A long custom tool', summary: 'Custom purpose' },
+    ] },
+  }
+  const actions = [], copies = [], view = { detail: 'math-anchor', drafts: {} }
+  let acceptsPause = false
+  const api = new Function('data', 'view', 'el', 'button', '$', 't', 'logoNode', 'call', 'copyCapabilityTask', 'confirm', `
+    const lastUpdates=null,featuredExperiences=[{id:'math-anchor',name:'Math Anchor',summary:'Exact calculation',prompt:'Original task'}];
+    const featuredToolName=id=>id,closeToolDetail=()=>{},openToolDetail=()=>{};
+    const row=(label,value)=>{const r=el('div');r.append(el('span',label),el('span',value));return r};
+    ${renderer}
+    return {renderToolDetail, installedTools, toolState};
+  `)(data, view, el, button, () => root, x => x, () => el('img'), action => actions.push(action), value => copies.push(value), () => acceptsPause)
+  api.renderToolDetail()
+  assert.equal(api.installedTools()[1].name, 'A long custom tool')
+  const editor = nodes.find(x => x.tag === 'textarea')
+  editor.value = 'My edited task'; editor.oninput()
+  data.tools.tools[0].version = '2'
+  nodes.length = 0; api.renderToolDetail()
+  assert.equal(nodes.find(x => x.tag === 'textarea').value, 'My edited task')
+  nodes.find(x => x.textContent === 'Use in Agent').onclick()
+  assert.equal(copies[0].prompt, 'My edited task')
+  let toggle = nodes.find(x => x.type === 'checkbox')
+  toggle.checked = false; await toggle.onchange()
+  assert.deepEqual(actions.pop(), { action: 'tools', tools: ['custom'] })
+  assert.equal(toggle.checked, true, 'an unsuccessful mutation restores the last confirmed state')
+  data.tools.activeAgentComponents = ['math-anchor']
+  nodes.length = 0; api.renderToolDetail()
+  toggle = nodes.find(x => x.type === 'checkbox'); toggle.checked = false; await toggle.onchange()
+  assert.equal(toggle.checked, true, 'cancelling the last-tool pause restores the control')
+  assert.equal(actions.length, 0)
+  acceptsPause = true; toggle.checked = false; await toggle.onchange()
+  assert.deepEqual(actions.pop(), { action: 'tools', tools: [] })
+  data.tools.paused = true; data.tools.activeAgentComponents = []
+  nodes.length = 0; api.renderToolDetail()
+  assert.equal(nodes.find(x => x.type === 'checkbox').disabled, true)
+  assert.equal(nodes.some(x => x.textContent === 'Use in Agent'), false)
+  assert.equal(api.toolState('math-anchor').label, 'Paused')
+  nodes.find(x => x.textContent === 'Resume tools').onclick()
+  assert.deepEqual(actions.pop(), { action: 'tools', resume: true })
+  data.tools.paused = false; data.tools.activeAgentComponents = ['custom']
+  nodes.length = 0; api.renderToolDetail()
+  assert.equal(api.toolState('math-anchor').label, 'Enable to use')
+  assert.equal(nodes.some(x => x.textContent === 'Use in Agent'), false)
+  nodes.find(x => x.textContent === 'Enable to use').onclick()
+  assert.deepEqual(actions.pop(), { action: 'tools', tools: ['custom', 'math-anchor'] })
+})
+
+test('browser tool activation offers an explicit conflict retry and preserves the requested selection', async () => {
+  const page = managerDocument()
+  const source = page.match(/async function call\(action,label\)\{[\s\S]*?(?=\nasync function refresh\()/u)?.[0]
+  assert.ok(source)
+  const messages = [], requests = [], error = { children: [], append(...items) { this.children.push(...items) } }
+  const selected = { action: 'tools', tools: ['math-anchor', 'decision-table'] }
+  const api = new Function('fetch', '$', 'document', 'notice', 'button', 'el', `
+    let changing=false; const view={},busy=()=>{},t=x=>x;
+    ${source}
+    return call;
+  `)(async (_url, options) => {
+    requests.push(JSON.parse(options.body))
+    return { ok: false, json: async () => ({ error: { code: 'CLAUDE_MCP_CONFLICT', message: 'Existing connection' } }) }
+  }, selector => selector === '#error' ? error : null,
+  { activeElement: null, querySelectorAll: () => [] }, value => messages.push(value),
+  (label, onclick) => ({ label, onclick }), (_tag, text) => ({ text }))
+  await api(selected, 'Enable')
+  const retry = error.children.find(item => item.label === 'Take over existing connections')
+  assert.ok(retry, messages.at(-1))
+  await retry.onclick()
+  assert.deepEqual(requests, [selected, { ...selected, replaceHostConflicts: true }])
 })

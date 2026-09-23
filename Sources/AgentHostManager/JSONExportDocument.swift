@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct TraceAnalysisDocument: FileDocument {
+struct JSONExportDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
 
     let data: Data

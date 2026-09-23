@@ -7,8 +7,11 @@ installed versions, machine state, or release acceptance.
 ## User and task
 
 The intended **external user** is an individual desktop Agent user who wants a
-small set of deterministic tools plus reliable local execution without cloning
-and configuring many repositories by hand. That path requires a bound
+coherent, trustworthy set of Agent capabilities plus reliable local execution
+without cloning and configuring many repositories by hand. The default working
+set may stay deliberately small, but that is an attention and context choice,
+not a ceiling on the kinds of useful capabilities the environment may admit.
+That path requires a bound
 compatibility release. This source checkout is not that release: it has no
 GitHub Release assets in-tree, no Apple-notarized DMG, and no tool marketplace.
 Unsigned preview download is documented in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
@@ -33,6 +36,10 @@ the requested Agent-app and background-service changes, installs one Agent
 environment, checks current health, updates or rolls back a bound compatibility
 release, and can remove everything Agent Host created.
 
+Making a capability available is an offer, not an endorsement or an obligation
+to use it. The user and their Agent may activate, ignore, challenge, replace, or
+remove it without first accepting Agent Host's interpretation of its value.
+
 The Windows Manager and native macOS Manager present English and Simplified
 Chinese, follow the operating-system language by default, and keep the explicit
 override in their secondary Settings surface. Platform-specific carrier and
@@ -43,6 +50,14 @@ release claims remain in the platform and release documents.
 Agent Host is a distribution and local operations product. The Agent Host Suite
 is this repository's technical distribution unit. Neither is the Agent-Host
 architecture itself, and Agent Host is not required for standards adoption.
+
+The Manager client is an optional human control surface, not the ecosystem's
+protocol or a task Agent. Its purpose is to make installation, connections,
+grants, updates and recovery convenient. The CLI uses the same lifecycle
+implementation. Once configured, Agent apps invoke the projected Provider
+entrypoints or separately managed execution service without routing each call
+through an open Manager window. This does not make the configured runtime or
+background services optional for calls that depend on them.
 
 Its durable product object is an **Agent environment**: one installed
 compatibility set containing:
@@ -86,16 +101,68 @@ quality. Replacing configuration requires a newly built and previewed archive.
 - `packages/direct-execution-runtime` owns bounded Host execution mechanics.
 - Agent Host owns artifact acquisition, hash verification, installation,
   official host integration, local service lifecycle, profiles, update,
-  rollback, removal, a small human status surface, and one bounded product
+  rollback, removal, optional passive observation and explicit task-activity
+  export, a small human status surface, and one bounded product
   operations Skill for external Agents.
 - Agent apps remain independently updated hosts. Agent Host never patches their
   binaries or private implementation files.
 
-Agent Host never exposes a model-facing generic Provider invocation tool.
+Agent-facing domain calls retain Provider identity and typed meaning. Current
+integrations do not expose a generic opaque Provider invocation tool.
 Direct Runtime receives only already-selected, schema-validated structured
-work. Details of that carrier, lifecycle locking, service recovery, process
+work; ordinary native MCP calls do not have to pass through it. Details of
+those routes, lifecycle locking, service recovery, process
 scope, state, and observation projection belong to
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## Stable responsibilities, evolving integrations
+
+The strategic aim is to make useful Provider capabilities cheaper to adopt and
+keep using as Agent apps, models and implementations change. It is not to make
+every participant adopt today's desktop client, tool-call loop, transport or
+execution engine. The current local desktop product is one delivery path, not
+a claim that every future consumer must look like it.
+
+The narrow waist concerns **mandatory shared meaning**, not the breadth of
+useful products. Capability contracts can preserve the meaning, version,
+inputs, outputs and failures of an operation where implementations genuinely
+share them. Host preserves the selected implementation's identity, explicit
+authority, configuration and lifecycle; it must not silently change semantics
+to make an adapter appear compatible. Provider-native features can remain
+native. Procedure contracts apply to settled reusable methods, not to every
+Agent's planning or private working state. None of these standards requires
+the Manager or this Suite as its universal intermediary.
+
+Compatibility is a continuing engineering responsibility, not a promise of no
+future development:
+
+- A model change behind an unchanged supported Agent interface may require no
+  Host change; verify the affected interface rather than inferring compatibility
+  from the model's name or architecture.
+- A changed harness or Provider transport belongs in its adapter when the
+  existing meaning and authority can be preserved. It does not automatically
+  require changing every Provider or the semantic standards.
+- A genuinely new kind of work may need new semantics, lifecycle or authority.
+  Establish it with a concrete consumer and executable cases, then add a
+  versioned contract or a separate binding. Do not disguise missing behavior
+  as a successful legacy call, or add speculative universal fields now.
+
+World models, multimodal agents and large Agent groups are possible consumers,
+not reasons to predefine their memory, scheduling, continuous state or
+coordination in today's mandatory ABI. Current synchronous structured calls
+and the Direct Runtime's read-only, idempotent, closed-world admission scope
+remain actual supported limits, not permanent limits on the whole ecosystem.
+Broadening a safety boundary requires its own implementation and verification;
+this direction does not relax the current checks.
+
+A new integration earns a shared abstraction when real task evidence shows
+preserved meaning and lower adoption or maintenance cost across distinct
+implementations. An adapter name, common JSON envelope or growing catalog
+alone does not establish interoperability. The test is whether useful Provider
+work survives a change of consumer or implementation without rewriting its
+domain behavior or forcing every participant into one Host-specific product
+template. Widespread ecosystem adoption remains an outcome to earn, not a
+property this architecture can declare.
 
 ## Profiles and private overlays
 
@@ -126,7 +193,10 @@ merely because they exercise typed boundaries.
 
 Installed inventory and active Agent-visible tools are separate. An inactive
 Provider may retain an immutable Skill and direct launcher without contributing
-MCP schemas to the current Agent catalog (`on-demand`). `tools pause` fully
+MCP schemas to the current Agent catalog (`on-demand`). Without that declared
+CLI Skill it is `inactive`: enable its MCP entrypoints before opening a new
+Agent task. Status and both Managers derive that distinction from the installed
+component, never from the toggle alone. `tools pause` fully
 pauses ordinary tools: new tasks get neither MCP nor those Skills, while a
 Developer Kit Skill, if installed, remains. `tools resume` restores the
 previous working set. Pause, host connect/disconnect, monitoring consent, and
@@ -188,13 +258,19 @@ Exact versions and fields belong to
 9. **Observation.** Automatic record adapters are read-only. Telemetry and hook
    adapters require an explicit user-owned configuration action. Passive
    storage is metadata-only; content export requires a second confirmation and
-   never enters Observer storage. See [`TRACE_PLANE.md`](TRACE_PLANE.md).
+   never enters Observer storage. A user can explicitly export one bounded,
+   pseudonymous task session with direct calls kept distinct from static nested
+   references. See [`TRACE_PLANE.md`](TRACE_PLANE.md).
 
 An observation controls only what it directly reports. Offered tools,
 historical calls, or installed Skills do not establish current-session Skill
 activation, non-use reason, semantic effect, result adoption, correctness,
 task quality, opportunity, or value. Those remain unknown unless a separate
-current assessment or controlled task establishes them.
+current assessment or controlled task establishes them. A user or their Agent
+may interpret an explicitly selected export, combine it with task-native work,
+or ignore it. Provider-reported rationale presence and stable completion
+reasons may be retained when available, but remain source-reported context—not
+Host judgments and not required setup.
 
 ## Human surface
 
@@ -210,25 +286,52 @@ durable objects:
 - **Activity** — bounded local lifecycle history translated into product names
   and human labels rather than raw state-field identifiers.
 
-Before installation, the same app presents one setup path: selected standard
-tools, detected Agent app, preflight review, then installation. After
-installation, Overview leads with a start-work handoff (open a new Agent task
-or connect an Agent), Host-observed facts, remaining gaps, and classified
-recovery paths (`not-connected`, `stale-session`, `permission`, `tool-fault`).
-Green status rows are supporting detail, not the destination. Host confirms
-only what it can observe and does not pretend an already-open task loaded
-tools. Recoverable errors use product language and one next action; raw paths
-and protocol detail remain outside the primary interface.
+Before installation, the same app opens on an honest empty local inventory and
+puts compatible recommendations below it. Installation still receives a
+preflight review. After installation, local tools occupy that first section;
+recommendations move below them. **Agents** exposes connection and repair
+without mixing Agent shells into the tool catalog, and keeps a start-work
+handoff with one next action (and its classified recovery path on demand) when
+something blocks new work. Changing the tool set says plainly that already-open
+tasks keep their old tools. Host confirms only what it
+can observe and does not pretend an already-open task loaded tools. Recoverable
+errors use product language and one next action; raw paths and protocol detail
+remain outside the primary interface.
+
+Tool collections use compact, unframed rows with a product mark, name, short
+purpose, and one availability or attention indicator. Versions, configuration,
+and source links belong in a full-page detail. Returning preserves the search,
+position, and keyboard focus; refresh preserves an edited example task. Normal
+states do not repeat their icon as a caption or legend. Consequential differences
+(such as pausing on-demand tools when the last active tool is turned off) remain
+explicit at the action. Agent connections use aligned rows, lifecycle changes use
+a chronology, and usage uses data sections rather than a universal card layout.
 
 The Manager refreshes stale in-memory state on foreground return and shows when
 visible status was last checked. Automatic refresh does not launch Agent apps;
 mutations remain disabled while current local state is being reacquired. Full
 Check is the explicit current Agent-app binding route.
 
-The primary interface does not show MCP schemas, Agent reasoning, Capability
-catalogs, protocol metadata, prompts, or marketing explanations. Usage &
-Reliability preserves unavailable and partial coverage and never derives a
-non-use reason, correctness, adoption, quality, opportunity, or value.
+**Tools** is the default destination. It shows tools installed on this machine
+first, including a compact empty state when there are none. Compatible
+recommendations follow that local inventory; a person can search or open
+**Browse** for the complete available catalog.
+
+The primary interface uses recognizable product identity, a short job label,
+current availability, and one useful next action; history, provenance, and
+machine detail remain available on demand. It does not require a person to read
+an evidence chain before acting. An editable example can be handed to a new
+Agent task after the person chooses **Use**; it remains optional and does not
+record adoption. It does not show MCP schemas,
+Agent reasoning, Capability catalogs, protocol metadata, or long marketing
+explanations. Usage &
+Reliability shows recent task activity through direct calls, errors, and static
+references before offering a detail export. It preserves unavailable and
+partial coverage and never derives a non-use reason, correctness, adoption,
+quality, opportunity, or value.
+
+Public-release and private-contributor participation paths, including who owns
+each decision, are defined in [`ECOSYSTEM_PATHS.md`](ECOSYSTEM_PATHS.md).
 
 Canonical product language and its stable-identifier boundary are defined in
 [`TERMINOLOGY.md`](TERMINOLOGY.md).
@@ -247,9 +350,10 @@ task and keep these kinds of evidence distinct when they affect the claim:
 - owner business and experience acceptance.
 
 These categories are not a mandatory reporting template or work queue. The
-local installed route and its fresh-session adoption limit are defined in
-[`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md). Unnamed page-task scoring, when a
-machine has Host plus Agent, is [`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md);
-Host status is not that score. Select affected risks and evidence using
+local installed route and its fresh-session observation limit are defined in
+[`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md). Optional unnamed page situations, when
+a machine has Host plus Agent, are in
+[`ADOPTION_ACCEPTANCE.md`](ADOPTION_ACCEPTANCE.md); Host status remains context,
+not a verdict. Select affected risks and evidence using
 [`REVIEW_CONTRACT.md`](REVIEW_CONTRACT.md). CI or cross-compilation cannot
 establish physical-device runtime or owner acceptance.

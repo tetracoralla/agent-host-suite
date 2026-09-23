@@ -391,6 +391,8 @@ test('the installed tool working set changes Codex exposure without removing pac
   assert.equal(state.components['migratory-time'] !== undefined, true)
   const tools = await toolSetStatus({ stateRoot })
   assert.deepEqual(tools.inactiveAgentComponents, ['migratory-time'])
+  assert.equal(tools.tools.find((item) => item.id === 'migratory-time').exposure, 'inactive')
+  assert.equal(tools.tools.find((item) => item.id === 'migratory-time').onDemandAvailable, false)
   assert.equal(tools.tools.find((item) => item.id === 'math-anchor').active, true)
   assert.match(tools.assessmentBoundary, /not Agent-app cache verification/u)
   assert.equal(tools.freshSession.currentSessionUptake, 'not-observed')
@@ -538,7 +540,7 @@ test('failed native configuration activation and compensation retain recovery ow
   assert.deepEqual(recovered.hosts, before.hosts)
 })
 
-test('an empty working set from the developer default stays on-demand instead of fully paused', async (t) => {
+test('an empty working set does not claim on-demand support for Providers without a CLI Skill', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-empty-ondemand-workspace-'))
   const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-empty-ondemand-state-'))
   t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(stateRoot, { recursive: true, force: true })]))
@@ -550,7 +552,7 @@ test('an empty working set from the developer default stays on-demand instead of
   assert.equal(emptied.paused, false)
   assert.deepEqual(emptied.activeAgentComponents, [])
   assert.equal(emptied.exposure, 'working-set')
-  assert.equal(emptied.tools.every((tool) => tool.exposure === 'on-demand'), true)
+  assert.equal(emptied.tools.every((tool) => tool.exposure === 'inactive'), true)
   const paths = await prepareStatePaths(stateRoot)
   const state = await loadState(paths)
   assert.equal(state.agentToolsPaused, undefined)

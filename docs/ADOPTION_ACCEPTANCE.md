@@ -1,89 +1,59 @@
-# Unnamed adoption acceptance
+# Unnamed capability exercise
 
-This is a protocol for a machine that already has Agent Host, a bound featured
-install, and a supported Agent app. It is not a claim that adoption already
-happened.
+This optional exercise helps a person explore whether an Agent notices and
+uses an installed capability on an ordinary task without being told its product
+name. It is not an acceptance gate, a universal adoption score, or a requirement
+for using Agent Host. A user or their selected Agent may run it, adapt it to a
+more relevant task, interpret the observations differently, or ignore it.
 
-This source checkout, and the Linux construction box that prepared it, did **not** complete live unnamed adoption. There is no macOS Host GUI or full
-Agent session here to score. A person with Host plus Agent follows the
-checklist below and records pass or fail.
+This checkout does not claim a completed live exercise. A source build, Host
+status, or observation count cannot decide what an Agent understood or whether
+the resulting work was useful. The participant inspects the task and work
+product, then owns any conclusion they choose to draw.
 
-Host `status`, `tools status`, `doctor`, `doctor --featured-readiness`,
-Manager copy, and observation / usage counts are not adoption evidence.
-They can only show Host user-level readiness (required tools, connection,
-projection receipts) and a separate recipe-consistency check. A **fresh Agent task** after the current bindings is required.
+## Keep the layers separate
 
-Do not patch Codex, Claude Code, ZCode, or another Agent app. Do not attach
-this document, [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md), Armorial source,
-or any “please use Armorial” instruction to the task.
+| Layer | What it can say | What it cannot say |
+| --- | --- | --- |
+| Host readiness | The selected tools, connection, and projection appear ready for a new task. | That a session discovered, chose, or benefited from a tool. |
+| Session observation | A supported Provider record contains a direct call, an error, or only a static reference. | Why the Agent chose it, whether the result entered the work, or whether another route was better. |
+| Work product | The requested icons are visible and the page still serves its brief. | Which tool caused them unless the task record and artifact establish that link. |
+| Participant interpretation | What this task means for this participant's current decision. | A permanent verdict for other Agents, tasks, owners, or future versions. |
 
-## What “adoption” means here
+Host `status`, `tools status`, `doctor`, `doctor --featured-readiness`, Manager
+copy, and observation counts are not adoption evidence. They remain useful
+context. Observer may also preserve bounded Provider-reported context when it
+exists, but neither requires it nor turns it into a Host judgment.
 
-Adoption is the Agent, on a realistic page task that never names Armorial,
-choosing that installed icon tool and leaving icons **in the work product**.
+Do not patch Codex, Claude Code, ZCode, or another Agent app. If the purpose is
+to explore unprompted discovery, do not attach this document,
+[`FEATURED_CATALOG.md`](FEATURED_CATALOG.md), Armorial source, or a “please use
+Armorial” instruction to the task.
 
-| This is adoption | This is not adoption |
-| --- | --- |
-| A fresh session, unnamed prompt, icons visible in the delivered HTML/SVG | Host working-set `active`, doctor OK, or a healthy projection receipt |
-| Session used Armorial MCP tools or the managed `scripts/armorial` launcher | Historical call counts, offered-tool lists, or Skill path existence |
-| Result compared with Lucide or hand-drawn geometry on the same page | An old session that still holds a previous catalog |
-| Operator judged the page, not the CLI | A prompt that names Armorial, IconPark, or “use the icon tool” |
+## Host context, when relevant
 
-Discovery (session loaded Skill/MCP) is a prerequisite. It is still not
-adoption. See [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md).
+On a machine with Agent Host, a bound featured install, and a supported Agent
+app, this command can check the Host side:
 
-## Preconditions (Host only)
+```text
+agent-host doctor --featured-readiness --json
+```
 
-On the machine that will run the Agent:
+Its `status` / `userStatus` covers required tools, connection, and projection.
+`recipe.consistency` separately records the working set as an experimental
+variable. A `local-dogfood` profile name is not itself a user-level failure,
+and the report always sets `adoptionEvidence` to `false`.
 
-1. Install a **bound** featured environment and select the featured working
-   set. There is no GitHub Release asset in this checkout; use an
-   owner-issued bound catalog or `AGENT_HOST_FEATURED_CATALOG_URL`. See
-   [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md) and
-   [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md).
+If the Host result is warning or error, record that limitation. Repair it when
+the question depends on current projection, or continue if the participant is
+deliberately studying the failure. Do not convert readiness into a task verdict.
+When bindings changed, use a **fresh Agent task** because an already-open task
+may retain its earlier catalog.
 
-   ```text
-   agent-host profiles list --json
-   agent-host setup --profile featured --host zcode --release-manifest /absolute/current.json
-   agent-host tools set --profile featured
-   ```
+## Runnable page situations
 
-   `zcode` is an example. Use the Agent app you will actually task. Codex and
-   Claude Code are the other public adapters.
-
-2. Confirm Host precondition only:
-
-   ```text
-   agent-host doctor --featured-readiness --json
-   ```
-
-   User-level `status` / `userStatus` is tools, permissions, connection, and
-   projection for the target task. It does not fail only because `profile` is
-   `local-dogfood`. `recipe.consistency` is a separate check that the featured
-   working set is selected. This report always sets `adoptionEvidence` to
-   `false` and `userStatus` is not natural model choice.
-
-   Unnamed adoption scoring requires JSON `status` / `userStatus` equal to
-   `ok`. `recipe.consistency` records the working set as an experimental variable
-   and is **not** a scoring gate. Extra installed tools, monitoring
-   off, and a `local-dogfood` profile name do not exclude a healthy Armorial
-   projection. `--skip-agent-apps` yields at most `warning` and is **not** a
-   protocol pass: receipts were not inspected. `--deep` is rejected; this
-   route does not probe Direct Runtime or pretend to judge the Agent.
-
-3. If bindings just changed, or `restartRequired` is set, start a **fresh
-   Agent task**. Do not reuse a thread that began before the current
-   projection.
-
-If user-level `status` is not `ok`, stop: required tools, connection, or
-projection receipts are not ready. Record `recipe.consistency` detail
-(profile name and working set) with the score; do not ask the operator to
-delete other healthy tools first.
-
-## Workspace rule
-
-Copy **one** task folder out of this repository into a workspace that does
-**not** contain Agent Host docs, Armorial source, or this protocol:
+Copy one fixture out of this repository into a workspace that does not contain
+Agent Host docs, Armorial source, or this exercise:
 
 ```text
 docs/fixtures/adoption/ops-console/
@@ -91,154 +61,85 @@ docs/fixtures/adoption/settings/
 docs/fixtures/adoption/library/
 ```
 
-Each folder is a self-contained unfinished page plus a paste-ready `brief.md`.
-The briefs and HTML never name Armorial, Lucide, or IconPark. Do not add such
-names. Do not point the Agent at this file.
+Each folder contains an unfinished page and a paste-ready `brief.md`. The brief
+does not name an icon product. Open a new Agent task and use that brief as the
+first message. The Agent edits `index.html` in the copied folder.
 
-Open a **new** Agent task. Paste that folder’s `brief.md` as the entire first
-message. The Agent should edit `index.html` in that copied folder.
+The three fixtures cover different icon situations:
 
-Run one unnamed task per session. Do not batch all three into one thread.
+- **North Pier ops console** — navigation, toolbar, status, and empty-state
+  placeholders share one operational chrome.
+- **North Pier berth settings** — object icons and primary or destructive
+  actions coexist in one settings page.
+- **North Pier harbor library** — empty-state art, actions, and row type marks
+  need a coherent visual family.
 
-## Tasks
+These are examples, not a quota. One relevant task can answer a narrow question;
+several different tasks can expose variation. A participant may substitute a
+task from their own ecosystem when it is safe to share with the chosen Agent.
 
-These are ordinary product-page jobs. The pass bar is icons in the page, then
-whether the Agent chose Armorial without being told to.
+## Observe while acting
 
-### 1. North Pier ops console
+1. Let the Agent work normally. Do not stop it to complete a protocol form.
+2. Open the delivered page and inspect whether the requested result is visible,
+   usable, and still faithful to the brief.
+3. If monitoring was already enabled, the Manager Task activity card or
+   `observability task-sources` can show direct calls, errors, and static
+   references. `observability export-task` can export bounded metadata for one
+   selected task. Monitoring is optional and must not be enabled merely to make
+   this exercise valid.
+4. Record only the facts needed for the participant's decision. Add an
+   interpretation if useful, and identify who made it.
 
-- Fixture: [`fixtures/adoption/ops-console/`](fixtures/adoption/ops-console/)
-- Work: navigation, toolbar, status chips, and the empty-state slot still
-  have dashed placeholder squares.
-- Why it is a real task: a night desk cannot ship a wireframe. Several icon
-  consumers share one chrome.
+Do not make one observation do the work of another:
 
-### 2. North Pier berth settings
+- A direct call shows execution, not that its result entered the artifact.
+- A tool name inside nested input is a static reference, not execution.
+- A finished page does not by itself identify the source of its icons.
+- No observed call does not reveal the Agent's reason or prove the capability
+  was absent from its context.
+- One successful or unsuccessful task does not settle all future tasks.
 
-- Fixture: [`fixtures/adoption/settings/`](fixtures/adoption/settings/)
-- Work: section headers and primary/destructive actions still lack icons.
-- Why it is a real task: settings pages mix object icons (billing, members)
-  with action icons (rotate a key, remove a berth).
+## Optional comparison
 
-### 3. North Pier harbor library
+When the participant is deciding between concrete routes, copy the original
+fixture again and run a separate control session. It may name an alternative,
+such as Lucide or hand-drawn SVG. Compare the rendered pages and the effort that
+mattered in this situation: semantic fit, visual consistency, geometry,
+retries, repairability, and context burden.
 
-- Fixture: [`fixtures/adoption/library/`](fixtures/adoption/library/)
-- Work: empty-state art, two actions, and sample row type marks are missing.
-- Why it is a real task: empty states fail when the picture is a box, and
-  list rows need durable type icons, not one-off doodles.
+This comparison is optional. It is a local judgment about those artifacts, not
+a Host metric or a claim that every participant should make the same choice.
 
-Two tasks are enough to score. Three is better if time allows. Do not skip
-the fresh-session rule to go faster.
+## Small factual note
 
-## Scoring
-
-Score **task outcome** and **adoption outcome** separately.
-
-### Task outcome (icons entered the work)
-
-Pass only if all of these hold:
-
-- The delivered `index.html` (and any SVG it references) is in the copied
-  workspace.
-- Placeholder `.icon-slot` squares are gone from the consumers the brief
-  named.
-- Icons are visible in the page (open the file in a browser). Chat-only SVG
-  dumps or “here is an icon you could use” do not count.
-- Layout, copy, and colors from the fixture remain; this is not a redesign.
-
-Fail the task if placeholders remain, icons are only discussed, or the page
-was replaced with a different product.
-
-### Adoption outcome (unnamed Armorial use)
-
-Pass only if the task passed **and** all of these hold:
-
-- The first user message did not name Armorial, IconPark, Lucide, or a
-  specific icon product, and did not say “use the installed icon tool”.
-- The workspace did not contain this protocol or Armorial source.
-- The session started after the current Host bindings.
-- The transcript shows Armorial MCP tools (`resolve_icon`, `search_icons`,
-  `get_icon`, `get_icons`, `choose_icon`) and/or the managed
-  `scripts/armorial` launcher supplying those icons.
-
-Fail adoption if the Agent used Lucide (or another icon corpus), emoji,
-CSS shapes, or model-authored path data **instead of** Armorial, even when
-the page looks finished. That is a task pass and an adoption fail.
-
-A named “please use Armorial” run can still be useful as a control. It is
-not unnamed adoption.
-
-### Host surfaces (never a pass)
-
-Do not record adoption from:
-
-- `agent-host status` / Manager “selected” / working-set `active`
-- `agent-host doctor` or `doctor --featured-readiness`
-- `host status` identity match or `cacheStatus: matched`
-- `usage` historical calls, offered-tool inventories, or Observer counts
-
-Those facts belong in the precondition column of the scorecard only.
-
-## Comparison with Lucide or hand-drawn icons
-
-Adoption is not only “did a tool run”. Compare **steps** and **quality**
-with the obvious alternatives on the **same** fixture.
-
-1. Keep the unnamed session’s delivered page.
-2. Copy the original fixture again into a second workspace.
-3. Start another **new** session. This control **may** name the alternative,
-   for example “use Lucide icons” or “draw the SVG yourself; do not call an
-   icon service”.
-4. Record, for unnamed vs control:
-
-   | Axis | What to write down |
-   | --- | --- |
-   | Steps | How many tool/file turns until icons were in the page; retries; dead ends |
-   | Fidelity | Did icons match the labeled action, or only the old placeholder shape? |
-   | Consistency | One family and stroke across nav, actions, and empty state, or a mix? |
-   | Geometry | Catalog strokes vs model-authored paths vs emoji |
-   | Cost | Rough turn count and whether SVG dumps filled the context |
-
-The comparison is operator judgment on that pair of pages. It is not a Host
-metric and not a claim about all future tasks.
-
-If the unnamed session already chose Lucide or hand-drew, that session is
-the alternative. A named-Armorial control on a third copy is optional and
-still not unnamed adoption.
-
-## Scorecard
-
-Copy this block per task. Fill it on the Host+Agent machine. Do not commit
-machine paths, transcripts, or secrets to this repository unless the owner
-asks for a redacted note.
+Use as much or as little of this note as the decision needs. Do not commit local
+paths, transcripts, or secrets.
 
 ```text
-Task: ops-console | settings | library
-Date:
-Agent app: zcode | codex | claude
-Fresh session after current bindings: yes | no
-doctor --featured-readiness status: ok | warning | error
-  (warning/error: do not score adoption)
-Prompt named Armorial/Lucide/IconPark: yes | no
-Workspace was a copy without Host/Armorial docs: yes | no
+Situation:
+Date and Agent app:
+Fresh task after the relevant bindings: yes | no | unknown
+Prompt named an icon product: yes | no
+Host readiness context: ok | warning | error | not checked
 
-Task outcome (icons in the page): pass | fail
-Adoption outcome (unnamed Armorial): pass | fail | not-scored
-Icon source actually used: armorial | lucide | hand-drawn | emoji/css | mixed | unknown
-Evidence for source (tool names or files, no secrets):
-Host status/counts used as adoption proof: yes | no  (yes => invalid)
+Work product: completed | partial | not completed
+What is visibly present:
+Direct tool observations:
+Static references (if any):
+Errors or missing coverage:
+Source-reported context (optional, if available):
+Artifact link between tool output and final work: established | not established | unknown
 
-Lucide or hand-drawn comparison (optional control session):
-  Control named: lucide | hand-drawn | named-armorial | none
-  Steps (unnamed vs control):
-  Quality (unnamed vs control):
-
-Notes:
+Optional comparison:
+Participant interpretation (optional):
+Interpretation by: owner | developer | selected Agent | other
+Decision or next experiment (optional):
 ```
 
-A protocol run is complete when at least two tasks have a task outcome and
-an adoption outcome, or an explicit fail at preconditions. “Should adopt”
-without a scorecard is not a result.
+A useful note can end with uncertainty. The exercise is complete when the
+participant has enough information for the decision they are actually making,
+not when a fixed number of tasks or fields has been filled.
 
 ## Related Host facts
 
@@ -246,5 +147,5 @@ without a scorecard is not a result.
   [`FEATURED_CATALOG.md`](FEATURED_CATALOG.md)
 - Working set vs session Skill/MCP paths:
   [`DISCOVERY_PROJECTION.md`](DISCOVERY_PROJECTION.md)
-- Observation counts are not adoption:
+- Neutral task activity and observation limits:
   [`TRACE_PLANE.md`](TRACE_PLANE.md)

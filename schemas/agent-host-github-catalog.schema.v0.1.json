@@ -29,6 +29,7 @@
           "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
           "featured": { "type": "boolean" },
           "presentation": { "type": "object" },
+          "source": {"type": "object", "additionalProperties": false, "required": ["kind", "commit", "pluginPath"], "properties": {"kind": {"const": "repository-plugin"}, "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "pluginPath": {"type": "string", "minLength": 1}}},
           "platforms": {
             "type": "object",
             "minProperties": 1,
