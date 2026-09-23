@@ -6,7 +6,7 @@ import { fingerprintRelativeFiles } from '../development-manifest.mjs'
 import { AgentHostError } from '../errors.mjs'
 import { writePrivateJson } from '../json.mjs'
 import { canonicalPathGrants, componentEnvironment } from '../component-environment.mjs'
-import { providerSkillEnvironment, skillLauncherScript } from '../skill-launcher.mjs'
+import { skillLauncherScript } from '../skill-launcher.mjs'
 
 const PROJECTION_SCHEMA = 'openadam.agent-host-codex-projection.v0.3'
 
@@ -105,7 +105,7 @@ function componentLauncherScript(component, workspaceRoot) {
   if (binding === null) return null
   return skillLauncherScript({
     ...binding,
-    environment: component.providerSkill === undefined ? {} : providerSkillEnvironment(component, workspaceRoot),
+    environment: component.providerSkill === undefined ? {} : componentEnvironment(component, workspaceRoot),
   })
 }
 

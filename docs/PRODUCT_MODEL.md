@@ -193,7 +193,10 @@ merely because they exercise typed boundaries.
 
 Installed inventory and active Agent-visible tools are separate. An inactive
 Provider may retain an immutable Skill and direct launcher without contributing
-MCP schemas to the current Agent catalog (`on-demand`). `tools pause` fully
+MCP schemas to the current Agent catalog (`on-demand`). Without that declared
+CLI Skill it is `inactive`: enable its MCP entrypoints before opening a new
+Agent task. Status and both Managers derive that distinction from the installed
+component, never from the toggle alone. `tools pause` fully
 pauses ordinary tools: new tasks get neither MCP nor those Skills, while a
 Developer Kit Skill, if installed, remains. `tools resume` restores the
 previous working set. Pause, host connect/disconnect, monitoring consent, and

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { AgentHostError } from './errors.mjs'
 import { fetchGitHubRelease } from './github-api.mjs'
 import { currentReleasePlatform } from './release-manifest.mjs'
+import { validateRepositoryPlugin } from './repository-plugin.mjs'
 
 export const GITHUB_TOOLS_SCHEMA = 'openadam.agent-host-github-tools.v0.1'
 export const GITHUB_CATALOG_SCHEMA = 'openadam.agent-host-github-catalog.v0.1'
@@ -36,7 +37,7 @@ export async function loadGitHubToolRegistry() {
   if (!Array.isArray(value.tools)) fail('GITHUB_REGISTRY_INVALID', 'GitHub tool registry tools must be an array')
   const ids = new Set()
   const tools = value.tools.map((tool) => {
-    exactKeys(tool, ['id', 'repository', 'featured', 'assetName', 'checksumAssetName', 'platforms'], 'GitHub tool registration')
+    exactKeys(tool, ['id', 'repository', 'featured', 'assetName', 'checksumAssetName', 'platforms', 'source'], 'GitHub tool registration')
     if (typeof tool.id !== 'string' || !/^[a-z][a-z0-9-]*$/u.test(tool.id) || ids.has(tool.id)) {
       fail('GITHUB_REGISTRY_INVALID', 'GitHub tool registration ids must be unique')
     }
@@ -50,6 +51,7 @@ export function parseGitHubToolCatalog(value) {
   exactKeys(value, ['schemaVersion', 'catalogId', 'createdAt', 'channel', 'incompletePlatforms', 'tools'], 'GitHub tool catalog')
   if (value.schemaVersion !== GITHUB_CATALOG_SCHEMA) fail('GITHUB_CATALOG_INVALID', 'Unsupported GitHub tool catalog schema')
   if (!Array.isArray(value.tools)) fail('GITHUB_CATALOG_INVALID', 'GitHub tool catalog tools must be an array')
+  for (const entry of value.tools) if (entry.source !== undefined) validateRepositoryPlugin(entry)
   return value
 }
 
@@ -132,7 +134,11 @@ export async function loadGitHubToolCatalog(options = {}) {
       signal: options.signal,
     })
     if (typeof options.onFetched === 'function') await options.onFetched(live)
-    return live.catalog
+    // A previously published catalog may predate repository-plugin support.
+    // Keep bundled exact source pins missing from that older catalog.
+    const ids = new Set(live.catalog.tools.map((tool) => tool.id))
+    return { ...live.catalog, tools: [...live.catalog.tools,
+      ...bundled.tools.filter((tool) => tool.source?.kind === 'repository-plugin' && !ids.has(tool.id))] }
   } catch {
     if (options.fallbackCatalog !== undefined && options.fallbackCatalog !== null) return options.fallbackCatalog
     return bundled

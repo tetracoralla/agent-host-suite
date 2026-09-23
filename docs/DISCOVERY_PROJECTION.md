@@ -67,13 +67,16 @@ These surfaces are different facts:
 | --- | --- | --- |
 | `agent-host status` | Installed Host state, working set, recorded host entries | Agent-app caches, Skill paths, MCP catalogs, open sessions |
 | `agent-host tools status` | Host working-set membership (`active`) | Agent-app enablement or session uptake |
+| `tools inventory` | Host inventory plus public user-level plugins/MCP entries, including independent installations | Project-scoped configuration, entrypoint health, current-session uptake |
 | Manager refresh / `--quick` host status | App present on PATH; doctor `--deep --skip-agent-apps` | Codex/Claude/ZCode bindings |
 | `host status` without `--quick`, `doctor --deep` without `--skip-agent-apps` | Public `plugin list` plus Host receipt/live cache identity | Whether an **already open** session loaded those bytes |
 | A live Agent task | Whatever that session resolved at start | Host working-set intent |
 
 `hostFacingManifest` sets `skillOnly: false` only for components in the active
 working set. Inactive discovery Providers stay Skill-only (`on-demand`) unless
-the working set is fully paused. `tools pause` omits those ordinary Skills from
+the working set is fully paused. Providers without that discovery declaration
+are `inactive`, with an explicit enable action; they have no retained callable
+Skill. `tools pause` omits those ordinary Skills from
 the Host-facing manifest; Developer Kit Skills remain. Codex then materializes
 a new digest and, when the projection identity changed, a new marketplace and
 `plugin add`. Host state can show

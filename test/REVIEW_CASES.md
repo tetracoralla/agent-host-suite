@@ -233,6 +233,13 @@ before package or host mutation.
 
 Start with [codex-projection.test.mjs](codex-projection.test.mjs), [codex-config.test.mjs](codex-config.test.mjs), [developer-kit-skill.test.mjs](developer-kit-skill.test.mjs). For Provider CLI grant propagation, run [provider-skill-execution.test.mjs](provider-skill-execution.test.mjs) and [provider-skill-lifecycle.test.mjs](provider-skill-lifecycle.test.mjs): these execute generated launchers, retain the caller cwd, change the authorized root, and inject a failed state commit.
 
+[provider-grant-probes.test.mjs](provider-grant-probes.test.mjs) starts real
+Providers through catalog admission, health, export, doctor and monitoring;
+missing authority must not become a package-cwd grant. Lifecycle coverage also
+checks that Claude/ZCode on-demand Skills do not retain an active MCP binding
+or lose ownership, and that adding an app with a changed shared grant updates
+existing consumers atomically.
+
 Host projections contain identity and invocation
 only, never provider runtime. Workspace-dependent tools require one explicit
 absolute grant whose variables all bind to that canonical root. Package-backed

@@ -49,6 +49,9 @@ export function parseGitHubResource(value) {
     kind = 'asset'
   } else if (parts[2] === 'releases' && (parts[3] === undefined || parts[3] === 'latest')) {
     kind = 'releases'
+  } else if (parts[2] === 'tree' && typeof parts[3] === 'string') {
+    tag = decodeURIComponent(parts[3])
+    kind = 'repository-revision'
   } else if (parts.length > 2 && parts[2] !== 'tree' && parts[2] !== 'blob') {
     fail('GITHUB_URL_INVALID', 'The GitHub URL is not a repository, Release, or Release asset')
   }

@@ -1,14 +1,16 @@
-# Featured catalog v1
+# Featured profile and tool browsing
 
 A featured catalog is an owner-selected, version-locked subset of independently
 released Agent tools that already have a closed tool-integration record in a
 **bound** compatibility release. It is a Host admission list, not a public marketplace,
 store, ranking, review, payment, or third-party plugin index.
 
-This source checkout does not operate a catalog service and does not ship a
-browseable store. v1 is the named `featured` profile plus `profiles list` /
+The bundled installation route is the named `featured` profile plus `profiles list` /
 `setup --profile featured` / `update --profile featured` over the installation
-APIs that already exist. Browser and native Managers use those same APIs.
+APIs that already exist. Browser and native Managers use those same APIs for the featured bundle.
+Their Browse pages also read `tools browse`: individually admitted GitHub
+plugins use their own preview and install action, rather than reinstalling the
+featured bundle. The browseable inventory is not limited to that default bundle.
 `tools set --profile` only selects the working set of **already installed**
 tools; it does not fetch Armorial or other missing inventory.
 
@@ -35,15 +37,13 @@ that a repository is compatible merely because it exists. A GitHub URL must
 pass compatibility preview before **Add** becomes available. It also does not
 promise that a selected tool is loaded in an already open session.
 
-## External path without a public Release
+## Distributing a bound installation
 
-This checkout has no GitHub Release assets and no Apple-notarized DMG. Apple
-Developer ID signing is not part of this product. Strangers download an
-**unsigned** macOS DMG or Windows ZIP from a published GitHub Release or a
-self-hosted HTTPS URL, then open it with Gatekeeper / SmartScreen as documented
-in [`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md). Until an owner publishes those
-assets, Host reports **public download is not configured** instead of pretending
-there is a store.
+The unsigned preview route uses a macOS DMG or Windows ZIP from a published
+GitHub Release or a self-hosted HTTPS URL, as documented in
+[`UNSIGNED_PREVIEW.md`](UNSIGNED_PREVIEW.md). A source checkout is not evidence
+that an external download is available. Host resolves the configured published
+index and reports when a compatible download is unavailable.
 
 Obtain a **bound** compatibility catalog (manifest, artifacts, and
 `build-provenance.json`) from that Release index or another owner-issued

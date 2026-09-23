@@ -52,6 +52,8 @@ struct ToolRow: View {
     let state: ManagedItemState?
     var updateAvailable = false
     var paused = false
+    var onDemandAvailable = false
+    var platformUnavailable = false
     let open: () -> Void
     @State private var hovered = false
 
@@ -64,7 +66,7 @@ struct ToolRow: View {
                     Text(L10n.text(summary)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                ToolStateSymbol(state: state, updateAvailable: updateAvailable, paused: paused)
+                ToolStateSymbol(state: state, updateAvailable: updateAvailable, paused: paused, onDemandAvailable: onDemandAvailable, platformUnavailable: platformUnavailable)
             }
             .padding(.vertical, 17).padding(.horizontal, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -84,10 +86,13 @@ struct ToolStateSymbol: View {
     let state: ManagedItemState?
     var updateAvailable = false
     var paused = false
-    private var label: String { paused ? "Paused" : updateAvailable ? "Update available" : state == .inactive ? "On-demand" : (state?.label ?? "Available to install") }
+    var onDemandAvailable = false
+    var platformUnavailable = false
+    private var label: String { paused ? "Paused" : updateAvailable ? "Update available" : platformUnavailable ? "No asset for this platform" : state == .inactive ? (onDemandAvailable ? "On-demand" : "Enable to use") : (state?.label ?? "Available to install") }
     private var symbol: String {
         if paused { return "pause" }
         if updateAvailable { return "arrow.up.circle.fill" }
+        if platformUnavailable { return "xmark.circle" }
         switch state {
         case .ready: return "checkmark"
         case .attention: return "exclamationmark.triangle.fill"
@@ -114,6 +119,7 @@ struct ToolDetailView: View {
     @State private var taskDraft = ""
     @State private var copied = false
     @State private var confirmingPause = false
+    @State private var importingGitHub = false
     @FocusState private var backFocused: Bool
 
     private var installed: ManagedTool? { store.managedTools.first { $0.id == toolID } }
@@ -153,6 +159,9 @@ struct ToolDetailView: View {
                         Label(L10n.text("All tools are paused."), systemImage: "pause.circle")
                             .foregroundStyle(.secondary)
                     }
+                } else if !store.catalogToolAvailable(toolID) {
+                    Label(L10n.text("No asset for this platform"), systemImage: "xmark.circle")
+                        .foregroundStyle(.secondary)
                 }
                 if catalog?.examplePrompt != nil {
                     VStack(alignment: .leading, spacing: 12) {
@@ -184,7 +193,7 @@ struct ToolDetailView: View {
                         ))
                         .toggleStyle(.switch)
                         .disabled(store.isBusy || paused)
-                        .help(L10n.text("Off keeps an on-demand Skill. Pause all withholds both."))
+                        .help(L10n.text(installed.onDemandAvailable ? "Off keeps an on-demand Skill. Pause all withholds both." : "Enable this tool, then start a fresh Agent task to use it."))
                         if let version = installed.version {
                             LabeledContent(L10n.text("Version")) { Text(version).textSelection(.enabled) }
                                 .foregroundStyle(.secondary)
@@ -221,7 +230,12 @@ struct ToolDetailView: View {
     }
 
     @ViewBuilder private var primaryAction: some View {
-        if installed == nil, catalog != nil {
+        if installed == nil, let catalog, !ManagerSetupPolicy.featuredToolIDs.contains(toolID), let repository = catalog.repositoryURL {
+            Button(L10n.text("Add from GitHub")) { importingGitHub = true }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.isBusy || !store.catalogToolAvailable(toolID))
+                .sheet(isPresented: $importingGitHub) { GitHubToolImportView(store: store, initialURL: repository) }
+        } else if installed == nil, catalog != nil {
             // Installs the whole admitted featured set; the preflight plan
             // discloses exactly which tools that adds.
             Button(L10n.text("Install featured tools")) {
@@ -233,6 +247,9 @@ struct ToolDetailView: View {
             .buttonStyle(.borderedProminent).disabled(store.isBusy)
         } else if paused {
             Button(L10n.text("Resume tools")) { Task { await store.resumeTools() } }
+                .buttonStyle(.borderedProminent).disabled(store.isBusy)
+        } else if let installed, !installed.active && !installed.onDemandAvailable {
+            Button(L10n.text("Enable to use")) { Task { await store.setTool(toolID, active: true) } }
                 .buttonStyle(.borderedProminent).disabled(store.isBusy)
         } else if catalog?.examplePrompt != nil, installed != nil {
             Button(L10n.text("Use in Agent")) { copied = store.beginExampleTask(taskDraft) }

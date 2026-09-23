@@ -13,12 +13,21 @@ these product commands, not a development checkout or private database query.
 
 - `usage --json`: tool activity, Agent-reported Tokens, runtime failures,
   version history, and coverage. This is the primary route for reviewing whether
-  installed tools are being used and how observed execution behaves.
+  Host-managed tools are being used and how observed execution behaves.
+  For independently installed tools, use `usage --all-tools --json`; use
+  `--tool NAME` to select a tool-name substring or exact Host component id.
+  Check `toolScope.available`: an older snapshot without this scope is missing
+  evidence, not zero usage. An unmapped tool is not proof of installation ownership.
 - `snapshot --json`: environment, active tools, storage, lifecycle, collection
   health and compact historical activity.
 - `doctor --json`: current executable health; add `--deep` when actual provider
   readiness matters. These are diagnostic executions, not ordinary Agent tasks.
 - `tools status --json`: active versus installed inventory.
+  `on-demand` requires a retained callable Skill; `inactive` requires enabling
+  MCP and starting a fresh task. The Host inventory excludes independent installs.
+- `tools inventory --json`: compare that inventory with public Codex plugin
+  and Claude/ZCode user-level MCP configuration, including independent entries.
+  Configuration presence is not runtime readiness or current-session discovery.
 - `activity --json`: bounded environment lifecycle events.
 - `observability status --json`: a named detail missing from the compact report.
   Select the needed fields before returning it to context. Follow gaps that are

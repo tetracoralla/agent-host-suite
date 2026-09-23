@@ -106,6 +106,29 @@ test('ZCode uninstall preserves a binding changed by the user after installation
   assert.deepEqual((await readConfig(item.configPath)).mcp.servers['math-anchor'], changed.mcp.servers['math-anchor'])
 })
 
+test('ZCode later edits block rebind and suspension; explicit replacement restores the latest edit', async (t) => {
+  const item = await fixture()
+  t.after(() => rm(item.root, { recursive: true, force: true }))
+  const options = { configPath: item.configPath, executable: process.execPath, workspaceRoot: item.workspaceRoot }
+  const installed = await installZcode(item.manifest, item.runner, null, { ...options, replaceConflicts: true })
+  const changed = await readConfig(item.configPath)
+  // Even an additional user field must not be silently discarded by a grant
+  // rebind, on-demand transition, or uninstall.
+  changed.mcp.servers['math-anchor'].userNote = 'keep my customization'
+  await writeFile(item.configPath, JSON.stringify(changed))
+  const before = await readFile(item.configPath, 'utf8')
+  await assert.rejects(installZcode(item.manifest, item.runner, installed, options), { code: 'ZCODE_MCP_CHANGED' })
+  await assert.rejects(suspendZcode(installed), { code: 'ZCODE_MCP_CHANGED' })
+  assert.equal(await readFile(item.configPath, 'utf8'), before)
+  const removed = await uninstallZcode(installed)
+  assert.equal(removed.removed[0].status, 'preserved-user-change')
+  assert.deepEqual(await readConfig(item.configPath), changed)
+  const replaced = await installZcode(item.manifest, item.runner, installed, { ...options, replaceConflicts: true })
+  assert.deepEqual(replaced.entries[0].displaced, changed.mcp.servers['math-anchor'])
+  await uninstallZcode(replaced)
+  assert.deepEqual(await readConfig(item.configPath), changed)
+})
+
 test('ZCode uninstall completes without recreating a user-removed configuration file', async (t) => {
   const item = await fixture()
   t.after(() => rm(item.root, { recursive: true, force: true }))
@@ -153,4 +176,38 @@ test('ZCode suspension removes an owned active tool while inspection stays read-
   assert.equal(await readFile(item.configPath, 'utf8'), before)
   await suspendZcode(installed)
   assert.equal((await readConfig(item.configPath)).mcp.servers['math-anchor'], undefined)
+})
+
+test('ZCode recognizes independent underscore names and restores them after suspension', async (t) => {
+  const item = await fixture()
+  t.after(() => rm(item.root, { recursive: true, force: true }))
+  const config = await readConfig(item.configPath)
+  config.mcp.servers.math_anchor = config.mcp.servers['math-anchor']
+  delete config.mcp.servers['math-anchor']
+  await writeFile(item.configPath, JSON.stringify(config))
+  const options = { configPath: item.configPath, executable: process.execPath, workspaceRoot: item.workspaceRoot }
+  await assert.rejects(installZcode(item.manifest, item.runner, null, options), { code: 'ZCODE_MCP_CONFLICT' })
+  assert.deepEqual(await readConfig(item.configPath), config)
+  const installed = await installZcode(item.manifest, item.runner, null, { ...options, replaceConflicts: true })
+  assert.equal(installed.entries[0].name, 'math_anchor')
+  assert.equal((await readConfig(item.configPath)).mcp.servers['math-anchor'], undefined)
+  await suspendZcode(installed)
+  assert.equal((await readConfig(item.configPath)).mcp.servers.math_anchor, undefined)
+  const resumed = await installZcode(item.manifest, item.runner, installed, options)
+  assert.equal(resumed.entries[0].name, 'math_anchor')
+  await suspendZcode(resumed)
+  await uninstallZcode({ ...resumed, inactiveEntries: resumed.entries })
+  assert.deepEqual(await readConfig(item.configPath), config)
+})
+
+test('ZCode refuses ambiguous aliases without changing either entry', async (t) => {
+  const item = await fixture()
+  t.after(() => rm(item.root, { recursive: true, force: true }))
+  const config = await readConfig(item.configPath)
+  config.mcp.servers.math_anchor = { ...item.previous, enabled: false }
+  await writeFile(item.configPath, JSON.stringify(config))
+  await assert.rejects(installZcode(item.manifest, item.runner, null, {
+    configPath: item.configPath, executable: process.execPath, workspaceRoot: item.workspaceRoot, replaceConflicts: true,
+  }), { code: 'ZCODE_MCP_CONFLICT' })
+  assert.deepEqual(await readConfig(item.configPath), config)
 })

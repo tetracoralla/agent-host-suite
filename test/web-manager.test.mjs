@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
 import test from 'node:test'
 import { AgentHostError } from '../src/errors.mjs'
-import { buildDashboardGuidance, environmentActionInvalidatesDoctor, MANAGER_SETUP_PROFILES, startWebManager } from '../src/web-manager.mjs'
+import { buildDashboardGuidance, environmentActionInvalidatesDoctor, MANAGER_SETUP_PROFILES, managerDocument, startWebManager } from '../src/web-manager.mjs'
 import { loadState, prepareStatePaths, saveState, STATE_SCHEMA } from '../src/state.mjs'
 import { setup } from '../src/setup.mjs'
 import { compatibleApplicationState, createCodexRunner, createDevelopmentWorkspace, healthyCatalogPreflight } from './helpers.mjs'
@@ -38,7 +38,7 @@ test('local Manager pause and empty tool set are distinct from on-demand Skills'
   assert.match(page, /Resume tools/u)
   assert.match(renderTools, /All tools are paused\./u)
   assert.doesNotMatch(renderTools, /Off keeps an on-demand Skill/u)
-  assert.match(page, /label:'On-demand'/u)
+  assert.match(page, /exposure==='on-demand'\?'On-demand':'Enable to use'/u)
   assert.match(page, /pause:true/u)
   assert.match(page, /resume:true/u)
 })
@@ -1401,4 +1401,33 @@ test('tool details keep edited tasks across refresh and bind controls to current
   assert.equal(api.toolState('math-anchor').label, 'Paused')
   nodes.find(x => x.textContent === 'Resume tools').onclick()
   assert.deepEqual(actions.pop(), { action: 'tools', resume: true })
+  data.tools.paused = false; data.tools.activeAgentComponents = ['custom']
+  nodes.length = 0; api.renderToolDetail()
+  assert.equal(api.toolState('math-anchor').label, 'Enable to use')
+  assert.equal(nodes.some(x => x.textContent === 'Use in Agent'), false)
+  nodes.find(x => x.textContent === 'Enable to use').onclick()
+  assert.deepEqual(actions.pop(), { action: 'tools', tools: ['custom', 'math-anchor'] })
+})
+
+test('browser tool activation offers an explicit conflict retry and preserves the requested selection', async () => {
+  const page = managerDocument()
+  const source = page.match(/async function call\(action,label\)\{[\s\S]*?(?=\nasync function refresh\()/u)?.[0]
+  assert.ok(source)
+  const messages = [], requests = [], error = { children: [], append(...items) { this.children.push(...items) } }
+  const selected = { action: 'tools', tools: ['math-anchor', 'decision-table'] }
+  const api = new Function('fetch', '$', 'document', 'notice', 'button', 'el', `
+    let changing=false; const view={},busy=()=>{},t=x=>x;
+    ${source}
+    return call;
+  `)(async (_url, options) => {
+    requests.push(JSON.parse(options.body))
+    return { ok: false, json: async () => ({ error: { code: 'CLAUDE_MCP_CONFLICT', message: 'Existing connection' } }) }
+  }, selector => selector === '#error' ? error : null,
+  { activeElement: null, querySelectorAll: () => [] }, value => messages.push(value),
+  (label, onclick) => ({ label, onclick }), (_tag, text) => ({ text }))
+  await api(selected, 'Enable')
+  const retry = error.children.find(item => item.label === 'Take over existing connections')
+  assert.ok(retry, messages.at(-1))
+  await retry.onclick()
+  assert.deepEqual(requests, [selected, { ...selected, replaceHostConflicts: true }])
 })

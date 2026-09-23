@@ -68,7 +68,7 @@ struct ToolsView: View {
                             ToolRow(name: tool.name, summary: ToolPresentation.summary(tool.id, fallback: tool.summary),
                                     logo: tool.logo, systemImage: tool.systemImage, toolID: tool.id,
                                     state: store.suite?.agentToolsPaused == true ? .inactive : tool.state,
-                                    updateAvailable: store.updates?.items?.contains { $0.id == tool.id && $0.availability == "update-available" } == true, paused: store.suite?.agentToolsPaused == true) {
+                                    updateAvailable: store.updates?.items?.contains { $0.id == tool.id && $0.availability == "update-available" } == true, paused: store.suite?.agentToolsPaused == true, onDemandAvailable: tool.onDemandAvailable) {
                                 selectedID = tool.id
                             }
                             .focused($focusedID, equals: tool.id)
@@ -90,7 +90,7 @@ struct ToolsView: View {
                     LazyVGrid(columns: toolColumns, spacing: 0) {
                         ForEach(catalogMatches) { tool in
                             ToolRow(name: tool.name, summary: tool.summary, logo: nil, systemImage: tool.systemImage,
-                                    toolID: tool.id, state: nil) { selectedID = tool.id }
+                                    toolID: tool.id, state: nil, platformUnavailable: !store.catalogToolAvailable(tool.id)) { selectedID = tool.id }
                                 .focused($focusedID, equals: tool.id)
                         }
                     }

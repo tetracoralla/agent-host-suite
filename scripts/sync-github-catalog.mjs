@@ -16,6 +16,10 @@ let changed = false
 
 for (const tool of registry.tools) {
   const existing = current.tools.find((item) => item.id === tool.id)
+  if (tool.source?.kind === 'repository-plugin') {
+    if (existing !== undefined) tools.push(existing)
+    continue // Repository plugins advance only through a new inspected commit/digest pin.
+  }
   let release
   try {
     release = await fetchGitHubRelease(tool.repository, 'latest')

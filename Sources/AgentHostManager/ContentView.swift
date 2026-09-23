@@ -32,9 +32,18 @@ struct ContentView: View {
                     Task { await store.replaceConflictingHostConnection() }
                 }
             }
+            if case let .replaceToolSelection(arguments) = store.recovery {
+                Button(L10n.text("Take over existing connections")) {
+                    // Capture before the alert clears its presentation state.
+                    Task { await store.replaceConflictingToolSelection(arguments) }
+                }
+            }
             Button(L10n.text("OK"), role: .cancel) { store.dismissError() }
         } message: {
             Text(L10n.text(store.errorMessage ?? ""))
+            if case .replaceToolSelection = store.recovery {
+                Text(L10n.text("Previous connections are saved and restored when the tools are removed."))
+            }
         }
         .sheet(isPresented: $store.isPresentingSetupPlan) {
             if let plan = store.setupPlan {

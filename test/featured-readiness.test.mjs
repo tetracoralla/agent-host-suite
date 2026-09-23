@@ -192,8 +192,9 @@ async function missingArmorialSkillState(t, hostId) {
   }
   const configPath = join(root, '.zcode', 'cli', 'config.json')
   await mkdir(join(root, '.zcode', 'cli'), { recursive: true })
+  const binding = { type: 'stdio', command, args, enabled: true }
   await writeFile(configPath, JSON.stringify({
-    mcp: { servers: { armorial: { type: 'stdio', command, args, enabled: true } } },
+    mcp: { servers: { armorial: binding } },
   }))
   return {
     root, missingSkill, providerSkills,
@@ -203,7 +204,8 @@ async function missingArmorialSkillState(t, hostId) {
         'migratory-time': { version: '2.0.0', identityFiles: [], plugin: 'migratory-time' },
         armorial,
       },
-      hosts: { zcode: { configPath, entries: [{ component: 'armorial', created: true }], providerSkills } },
+      // A real Host-owned receipt retains the exact binding written by installZcode.
+      hosts: { zcode: { configPath, entries: [{ component: 'armorial', created: true, binding }], providerSkills } },
     }),
   }
 }

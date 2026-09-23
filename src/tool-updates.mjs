@@ -16,7 +16,7 @@ import { loadState, prepareStatePaths, statePaths } from './state.mjs'
 import { transitionComponentInventory } from './lifecycle.mjs'
 import { isAgentToolsPaused } from './profile.mjs'
 import { recordActivity } from './activity.mjs'
-import { assertCompatibleOrigin, githubOrigin, originIdentity, readToolSources, writeToolSources } from './tool-sources.mjs'
+import { assertCompatibleOrigin, isGitHubOrigin, githubOrigin, originIdentity, readToolSources, writeToolSources } from './tool-sources.mjs'
 import { candidateFromRemote, clearUpdateCandidate, mergeUpdateCandidates, readUpdateCandidates, sameCandidateCacheIdentity } from './update-candidates.mjs'
 import { compareSemVer } from './semver.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
@@ -150,6 +150,16 @@ export function updateAvailability({ installedVersion, availableVersion, compati
 async function resolveRemoteCandidate(origin, catalogEntry, { fetch, signal, channel = 'stable', platform } = {}) {
   const repository = origin?.repository ?? catalogEntry?.repository
   const fetchImpl = fetch ?? globalThis.fetch
+  if (catalogEntry?.source?.kind === 'repository-plugin' || origin?.kind === 'github-repository') {
+    const asset = platform === null ? null : catalogEntry?.platforms?.[platform]
+    return {
+      availableVersion: catalogEntry?.version ?? null, tag: catalogEntry?.tag ?? origin?.tag,
+      compatible: catalogEntry?.source?.kind === 'repository-plugin', platformAvailable: asset != null,
+      from: 'catalog', digest: asset?.sha256 ?? null, assetName: asset?.assetName ?? null,
+      assetUrl: asset?.url ?? null, assetBytes: asset?.bytes ?? null,
+      releaseUrl: catalogEntry?.releaseUrl ?? origin?.releaseUrl, error: null,
+    }
+  }
   if (typeof repository !== 'string') {
     return {
       availableVersion: catalogEntry?.version ?? null,
@@ -436,6 +446,7 @@ export async function checkRegisteredTool(id, { fetch, signal, channel = 'stable
   const saved = stateRoot === undefined ? null : (await readToolSources(stateRoot)).tools?.[id]
   const repository = registration?.repository ?? catalogEntry?.repository ?? saved?.origin?.repository
   if (typeof repository !== 'string') fail('GITHUB_TOOL_UNKNOWN', `No GitHub registration for ${id}`)
+  if (catalogEntry?.source?.kind === 'repository-plugin') return { id, repository, tag: catalogEntry.tag, version: catalogEntry.version, prerelease: false, htmlUrl: catalogEntry.releaseUrl, from: 'catalog' }
   try {
     const release = await fetchGitHubRelease(repository, channel === 'preview' ? null : 'latest', { fetch: fetch ?? globalThis.fetch, signal })
     return {
@@ -502,14 +513,14 @@ async function commitGitHubInstall(options, { wrapped, binding, component, healt
     previousComponent !== undefined
     && record?.current?.component === undefined
     && previousSource === undefined
-    && previousComponent.origin?.kind !== 'github-release'
+    && !isGitHubOrigin(previousComponent.origin)
   ) {
     // Allow a verified migration onto a registered GitHub-managed tool for the same id.
     // Keep reserved-ID protection for unregistered / mismatched repositories.
     const registered = await findRegisteredTool(binding.id)
     const allowedMigration = typeof registered?.repository === 'string'
       && registered.repository === wrapped.origin?.repository
-      && wrapped.origin?.kind === 'github-release'
+      && isGitHubOrigin(wrapped.origin)
     if (!allowedMigration) {
       fail('LOCAL_COMPONENT_ID_RESERVED', `Component ${binding.id} is owned by the installed compatibility release`)
     }
@@ -724,7 +735,7 @@ export async function installGitHubTool(options, dependencies = {}) {
       ? { tools: wrapped.contract.expectedTools, skipped: true }
       : await (dependencies.mcpProbe ?? probeMcpToolsFirstAndRepeat)({
         ...component,
-        healthWorkspaceRoot: state.workspaceRoot ?? component.cwd,
+        healthWorkspaceRoot: state.workspaceRoot ?? null,
       }))
     const result = await withLifecycleMutation(
       statePaths(paths.root),

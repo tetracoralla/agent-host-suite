@@ -55,14 +55,16 @@
       "additionalProperties": false,
       "required": ["kind"],
       "properties": {
-        "kind": { "enum": ["github-release", "catalog", "local-import"] },
+        "kind": { "enum": ["github-release", "catalog", "local-import", "github-repository"] },
         "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
         "tag": { "type": "string", "minLength": 1 },
         "releaseUrl": { "type": "string", "format": "uri" },
         "assetUrl": { "type": "string", "format": "uri" },
         "assetName": { "type": "string", "minLength": 1 },
         "assetSha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-        "assetBytes": { "type": "integer", "minimum": 1 }
+        "assetBytes": { "type": "integer", "minimum": 1 },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "pluginPath": { "type": "string", "minLength": 1 }
       }
     },
     "legal": {

@@ -2,7 +2,7 @@ import { access, lstat, mkdir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { AgentHostError } from '../errors.mjs'
-import { readJson } from '../json.mjs'
+import { canonicalJson, readJson } from '../json.mjs'
 import { resolveExecutable, runFile } from '../process.mjs'
 import { componentEnvironment } from '../component-environment.mjs'
 import { writeEnvironmentJson } from '../environment-resources.mjs'
@@ -27,6 +27,7 @@ function targets(manifest, workspaceRoot) {
       return {
         component,
         name: component,
+        aliases: [...new Set([component, component.replaceAll('-', '_')])],
         binding: {
           type: 'stdio',
           command: value.command,
@@ -90,6 +91,11 @@ async function sameBinding(actual, expected) {
   return (actual.timeoutMs ?? null) === (expected.timeoutMs ?? null)
 }
 
+function ownedBindingMatches(actual, entry) {
+  return plainObject(actual) && plainObject(entry?.binding)
+    && canonicalJson(actual) === canonicalJson(entry.binding)
+}
+
 async function versionOf(executable, runner) {
   if (executable === null) return null
   const result = await runner(executable, ['version', '--json'], { allowFailure: true, timeoutMs: 5_000 })
@@ -110,16 +116,25 @@ export async function inspectZcode(manifest, runner = runFile, managedState = nu
   const servers = config.mcp?.servers ?? {}
   const entries = []
   for (const target of targets(manifest, options.workspaceRoot ?? managedState?.workspaceRoot ?? null)) {
-    const existing = servers[target.name] ?? null
     const managed = managedState?.entries?.find((entry) => entry.component === target.component)
+    const aliases = target.aliases.filter((name) => Object.hasOwn(servers, name))
+    if (aliases.length > 1) throw new AgentHostError('ZCODE_MCP_CONFLICT', `ZCode exposes multiple aliases for ${target.component}; keep one binding before connecting it`)
+    // Keep the public alias, including while temporarily suspended. This also
+    // lets uninstall restore the exact independent entry without a second name.
+    const name = aliases[0] ?? managed?.name ?? target.name
+    const existing = servers[name] ?? null
+    if (aliases.length > 0 && !plainObject(existing)) throw new AgentHostError('ZCODE_CONFIG_INVALID', `ZCode binding ${name} is not an object`)
     const identityMatched = existing !== null && await sameBinding(existing, target.binding)
     const owned = managed?.created === true
     if (existing !== null && !identityMatched && !owned && options.replaceConflicts !== true) {
       throw new AgentHostError('ZCODE_MCP_CONFLICT', `ZCode already has an unmanaged MCP server for ${target.name} with a different binding`)
     }
+    if (existing !== null && owned && !ownedBindingMatches(existing, managed) && options.replaceConflicts !== true) {
+      throw new AgentHostError('ZCODE_MCP_CHANGED', `ZCode binding ${target.name} changed after installation`)
+    }
     entries.push({
       component: target.component,
-      name: target.name,
+      name,
       present: existing !== null,
       owned,
       identityMatched,
@@ -151,7 +166,9 @@ export async function installZcode(manifest, runner = runFile, managedState = nu
       continue
     }
     const previous = managedState?.entries?.find((item) => item.component === entry.component)
-    const displaced = previous?.displaced ?? (entry.present && !entry.owned ? structuredClone(entry.existingBinding) : null)
+    const changedOwned = entry.present && entry.owned && !ownedBindingMatches(entry.existingBinding, previous)
+    const displaced = changedOwned ? structuredClone(entry.existingBinding)
+      : previous?.displaced ?? (entry.present && !entry.owned ? structuredClone(entry.existingBinding) : null)
     servers[entry.name] = entry.binding
     installed.push({ ...entry, created: true, adopted: false, displaced })
   }
@@ -182,7 +199,7 @@ export async function installZcode(manifest, runner = runFile, managedState = nu
 }
 
 async function currentBindingMatches(entry, servers) {
-  return servers[entry.name] !== undefined && await sameBinding(servers[entry.name], entry.binding)
+  return ownedBindingMatches(servers[entry.name], entry)
 }
 
 export async function uninstallZcode(hostState) {
@@ -191,7 +208,8 @@ export async function uninstallZcode(hostState) {
   const removed = []
   for (const entry of [...(hostState.entries ?? [])].reverse()) {
     if (entry.created !== true) continue
-    if (!await currentBindingMatches(entry, servers)) {
+    const intentionallySuspended = (hostState.inactiveEntries ?? []).some((item) => item.component === entry.component)
+    if (!(intentionallySuspended && !Object.hasOwn(servers, entry.name)) && !await currentBindingMatches(entry, servers)) {
       removed.push({ target: entry.name, kind: 'mcp', status: 'preserved-user-change' })
       continue
     }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { componentEnvironment } from '../src/component-environment.mjs'
 import { assessManagedCatalog, exportManagedCatalog } from '../src/context-exporter.mjs'
 import { inspectProviderSkills, installProviderSkills, uninstallProviderSkills } from '../src/developer-kit-skill.mjs'
 import { materializeCodexProjections } from '../src/hosts/codex-projection.mjs'
@@ -65,7 +65,7 @@ async function connectActiveProvider(component) {
     command: component.command,
     args: component.args,
     cwd: component.cwd,
-    env: getDefaultEnvironment(),
+    env: componentEnvironment(component, stateRoot),
     stderr: 'pipe',
   })
   const client = new Client({ name: 'agent-host-provider-performance-probe', version: '0.1.0' }, { capabilities: {} })
@@ -258,11 +258,11 @@ try {
   }
 
   const baselineComponents = Object.fromEntries(activeIds.map((id) => [id, manifest.components[id]]))
-  const baselineCatalog = assessManagedCatalog(await exportManagedCatalog(baselineComponents))
-  const expandedCatalog = assessManagedCatalog(await exportManagedCatalog({ ...baselineComponents, armorial: manifest.components.armorial }))
+  const baselineCatalog = assessManagedCatalog(await exportManagedCatalog(baselineComponents, { workspaceRoot: stateRoot }))
+  const expandedCatalog = assessManagedCatalog(await exportManagedCatalog({ ...baselineComponents, armorial: manifest.components.armorial }, { workspaceRoot: stateRoot }))
   const fullInventoryCatalog = assessManagedCatalog(await exportManagedCatalog(Object.fromEntries(
     profile.agentComponents.map((id) => [id, manifest.components[id]]),
-  )))
+  ), { workspaceRoot: stateRoot }))
   assert.equal(baselineCatalog.status, 'within')
   assert.equal(expandedCatalog.status, 'within')
   assert.equal(fullInventoryCatalog.status, 'within')

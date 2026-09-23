@@ -201,7 +201,9 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
         [`${pluginRoot}/.codex-plugin/plugin.json`, ['{"name":"armorial","version":"0.7.0","skills":"./skills/","mcpServers":"./.mcp.json"}\n', false]],
         [`${pluginRoot}/.mcp.json`, ['{"mcpServers":{"armorial":{"command":"./server.mjs","args":[],"cwd":"."}}}\n', false]],
         [`${pluginRoot}/skills/use-armorial/SKILL.md`, ['---\nname: use-armorial\n---\n', false]],
-        [`${pluginRoot}/server.mjs`, [`// ${marker}\nprocess.stdin.resume()\n`, false]],
+        [`${pluginRoot}/server.mjs`, [armorialWorkspace
+          ? `// ${marker}\n${await readFile(new URL('./fixtures/workspace-provider.mjs', import.meta.url), 'utf8')}`
+          : `// ${marker}\nprocess.stdin.resume()\n`, false]],
         [`${pluginRoot}/cli.mjs`, [armorialWorkspace
           ? `import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

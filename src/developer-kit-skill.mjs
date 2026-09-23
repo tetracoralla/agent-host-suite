@@ -8,7 +8,8 @@ import { AgentHostError } from './errors.mjs'
 import { moveEnvironmentPath, setEnvironmentLink } from './environment-resources.mjs'
 import { afterEnvironmentCommit } from './environment-change.mjs'
 import { runFile } from './process.mjs'
-import { providerSkillEnvironment, skillLauncherScript } from './skill-launcher.mjs'
+import { skillLauncherScript } from './skill-launcher.mjs'
+import { componentEnvironment } from './component-environment.mjs'
 
 const COMPONENT_ID = 'agent-tool-development-kit'
 const PROJECTION_SCHEMA = 'openadam.agent-host-developer-skill-projection.v0.2'
@@ -163,7 +164,7 @@ async function materializeLinkedDeveloperSkill(component, paths, host, workspace
   const skill = await verifyComponent(component)
   const launcherScript = component.plainSkill === true ? null : skillLauncherScript({
     command: component.command, args: component.args,
-    environment: component.providerSkill === undefined ? {} : providerSkillEnvironment(component, workspaceRoot),
+    environment: component.providerSkill === undefined ? {} : componentEnvironment(component, workspaceRoot),
   })
   const componentRoot = join(paths.hostProjections, component.projectionCollection ?? 'developer-skills', host, skill.id)
   const projectionRoot = join(componentRoot, projectionDigest(component, launcherScript))

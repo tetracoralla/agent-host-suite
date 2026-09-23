@@ -12,6 +12,7 @@ struct ToolLogo: Decodable, Equatable, Sendable {
 
 struct ComponentSummary: Decodable, Equatable, Sendable {
     let version: String
+    let onDemandAvailable: Bool?
     let displayName: String?
     let summary: String?
     let author: String?
@@ -20,6 +21,7 @@ struct ComponentSummary: Decodable, Equatable, Sendable {
 
     init(
         version: String,
+        onDemandAvailable: Bool? = nil,
         displayName: String? = nil,
         summary: String? = nil,
         author: String? = nil,
@@ -27,6 +29,7 @@ struct ComponentSummary: Decodable, Equatable, Sendable {
         logo: ToolLogo? = nil
     ) {
         self.version = version
+        self.onDemandAvailable = onDemandAvailable
         self.displayName = displayName
         self.summary = summary
         self.author = author
@@ -94,6 +97,17 @@ struct GitHubCompatibility: Decodable, Equatable, Sendable {
 
 struct GitHubPermissions: Decodable, Equatable, Sendable {
     let message: String?
+}
+
+struct ToolBrowseCatalog: Decodable, Sendable {
+    let tools: [ToolBrowseEntry]
+}
+
+struct ToolBrowseEntry: Decodable, Sendable {
+    let id: String
+    let homepage: String
+    let compatible: Bool
+    let presentation: GitHubPresentation?
 }
 
 struct HostEntrySummary: Decodable, Equatable, Sendable {
@@ -1504,6 +1518,7 @@ struct ManagedTool: Identifiable, Equatable {
     let availability: String
     let ownership: String
     let active: Bool
+    var onDemandAvailable: Bool = false
 }
 
 enum ManagedItemState: Equatable {

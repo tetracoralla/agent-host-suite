@@ -23,11 +23,12 @@ struct ToolLibraryView: View {
                         LazyVGrid(columns: toolColumns, spacing: 0) {
                             ForEach(filteredTools) { tool in
                                 let installed = store.managedTools.first { $0.id == tool.id }
-                                ToolRow(name: tool.name, summary: tool.summary, logo: nil,
+                                ToolRow(name: tool.name, summary: ToolPresentation.summary(tool.id, fallback: tool.summary), logo: nil,
                                         systemImage: tool.systemImage, toolID: tool.id,
                                         state: installed?.state,
                                         updateAvailable: store.updates?.items?.contains { $0.id == tool.id && $0.availability == "update-available" } == true,
-                                        paused: installed != nil && store.suite?.agentToolsPaused == true) {
+                                        paused: installed != nil && store.suite?.agentToolsPaused == true, onDemandAvailable: installed?.onDemandAvailable == true,
+                                        platformUnavailable: installed == nil && !store.catalogToolAvailable(tool.id)) {
                                     selectedID = tool.id
                                 }
                                 .focused($focusedID, equals: tool.id)
@@ -62,6 +63,7 @@ struct ToolLibraryView: View {
 
 struct GitHubToolImportView: View {
     @ObservedObject var store: AgentHostStore
+    var initialURL = ""
     @State private var githubURL = ""
     @State private var previewedURL = ""
     @Environment(\.dismiss) private var dismiss
@@ -120,11 +122,22 @@ struct GitHubToolImportView: View {
 
             Spacer()
 
+            if let message = store.errorMessage {
+                Text(message).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+            }
+            if store.githubConflictURL == normalizedURL {
+                Text(L10n.text("This tool is already configured independently. Agent Host can take over its connection and restore the previous configuration when you remove it."))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+
             HStack {
                 Spacer()
                 if store.suite?.configured == true {
-                    Button(L10n.text("Add tool")) {
-                        Task { await store.addGitHubTool(githubURL) }
+                    Button(L10n.text(store.githubConflictURL == normalizedURL ? "Take over connection and add" : "Add tool")) {
+                        Task {
+                            await store.addGitHubTool(githubURL, replacingHostConflicts: store.githubConflictURL == normalizedURL)
+                            if store.errorMessage == nil && store.githubPreview == nil { dismiss() }
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(
@@ -140,9 +153,11 @@ struct GitHubToolImportView: View {
             }
         }
         .padding(24)
-        .frame(width: 560, height: 390)
+        .frame(width: 560, height: 500)
         .onAppear {
             store.clearGitHubPreview()
+            store.errorMessage = nil
+            githubURL = initialURL
             previewedURL = ""
         }
         .onChange(of: normalizedURL) { _, value in

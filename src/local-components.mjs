@@ -1,3 +1,4 @@
+import { isGitHubOrigin } from './tool-sources.mjs'
 import { lstat, mkdtemp, realpath, rm, rmdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -451,8 +452,8 @@ async function syncGithubSourceAfterRollback(options, dependencies, {
   const id = options.target
   const sources = await readToolSources(options.stateRoot)
   const source = sources.tools?.[id]
-  const restoredLooksGithub = restoredComponent?.origin?.kind === 'github-release' || source?.rollback?.origin?.kind === 'github-release'
-  const replacedLooksGithub = replacedComponent?.origin?.kind === 'github-release' || source?.origin?.kind === 'github-release'
+  const restoredLooksGithub = isGitHubOrigin(restoredComponent?.origin) || isGitHubOrigin(source?.rollback?.origin)
+  const replacedLooksGithub = isGitHubOrigin(replacedComponent?.origin) || isGitHubOrigin(source?.origin)
   if (source === undefined && restoredLooksGithub !== true && replacedLooksGithub !== true) return
   // Verified restored component binding is source of truth. Do not prefer an
   // independent tool-sources rollback.origin from an earlier upgrade/source-switch

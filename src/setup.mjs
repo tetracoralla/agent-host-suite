@@ -300,7 +300,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     if (options.dryRun) {
       catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(Object.fromEntries(
         activeAgentComponents.map((id) => [id, manifest.components[id]]),
-      ))
+      ), { workspaceRoot })
       await cleanupMaterializedRelease(releasePreparation)
       if (codexProjectionTemporaryRoot !== null) await rm(codexProjectionTemporaryRoot, { recursive: true, force: true })
       await rm(operationsProjectionPaths.hostProjections, { recursive: true, force: true })
@@ -322,7 +322,7 @@ async function setupUnlocked(options, dependencies = {}, preparedPaths = null) {
     }
     catalogPreflight = await (dependencies.catalogPreflight ?? preflightManagedCatalog)(Object.fromEntries(
       activeAgentComponents.map((id) => [id, manifest.components[id]]),
-    ))
+    ), { workspaceRoot })
     runtimeFiles = await (dependencies.writeRuntimeFiles ?? writeRuntimeFiles)(paths, manifest, { workspaceRoot })
     for (const host of hosts) installedHosts[host] = await installHost(host, host === 'codex' ? codexManifest : hostManifest, paths, runner, { ...options, workspaceRoot }, dependencies)
     if (!options.noService) {

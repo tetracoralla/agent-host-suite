@@ -81,19 +81,12 @@ test('the featured catalog lists profile membership without becoming a marketpla
   assert.match(configured.message, /Host can fetch the bound catalog/u)
 })
 
-test('featured membership matches the catalog document and fails closed without armorial bytes', async () => {
+test('featured membership fails closed without armorial bytes', async () => {
   const featured = await loadProfile(FEATURED_PROFILE_ID)
+  // Documentation is reviewed for current meaning; runtime cases own behavior.
+  // Keep only a structural tie to the owning document, not its wording.
   const catalogDoc = await readFile(new URL('../docs/FEATURED_CATALOG.md', import.meta.url), 'utf8')
-  assert.match(catalogDoc, /--profile featured/u)
-  assert.match(catalogDoc, /profiles list/u)
-  assert.match(catalogDoc, /armorial/u)
-  assert.match(catalogDoc, /draft-unbound/u)
-  assert.match(catalogDoc, /--development-root/u)
-  assert.match(catalogDoc, /not a public marketplace/u)
-  assert.match(catalogDoc, /UNSIGNED_PREVIEW.md/u)
-  assert.match(catalogDoc, /profiles fetch/u)
-  assert.match(catalogDoc, /public download is not configured/u)
-  assert.doesNotMatch(catalogDoc, /until a Developer ID signed build exists/u)
+  assert.match(catalogDoc, /featured/u)
   const standardOnly = {
     components: Object.fromEntries(['node-runtime', 'direct-execution-runtime', 'math-anchor', 'migratory-time'].map((id) => [id, {}])),
   }

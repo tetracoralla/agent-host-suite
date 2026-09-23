@@ -248,8 +248,7 @@ function hostReport(report, providerIds) {
   }
   const semanticTotals = semanticExecutionTotals(report.semanticExecutions)
   const suiteExecutions = report.semanticExecutions.filter((item) => providerIds.has(item.providerId))
-  const suiteTools = report.tools
-    .filter((item) => item.currentAgentHostDeployment?.componentId !== undefined)
+  const observedTools = report.tools
     .sort((left, right) => right.calls - left.calls || left.toolName.localeCompare(right.toolName))
     .map((item) => ({
       provider: item.provider,
@@ -264,6 +263,7 @@ function hostReport(report, providerIds) {
       currentAgentHostDeployment: item.currentAgentHostDeployment,
       currentComponentBinding: item.currentComponentBinding ?? null,
     }))
+  const suiteTools = observedTools.filter((item) => item.currentAgentHostDeployment?.componentId !== undefined)
   const routingObservations = report.routingObservations ?? []
   return {
     schemaVersion: report.schemaVersion,
@@ -281,6 +281,7 @@ function hostReport(report, providerIds) {
     runtimeErrorCodes: report.runtimeErrorCodes ?? [],
     suiteExecutions,
     suiteTools,
+    observedTools,
     routingObservations,
     totals: {
       observedTools: report.tools.length,
@@ -357,7 +358,7 @@ export async function readCurrentObservability(state, runner = runFile, nowMs = 
 async function writeAnalysis(paths, state, runner) {
   const active = new Set(state.agentComponents ?? Object.keys(state.components))
   const activeComponents = Object.fromEntries(Object.entries(state.components).filter(([id]) => active.has(id)))
-  const { snapshot, bindings } = await exportManagedCatalogInventory(activeComponents)
+  const { snapshot, bindings } = await exportManagedCatalogInventory(activeComponents, { workspaceRoot: state.workspaceRoot ?? null })
   const snapshotPath = join(paths.context, 'managed-catalog.snapshot.json')
   const analysisPath = join(paths.context, 'managed-catalog.analysis.json')
   await writePrivateJson(snapshotPath, snapshot)

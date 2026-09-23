@@ -259,9 +259,20 @@ export function validateComponentDescriptor(descriptor, releaseComponent) {
     }
   }
   if (descriptor.origin !== undefined) {
-    exactKeys(descriptor.origin, ['kind', 'repository', 'tag', 'releaseUrl', 'assetUrl', 'assetName', 'assetSha256', 'assetBytes'], `${descriptor.id} origin`)
-    if (!['github-release', 'catalog', 'local-import'].includes(descriptor.origin.kind)) {
+    exactKeys(descriptor.origin, ['kind', 'repository', 'tag', 'releaseUrl', 'assetUrl', 'assetName', 'assetSha256', 'assetBytes', 'commit', 'pluginPath'], `${descriptor.id} origin`)
+    if (!['github-release', 'github-repository', 'catalog', 'local-import'].includes(descriptor.origin.kind)) {
       fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} origin kind is unsupported`)
+    }
+    if (descriptor.origin.kind === 'github-repository') {
+      const origin = descriptor.origin
+      if (!/^[0-9a-f]{40}$/u.test(origin.commit ?? '') || origin.tag !== origin.commit
+        || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(origin.repository ?? '')
+        || origin.assetUrl !== `https://codeload.github.com/${origin.repository}/tar.gz/${origin.commit}`
+        || !/^sha256:[0-9a-f]{64}$/u.test(origin.assetSha256 ?? '')
+        || !Number.isSafeInteger(origin.assetBytes) || origin.assetBytes < 1) {
+        fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} repository origin is not immutable`)
+      }
+      relativePath(origin.pluginPath, 'repository plugin path')
     }
   }
   return descriptor

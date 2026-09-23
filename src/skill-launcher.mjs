@@ -1,18 +1,5 @@
 import { platform } from 'node:os'
-import { componentEnvironment } from './component-environment.mjs'
 import { AgentHostError } from './errors.mjs'
-
-// Both delivery surfaces belong to the same installed Provider Instance. The
-// caller supplies the canonical Host grant; neither surface derives authority
-// from the Agent's cwd, arguments, or the component's installation directory.
-export function providerSkillEnvironment(component, workspaceRoot) {
-  if ((component.workspaceEnvironment ?? []).length > 0 && workspaceRoot == null) {
-    throw new AgentHostError('WORKSPACE_GRANT_REQUIRED', `${component.displayName ?? component.plugin ?? component.componentId} requires an explicit workspace for its Provider Skill`, {
-      variables: component.workspaceEnvironment,
-    })
-  }
-  return componentEnvironment(component, workspaceRoot)
-}
 
 export function skillLauncherScript({ command, args = [], environment = {} }, platformName = platform()) {
   function invalid() {

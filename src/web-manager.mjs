@@ -297,7 +297,7 @@ function exactObject(value, allowed) {
 }
 
 async function action(value, stateRoot, dependencies = {}) {
-  exactObject(value, ['action', 'host', 'connected', 'enabled', 'profile', 'tools', 'pause', 'resume', 'purgeData', 'language', 'url', 'path', 'check', 'clear', 'github', 'preview', 'id', 'all', 'includeApp'])
+  exactObject(value, ['action', 'host', 'connected', 'enabled', 'profile', 'tools', 'pause', 'resume', 'purgeData', 'language', 'url', 'path', 'check', 'clear', 'github', 'preview', 'id', 'all', 'includeApp', 'replaceHostConflicts'])
   if (typeof value.action !== 'string') throw new AgentHostError('MANAGER_REQUEST_INVALID', 'The Manager action is missing')
   if (value.action === 'setup') {
     if (!PROFILES.has(value.profile)) throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a supported Agent app and tool set')
@@ -323,16 +323,18 @@ async function action(value, stateRoot, dependencies = {}) {
     return value.connected ? addHost({ stateRoot, target: value.host }) : removeHost({ stateRoot, target: value.host })
   }
   if (value.action === 'tools') {
+    if (value.replaceHostConflicts !== undefined && typeof value.replaceHostConflicts !== 'boolean') throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose whether to take over the existing tool connection')
+    const replacement = { replaceHostConflicts: value.replaceHostConflicts === true }
     if (value.pause === true && value.resume === true) {
       throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Pause and resume cannot be combined')
     }
-    if (value.pause === true) return setActiveTools({ stateRoot, pauseTools: true })
-    if (value.resume === true) return setActiveTools({ stateRoot, resumeTools: true })
+    if (value.pause === true) return setActiveTools({ stateRoot, pauseTools: true, ...replacement })
+    if (value.resume === true) return setActiveTools({ stateRoot, resumeTools: true, ...replacement })
     if (!Array.isArray(value.tools) || value.tools.some((item) => typeof item !== 'string')) {
       throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose installed Agent tools, or pause all tools')
     }
-    if (value.tools.length === 0) return setActiveTools({ stateRoot, pauseTools: true })
-    return setActiveTools({ stateRoot, tools: [...new Set(value.tools)] })
+    if (value.tools.length === 0) return setActiveTools({ stateRoot, pauseTools: true, ...replacement })
+    return setActiveTools({ stateRoot, tools: [...new Set(value.tools)], ...replacement })
   }
   if (value.action === 'update') {
     if (value.profile !== undefined && !PROFILES.has(value.profile)) {
@@ -365,6 +367,9 @@ async function action(value, stateRoot, dependencies = {}) {
     throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose a local catalog path or an HTTPS catalog URL')
   }
   if (value.action === 'github') {
+    if (value.replaceHostConflicts !== undefined && typeof value.replaceHostConflicts !== 'boolean') {
+      throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose whether to take over the existing tool connection')
+    }
     if (typeof value.github !== 'string' || value.github.trim() === '') {
       throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Paste a GitHub repository or Release URL')
     }
@@ -372,6 +377,7 @@ async function action(value, stateRoot, dependencies = {}) {
       stateRoot,
       github: value.github.trim(),
       preview: value.preview === true,
+      replaceHostConflicts: value.replaceHostConflicts === true,
     })
   }
   if (value.action === 'updates-check') return updatesCheck({ stateRoot })
@@ -718,10 +724,13 @@ button.action{border:1px solid var(--line);background:var(--canvas);border-radiu
 @media(max-width:540px){.shell{display:block}.side{position:relative;height:auto;padding:18px 16px}.brand{margin:0 0 18px 6px}.nav{display:flex;justify-content:space-between;gap:2px}.nav button{padding:7px 9px;font-size:12px}.side-footer{position:absolute;right:20px;top:20px;display:flex;padding:0;gap:14px}.version{display:none}.main{padding:28px 22px}.agent-row{flex-wrap:wrap;gap:12px}.agent-row .grow{min-width:120px}.agent-row button{margin-left:auto}.task-row{flex-wrap:wrap}.row{flex-wrap:wrap}.detail-identity h1{font-size:23px}.detail-identity .tool-logo{width:52px;height:52px}.heat{grid-template-columns:repeat(15,minmax(5px,1fr))}.start-row{flex-wrap:wrap}}
 </style></head><body><div class="shell"><aside class="side"><div class="brand">Agent Host</div><nav class="nav" id="nav"><button data-page="tools" aria-current="true"></button><button data-page="updates"></button><button data-page="environment"></button><button data-page="activity"></button><button data-page="usage"></button></nav><div class="side-footer"><button id="refreshButton"></button><button id="settingsButton"></button><div class="version" id="version"></div></div></aside><main class="main"><div id="error" class="notice hidden" role="alert"></div><section id="tools"></section><section id="updates" class="hidden"></section><section id="environment" class="hidden"></section><section id="usage" class="hidden"></section><section id="activity" class="hidden"></section><section id="tool-detail" class="hidden"></section></main></div><dialog id="settingsDialog"><h2 id="settingsTitle"></h2><label class="setting-row"><span id="languageLabel"></span><select id="languageSelect"></select></label><div id="versionPlanes"></div><div id="sourceSettings"></div><div class="actions"><button class="action primary" id="settingsDone"></button></div></dialog><div id="busy" class="busy hidden" role="status" aria-live="polite"><div id="busyText"></div></div>
 <script>
-const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};let data,languageSelection='system',changing=false,lastPreview=null,lastUpdates=null,lastGithubTarget='',lastGithubPreviewed='',lastDoctor=null;
+const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};let data,languageSelection='system',changing=false,lastPreview=null,lastUpdates=null,lastGithubTarget='',lastGithubPreviewed='',githubConflictURL=null,lastDoctor=null;
 const view={page:'tools',queries:{tools:'',updates:''},detail:null,returnPage:'tools',scroll:0,drafts:{},githubOpen:false,managementOpen:false};
 const names={zcode:'ZCode',codex:'Codex',claude:'Claude Code','deepseek-harness':'DeepSeek Harness','gemini-cli':'Gemini CLI','github-copilot-cli':'GitHub Copilot CLI'};
 const zh={
+'Decision rules':'决策规则','State transitions':'状态流转','Schedule calculation':'日程计算',
+'Take over existing connections':'接管现有连接','Previous connections are saved and restored when the tools are removed.':'原连接会被保存，并在移除工具时恢复。',
+'Tool activity':'工具使用情况','Calls mapped to tools managed by Agent Host. Independently configured tools are outside this view.':'此处统计映射到 Host 管理工具的调用，不包含独立配置的工具。','Take over connection and add':'接管连接并添加','This tool is already configured independently. Agent Host can take over its connection and restore the previous configuration when you remove it.':'这个工具已有独立配置。Agent Host 可以接管连接，并在移除工具时恢复原配置。',
 'My tools':'我的工具','Install Agent Host before adding a GitHub tool.':'请先安装 Agent Host，再添加 GitHub 工具。','Collection details':'采集详情','Static references do not prove execution.':'静态引用不代表执行。','Script references are not execution; open tasks may use older bindings.':'脚本引用不代表执行；未关闭的任务可能仍使用旧绑定。','Pause all tools? On-demand tools will also pause.':'暂停全部工具？按需工具也将暂停。','Disconnect this Agent app?':'断开此 Agent 的连接？','Tool options':'更多操作','Inspection unavailable':'无法检查','Error report copied':'已复制错误报告','Open':'打开','Manage':'管理','Back':'返回','Try a task':'试一试','Example task':'示例任务','Enable by default':'默认启用','Version':'版本','Project website':'项目网站','Use in Agent':'在 Agent 中使用','Clear search':'清除搜索','No matching tools':'没有匹配的工具','Connected, not checked':'已连接，尚未检查','Copy error report':'复制错误报告','Browse more tools':'浏览更多工具','Tool status unavailable':'工具状态暂不可用','Structured data':'结构化数据','Mind maps':'思维导图','Projective layouts':'投影布局','Standard expressions':'标准表达式','File inspection':'文件检查','Spatial composition':'空间编排','Unicode inspection':'Unicode 检查','Responsive layouts':'响应式布局','Visual documents':'可视化文档','Task copied':'任务已复制',
 
 "Tool activity":"工具使用情况",
@@ -747,7 +756,7 @@ const zh={
 "Script references do not prove execution. Binding counts can include older open sessions.":"脚本引用不能证明实际执行。绑定期间统计可能包括尚未关闭的旧会话。",
 "Use the installed Agent Host operations skill to analyze the current usage report, version history, runtime errors and coverage. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; counts alone do not establish adoption or correctness.":"请使用已安装的 Agent Host operations 技能分析当前使用报告、版本历史、运行错误和采集覆盖。区分真实任务与健康检查、脚本引用与实际执行。结合当前任务提出改进，不要仅凭次数推断采纳或正确性。",
 
-  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','Off keeps an on-demand Skill. Pause all withholds both.':'关闭单项仍保留按需 Skill；全部暂停则两者都不投影。','All tools are paused.':'所有工具已暂停。','On-demand':'按需','Paused':'已暂停','Use':'使用','Use {tool} in a new Agent task':'在新的 Agent 任务中使用 {tool}','For new tasks':'用于新任务','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源','Task provider':'任务来源',
+  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','Off keeps an on-demand Skill. Pause all withholds both.':'关闭单项仍保留按需 Skill；全部暂停则两者都不投影。','All tools are paused.':'所有工具已暂停。','Enable to use':'启用后使用','Enable this tool, then start a fresh Agent task to use it.':'启用此工具后，在新的 Agent 任务中使用。','On-demand':'按需','Paused':'已暂停','Use':'使用','Use {tool} in a new Agent task':'在新的 Agent 任务中使用 {tool}','For new tasks':'用于新任务','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源','Task provider':'任务来源',
   'Overview':'总览','Environment':'环境','Tools':'工具','Browse':'浏览','Agents':'Agent','Updates':'更新','Tool Library':'工具库','Installed':'已安装','Recommended':'推荐','See all':'查看更多','No installed tools':'本机还没有安装工具','No installed tools match this search.':'已安装工具中没有匹配项。','No compatible tools match this search.':'兼容工具中没有匹配项。','Choose a compatible tool below, or browse the full library.':'可从下方选择兼容工具，也可浏览完整工具库。','Search tools':'搜索工具','Search compatible tools':'搜索兼容工具','Install featured tools':'安装精选工具','Install missing':'安装缺少项','Available to install':'可安装','Available to Agent apps':'对 Agent 可用','Compatible':'兼容','Not compatible':'不兼容','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…','Browse recommended tools':'浏览推荐工具','Add GitHub project':'添加 GitHub 项目','GitHub repository or Release URL':'GitHub 仓库或 Release 地址','Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it.':'粘贴 GitHub 仓库或 Release 地址。预览只读取项目元数据；通过兼容性检查后才能添加。','Preview GitHub project':'预览 GitHub 项目','Add from GitHub':'从 GitHub 添加','Previewing GitHub project…':'正在预览 GitHub 项目…','Adding GitHub tool…':'正在添加 GitHub 工具…','Check for updates':'检查更新','Checking updates…':'正在检查更新…','This platform':'当前平台','No asset for this platform':'当前平台无安装包','profiles fetch --carrier downloads an installer. It does not replace Agent Host.':'profiles fetch --carrier 只下载安装包，不会替换或重启 Agent Host。',
   'Versions':'版本','Application':'应用','Environment release':'环境兼容版本','Catalog source':'目录来源','Catalog assets are unpublished.':'目录资产尚未发布。','Not Apple-notarized. Not a store.':'未经 Apple 公证，也不是应用商店。','Check source':'检查来源','Checking source…':'正在检查来源…','Use local catalog':'使用本地目录','Set HTTPS catalog':'设置 HTTPS 目录','Clear source':'清除来源','Last check':'最近检查','Retry':'重试','HTTPS catalog URL':'HTTPS 目录 URL','Local catalog path':'本地目录路径','not installed':'未安装','source-checkout':'源码 checkout','The Manager application and the installed Agent environment can share this product name with different payloads. Application build, environment release, and tool versions are separate.':'管理器应用与已安装的 Agent 环境可以同名但载荷不同。应用 build、环境兼容版本和工具版本是分开的。','Install update':'安装更新','Install all updates':'安装全部更新','update available':'可更新','Check for updates to load current and available versions.':'请检查更新以查看当前版本和可用版本。','compatible after Host update':'需先更新 Host','official upgrade':'官方升级','installed, version unread':'已安装，未能读取版本','check failed':'检查失败',
 
@@ -828,6 +837,11 @@ async function call(action,label){
     const v=await r.json();
     if(!r.ok){
       notice((v.error?.message&&t(v.error.message))||t('The action failed'),'error');
+      if(action.action==='github'&&!action.preview&&['CODEX_PLUGIN_CONFLICT','CODEX_MARKETPLACE_CONFLICT','CODEX_BINDING_AMBIGUOUS','CLAUDE_MCP_CONFLICT','ZCODE_MCP_CONFLICT','PRODUCT_SKILL_CONFLICT','DEVELOPER_SKILL_CONFLICT'].includes(v.error?.code)){githubConflictURL=action.github.trim();view.githubOpen=true;renderUpdates()}
+      if(action.action==='tools'&&['CODEX_PLUGIN_CONFLICT','CODEX_MARKETPLACE_CONFLICT','CODEX_BINDING_AMBIGUOUS','CLAUDE_MCP_CONFLICT','ZCODE_MCP_CONFLICT','PRODUCT_SKILL_CONFLICT','DEVELOPER_SKILL_CONFLICT'].includes(v.error?.code)){
+        const recovery=button('Take over existing connections',()=>call({...action,replaceHostConflicts:true},t('Updating tools…')));
+        $('#error').append(el('p',t('Previous connections are saved and restored when the tools are removed.')),recovery);
+      }
       if(action.action==='pick-workspace'&&v.error?.code==='DIRECTORY_PICKER_UNAVAILABLE') revealGrantPathFallback();
       return
     }
@@ -836,7 +850,7 @@ async function call(action,label){
     if(action.action==='doctor') lastDoctor=v.result;
     if(v.dashboard)acceptDashboard(v.dashboard);
     if(action.action==='github'&&action.preview){ lastPreview=v.result; lastGithubTarget=action.github.trim(); lastGithubPreviewed=action.github.trim() }
-    if(action.action==='github'&&!action.preview) lastPreview=null;
+    if(action.action==='github'&&!action.preview){lastPreview=null;githubConflictURL=null}
     if(action.action==='updates-check'||action.action==='updates-install') lastUpdates=v.result;
     if(v.dashboard)render();
     const warnings=(v.result?.warnings||[]).slice(0,8).map(w=>f('Completed with a warning: {message}',{message:w.message||w.code}));
@@ -900,11 +914,17 @@ function renderUpdates(){
   const updateAddState=()=>{addButton.disabled=!data.snapshot.configured||!(lastPreview?.compatibility?.available===true&&input.value.trim()===lastGithubPreviewed)};
   input.addEventListener('input',()=>{
     lastGithubTarget=input.value;
+    if(input.value.trim()!==githubConflictURL){githubConflictURL=null;add.querySelector('[data-conflict]')?.remove()}
     if(lastPreview&&input.value.trim()!==lastGithubPreviewed){lastPreview=null;add.querySelector('[data-preview]')?.remove()}
     updateAddState();
   });
   previewActions.append(button('Preview GitHub project',()=>{const target=(input.value||lastGithubTarget).trim();lastPreview=null;lastGithubPreviewed='';lastGithubTarget=target;updateAddState();call({action:'github',github:target,preview:true},t('Previewing GitHub project…'))}),addButton);
   add.append(input,previewActions);
+  if(githubConflictURL===input.value.trim()){
+    const recovery=el('div');recovery.dataset.conflict='current';
+    recovery.append(el('p',t('This tool is already configured independently. Agent Host can take over its connection and restore the previous configuration when you remove it.'),'muted'),button('Take over connection and add',()=>{if(input.value.trim()===githubConflictURL)call({action:'github',github:githubConflictURL,replaceHostConflicts:true},t('Adding GitHub tool…'))}));
+    add.append(recovery);
+  }
   if(!data.snapshot.configured)add.append(el('p',t('Install Agent Host before adding a GitHub tool.'),'muted'));
   if(lastPreview?.presentation){
     const p=el('div',undefined,'row');p.dataset.preview='current';
@@ -1106,7 +1126,7 @@ function renderEnvironment(s,u){
   more.append(moreBody);
   root.append(more);
 }
-const shortJobs={'math-anchor':'Exact calculation','migratory-time':'World time','armorial':'Project icons','data-transformer':'Structured data','laniakea':'Mind maps','projective':'Projective layouts','equatorium':'Standard expressions','file-vitals':'File inspection','worldbend':'Spatial composition','text-integrity':'Unicode inspection','layout-contract-conformance':'Responsive layouts','calligram':'Visual documents'};
+const shortJobs={'decision-table':'Decision rules','state-machine':'State transitions','schedule-algebra':'Schedule calculation','math-anchor':'Exact calculation','migratory-time':'World time','armorial':'Project icons','data-transformer':'Structured data','laniakea':'Mind maps','projective':'Projective layouts','equatorium':'Standard expressions','file-vitals':'File inspection','worldbend':'Spatial composition','text-integrity':'Unicode inspection','layout-contract-conformance':'Responsive layouts','calligram':'Visual documents'};
 function catalogTools(){
   const remote=data.recommended?.tools||[],byId=Object.fromEntries(remote.map(item=>[item.id,item]));
   return [...featuredExperiences.map(item=>({id:item.id,name:item.name,summary:item.summary,prompt:item.prompt,compatible:byId[item.id]?.compatible!==false,homepage:byId[item.id]?.homepage,...byId[item.id]?.presentation})),
@@ -1124,7 +1144,7 @@ function toolState(id){
   if(data.tools?.paused)return {symbol:'Ⅱ',label:'Paused'};
   const update=(lastUpdates?.items||data.updates?.items||[]).find(item=>item.id===id&&item.availability==='update-available');
   if(update)return {symbol:'↑',label:'update available',tone:'attention'};
-  return (data.tools?.activeAgentComponents||[]).includes(id)?{symbol:'✓',label:'Available to Agent apps'}:{symbol:'○',label:'On-demand'};
+  return (data.tools?.activeAgentComponents||[]).includes(id)?{symbol:'✓',label:'Available to Agent apps'}:{symbol:'○',label:data.tools?.tools?.find(tool=>tool.id===id)?.exposure==='on-demand'?'On-demand':'Enable to use'};
 }
 function toolRow(item){
   const state=toolState(item.id),r=el('button',undefined,'tool-row');r.type='button';r.dataset.toolId=item.id;r.onclick=()=>openToolDetail(item.id);
@@ -1168,6 +1188,7 @@ function renderToolDetail(){
   let useButton;
   if(!installed){const featured=featuredExperiences.some(x=>x.id===id);const install=button(featured?'Install featured tools':'Add from GitHub',featured?acquireFeatured:()=>{lastGithubTarget=catalog.homepage||'';view.githubOpen=true;setPage('updates');renderUpdates();$('#github-import input')?.focus()},'action primary');install.disabled=catalog?.compatible===false;head.append(install)}
   else if(data.tools.paused)head.append(button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…')),'action primary'));
+  else if(!(data.tools.activeAgentComponents||[]).includes(id)&&!installed.onDemandAvailable)head.append(button('Enable to use',()=>call({action:'tools',tools:[...new Set([...(data.tools.activeAgentComponents||[]),id])]},t('Updating tools…')),'action primary'));
   else if(catalog?.prompt){
     useButton=button('Use in Agent',()=>copyCapabilityTask({...catalog,prompt:view.drafts[id]},useButton),'action primary');head.append(useButton);
   }
@@ -1183,7 +1204,7 @@ function renderToolDetail(){
   const metadata=el('div',undefined,'detail-metadata');
   if(installed){
     const label=el('label',undefined,'row'),toggle=el('input');toggle.type='checkbox';toggle.dataset.focusKey='tool-toggle-'+id;toggle.setAttribute('role','switch');toggle.checked=(data.tools.activeAgentComponents||[]).includes(id);toggle.disabled=data.tools.paused===true;
-    toggle.title=t('Off keeps an on-demand Skill. Pause all withholds both.');
+    toggle.title=t(data.tools?.tools?.find(tool=>tool.id===id)?.onDemandAvailable===true?'Off keeps an on-demand Skill. Pause all withholds both.':'Enable this tool, then start a fresh Agent task to use it.');
     toggle.onchange=async()=>{const ids=new Set(data.tools.activeAgentComponents||[]);if(toggle.checked)ids.add(id);else ids.delete(id);if(!ids.size&&!confirm(t('Pause all tools? On-demand tools will also pause.'))){toggle.checked=true;return}await call({action:'tools',tools:[...ids]},t('Updating tools…'));if(toggle.isConnected)toggle.checked=(data.tools.activeAgentComponents||[]).includes(id)};
     label.append(el('span',t('Enable by default'),'grow'),toggle);metadata.append(label);
     if(installed.version)metadata.append(row(t('Version'),installed.version));
@@ -1202,6 +1223,7 @@ async function loadTaskSessions(provider,container){$('#busyText').textContent=t
 function renderTaskSessions(u,root){const providers=[...new Set((u.providerActivity||[]).map(x=>x.provider).filter(Boolean))],c=card('Task activity');if(!providers.length){c.append(el('p',t('No retained task activity for this Agent app.'),'muted'));root.append(c);return}const actions=el('div',undefined,'actions'),select=document.createElement('select'),list=el('div');select.setAttribute('aria-label',t('Task provider'));for(const provider of providers){const option=el('option',names[provider]||provider);option.value=provider;select.append(option)}actions.append(select,button('Show recent tasks',()=>loadTaskSessions(select.value,list),'action primary'));c.append(actions,list,el('p',t('Static references do not prove execution.'),'muted'));root.append(c)}
 function renderToolHistory(u,root){
   const tools=card('Tool activity');
+  tools.append(el('p',t('Calls mapped to tools managed by Agent Host. Independently configured tools are outside this view.'),'muted'));
   const toolList=el('div'),toolCount=el('p',undefined,'muted');let expanded=false;
   const renderTools=()=>{toolList.replaceChildren();const displayed=u.tools.entries.slice(0,expanded?u.tools.entries.length:8);toolCount.textContent=f('Showing {shown} of {available} groups',{shown:displayed.length,available:u.tools.available});for(const item of displayed){
     const title=(item.toolName||t('Unknown')).replace(/^mcp__/,'').replaceAll('__',' · ');

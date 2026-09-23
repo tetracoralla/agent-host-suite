@@ -222,7 +222,7 @@ export async function doctor(state, {
   if (deep) {
     for (const [id, component] of Object.entries(state.components).filter(([, item]) => item.toolIntegrationSchema !== undefined)) {
       try {
-        const result = await mcpProbe(component)
+        const result = await mcpProbe({ ...component, healthWorkspaceRoot: state.workspaceRoot ?? null })
         checks.push(check(`tool.${id}.installed`, 'ok', `${component.displayName ?? id} installed runtime is ready`, {
           tools: result.tools,
           server: result.server,

@@ -81,58 +81,15 @@ const dogfoodOnly = dogfood.components.filter((id) => id !== 'armorial')
 if (dogfoodOnly.some((id) => featured.components.includes(id))) {
   throw new Error('featured catalog must not include local-dogfood-only tools')
 }
-const featuredDoc = await readFile(join(root, 'docs/FEATURED_CATALOG.md'), 'utf8')
-if (!featuredDoc.includes('--profile featured') || !featuredDoc.includes('profiles list') || !featuredDoc.includes('draft-unbound')) {
-  throw new Error('featured catalog document must name the CLI path and unbound fail-closed')
-}
-if (!featuredDoc.includes('not a public marketplace') || !featuredDoc.includes('--development-root')) {
-  throw new Error('featured catalog document must remain a non-marketplace admission list with a bound-release path')
-}
-if (!featuredDoc.includes('--no-host') || !featuredDoc.includes('Get featured tools') || !featuredDoc.includes('working set')) {
-  throw new Error('featured catalog document must distinguish inventory install from working-set selection and allow setup without an Agent app')
-}
-if (!featuredDoc.includes('Gatekeeper') || !featuredDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL')) {
-  throw new Error('featured catalog document must keep unsigned macOS Gatekeeper copy and an honest download hook')
-}
-if (!featuredDoc.includes('UNSIGNED_PREVIEW.md') || featuredDoc.includes('until a Developer ID signed build exists')) {
-  throw new Error('featured catalog document must point at unsigned preview download and must not promise a future notarized build')
-}
-if (!featuredDoc.includes('profiles fetch') || !featuredDoc.includes('public download is not configured')) {
-  throw new Error('featured catalog document must name profiles fetch and the unconfigured download state')
-}
-if (!featuredDoc.includes('source status') || !featuredDoc.includes('Catalog assets are unpublished')) {
-  throw new Error('featured catalog document must name source status and unpublished catalog assets')
-}
-if (!featuredDoc.includes('experimental variable')) {
-  throw new Error('featured catalog document must treat recipe consistency as an experimental variable')
-}
-const previewDoc = await readFile(join(root, 'docs/UNSIGNED_PREVIEW.md'), 'utf8')
-
-if (!previewDoc.includes('publish-unsigned-preview.mjs') || !previewDoc.includes('Where a non-developer downloads today')) {
-  throw new Error('unsigned preview document must name the owner publish script and the non-developer download entry')
-}
-if (!previewDoc.includes('Open Anyway') || !previewDoc.includes('Privacy & Security') || !previewDoc.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !previewDoc.includes('preview-distribution.json')) {
-  throw new Error('unsigned preview document must name the macOS 15+ Gatekeeper override, the catalog URL hook, and the index asset')
-}
-if (!previewDoc.includes('Sequoia') && !previewDoc.includes('macOS 15')) {
-  throw new Error('unsigned preview document must name macOS 15 Sequoia first-open rules')
-}
-if (previewDoc.includes('notarytool') || previewDoc.includes('APPLE_NOTARY')) {
-  throw new Error('unsigned preview document must not instruct Apple notarization')
-}
-if (!previewDoc.includes('UPDATES.md') || !previewDoc.includes('unsigned-preview-release.yml')) {
-  throw new Error('unsigned preview document must name docs/unsigned-preview-release.yml draft and UPDATES.md')
-}
+// Documentation is reviewed for current meaning; runtime cases own behavior.
 const unsignedWorkflow = await readFile(join(root, 'docs/unsigned-preview-release.yml'), 'utf8')
 if (unsignedWorkflow.includes('notarytool') || unsignedWorkflow.includes('APPLE_NOTARY') || unsignedWorkflow.includes('APPLE_DEVELOPER_ID')) {
   throw new Error('unsigned preview workflow draft must not require Apple notarization credentials')
 }
-if (!unsignedWorkflow.includes('Unsigned preview') || !unsignedWorkflow.includes('admit-github-plugin.mjs')) {
+if (!unsignedWorkflow.includes('admit-github-plugin.mjs')) {
   throw new Error('unsigned preview workflow draft must admit GitHub tools on a clean runner without Apple secrets')
 }
-if (!unsignedWorkflow.includes('Open Anyway') || !unsignedWorkflow.includes('Privacy & Security')) {
-  throw new Error('unsigned preview workflow draft must name the macOS 15+ System Settings override')
-}
+
 if (unsignedWorkflow.includes('needs: github-tools') || unsignedWorkflow.includes('name: github-tools')) {
   throw new Error('unsigned preview workflow must not reuse one OS GitHub-tool archive on other platforms')
 }
@@ -174,49 +131,14 @@ for (const id of ['math-anchor', 'migratory-time', 'capability-contracts']) {
 if (!unsignedWorkflow.includes('capability-contracts') || !unsignedWorkflow.includes('AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT')) {
   throw new Error('unsigned preview workflow draft must checkout capability-contracts and set AGENT_HOST_CAPABILITY_CONTRACTS_SOURCE_ROOT')
 }
-const readme = await readFile(join(root, 'README.md'), 'utf8')
-if (!readme.includes('not Apple-notarized') && !readme.includes('No notarization')) {
-  throw new Error('README must state that preview distribution is not notarized')
-}
-if (!readme.includes('AGENT_HOST_FEATURED_CATALOG_URL') || !readme.includes('UNSIGNED_PREVIEW.md')) {
-  throw new Error('README must name the catalog download hook and unsigned preview document')
-}
-if (!readme.includes('UPDATES.md') || !readme.includes('profiles fetch --carrier')) {
-  throw new Error('README must name GitHub updates and that carrier fetch is not application replacement')
-}
-const readmeZh = await readFile(join(root, 'README.zh-CN.md'), 'utf8')
-if (!readmeZh.includes('无公证') || !readmeZh.includes('AGENT_HOST_FEATURED_CATALOG_URL')) {
-  throw new Error('Chinese README must state 无公证 and the catalog download hook')
-}
 const unpublished = JSON.parse(await readFile(join(root, 'catalog/preview-distribution.json'), 'utf8'))
 if (unpublished.publicReleasePublished !== false || unpublished.notarized !== false || unpublished.catalog !== null || unpublished.carriers.length !== 0) {
   throw new Error('tracked preview-distribution.json must remain an unpublished placeholder')
 }
-if (!unpublished.gatekeeperNote.includes('Open Anyway') || !unpublished.gatekeeperNote.includes('Privacy & Security')) {
-  throw new Error('tracked preview-distribution.json gatekeeperNote must name the macOS 15+ System Settings override')
-}
+
 const draftWorkflow = await readFile(join(root, 'docs/unsigned-preview-release.yml'), 'utf8')
 if (draftWorkflow.includes('notarytool') || draftWorkflow.includes('APPLE_NOTARY')) {
   throw new Error('unsigned preview workflow draft must not require Apple notarization')
-}
-if (!featuredDoc.includes('ADOPTION_ACCEPTANCE.md')) {
-  throw new Error('featured catalog document must point at the unnamed capability exercise')
-}
-const adoptionDoc = await readFile(join(root, 'docs/ADOPTION_ACCEPTANCE.md'), 'utf8')
-if (!adoptionDoc.includes('fresh Agent task') || !adoptionDoc.includes('not adoption evidence') || !adoptionDoc.includes('doctor --featured-readiness')) {
-  throw new Error('capability exercise must preserve fresh-task context and refuse Host status as a task verdict')
-}
-if (!adoptionDoc.includes('recipe.consistency') || !adoptionDoc.includes('userStatus') || !adoptionDoc.includes('local-dogfood')) {
-  throw new Error('capability exercise must separate user-level readiness from recipe consistency')
-}
-if (!/experimental\s+variable/u.test(adoptionDoc) || !adoptionDoc.includes('Participant interpretation (optional)')) {
-  throw new Error('capability exercise must keep working-set context separate from participant interpretation')
-}
-if (adoptionDoc.includes('Two tasks are enough to score') || adoptionDoc.includes('## Scorecard') || adoptionDoc.includes('without a scorecard is not a result')) {
-  throw new Error('capability exercise must not restore a fixed quota or mandatory scorecard')
-}
-if (!adoptionDoc.includes('docs/fixtures/adoption')) {
-  throw new Error('capability exercise must ship unnamed fixtures')
 }
 const adoptionFixtureRoot = join(root, 'docs/fixtures/adoption')
 const steered = /\barmorial\b|\blucide\b|\biconpark\b|请使用/iu

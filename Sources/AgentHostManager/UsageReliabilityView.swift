@@ -168,6 +168,8 @@ struct UsageReliabilityView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            Text(L10n.text("Calls mapped to tools managed by Agent Host. Independently configured tools are outside this view."))
+                .font(.caption).foregroundStyle(.secondary)
             if displayed.isEmpty {
                 Text(L10n.text("No mapped Agent Host tool calls were observed in this window."))
                     .foregroundStyle(.secondary)

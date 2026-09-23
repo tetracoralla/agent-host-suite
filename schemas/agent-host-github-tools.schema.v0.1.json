@@ -22,13 +22,15 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "repository", "featured", "assetName", "platforms"],
+        "required": ["id", "repository", "featured"],
+        "oneOf": [{"required": ["assetName", "platforms"], "not": {"required": ["source"]}}, {"required": ["source"], "not": {"anyOf": [{"required": ["assetName"]}, {"required": ["platforms"]}]}}],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
           "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
           "featured": { "type": "boolean" },
           "assetName": { "type": "string", "minLength": 1 },
           "checksumAssetName": { "type": "string", "minLength": 1 },
+          "source": {"type": "object", "additionalProperties": false, "required": ["kind", "pluginPath"], "properties": {"kind": {"const": "repository-plugin"}, "pluginPath": {"type": "string", "minLength": 1}}},
           "platforms": {
             "type": "object",
             "minProperties": 1,
