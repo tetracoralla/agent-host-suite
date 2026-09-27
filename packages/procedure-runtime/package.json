@@ -1,0 +1,11 @@
+{
+  "name": "@openadam/procedure-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=22.16.0" },
+  "bin": { "agent-procedure": "bin/agent-procedure.mjs" },
+  "dependencies": { "ajv": "^8.20.0", "ajv-formats": "3.0.1" },
+  "scripts": { "start": "node bin/agent-procedure.mjs serve", "check": "node --test --test-timeout=180000 test/*.test.mjs" }
+}

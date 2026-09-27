@@ -12,7 +12,7 @@ const required = [
   'docs/DISCOVERY_PROJECTION.md', 'docs/FEATURED_CATALOG.md', 'docs/ADOPTION_ACCEPTANCE.md', 'docs/ECOSYSTEM_PATHS.md', 'docs/UNSIGNED_PREVIEW.md', 'docs/UPDATES.md',
   'docs/unsigned-preview-release.yml', 'docs/scan-github-tools.yml', 'scripts/write-preview-distribution.mjs', 'scripts/publish-unsigned-preview.mjs', 'scripts/admit-github-plugin.mjs', 'scripts/sync-github-catalog.mjs', 'scripts/verify-application-update.mjs', 'scripts/build-unsigned-preview-catalog.mjs',
   'catalog/github-tools.json', 'catalog/github-releases/current.json', 'catalog/unsigned-preview-source-pins.json',
-  'schemas/agent-host-github-tools.schema.v0.1.json', 'schemas/agent-host-github-catalog.schema.v0.1.json', 'schemas/agent-host-component.schema.v0.2.json',
+  'schemas/agent-host-github-tools.schema.v0.1.json', 'schemas/agent-host-github-catalog.schema.v0.1.json', 'schemas/agent-host-component.schema.v0.2.json', 'schemas/agent-host-component.schema.v0.3.json',
   'schemas/agent-host-preview-distribution.schema.v0.1.json', 'catalog/preview-distribution.json',
   'scripts/check-manager-models.sh', 'scripts/write-internal-beta-distribution.mjs', 'scripts/check-macos-distribution.sh', 'Tests/AgentHostManagerChecks/main.swift',
   'scripts/release-source-provenance.mjs', 'scripts/check-release-source-provenance.mjs', 'scripts/provider-source-build.mjs', 'src/release-provenance.mjs',
@@ -22,7 +22,7 @@ const required = [
   'schemas/agent-host-release-source-lock.schema.v0.1.json', 'schemas/agent-host-build-provenance.schema.v0.1.json',
   'schemas/agent-host-developer-kit-integration.schema.v0.1.json',
   'schemas/agent-host-profile.schema.v0.1.json', 'schemas/agent-host-profile.schema.v0.2.json',
-  'schemas/agent-host-tool-integration.schema.v0.1.json', 'schemas/agent-host-tool-integration.schema.v0.2.json', 'schemas/agent-host-tool-integration.schema.v0.3.json', 'schemas/agent-host-tool-integration.schema.v0.4.json', 'schemas/agent-host-tool-integration.schema.v0.5.json',
+  'schemas/agent-host-tool-integration.schema.v0.1.json', 'schemas/agent-host-tool-integration.schema.v0.2.json', 'schemas/agent-host-tool-integration.schema.v0.3.json', 'schemas/agent-host-tool-integration.schema.v0.4.json', 'schemas/agent-host-tool-integration.schema.v0.5.json', 'schemas/agent-host-procedure-integration.schema.v0.2.json', 'schemas/agent-host-method-graph.schema.v2.json', 'schemas/agent-host-procedure-run-request.schema.v0.1.json',
   '.github/workflows/ci.yml', '.github/workflows/codeql.yml', '.github/workflows/release.yml',
 ]
 for (const path of required) {

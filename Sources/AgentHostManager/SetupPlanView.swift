@@ -37,15 +37,15 @@ struct SetupPlanView: View {
 
             if store.connectsAgentDuringSetup {
                 NoticeView(
-                    title: L10n.format("A new {app} task will be required", ["app": store.selectedSetupHostName]),
-                    message: L10n.format("Open a fresh task after setup so {app} can load the installed tools.", ["app": store.selectedSetupHostName]),
+                    title: L10n.text("New tasks pick up changes"),
+                    message: L10n.format("New {app} tasks load the installed tools. Tasks already open keep what they started with.", ["app": store.selectedSetupHostName]),
                     systemImage: "arrow.clockwise.circle.fill",
                     color: .blue
                 )
             } else {
                 NoticeView(
                     title: L10n.text("Connect an Agent app when it is installed"),
-                    message: L10n.text("Connect an Agent afterward, then start a new task."),
+                    message: L10n.text("New tasks load this tool selection. Tasks already open keep the tools they started with."),
                     systemImage: "arrow.clockwise.circle.fill",
                     color: .blue
                 )

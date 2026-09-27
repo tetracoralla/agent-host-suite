@@ -21,6 +21,23 @@ checkouts use [`LOCAL_DOGFOOD.md`](LOCAL_DOGFOOD.md) so installed execution
 matches a stranger's package bytes while they still edit those repositories.
 `local-dogfood` remains a local feedback profile, not a store.
 
+Provider developers, Procedure developers and environment users are distinct
+roles even when one person sometimes holds more than one:
+
+- A **Provider developer** owns an implementation such as a program, tool or
+  model-backed service. Its internals may be opaque to Host, but its admitted
+  entrypoint, Capability contracts, effects, configuration and version identity
+  are explicit.
+- A **Procedure developer** (or that developer's Agent) authors, validates,
+  tests and packages a reusable Procedure product against declared Capability
+  requirements. This is development work, not per-task consumer setup.
+- A **user's Agent** selects an installed Procedure, derives its inputs from the
+  user's task, invokes it and evaluates the declared outputs. It does not rebuild
+  the Procedure's internal plan on every use.
+- The **human user** manages which Provider and Procedure products are installed,
+  available and healthy. They do not operate routine Run state, stage transitions,
+  bindings or logs.
+
 The `featured` profile is the external-user admission list: an owner-selected
 subset of independently released tools installed through the existing setup,
 `profiles list`, `update --profile featured`, and private-import APIs. Browser
@@ -47,6 +64,94 @@ release claims remain in the platform and release documents.
 
 ## Product object
 
+### Optional task coordination
+
+An installed Procedure is a developer-produced, validated and versioned product.
+Every Procedure package has one common identity, input schema, output schema,
+permission declaration and lifecycle declaration. Its execution binding then
+selects either `direct-runtime` for a synchronous structured call or
+`agentic-runner` for a stateful Method/Run. These are two execution kinds of one
+installed product model, not two independent catalogs that happen to share a
+name.
+
+Host's immutable installed component state is the catalog authority. At use
+time, the person's Agent selects an exact installed `id` and `version`, maps the
+person's task into its declared inputs, invokes it through the Host Procedure
+interface, and consumes only the declared outputs. Agentic products are loaded
+from that installed state into the
+[Procedure Runner](../packages/procedure-runtime/README.md); the Runner does not
+quietly inject consumer-visible built-in products. Neither the person nor that
+Agent assembles a new workflow for the Run. The consumer API is read-only for
+Procedure definitions.
+
+The Runner is headless and the user's Agent is its consumer. `procedure list`
+provides searchable, paged, byte-budgeted summaries without embedding every
+input/output schema. `procedure describe ID VERSION` returns the one exact full
+contract. `procedure invoke --request` accepts that same exact identity inside a
+versioned Run Request; `procedure status` and `procedure continue` preserve the
+durable read/continue boundary. If a Run needs a
+human decision or permission, the Agent mediates that through the Agent app's
+existing conversation or native permission surface. Agent Host Manager does not
+become a Run console: it shows installed Procedure products and whether they are
+available to Agents, not stages, logs, provider bindings, checks or internal
+state. A workspace is an adapter selected by the Procedure product, not an
+assumed Git checkout.
+
+An agentic Method uses the closed, versioned `openadam.method-graph.v2` source
+model. Nodes can be Agent turns, Direct Capability calls, exact-version
+subprocedure calls, human input/checkpoints, deterministic conditions or
+deterministic transforms. Every edge, consumed/produced artifact, permission and
+resource reference is explicit. Unknown fields are rejected so a future Studio
+cannot silently discard source it does not understand. `parallel` and `wait` are
+declared extension points with `supported: false`; they are not claimed as
+implemented execution behavior.
+
+Authority has four separate layers. A product permission declaration states
+what the product may need. Installed state records a distinct permission ceiling
+(initially the admitted declaration). Each Run Request supplies the smaller
+grant set actually authorized for that task and binds required workspace, file
+or account resources. Because the current Direct Runtime work-order has no
+per-node permission or resource carrier, a Direct Procedure must receive every
+declared permission as an explicit Run grant and cannot yet declare resources;
+admission rejects an unusable contract instead of deferring the failure until
+invocation. An agentic graph can require only the permissions and resources on
+the nodes actually reached. A Provider callback may ask for a one-time decision
+while a node runs, but it is automatically refused unless both the Run and that
+node already contain its required grant. A declaration or callback never
+enlarges task authority.
+
+Procedure authoring belongs to a separate developer-facing **Procedure Studio**.
+Its primary representation is graphical structure and contract relationships,
+with direct manipulation for stages, Capability requirements, typed inputs and
+outputs, conditions, permissions and composition. Validation, test Runs and
+package/export are part of that developer flow. Source text and diagnostics are
+secondary inspectable detail, not long forms or explanatory prose that the
+developer must read before acting. An authoring Agent may create or revise the
+same source model, but the Studio remains a first-class product for inspection,
+debugging and deliberate editing.
+
+The Git development-and-review profile owns its stronger candidate, independent
+review, staging and commit rules. A no-workspace research-brief method provides
+a structurally different Agent flow with a question/continuation branch. A
+workspace composition reference crosses an Agent turn, a Direct Capability and
+an exact subprocedure under explicit grants and resource bindings. These prove
+the local model is not defined by the development profile; they do not by
+themselves qualify real provider behavior or every future domain.
+Concrete task coordination owns local run state, permissions and recovery;
+portable Procedure semantics and conformance remain in the standards repository.
+
+Procedure availability is never one inferred green flag. Host separately
+reports installed/contract-validated/discoverable state, the timestamp of the
+last successful invocation, whether that invocation evidence still matches the
+current product/runtime/binding fingerprints, current health, and current Agent
+session discovery. Product, runtime or binding changes invalidate only the
+current evidence while retaining the historical success time. Current-session
+discovery remains `not-observed` until that session is actually observed; no
+Host projection claims that an already-open Agent session loaded new bytes or
+that a Procedure result is fit for the user's task.
+
+### Environment
+
 Agent Host is a distribution and local operations product. The Agent Host Suite
 is this repository's technical distribution unit. Neither is the Agent-Host
 architecture itself, and Agent Host is not required for standards adoption.
@@ -67,6 +172,8 @@ compatibility set containing:
 - the selected profile;
 - the profile's installed component set and its separately declared
   Agent-visible component set;
+- exact installed Procedure products with their common identity, input/output
+  schemas, permissions, lifecycle and one explicit execution binding;
 - explicit host adapters installed through supported host interfaces;
 - private current-host configuration and service state; and
 - optional, separately consented observation components.
@@ -96,13 +203,16 @@ quality. Replacing configuration requires a newly built and previewed archive.
   contracts.
 - Independently useful Provider products own their source, binaries, domain
   behavior, product Skills, plugins, and releases.
+- Independently useful Procedure products own their source, tested method,
+  declared Capability requirements, schemas, package identity and releases.
 - Host-internal packages own execution, transport, instance, observation, and
   routing-support implementation behind explicit contracts.
 - `packages/direct-execution-runtime` owns bounded Host execution mechanics.
 - Agent Host owns artifact acquisition, hash verification, installation,
   official host integration, local service lifecycle, profiles, update,
   rollback, removal, optional passive observation and explicit task-activity
-  export, a small human status surface, and one bounded product
+  export, Provider/Procedure availability in its small human management surface,
+  and one bounded product
   operations Skill for external Agents.
 - Agent apps remain independently updated hosts. Agent Host never patches their
   binaries or private implementation files.
@@ -211,15 +321,19 @@ constraint on those dimensions.
 Working-set changes retain rollback bytes and displaced user entries and
 require a fresh Agent task before current discovery can be assessed.
 
-An environment may also carry a small owner-selected set of private Agent tools
+An environment may also carry a small owner-selected set of private Provider
+and Procedure products
 outside the release profile. This is a local overlay, not another profile,
 registry, marketplace, or Agent-facing import route. The human CLI accepts only
-self-contained sealed component archives through the closed tool-integration
-contract, previews exact artifact and live catalog facts before import, defaults
-the tool to inactive, and retains one component-level rollback. Optional path
-grants are explicit, component-specific, and never supplied by Agent input.
-Exact versions and fields belong to
-[`TOOL_INTEGRATION.md`](TOOL_INTEGRATION.md) and the corresponding schemas.
+self-contained sealed component archives through closed integration contracts,
+previews exact artifact facts before import, and retains one component-level
+rollback. Provider activation remains a separate working-set choice. Procedure
+products are admitted with their common product envelope and exact execution
+binding, then appear in the Agent-readable Procedure catalog; they are
+not placed in the Provider tool toggle. Optional path grants are explicit,
+component-specific, and never supplied by Agent input. Exact fields belong to
+[`TOOL_INTEGRATION.md`](TOOL_INTEGRATION.md) and the corresponding Provider and
+Procedure integration schemas.
 
 ## Core flows
 
@@ -274,17 +388,19 @@ Host judgments and not required setup.
 
 ## Human surface
 
-The Agent Host Manager is a backstage management surface organized around four
-durable objects:
+The Agent Host Manager is a backstage environment-management surface. It is for
+the person using Agents, not for Procedure authors and not for operating Runs.
+Primary navigation follows what is already on this machine:
 
-- **Environment** — readiness, profile, version, background service,
-  monitoring, check, repair, rollback, and removal;
-- **Tools** — installed version, current health, Agent-app availability, and
-  Suite-owned versus preserved user configuration;
-- **Agent Apps** — detected supported apps, connected state, health, and
-  explicit connect or disconnect actions; and
-- **Activity** — bounded local lifecycle history translated into product names
-  and human labels rather than raw state-field identifiers.
+- **Library** — installed Provider and Procedure products and whether new Agent
+  tasks can use them; Provider working-set controls apply only where relevant;
+- **Browse** — the compatible catalog and a GitHub compatibility preview; and
+- **Agents** — detected apps, connection, health, and repair.
+
+History and Usage appear only after an environment exists. Versions, catalog
+source, monitoring, the installed profile, rollback, and removal stay in
+Settings. Those are environment operations, not a second home screen and not
+a reason to open an Agent app.
 
 Before installation, the same app opens on an honest empty local inventory and
 puts compatible recommendations below it. Installation still receives a
@@ -298,33 +414,33 @@ can observe and does not pretend an already-open task loaded tools. Recoverable
 errors use product language and one next action; raw paths and protocol detail
 remain outside the primary interface.
 
-Tool collections use compact, unframed rows with a product mark, name, short
-purpose, and one availability or attention indicator. Versions, configuration,
-and source links belong in a full-page detail. Returning preserves the search,
-position, and keyboard focus; refresh preserves an edited example task. Normal
+Product collections use compact, unframed rows with a product mark, name, short
+purpose, and one availability or attention indicator. Provider and Procedure
+products are visibly distinct without exposing their internal contracts.
+Versions, configuration, source and diagnostics belong in detail or recovery
+views. Returning preserves the search, position and keyboard focus. Normal
 states do not repeat their icon as a caption or legend. Consequential differences
-(such as pausing on-demand tools when the last active tool is turned off) remain
-explicit at the action. Agent connections use aligned rows, lifecycle changes use
-a chronology, and usage uses data sections rather than a universal card layout.
+(such as pausing on-demand Providers when the last active Provider is turned
+off) remain explicit at the action. Agent connections use aligned rows,
+lifecycle changes use a chronology, and usage uses data sections rather than a
+universal card layout.
 
 The Manager refreshes stale in-memory state on foreground return and shows when
 visible status was last checked. Automatic refresh does not launch Agent apps;
 mutations remain disabled while current local state is being reacquired. Full
 Check is the explicit current Agent-app binding route.
 
-**Tools** is the default destination. It shows tools installed on this machine
-first, including a compact empty state when there are none. Compatible
-recommendations follow that local inventory; a person can search or open
-**Browse** for the complete available catalog.
+**Library** is the default destination. It shows products installed on this
+machine first, with separate Provider and Procedure sections and a compact empty
+state when neither exists. Compatible recommendations follow that local
+inventory; a person can search or open **Browse** for the available catalog.
 
 The primary interface uses recognizable product identity, a short job label,
-current availability, and one useful next action; history, provenance, and
-machine detail remain available on demand. It does not require a person to read
-an evidence chain before acting. An editable example can be handed to a new
-Agent task after the person chooses **Use**; it remains optional and does not
-record adoption. It does not show MCP schemas,
-Agent reasoning, Capability catalogs, protocol metadata, or long marketing
-explanations. Usage &
+current availability, and one useful environment action when install, connect,
+enable, repair, or resume is still needed. A ready product does not offer a
+try-in-a-new-task action. Manager does not provide Procedure authoring or Run
+controls. It does not show MCP schemas, Procedure graphs, Agent reasoning,
+Capability catalogs, protocol metadata, or long marketing explanations. Usage &
 Reliability shows recent task activity through direct calls, errors, and static
 references before offering a detail export. It preserves unavailable and
 partial coverage and never derives a non-use reason, correctness, adoption,

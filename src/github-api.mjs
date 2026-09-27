@@ -1,4 +1,5 @@
 import { AgentHostError } from './errors.mjs'
+import { fetchExternal } from './external-fetch.mjs'
 
 export const GITHUB_API_ACCEPT = 'application/vnd.github+json'
 export const GITHUB_USER_AGENT = 'openAdam-agent-host-suite'
@@ -90,7 +91,7 @@ export function parseSha256File(text, expectedName = null) {
   return { sha256: `sha256:${digest}`, assetName: name }
 }
 
-async function readGithubJson(url, { fetch = globalThis.fetch, signal } = {}) {
+async function readGithubJson(url, { fetch = fetchExternal, signal } = {}) {
   let response
   try {
     response = await fetch(url, {

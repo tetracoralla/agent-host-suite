@@ -84,6 +84,10 @@ agent-host observability export-trace --provider zcode \
   --file /exact/model-io-file.jsonl --output /new/trace-pack.json --json
 ```
 
+`task-sources` and `export-task` require an installed Observer 0.6.5 or newer.
+An older installed component must be updated through a bound environment release
+before these Manager actions can work.
+
 `adapters` is a path-free capability catalog. `trace-sources` and
 `task-sources` are path-free, bounded catalogs of retained pseudonymous
 sessions for one provider. Under Usage & Reliability, Manager exposes the

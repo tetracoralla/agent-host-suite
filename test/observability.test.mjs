@@ -582,7 +582,7 @@ test('Agent Host lists and exports retained task activity only through the insta
     installedAt: '2026-09-21T00:00:00.000Z',
     updatedAt: '2026-09-21T00:00:00.000Z',
     components: {
-      'agent-tool-observer': { command: '/private/node', args: ['/private/observer/cli.mjs'], root: '/private/observer' },
+      'agent-tool-observer': { version: '0.6.5', command: '/private/node', args: ['/private/observer/cli.mjs'], root: '/private/observer' },
     },
     hosts: {},
     runtime: { observationLog: '/private/direct-runtime.jsonl' },
@@ -617,6 +617,36 @@ test('Agent Host lists and exports retained task activity only through the insta
   assert.equal(calls.every((item) => item.options.cwd === '/private/observer'), true)
   assert.equal(calls.every((item) => item.options.env.ATO_STATE_DIR === '/private/observer-state'), true)
   assert.equal(calls[1].options.signal, signal)
+})
+
+test('task activity reports an actionable version mismatch before invoking an older installed Observer', async (t) => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'agent-host-old-task-observer-'))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
+  const paths = await prepareStatePaths(stateRoot)
+  await saveState(paths, {
+    schemaVersion: STATE_SCHEMA,
+    suiteVersion: '0.2.0',
+    channel: 'release',
+    profile: 'observability',
+    installedAt: '2026-09-21T00:00:00.000Z',
+    updatedAt: '2026-09-21T00:00:00.000Z',
+    components: {
+      'agent-tool-observer': { version: '0.6.4', command: '/private/node', args: ['/private/observer/cli.mjs'], root: '/private/observer' },
+    },
+    hosts: {},
+    runtime: { observationLog: '/private/direct-runtime.jsonl' },
+    observability: { enabled: true, observer: { stateDir: '/private/observer-state' } },
+  })
+  const neverRun = async () => { throw new Error('older Observer must not be invoked for task activity') }
+  for (const request of [
+    () => observabilityTaskSources({ stateRoot, provider: 'codex' }, { runner: neverRun }),
+    () => exportObservabilityTask({ stateRoot, provider: 'codex', session: 'b'.repeat(64), output: '/selected/task.json' }, { runner: neverRun }),
+  ]) {
+    await assert.rejects(request(), {
+      code: 'OBSERVABILITY_COMPONENT_UPDATE_REQUIRED',
+      message: 'Task activity requires Observer 0.6.5 or newer. Update the Agent environment, then retry.',
+    })
+  }
 })
 
 test('Observer command failures do not expose installed paths or command details', async (t) => {

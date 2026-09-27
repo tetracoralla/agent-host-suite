@@ -23,9 +23,6 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var environmentChangePlan: EnvironmentChangePlan?
     @Published private(set) var toolSetNeedsFreshTask = false
     @Published private(set) var justCompletedSetup = false
-    // Copy succeeded but no single connected app could be opened; the Agents
-    // page shows this so the handoff stays explained after the section switch.
-    @Published private(set) var exampleTaskHandoff: String?
     @Published var requestedSection: ManagerSection?
     @Published var exampleTaskDrafts: [String: String] = [:]
     @Published private(set) var isBusy = false
@@ -198,8 +195,6 @@ final class AgentHostStore: ObservableObject {
                 DispatchQueue.main.async {
                     if error != nil {
                         self.requestedSection = .agentApps
-                    } else {
-                        self.exampleTaskHandoff = nil
                     }
                 }
             }
@@ -209,23 +204,14 @@ final class AgentHostStore: ObservableObject {
         requestedSection = .agentApps
     }
 
+    /// Copies an optional example. Does not open an Agent app or explain how to paste it.
     @discardableResult
-    func beginExampleTask(_ prompt: String) -> Bool {
+    func copyExampleTask(_ prompt: String) -> Bool {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         guard pasteboard.setString(prompt, forType: .string) else {
             errorMessage = L10n.text("Agent Host could not copy the example task.")
             return false
-        }
-        let connectedApps = connectedAgentAppIDs
-        if connectedApps.count == 1 {
-            exampleTaskHandoff = "Open the connected Agent app, then start a new task and paste."
-            openConnectedAgentApp(hostID: connectedApps[0])
-        } else {
-            exampleTaskHandoff = connectedApps.isEmpty
-                ? "Connect an Agent app, then start a new task and paste."
-                : "Choose an Agent app to open, then start a new task and paste."
-            requestedSection = .agentApps
         }
         return true
     }
@@ -319,6 +305,26 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
+    var managedProcedures: [ManagedProcedure] {
+        (suite?.components ?? [:])
+            .filter { $0.value.productType == "procedure" }
+            .map { id, component in
+                ManagedProcedure(
+                    id: id,
+                    name: component.displayName ?? id.replacingOccurrences(of: "-", with: " ").localizedCapitalized,
+                    summary: component.summary ?? component.procedureId ?? "",
+                    version: component.version,
+                    procedureId: component.procedureId ?? id,
+                    procedureVersion: component.procedureVersion ?? component.version,
+                    execution: component.procedureExecution,
+                    availability: component.procedureAvailability,
+                    isPrivate: component.isPrivate == true,
+                    logo: component.logo
+                )
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     var connectedAgentAppCount: Int {
         suite?.hosts?.values.filter(\.installed).count ?? 0
     }
@@ -345,7 +351,8 @@ final class AgentHostStore: ObservableObject {
         return builtIn + (browseCatalog?.tools ?? []).filter { !known.contains($0.id) }.map { item in
             ManagerSetupTool(id: item.id, name: item.presentation?.displayName ?? item.id,
                              summary: item.presentation?.summary ?? "", details: item.presentation?.summary ?? "",
-                             systemImage: "shippingbox", repositoryURL: item.homepage)
+                             systemImage: "shippingbox", examplePrompt: ManagerSetupPolicy.examplePrompt(item.id),
+                             repositoryURL: item.homepage)
         }
     }
 
@@ -871,6 +878,10 @@ final class AgentHostStore: ObservableObject {
             self.updates = try await self.cli.run(["updates", "check"], as: UpdatesReport.self)
             await self.refresh()
         }
+    }
+
+    func removeProcedure(id: String) async {
+        await action(["component", "remove", id], label: "Removing Procedure")
     }
 
     func installUpdate(id: String) async {

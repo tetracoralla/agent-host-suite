@@ -51,7 +51,7 @@ async function component(catalogRoot, fixtureRoot, definition, marker) {
   ])
   for (const [path, [contents, executable]] of files) await write(join(root, path), contents, executable ? 0o700 : 0o600)
   const descriptor = {
-    schemaVersion: 'openadam.agent-host-component.v0.1',
+    schemaVersion: definition.schemaVersion ?? 'openadam.agent-host-component.v0.1',
     id: definition.id,
     version: definition.version,
     kind: definition.kind,
@@ -60,6 +60,7 @@ async function component(catalogRoot, fixtureRoot, definition, marker) {
     entrypoints: definition.entrypoints,
     integration: definition.integration,
     legal: { license: 'LICENSE', notice: 'NOTICE', thirdPartyNotices: 'THIRD_PARTY_NOTICES.txt', sbom: 'sbom.spdx.json' },
+    ...(definition.presentation === undefined ? {} : { presentation: definition.presentation }),
   }
   const descriptorPath = join(root, 'component.json')
   await json(descriptorPath, descriptor)
@@ -96,7 +97,17 @@ export async function createReleaseFixture(root, { suiteVersion, releaseId, mark
     },
     {
       id: 'direct-execution-runtime', version: '0.1.0', kind: 'direct-runtime',
-      files: [['src/cli.mjs', [`// ${marker}\n`, false]]],
+      files: [['src/cli.mjs', [`#!/usr/bin/env node
+import { readFile } from 'node:fs/promises'
+const [command, flag, path] = process.argv.slice(2)
+if (command !== 'check-config' || flag !== '--config' || path === undefined) process.exitCode = 64
+else {
+  const config = JSON.parse(await readFile(path, 'utf8'))
+  if (!Array.isArray(config.providers)) process.exitCode = 1
+  else process.stdout.write(JSON.stringify({ schemaVersion: 'openadam.direct-config-check.v0.1', status: 'valid', providers: config.providers.length }) + '\\n')
+}
+// ${marker}
+`, false]]],
       identityFiles: ['src/cli.mjs', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'sbom.spdx.json'],
       entrypoints: { cli: 'src/cli.mjs' }, integration: null,
     },
@@ -347,6 +358,272 @@ export async function createToolComponentFixture(root, { id = 'private-fixture',
       ownership: { uninstall: 'agent-host-created-only' },
     },
   }, marker)
+  return {
+    artifactPath: join(catalogRoot, releaseComponent.artifact.url),
+    binding: {
+      archiveSha256: releaseComponent.artifact.sha256,
+      archiveBytes: releaseComponent.artifact.bytes,
+      descriptorSha256: releaseComponent.descriptorSha256,
+      id,
+      version,
+      platform: currentReleasePlatform(),
+      spdx: 'Apache-2.0',
+    },
+  }
+}
+
+export async function createProcedureComponentFixture(root, {
+  id = 'private-procedure',
+  version = '0.1.0',
+  permissions = [],
+  resources = [],
+  mutateAdapter = null,
+} = {}) {
+  const catalogRoot = join(root, 'catalog')
+  await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
+  const fixtureRoot = new URL('../packages/direct-execution-runtime/test/fixtures/fake-capability/', import.meta.url)
+  const files = await Promise.all(
+    ['procedure-profile.json', 'procedure-manifest.json', 'echo.input.schema.json', 'echo.output.schema.json', 'procedure-adapter.mjs']
+      .map(async (name) => {
+        let bytes = await readFile(new URL(name, fixtureRoot))
+        // Produce a different-bytes package at the same declared product
+        // identity: identity files change, so the installed fingerprint and
+        // archive change while id@version stay identical.
+        if (name === 'procedure-adapter.mjs' && mutateAdapter !== null)
+          bytes = Buffer.concat([bytes, Buffer.from(`\n// ${mutateAdapter}\n`)])
+        return [name, [bytes, name === 'procedure-adapter.mjs']]
+      }),
+  )
+  const releaseComponent = await component(catalogRoot, root, {
+    schemaVersion: 'openadam.agent-host-component.v0.3',
+    id,
+    version,
+    kind: 'procedure',
+    files,
+    identityFiles: [
+      'procedure-profile.json',
+      'procedure-manifest.json',
+      'echo.input.schema.json',
+      'echo.output.schema.json',
+      'procedure-adapter.mjs',
+    ],
+    entrypoints: { adapter: 'procedure-adapter.mjs' },
+    presentation: {
+      displayName: 'Echo Procedure',
+      summary: 'Return one explicit value through a packaged Procedure.',
+      author: 'Fixture Developer',
+    },
+    integration: {
+      schemaVersion: 'openadam.agent-host-procedure-integration.v0.2',
+      displayName: 'Echo Procedure',
+      summary: 'Return one explicit value through a packaged Procedure.',
+      procedure: {
+        id: 'org.openadam.test.echo-procedure',
+        version: '0.1.0',
+        inputSchema: 'echo.input.schema.json',
+        outputSchema: 'echo.output.schema.json',
+        permissions,
+        resources,
+        lifecycle: {
+          mode: 'synchronous',
+          resumable: false,
+          interaction: 'none',
+        },
+      },
+      execution: {
+        kind: 'direct-runtime',
+        providerId: 'test.fake-procedure',
+        transport: 'procedure-jsonl-v0.2',
+        providerLifecycle: 'per-call',
+        profile: 'procedure-profile.json',
+        implementationManifest: 'procedure-manifest.json',
+        identityFiles: ['procedure-adapter.mjs'],
+      },
+      ownership: { uninstall: 'agent-host-created-only' },
+    },
+  }, 'procedure')
+  return {
+    artifactPath: join(catalogRoot, releaseComponent.artifact.url),
+    binding: {
+      archiveSha256: releaseComponent.artifact.sha256,
+      archiveBytes: releaseComponent.artifact.bytes,
+      descriptorSha256: releaseComponent.descriptorSha256,
+      id,
+      version,
+      platform: currentReleasePlatform(),
+      spdx: 'Apache-2.0',
+    },
+  }
+}
+
+export async function createAgenticProcedureComponentFixture(root, {
+  id = 'research-brief-procedure',
+  version = '1.0.0',
+} = {}) {
+  const catalogRoot = join(root, 'catalog')
+  await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
+  const { researchBriefMethod } = await import('../packages/procedure-runtime/src/profiles/research-brief.mjs')
+  const inputSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['goal', 'audience'],
+    properties: {
+      goal: { type: 'string', minLength: 1 },
+      audience: { type: 'string', minLength: 1 },
+    },
+  }
+  const outputSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['brief'],
+    properties: { brief: { type: 'string', minLength: 1 } },
+  }
+  const files = [
+    ['method.json', [Buffer.from(`${JSON.stringify(researchBriefMethod, null, 2)}\n`), false]],
+    ['input.schema.json', [Buffer.from(`${JSON.stringify(inputSchema, null, 2)}\n`), false]],
+    ['output.schema.json', [Buffer.from(`${JSON.stringify(outputSchema, null, 2)}\n`), false]],
+  ]
+  const releaseComponent = await component(catalogRoot, root, {
+    schemaVersion: 'openadam.agent-host-component.v0.3',
+    id,
+    version,
+    kind: 'procedure',
+    files,
+    identityFiles: ['method.json', 'input.schema.json', 'output.schema.json'],
+    entrypoints: {},
+    presentation: {
+      displayName: 'Research Brief',
+      summary: 'Produce a checked research brief without a Git workspace.',
+      author: 'Fixture Developer',
+    },
+    integration: {
+      schemaVersion: 'openadam.agent-host-procedure-integration.v0.2',
+      displayName: 'Research Brief',
+      summary: 'Produce a checked research brief without a Git workspace.',
+      procedure: {
+        id: 'org.openadam.test.research-brief',
+        version,
+        inputSchema: 'input.schema.json',
+        outputSchema: 'output.schema.json',
+        permissions: ['model.invoke', 'network.read'],
+        resources: [],
+        lifecycle: {
+          mode: 'stateful',
+          resumable: true,
+          interaction: 'agent-mediated',
+        },
+      },
+      execution: {
+        kind: 'agentic-runner',
+        method: 'method.json',
+        outputArtifacts: ['brief'],
+        identityFiles: ['method.json'],
+      },
+      ownership: { uninstall: 'agent-host-created-only' },
+    },
+  }, 'procedure')
+  return {
+    artifactPath: join(catalogRoot, releaseComponent.artifact.url),
+    binding: {
+      archiveSha256: releaseComponent.artifact.sha256,
+      archiveBytes: releaseComponent.artifact.bytes,
+      descriptorSha256: releaseComponent.descriptorSha256,
+      id,
+      version,
+      platform: currentReleasePlatform(),
+      spdx: 'Apache-2.0',
+    },
+  }
+}
+
+export async function createInteractiveProcedureComponentFixture(root, {
+  id = 'interactive-procedure',
+  version = '1.0.0',
+} = {}) {
+  const catalogRoot = join(root, 'catalog')
+  await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
+  const method = {
+    schema: 'openadam.method-graph.v2',
+    profile: null,
+    id: 'interactive-brief',
+    revision: 1,
+    name: 'Interactive brief',
+    description: 'Pause for one explicit human checkpoint, then deterministically return the answer.',
+    roles: [],
+    inputs: [{ id: 'topic', name: 'Topic', type: 'text', required: true }],
+    artifacts: [
+      { id: 'answer', name: 'Answer', type: 'text', required: false },
+      { id: 'brief', name: 'Brief', type: 'text', required: true },
+    ],
+    permissions: [],
+    resources: [],
+    graph: {
+      entry: 'confirm',
+      extensions: {
+        parallel: { version: 1, supported: false },
+        wait: { version: 1, supported: false },
+      },
+      nodes: [
+        {
+          id: 'confirm', name: 'Confirm', kind: 'human-input',
+          prompt: 'Provide the final brief text.', interaction: 'input', responseArtifact: 'answer',
+          consumes: ['topic'], produces: ['answer'], permissions: [], resources: [],
+          transitions: [{ when: { operator: 'always' }, to: 'project' }],
+        },
+        {
+          id: 'project', name: 'Project answer', kind: 'transform',
+          consumes: ['answer'], produces: ['brief'], permissions: [], resources: [],
+          output: { brief: { path: 'outputs.answer' } },
+          transitions: [{ when: { operator: 'always' }, to: null }],
+        },
+      ],
+    },
+  }
+  const inputSchema = {
+    type: 'object', additionalProperties: false, required: ['topic'],
+    properties: { topic: { type: 'string', minLength: 1 } },
+  }
+  const outputSchema = {
+    type: 'object', additionalProperties: false, required: ['brief'],
+    properties: { brief: { type: 'string', minLength: 1 } },
+  }
+  const files = [
+    ['method.json', [Buffer.from(`${JSON.stringify(method, null, 2)}\n`), false]],
+    ['input.schema.json', [Buffer.from(`${JSON.stringify(inputSchema, null, 2)}\n`), false]],
+    ['output.schema.json', [Buffer.from(`${JSON.stringify(outputSchema, null, 2)}\n`), false]],
+  ]
+  const releaseComponent = await component(catalogRoot, root, {
+    schemaVersion: 'openadam.agent-host-component.v0.3',
+    id,
+    version,
+    kind: 'procedure',
+    files,
+    identityFiles: ['method.json', 'input.schema.json', 'output.schema.json'],
+    entrypoints: {},
+    presentation: {
+      displayName: 'Interactive Brief',
+      summary: 'Pause for one human answer and return it through the stateful Runner.',
+      author: 'Fixture Developer',
+    },
+    integration: {
+      schemaVersion: 'openadam.agent-host-procedure-integration.v0.2',
+      displayName: 'Interactive Brief',
+      summary: 'Pause for one human answer and return it through the stateful Runner.',
+      procedure: {
+        id: 'org.openadam.test.interactive-brief',
+        version,
+        inputSchema: 'input.schema.json',
+        outputSchema: 'output.schema.json',
+        permissions: [],
+        resources: [],
+        lifecycle: { mode: 'stateful', resumable: true, interaction: 'agent-mediated' },
+      },
+      execution: {
+        kind: 'agentic-runner', method: 'method.json', outputArtifacts: ['brief'], identityFiles: ['method.json'],
+      },
+      ownership: { uninstall: 'agent-host-created-only' },
+    },
+  }, 'procedure')
   return {
     artifactPath: join(catalogRoot, releaseComponent.artifact.url),
     binding: {

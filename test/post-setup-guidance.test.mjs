@@ -35,9 +35,26 @@ test('post-setup guidance points ready installs at opening the Agent app', () =>
   assert.equal(guidance.statusLine, 'Ready')
   assert.equal(guidance.primaryAction.id, PRIMARY_ACTIONS.OPEN_APP)
   assert.equal(guidance.primaryAction.label, 'Open Codex')
-  assert.equal(guidance.hint, 'Start a new task in the app')
+  assert.equal(guidance.hint, 'New tasks load this tool selection. Tasks already open keep the tools they started with.')
   assert.equal(guidance.gaps.some((line) => /already-open Agent task/u.test(line)), true)
   assert.equal(guidance.observed.some((line) => /installed/iu.test(line)), true)
+})
+
+test('steady ready guidance opens the app without a new-task caption', () => {
+  const guidance = buildPostSetupGuidance({
+    configured: true,
+    connectedHosts: ['Codex'],
+    installedToolCount: 3,
+    activeToolCount: 3,
+    needsFreshTask: false,
+    agentAppsVerified: true,
+    primaryHostName: 'Codex',
+    primaryHostId: 'codex',
+  })
+  assert.equal(guidance.readyToWork, true)
+  assert.equal(guidance.primaryAction.id, PRIMARY_ACTIONS.OPEN_APP)
+  assert.equal(guidance.primaryAction.label, 'Open Codex')
+  assert.equal(guidance.hint, null)
 })
 
 test('post-setup guidance classifies not-connected with a connect recovery path', () => {

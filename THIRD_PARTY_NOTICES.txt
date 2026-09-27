@@ -1,7 +1,8 @@
 Agent Host Suite third-party notices
 
-The command-line package depends on @modelcontextprotocol/sdk and its transitive
-Node.js dependencies. The macOS app development bundle includes those packages
+The command-line package depends on @modelcontextprotocol/sdk, ajv, ajv-formats,
+undici, and their
+transitive Node.js dependencies. The macOS app development bundle includes those packages
 under Contents/Resources/agent-host-suite/node_modules. Each package retains
 its own LICENSE or license metadata at that location.
 
@@ -13,6 +14,9 @@ do not change Agent Host Suite's Apache-2.0 license.
 Primary dependency:
 
 - Model Context Protocol TypeScript SDK, Copyright Anthropic, PBC, MIT License
+- Ajv JSON Schema validator, Copyright Evgeny Poberezkin, MIT License
+- Ajv formats plugin, Copyright Evgeny Poberezkin, MIT License
+- Undici HTTP client, Copyright Matteo Collina and Undici contributors, MIT License
 
 Interface category glyphs:
 

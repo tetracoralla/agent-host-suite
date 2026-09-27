@@ -33,6 +33,13 @@ test('CLI validates and runs one stdin work order without persisting it', async 
   try {
     const configPath = resolve(directory, 'providers.json')
     await writeFile(configPath, `${JSON.stringify(fakeConfig())}\n`)
+    const checked = await runCli(['check-config', '--config', configPath])
+    assert.equal(checked.code, 0, checked.stderr)
+    assert.deepEqual(JSON.parse(checked.stdout), {
+      schemaVersion: 'openadam.direct-config-check.v0.1',
+      status: 'valid',
+      providers: 1,
+    })
     const order = JSON.stringify(workOrder('cli', [fakeCall('echo', { value: 'cli-ok' })]))
     const validated = await runCli(['validate', '--config', configPath, '--work-order', '-'], order)
     assert.equal(validated.code, 0, validated.stderr)

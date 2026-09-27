@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-procedure-integration.schema.v0.2.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "displayName", "summary", "procedure", "execution", "ownership"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-procedure-integration.v0.2" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 180 },
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "inputSchema", "outputSchema", "permissions", "resources", "lifecycle"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "$ref": "#/$defs/semver" },
+        "inputSchema": { "$ref": "#/$defs/path" },
+        "outputSchema": { "$ref": "#/$defs/path" },
+        "permissions": { "type": "array", "maxItems": 40, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "resources": {
+          "type": "array",
+          "maxItems": 40,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/resource" }
+        },
+        "lifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "resumable", "interaction"],
+          "properties": {
+            "mode": { "enum": ["synchronous", "stateful"] },
+            "resumable": { "type": "boolean" },
+            "interaction": { "enum": ["none", "agent-mediated"] }
+          }
+        }
+      }
+    },
+    "execution": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "providerId", "transport", "providerLifecycle", "profile", "implementationManifest", "identityFiles"],
+          "properties": {
+            "kind": { "const": "direct-runtime" },
+            "providerId": { "$ref": "#/$defs/id" },
+            "transport": { "const": "procedure-jsonl-v0.2" },
+            "providerLifecycle": { "enum": ["persistent", "per-call"] },
+            "profile": { "$ref": "#/$defs/path" },
+            "implementationManifest": { "$ref": "#/$defs/path" },
+            "identityFiles": { "$ref": "#/$defs/identityFiles" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "method", "outputArtifacts", "identityFiles"],
+          "properties": {
+            "kind": { "const": "agentic-runner" },
+            "method": { "$ref": "#/$defs/path" },
+            "outputArtifacts": { "type": "array", "minItems": 1, "maxItems": 80, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+            "identityFiles": { "$ref": "#/$defs/identityFiles" }
+          }
+        }
+      ]
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uninstall"],
+      "properties": { "uninstall": { "const": "agent-host-created-only" } }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", "maxLength": 160 },
+    "semver": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$" },
+    "path": { "type": "string", "minLength": 1 },
+    "identityFiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/path" } },
+    "resource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "required", "adapter"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "workspace" },
+            "required": { "type": "boolean" },
+            "adapter": { "const": "git" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "required", "access"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "file" },
+            "required": { "type": "boolean" },
+            "access": { "enum": ["read", "write"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "required"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "account" },
+            "required": { "type": "boolean" },
+            "provider": { "$ref": "#/$defs/id" }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "execution": { "properties": { "kind": { "const": "direct-runtime" } }, "required": ["kind"] } } },
+      "then": { "properties": { "procedure": { "properties": { "resources": { "maxItems": 0 }, "lifecycle": { "properties": { "mode": { "const": "synchronous" }, "resumable": { "const": false }, "interaction": { "const": "none" } } } } } } }
+    },
+    {
+      "if": { "properties": { "execution": { "properties": { "kind": { "const": "agentic-runner" } }, "required": ["kind"] } } },
+      "then": { "properties": { "procedure": { "properties": { "lifecycle": { "properties": { "mode": { "const": "stateful" }, "resumable": { "const": true }, "interaction": { "const": "agent-mediated" } } } } } } }
+    }
+  ]
+}

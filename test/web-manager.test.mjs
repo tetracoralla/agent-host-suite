@@ -74,13 +74,28 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.match(document, /Install featured tools/u)
   assert.match(document, /tool-row/u)
   assert.match(document, /detail-head/u)
-  assert.match(document, /pageHead\(root,'My tools'/u)
+  assert.match(document, /pageHead\(root,'Library'/u)
+  assert.match(document, /el\('h2',t\('Providers'\)/u)
+  assert.match(document, /el\('h2',t\('Procedures'\)/u)
+  assert.match(document, /function procedureRow/u)
+  assert.match(document, /function renderProcedureDetail/u)
+  assert.match(document, /bundled\.has\(id\)/u)
+  assert.match(document, /procedureId/u)
+  assert.match(document, /component-remove/u)
   assert.match(document, /el\('h2',t\('Recommended'\)/u)
   assert.match(document, /data-page="tools" aria-current="true"/u)
-  assert.match(document, /environment:'Agents',tools:'Tools',updates:'Browse'/u)
-  assert.match(document, /button\('Use in Agent'/u)
-  assert.match(document, /hostIds\.length===1/u)
-  assert.match(document, /Task copied\. Choose an Agent app to continue/u)
+  assert.match(document, /environment:'Agents',tools:'Library',updates:'Browse'/u)
+  assert.match(document, /querySelectorAll\('main > section'\)/u)
+  assert.doesNotMatch(document, /querySelectorAll\('main section'\)/u)
+  assert.doesNotMatch(document, /button\('Use in Agent'/u)
+  assert.doesNotMatch(document, /Try in a new task/u)
+  assert.doesNotMatch(document, /Paste it into a new Agent task/u)
+  assert.doesNotMatch(document, /hostIds\.length===1/u)
+  assert.match(document, /button\('Copy'/u)
+  assert.match(document, /button\('Enable to use'/u)
+  assert.match(document, /button\('Connect'/u)
+  assert.match(document, /button\('Open'/u)
+  assert.match(document, /async function copyExamplePrompt/u)
   assert.doesNotMatch(document, /catalog\.append\(el\('p',t\('Public download is not configured\.'/u)
   assert.doesNotMatch(document, /9,999,999,999\\n× 87/u)
   assert.match(document, /Calculate 9,999,999,999 × 87 exactly/u)
@@ -644,7 +659,8 @@ test('post-setup primary CTAs perform navigation or API side effects', async (t)
   assert.equal(body.guidance?.statusLine, 'Ready')
   assert.equal(body.guidance?.primaryAction?.id, 'open-app')
   assert.match(body.guidance?.primaryAction?.label || '', /^Open /u)
-  assert.equal(body.guidance?.hint, 'Start a new task in the app')
+  assert.equal(body.guidance?.hint, null)
+  assert.equal(body.guidance?.primaryAction?.id, 'open-app')
 
   const openAttempt = await fetch(`${origin}/api/action`, {
     method: 'POST',
@@ -750,7 +766,7 @@ test('post-setup primary CTAs perform navigation or API side effects', async (t)
     readyToWork: true,
     primaryAction: { id: 'open-app', label: 'Open Codex' },
     primaryHostId: 'codex',
-    hint: 'Start a new task in the app',
+    hint: 'New tasks load this tool selection. Tasks already open keep the tools they started with.',
     observed: [],
     gaps: [],
   })
@@ -901,6 +917,7 @@ test('repair and update invalidate a cached doctor; preview does not', () => {
   assert.equal(environmentActionInvalidatesDoctor({ action: 'repair' }), true)
   assert.equal(environmentActionInvalidatesDoctor({ action: 'update' }), true)
   assert.equal(environmentActionInvalidatesDoctor({ action: 'workspace' }), true)
+  assert.equal(environmentActionInvalidatesDoctor({ action: 'component-remove' }), true)
   assert.equal(environmentActionInvalidatesDoctor({ action: 'github' }), true)
   assert.equal(environmentActionInvalidatesDoctor({ action: 'github', preview: true }), false)
   assert.equal(environmentActionInvalidatesDoctor({ action: 'doctor' }), false)
@@ -1367,7 +1384,7 @@ test('tool details keep edited tasks across refresh and bind controls to current
   }
   const actions = [], copies = [], view = { detail: 'math-anchor', drafts: {} }
   let acceptsPause = false
-  const api = new Function('data', 'view', 'el', 'button', '$', 't', 'logoNode', 'call', 'copyCapabilityTask', 'confirm', `
+  const api = new Function('data', 'view', 'el', 'button', '$', 't', 'logoNode', 'call', 'copyExamplePrompt', 'confirm', `
     const lastUpdates=null,featuredExperiences=[{id:'math-anchor',name:'Math Anchor',summary:'Exact calculation',prompt:'Original task'}];
     const featuredToolName=id=>id,closeToolDetail=()=>{},openToolDetail=()=>{};
     const row=(label,value)=>{const r=el('div');r.append(el('span',label),el('span',value));return r};
@@ -1381,8 +1398,13 @@ test('tool details keep edited tasks across refresh and bind controls to current
   data.tools.tools[0].version = '2'
   nodes.length = 0; api.renderToolDetail()
   assert.equal(nodes.find(x => x.tag === 'textarea').value, 'My edited task')
-  nodes.find(x => x.textContent === 'Use in Agent').onclick()
-  assert.equal(copies[0].prompt, 'My edited task')
+  const copy = nodes.find(x => x.textContent === 'Copy')
+  assert.ok(copy, 'an installed tool keeps a secondary example copy')
+  assert.equal(String(copy.className || '').includes('primary'), false)
+  assert.equal(nodes.some(x => x.textContent === 'Use in Agent'), false)
+  assert.equal(nodes.some(x => String(x.className || '').includes('primary') && /Try|Use in Agent/u.test(x.textContent || '')), false)
+  copy.onclick()
+  assert.equal(copies[0], 'My edited task')
   let toggle = nodes.find(x => x.type === 'checkbox')
   toggle.checked = false; await toggle.onchange()
   assert.deepEqual(actions.pop(), { action: 'tools', tools: ['custom'] })
@@ -1407,6 +1429,30 @@ test('tool details keep edited tasks across refresh and bind controls to current
   assert.equal(nodes.some(x => x.textContent === 'Use in Agent'), false)
   nodes.find(x => x.textContent === 'Enable to use').onclick()
   assert.deepEqual(actions.pop(), { action: 'tools', tools: ['custom', 'math-anchor'] })
+
+  data.recommended.tools = ['decision-table', 'state-machine', 'schedule-algebra'].map(id => ({
+    id, homepage: `https://github.com/tetracoralla/${id}`, compatible: true,
+    presentation: { displayName: id, summary: 'A useful tool' },
+  }))
+  data.tools.availableAgentComponents.push('decision-table', 'state-machine', 'schedule-algebra')
+  data.tools.activeAgentComponents.push('decision-table', 'state-machine', 'schedule-algebra')
+  for (const id of ['decision-table', 'state-machine', 'schedule-algebra']) {
+    data.tools.tools.push({ id, displayName: id, version: '1' })
+    view.detail = id
+    nodes.length = 0; api.renderToolDetail()
+    assert.equal(nodes.some(x => x.textContent === 'Use in Agent'), false, `${id} has no primary try action`)
+    const exampleCopy = nodes.find(x => x.textContent === 'Copy')
+    assert.ok(exampleCopy, `${id} keeps a secondary example`)
+    assert.equal(String(exampleCopy.className || '').includes('primary'), false)
+    assert.ok(nodes.find(x => x.tag === 'textarea')?.value, `${id} needs an editable example`)
+    assert.ok(nodes.find(x => x.tag === 'details'), `${id} keeps the example collapsed`)
+  }
+  data.recommended.tools = []
+  view.detail = 'state-machine'
+  nodes.length = 0; api.renderToolDetail()
+  assert.equal(nodes.some(x => x.textContent === 'Use in Agent'), false, 'an installed tool does not grow a try funnel when browse is unavailable')
+  assert.ok(nodes.find(x => x.textContent === 'Copy'))
+  assert.ok(nodes.find(x => x.tag === 'textarea')?.value)
 })
 
 test('browser tool activation offers an explicit conflict retry and preserves the requested selection', async () => {

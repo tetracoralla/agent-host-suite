@@ -11,7 +11,8 @@ CLI --------------------+--> Host lifecycle and instance management
 
 Invocation after configuration (no Manager-window dependency):
 Agent app ---------------------------> Provider MCP / Skill + CLI
-consumer with selected typed work ---> Direct Execution Runtime ---> Provider
+user's Agent --> Host Procedure catalog/invocation --> Direct Runtime or headless Procedure Runner --> Providers
+consumer with selected typed work ---> Direct Execution Runtime ----> Provider
 
 Independent Capability / Procedure standards govern bindings that adopt them;
 native Provider integrations do not require semantic standardization first.
@@ -24,6 +25,61 @@ loop. The product's stable responsibilities and evolution policy live in
 [`PRODUCT_MODEL.md`](PRODUCT_MODEL.md#stable-responsibilities-evolving-integrations).
 
 ## No Agent app patching
+
+The optional `packages/procedure-runtime` is a separate Procedure Runner for
+explicitly authorized, stateful Agent work. Its CLI starts an authenticated
+headless API over a transactional store and immutable method revisions. The generic
+run model is the closed `openadam.method-graph.v2` contract. It contains typed
+inputs/artifacts/resources, explicit consume/produce edges and ordered routes,
+with `agent-turn`, `direct-call`, `procedure-call`, `human-input`, `condition`
+and `transform` nodes. `parallel` and `wait` are versioned reserved extensions
+and currently fail closed as unsupported. Workspace state is selected through an
+explicit resource binding; Git workspaces add exact candidate fingerprints and
+sequential checkout leases. The development profile, not the core schema, owns
+its fixed planning/build/review rules. Agent worker
+adapters are separate from `src/hosts/` environment configuration adapters. See
+its [runtime contract and limits](../packages/procedure-runtime/README.md).
+This does not widen Direct Runtime admission, claim standards conformance or
+require the Manager window. Real model, permission, native-session continuity
+and external-effect claims need evidence beyond protocol negotiation and
+injected test workers.
+
+Procedure development and Procedure consumption are separate boundaries. One
+Host-installed package envelope owns product identity, version, schemas,
+permissions and lifecycle; its discriminated execution binding selects
+`direct-runtime` or `agentic-runner`. Host installed state is the catalog
+authority. The consumer CLI first lists compact summaries, then describes one
+exact installed version, and invokes either binding with the same versioned Run
+Request contract. That request contains exact product identity, inputs, task
+grants, resource bindings, limits and an idempotency key. An embedding
+application injects the same installed agentic product set into the Runner HTTP
+API and submits the same contract. The Runner
+has no implicit consumer-visible product catalog of its own, does not accept a
+replacement definition and has no human Run page. The
+person's Agent translates task intent into declared inputs, invokes the product,
+mediates the rare user decision through its own interaction surface, and consumes
+the outputs. Agent Host Manager shows product installation and availability only.
+New or changed products enter through source-owned developer validation and
+packaging before use.
+
+Permission declarations, installed permission ceilings, per-Run grants and
+Provider one-time permission requests are distinct. A Run grant must fit both
+the product declaration and the installed ceiling. A Provider request is
+delivered for human decision only when its required grant is already present on
+the Run and the active graph node; otherwise the Runner refuses it. Resource
+bindings are separately validated against the product requirement. A Direct
+Runtime top-level Procedure must receive every declared permission as an
+explicit Run grant. Its current work-order carrier does not transport resource
+bindings, so admission rejects a Direct Procedure that declares resources
+instead of installing a product that can never run. An agentic graph may bind a
+workspace while calling a Direct node that needs no resource binding.
+
+The intended authoring client is a separate graphical Procedure Studio in the
+Developer Kit: graph editing, contract inspection, validation, test execution
+and packaging share one source model. This checkout does not currently contain
+that Studio implementation. The absence is an unfinished developer-product
+surface, not a reason to repurpose the headless runtime or consumer Manager as a
+long form editor.
 
 Host adapters call documented Agent-app extension commands and write only state
 owned by those public mechanisms. An Agent-app update may require a fresh
@@ -72,9 +128,12 @@ Provider's compact advertised schema. Agent Host does not patch the Agent app
 to change that limitation. These are the current adapters' supported routes,
 not a requirement that future harnesses use the same catalog or turn model.
 
-Agent Host does expose one management Skill, not a domain invocation tool. Its
-default launcher calls the packaged `agent-host snapshot --json` interface and
-adds no MCP server, provider operation, generic invoke surface, or model call.
+Agent Host does expose one management Skill, not a generic domain invocation
+tool. Its launcher calls packaged `agent-host` interfaces, including the bounded
+Procedure list/invoke/status/continue routes for exact installed products; those
+routes do not select an opaque Provider operation or add an MCP server or model
+call by themselves. The default operations report remains
+`agent-host snapshot --json`.
 Codex carries it as a Suite-managed Skill-only plugin so it does not replace a
 user's canonical local Skill source; ZCode and Claude link to separate immutable
 private projections. The snapshot has a 16 KiB serialized budget and excludes private
@@ -342,11 +401,14 @@ Capability” without an implementation and it does not redefine Capability
 semantics from a tool schema.
 
 For Skill refinement, the Host may export one exact link-catalog projection.
-Configured Capability and Procedure entries are read from the private Direct
-Runtime configuration; active provider-native Tool entries are reacquired from
-their live MCP catalogs. The projection discloses only kind, exact identity,
-version, and a digest over the complete input/output schema pair. It neither
-selects a Provider nor claims that equal schemas have equal semantics.
+Configured Capability entries are read from the private Direct Runtime
+configuration. Procedure entries are read from Host's installed component
+state and include the exact execution kind, lifecycle, permissions, invocation
+descriptor and separately evidenced availability. Active provider-native Tool
+entries are reacquired from their live MCP catalogs. Every entry retains exact
+identity, version, and a digest over the complete input/output schema pair. The
+projection neither selects a Provider nor claims that equal schemas have equal
+semantics.
 
 The supported installable shapes are local MCP stdio packages and specialized
 local Direct Runtime bindings. A bounded model-inference Provider may use the

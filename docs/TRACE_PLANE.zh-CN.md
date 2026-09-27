@@ -68,6 +68,9 @@ agent-host observability export-trace --provider zcode \
   --file /明确选择的/model-io-file.jsonl --output /新建的/trace-pack.json --json
 ```
 
+`task-sources` 和 `export-task` 需要已安装 Observer 0.6.5 或更新版本。
+旧组件必须通过已绑定的环境版本更新，Manager 中的任务活动入口才能使用。
+
 `adapters` 返回不含路径的能力目录；`trace-sources` 与 `task-sources` 返回一个 Provider
 当前保留的、带数量上限且不含路径的匿名会话目录。Manager 的“使用情况与
 可靠性”页面为保留轨迹会话提供同样的列表与纯元数据下载流程；原生和浏览器

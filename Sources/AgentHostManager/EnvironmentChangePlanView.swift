@@ -71,8 +71,8 @@ struct EnvironmentChangePlanView: View {
             }
 
             NoticeView(
-                title: "A new Agent task will be required",
-                message: "The current task keeps its loaded catalog. Open a fresh task after this change.",
+                title: "New tasks pick up changes",
+                message: "New tasks load this tool selection. Tasks already open keep the tools they started with.",
                 systemImage: "arrow.clockwise.circle.fill",
                 color: .blue
             )

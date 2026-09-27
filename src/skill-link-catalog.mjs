@@ -8,8 +8,9 @@ import { loadState, readStatePaths } from './state.mjs'
 import { componentEnvironment } from './component-environment.mjs'
 import { ManagedMcpStdioTransport } from './managed-mcp-stdio-transport.mjs'
 import { closeMcpProbeTransport } from './mcp-probe-cleanup.mjs'
+import { projectProcedureAvailability } from './procedure-availability.mjs'
 
-export const SKILL_LINK_CATALOG_SCHEMA = 'openadam.skill-link-catalog.v0.2'
+export const SKILL_LINK_CATALOG_SCHEMA = 'openadam.skill-link-catalog.v0.3'
 export const SKILL_LINK_SCHEMA_DIGEST_ALGORITHM = 'openadam.skill-link-schema-pair.v0.1'
 export const SKILL_LINK_CATALOG_MAX_ENTRIES = 4096
 export const SKILL_LINK_CATALOG_MAX_BYTES = 1024 * 1024
@@ -105,18 +106,32 @@ async function semanticEntries(config) {
           schemaDigest: schemaDigest(inputSchema, outputSchema),
         })
       }
-    } else if (provider.transport === 'procedure-jsonl-v0.2') {
-      const [inputSchema, outputSchema] = await Promise.all([
-        readSchema(provider.inputSchemaPath, `${provider.providerId} Procedure input schema`),
-        readSchema(provider.outputSchemaPath, `${provider.providerId} Procedure output schema`),
-      ])
-      entries.push({
-        kind: 'procedure',
-        identity: provider.procedureId,
-        version: provider.procedureVersion,
-        schemaDigest: schemaDigest(inputSchema, outputSchema),
-      })
     }
+  }
+  return entries
+}
+
+async function procedureEntries(state) {
+  const entries = []
+  for (const [componentId, component] of Object.entries(state.components ?? {})) {
+    if (component?.productType !== 'procedure') continue
+    const [inputSchema, outputSchema] = await Promise.all([
+      readSchema(component.procedure.inputSchemaPath, `${componentId} Procedure input schema`),
+      readSchema(component.procedure.outputSchemaPath, `${componentId} Procedure output schema`),
+    ])
+    entries.push({
+      kind: 'procedure',
+      identity: component.procedure.id,
+      version: component.procedure.version,
+      schemaDigest: schemaDigest(inputSchema, outputSchema),
+      componentId,
+      execution: component.procedureExecution.kind,
+      permissions: [...component.procedure.permissions],
+      permissionCeiling: [...(component.procedure.permissionCeiling ?? component.procedure.permissions)],
+      lifecycle: structuredClone(component.procedure.lifecycle),
+      invocation: structuredClone(component.procedureInvocation),
+      availability: projectProcedureAvailability(state, component),
+    })
   }
   return entries
 }
@@ -180,11 +195,12 @@ export async function exportSkillLinkCatalog(options = {}, dependencies = {}) {
   if (state === null) fail('NOT_INSTALLED', 'No Agent environment is installed')
   const config = await readJson(state.runtime?.configPath)
   if (config === null) fail('LINK_CATALOG_RUNTIME_CONFIG_UNAVAILABLE', 'The current Direct Runtime configuration is unavailable')
-  const [semantics, tools] = await Promise.all([
+  const [semantics, procedures, tools] = await Promise.all([
     semanticEntries(config),
+    procedureEntries(state),
     toolEntries(state, dependencies.listMcpTools ?? listMcpTools),
   ])
-  return finalize([...semantics, ...tools])
+  return finalize([...semantics, ...procedures, ...tools])
 }
 
 export function skillLinkSchemaDigest(inputSchema, outputSchema) {

@@ -32,6 +32,7 @@ import { checkApplicationState } from './state-migration.mjs'
 import { validateComponentPathGrants } from './component-environment.mjs'
 import { retireLifecycleRoot, withLifecycleMutation } from './lifecycle-lock.mjs'
 import { removeEnvironmentDirectory } from './environment-resources.mjs'
+import { projectProcedureAvailability } from './procedure-availability.mjs'
 import { hasEnvironmentChange, recoverCurrentEnvironmentChange } from './environment-change.mjs'
 import {
   inspectDeveloperKitSkill,
@@ -1294,8 +1295,11 @@ export async function toolSetStatus(options = {}) {
   const paused = isAgentToolsPaused(state)
   const profile = await loadProfile(state.profile)
   const defaults = profile.defaultAgentComponents.filter((id) => available.includes(id))
+  const procedures = Object.entries(state.components)
+    .filter(([, component]) => component.productType === 'procedure')
+    .sort(([left], [right]) => left.localeCompare(right))
   return {
-    schemaVersion: 'openadam.agent-host-tool-set.v0.1',
+    schemaVersion: 'openadam.agent-host-tool-set.v0.2',
     status: 'ok',
     profile: state.profile,
     availableAgentComponents: available,
@@ -1319,11 +1323,38 @@ export async function toolSetStatus(options = {}) {
       exposure: toolExposure(active.includes(id), paused, state.components[id]),
       onDemandAvailable: state.components[id]?.providerSkill !== undefined,
     }))),
+    procedures: await Promise.all(procedures.map(async ([id, component]) => {
+      const availability = projectProcedureAvailability(state, component)
+      return ({
+      id,
+      version: component.version,
+      procedureId: component.procedureId,
+      procedureVersion: component.procedureVersion,
+      displayName: component.displayName ?? id,
+      summary: component.summary ?? null,
+      author: component.author ?? null,
+      homepage: component.homepage ?? null,
+      logo: await presentInstalledLogo(component),
+      origin: component.origin ?? null,
+      private: state.privateComponents?.[id]?.current?.component !== undefined,
+      execution: component.procedureExecution?.kind ?? null,
+      lifecycle: structuredClone(component.procedure?.lifecycle ?? null),
+      permissions: [...(component.procedure?.permissions ?? [])],
+      permissionCeiling: [...(component.procedure?.permissionCeiling ?? component.procedure?.permissions ?? [])],
+      availability,
+      agentAvailable: availability.invocationEvidence.valid === true,
+      exposure: component.procedureInvocation === undefined
+        ? 'installed'
+        : availability.contractValidated === true
+          ? 'available-to-new-agent-task'
+          : 'installed-not-validated',
+      })
+    })),
     freshSession: {
       requiredAfterChange: true,
       currentSessionUptake: 'not-observed',
     },
-    assessmentBoundary: 'active exposes declared MCP and Skill entrypoints for new Agent tasks. on-demand retains a declared callable CLI Skill; inactive requires MCP activation. paused withholds ordinary MCP and Skill projections; it is not Agent-app cache verification, a current-session Skill path, or adoption.',
+    assessmentBoundary: 'active exposes declared Provider MCP and Skill entrypoints for new Agent tasks. Procedure availability separates installation, contract validation and catalog discovery from historical success time, current invocation evidence, current health and current-session observation. Procedures are not controlled by the MCP tool toggle. This is not Agent-app cache verification, current-session uptake, or Procedure task-quality acceptance.',
   }
 }
 

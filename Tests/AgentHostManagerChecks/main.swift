@@ -258,6 +258,10 @@ do {
         "task-first discovery must provide usable optional examples rather than scores"
     )
     expect(
+        ["decision-table", "state-machine", "schedule-algebra"].allSatisfy { ManagerSetupPolicy.examplePrompt($0)?.isEmpty == false },
+        "admitted repository tools keep an editable example"
+    )
+    expect(
         ManagerSetupPolicy.tools(for: "developer").allSatisfy { !$0.hasTaskExperience },
         "the Developer Kit must keep its own contributor route instead of inheriting consumer task cards"
     )
@@ -742,8 +746,28 @@ do {
     expect(readyGuidance.statusLine == "Ready", "ready surface is one short status line")
     expect(readyGuidance.primaryActionID == .openApp, "primary CTA must open the connected Agent app")
     expect(readyGuidance.primaryActionLabel == "Open Codex", "primary CTA should be a short Open verb")
-    expect(readyGuidance.hint == "Start a new task in the app", "honest hint when Host cannot create a task")
+    expect(
+        readyGuidance.hint == "New tasks load this tool selection. Tasks already open keep the tools they started with.",
+        "a fresh-task requirement stays a secondary environment fact"
+    )
     expect(readyGuidance.gaps.contains(where: { $0.contains("already-open Agent task") }), "Host must not pretend open tasks loaded tools")
+
+    let steadyGuidance = ManagerPostSetupPolicy.guidance(
+        configured: true,
+        connectedHostNames: ["Codex"],
+        installedToolCount: 3,
+        activeToolCount: 3,
+        agentToolsPaused: false,
+        needsFreshTask: false,
+        agentAppsVerified: true,
+        doctorBlockingErrors: [],
+        justInstalled: false,
+        primaryHostName: "Codex",
+        primaryHostID: "codex"
+    )
+    expect(steadyGuidance.readyToWork, "a steady ready environment stays ready")
+    expect(steadyGuidance.primaryActionID == .openApp, "steady ready action opens the connected app")
+    expect(steadyGuidance.hint == nil, "a steady ready state does not ask for a new task")
 
     let disconnectedGuidance = ManagerPostSetupPolicy.guidance(
         configured: true,
@@ -884,18 +908,12 @@ do {
     expect(L10n.text("Usage") == "使用情况", "the Manager must provide Simplified Chinese product copy")
     expect(L10n.text("Get") == "获取", "featured acquire must provide Simplified Chinese copy")
     expect(L10n.text("Start from a task") == "从真实任务开始", "task-first discovery must provide Simplified Chinese copy")
-    expect(L10n.text("Task copied") == "任务已复制", "task handoff feedback must provide Simplified Chinese copy")
+    expect(L10n.text("Copied") == "已复制", "example copy feedback must provide Simplified Chinese copy")
+    expect(L10n.text("Copy") == "复制", "example copy action must provide Simplified Chinese copy")
+    expect(L10n.text("Example") == "示例", "collapsed example label must provide Simplified Chinese copy")
     expect(
-        L10n.text("Connect an Agent app, then start a new task and paste.") == "请连接一个 Agent 应用，然后新建任务并粘贴。",
-        "the no-connected-app task handoff must provide Simplified Chinese copy"
-    )
-    expect(
-        L10n.text("Choose an Agent app to open, then start a new task and paste.") == "请选择并打开一个 Agent 应用，然后新建任务并粘贴。",
-        "the multi-app task handoff must provide Simplified Chinese copy"
-    )
-    expect(
-        L10n.text("Open the connected Agent app, then start a new task and paste.") == "请打开已连接的 Agent 应用，然后新建任务并粘贴。",
-        "the failed single-app launch handoff must preserve a localized next step"
+        L10n.text("New tasks load this tool selection. Tasks already open keep the tools they started with.") == "新任务会载入当前工具选择；已打开的任务保留启动时的工具。",
+        "the fresh-task fact must provide Simplified Chinese copy"
     )
     expect(L10n.text("Open") == "打开", "opening a connected Agent app must provide Simplified Chinese copy")
     expect(

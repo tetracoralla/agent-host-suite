@@ -3,6 +3,7 @@ import { AgentHostError } from './errors.mjs'
 import { fingerprintIdentityFiles, fingerprintRelativeFiles } from './development-manifest.mjs'
 import { containedComponentPath } from './release-manifest.mjs'
 import { validateToolIntegration } from './tool-integration.mjs'
+import { validateProcedureIntegration } from './procedure-integration.mjs'
 
 function fail(code, message) { throw new AgentHostError(code, message) }
 
@@ -73,6 +74,7 @@ export async function materializeToolComponent(installed, releaseComponent, node
     }
   }
   return {
+    productType: 'provider',
     version: installed.descriptor.version,
     root: installed.root,
     identityFiles: identities,
@@ -102,5 +104,91 @@ export async function materializeToolComponent(installed, releaseComponent, node
     toolIntegrationSchema: integration.schemaVersion,
     ...(providerSkill === null ? {} : { providerSkill }),
     ...(capabilityProvider === null ? {} : { capabilityProvider }),
+  }
+}
+
+export async function materializeProcedureComponent(installed, releaseComponent) {
+  validateProcedureIntegration(installed.descriptor.integration)
+  const integration = installed.descriptor.integration
+  const procedure = integration.procedure
+  const execution = integration.execution
+  if (installed.descriptor.version !== procedure.version) {
+    fail('COMPONENT_DESCRIPTOR_INVALID', 'Procedure package and product versions must match')
+  }
+  const identities = [
+    installed.descriptorPath,
+    ...installed.descriptor.identityFiles.map((path) => containedComponentPath(installed.root, path, `${installed.descriptor.id} identity file`)),
+  ]
+  const product = {
+    id: procedure.id,
+    version: procedure.version,
+    permissions: [...procedure.permissions],
+    permissionCeiling: [...procedure.permissions],
+    resources: structuredClone(procedure.resources),
+    lifecycle: structuredClone(procedure.lifecycle),
+    inputSchemaPath: containedComponentPath(installed.root, procedure.inputSchema, `${integration.displayName} input schema`),
+    outputSchemaPath: containedComponentPath(installed.root, procedure.outputSchema, `${integration.displayName} output schema`),
+  }
+  const executionBinding = execution.kind === 'direct-runtime'
+    ? {
+        kind: execution.kind,
+        providerId: execution.providerId,
+        transport: execution.transport,
+        providerLifecycle: execution.providerLifecycle,
+        profilePath: containedComponentPath(installed.root, execution.profile, `${integration.displayName} Procedure Profile`),
+        implementationManifestPath: containedComponentPath(installed.root, execution.implementationManifest, `${integration.displayName} implementation manifest`),
+        identityFiles: execution.identityFiles.map((path) => containedComponentPath(installed.root, path, `${integration.displayName} Procedure identity file`)),
+      }
+    : {
+        kind: execution.kind,
+        methodPath: containedComponentPath(installed.root, execution.method, `${integration.displayName} method`),
+        outputArtifacts: [...execution.outputArtifacts],
+        identityFiles: execution.identityFiles.map((path) => containedComponentPath(installed.root, path, `${integration.displayName} Procedure identity file`)),
+      }
+  return {
+    productType: 'procedure',
+    version: installed.descriptor.version,
+    root: installed.root,
+    identityFiles: identities,
+    fingerprint: await fingerprintIdentityFiles(identities),
+    descriptorPath: installed.descriptorPath,
+    releaseArtifact: releaseComponent,
+    displayName: installed.descriptor.presentation?.displayName ?? integration.displayName,
+    summary: installed.descriptor.presentation?.summary ?? integration.summary,
+    author: installed.descriptor.presentation?.author,
+    homepage: installed.descriptor.presentation?.homepage,
+    license: installed.descriptor.presentation?.license,
+    logo: installed.descriptor.presentation?.logo,
+    origin: installed.descriptor.origin,
+    procedureId: procedure.id,
+    procedureVersion: procedure.version,
+    procedure: product,
+    procedureExecution: executionBinding,
+    procedureInvocation: {
+      carrier: 'agent-host-cli',
+      protocol: 'openadam.agent-host-procedure-invocation.v0.2',
+      command: 'agent-host',
+      arguments: ['procedure', 'invoke', '--request', '-', '--json'],
+      describeArguments: ['procedure', 'describe', '--id', procedure.id, '--version', procedure.version, '--json'],
+      statusArguments: ['procedure', 'status', '--run', '{taskId}', '--json'],
+      continueArguments: ['procedure', 'continue', '--run', '{taskId}', '--input', '-', '--json'],
+      input: 'json-stdin',
+      output: 'json-stdout',
+    },
+    ...(execution.kind !== 'direct-runtime' ? {} : {
+      procedureProvider: {
+        providerId: execution.providerId,
+        transport: execution.transport,
+        lifecycle: execution.providerLifecycle,
+        rootPath: installed.root,
+        profilePath: executionBinding.profilePath,
+        implementationManifestPath: executionBinding.implementationManifestPath,
+        identityFiles: executionBinding.identityFiles,
+        procedureId: procedure.id,
+        procedureVersion: procedure.version,
+        inputSchemaPath: product.inputSchemaPath,
+        outputSchemaPath: product.outputSchemaPath,
+      },
+    }),
   }
 }

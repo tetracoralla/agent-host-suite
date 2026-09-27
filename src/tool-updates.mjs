@@ -4,6 +4,7 @@ import { cp, mkdir, rm, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { AgentHostError } from './errors.mjs'
+import { fetchExternal } from './external-fetch.mjs'
 import { admitGitHubRelease, browseRecommendedTools, previewGitHubProject, supportedReleasePlatform } from './github-project.mjs'
 import { fetchGitHubRelease, selectReleaseAsset } from './github-api.mjs'
 import { findCatalogTool, findRegisteredTool, loadGitHubToolCatalog } from './github-registry.mjs'
@@ -149,7 +150,7 @@ export function updateAvailability({ installedVersion, availableVersion, compati
 
 async function resolveRemoteCandidate(origin, catalogEntry, { fetch, signal, channel = 'stable', platform } = {}) {
   const repository = origin?.repository ?? catalogEntry?.repository
-  const fetchImpl = fetch ?? globalThis.fetch
+  const fetchImpl = fetch ?? fetchExternal
   if (catalogEntry?.source?.kind === 'repository-plugin' || origin?.kind === 'github-repository') {
     const asset = platform === null ? null : catalogEntry?.platforms?.[platform]
     return {
@@ -448,7 +449,7 @@ export async function checkRegisteredTool(id, { fetch, signal, channel = 'stable
   if (typeof repository !== 'string') fail('GITHUB_TOOL_UNKNOWN', `No GitHub registration for ${id}`)
   if (catalogEntry?.source?.kind === 'repository-plugin') return { id, repository, tag: catalogEntry.tag, version: catalogEntry.version, prerelease: false, htmlUrl: catalogEntry.releaseUrl, from: 'catalog' }
   try {
-    const release = await fetchGitHubRelease(repository, channel === 'preview' ? null : 'latest', { fetch: fetch ?? globalThis.fetch, signal })
+    const release = await fetchGitHubRelease(repository, channel === 'preview' ? null : 'latest', { fetch: fetch ?? fetchExternal, signal })
     return {
       id,
       repository,

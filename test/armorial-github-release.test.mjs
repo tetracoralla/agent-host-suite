@@ -68,6 +68,7 @@ test('truncated Armorial download fails closed and does not keep a bad file', as
   t.after(() => rm(root, { recursive: true, force: true }))
   const destination = join(root, 'armorial.tar.gz')
   await mkdir(root, { recursive: true })
+  const truncatedBytes = Buffer.alloc(32)
   await assert.rejects(
     () => acquireHttpsFile({
       url: ARMORIAL_ASSET,
@@ -75,9 +76,10 @@ test('truncated Armorial download fails closed and does not keep a bad file', as
       expectedSha256: ARMORIAL_SHA256,
       expectedBytes: 64,
       maxBytes: 64,
+      fetch: async () => new Response(truncatedBytes, { status: 200 }),
       label: 'truncated armorial',
     }),
-    (error) => error.code === 'RELEASE_ARTIFACT_SIZE_MISMATCH' || error.code === 'PREVIEW_DOWNLOAD_SIZE_MISMATCH' || error.code === 'RELEASE_DOWNLOAD_FAILED' || error.code === 'RELEASE_ARTIFACT_DIGEST_MISMATCH',
+    (error) => error.code === 'RELEASE_ARTIFACT_SIZE_MISMATCH',
   )
   await assert.rejects(() => stat(destination), (error) => error.code === 'ENOENT')
 }, { timeout: 60_000 })
@@ -86,15 +88,18 @@ test('wrong Armorial digest fails closed', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-armorial-digest-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const destination = join(root, 'armorial.tar.gz')
+  const wrongBytes = Buffer.from('wrong armorial archive')
   await assert.rejects(
     () => acquireHttpsFile({
       url: ARMORIAL_ASSET,
       destination,
       expectedSha256: 'sha256:' + '0'.repeat(64),
-      expectedBytes: ARMORIAL_BYTES,
-      maxBytes: ARMORIAL_BYTES,
+      expectedBytes: wrongBytes.length,
+      maxBytes: wrongBytes.length,
+      fetch: async () => new Response(wrongBytes, { status: 200 }),
       label: 'armorial digest',
     }),
     (error) => error.code === 'RELEASE_ARTIFACT_DIGEST_MISMATCH',
   )
+  await assert.rejects(() => stat(destination), (error) => error.code === 'ENOENT')
 }, { timeout: 180_000 })

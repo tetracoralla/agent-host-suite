@@ -27,6 +27,7 @@ import {
 } from './updates.mjs'
 import { checkApplicationUpdate, packageJsonApplicationVersion, resolveInstalledApplicationVersion, updateApplication } from './application-update.mjs'
 import { readUpdatePreferences } from './update-preferences.mjs'
+import { projectProcedureAvailability } from './procedure-availability.mjs'
 import { executeAutoUpdates } from './auto-update.mjs'
 import { FEATURED_READINESS_SCHEMA, inspectFeaturedReadiness } from './featured-readiness.mjs'
 import {
@@ -37,8 +38,9 @@ import {
   setCatalogSource,
 } from './source-status.mjs'
 import { isAbsolute, join, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
 
-const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'service', 'profiles', 'source', 'updates', 'app'])
+const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'procedure', 'service', 'profiles', 'source', 'updates', 'app'])
 const PROFILE_CHOICES = 'standard|featured|developer|observability|local-dogfood'
 
 const USAGE = `Usage:
@@ -83,6 +85,11 @@ const USAGE = `Usage:
   agent-host component status COMPONENT [--state-root PATH] [--json]
   agent-host component remove COMPONENT [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host component rollback COMPONENT [--workspace-root PATH] [--path-grant NAME=PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
+  agent-host procedure list [--query TEXT] [--cursor CURSOR] [--limit N] [--budget-bytes N] [--state-root PATH] [--json]
+  agent-host procedure describe --id ID --version VERSION [--state-root PATH] [--json]
+  agent-host procedure invoke --request PATH|- [--state-root PATH] [--json]
+  agent-host procedure status --run TASK_ID [--state-root PATH] [--json]
+  agent-host procedure continue --run TASK_ID --input PATH|- [--timeout-ms N] [--state-root PATH] [--json]
   agent-host rollback [--workspace-root PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host observability enable|disable|refresh|status [--state-root PATH] [--json]
   agent-host observability trace-sources --provider PROVIDER [--from-ms N] [--to-ms N] [--limit N] [--state-root PATH] [--json]
@@ -134,6 +141,11 @@ const ROUTE_ARGUMENTS = Object.freeze({
   'component status': ['--state-root', '--json'],
   'component remove': ['--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
   'component rollback': ['--workspace-root', '--path-grant', '--replace-host-conflicts', '--dry-run', '--state-root', '--json'],
+  'procedure list': ['--query', '--cursor', '--limit', '--budget-bytes', '--state-root', '--json'],
+  'procedure describe': ['--id', '--version', '--state-root', '--json'],
+  'procedure invoke': ['--request', '--state-root', '--json'],
+  'procedure status': ['--run', '--state-root', '--json'],
+  'procedure continue': ['--run', '--input', '--timeout-ms', '--state-root', '--json'],
   'observability enable': ['--state-root', '--json'],
   'observability disable': ['--state-root', '--json'],
   'observability refresh': ['--state-root', '--json'],
@@ -200,9 +212,14 @@ function parseArgs(argv) {
     tag: undefined,
     channel: undefined,
     id: undefined,
+    version: undefined,
+    input: undefined,
+    request: undefined,
+    run: undefined,
+    timeoutMs: undefined,
   }
   if (options.command === 'component' && ['status', 'remove', 'rollback'].includes(options.action) && argv[2] !== undefined && !argv[2].startsWith('--')) options.target = argv[2]
-  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--adapter', '--recovery', '--manifest-sha256', '--url', '--plan-id', '--github', '--tag', '--channel', '--id', '--auto-check', '--auto-download', '--auto-install'])
+  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--budget-bytes', '--query', '--cursor', '--adapter', '--recovery', '--manifest-sha256', '--url', '--plan-id', '--github', '--tag', '--channel', '--id', '--version', '--input', '--request', '--run', '--timeout-ms', '--auto-check', '--auto-download', '--auto-install'])
   const booleans = new Map([
     ['--json', 'json'], ['--deep', 'deep'], ['--dry-run', 'dryRun'], ['--no-service', 'noService'], ['--no-host', 'noHost'],
     ['--enable-observability', 'enableObservability'], ['--purge-data', 'purgeData'],
@@ -246,6 +263,16 @@ function parseArgs(argv) {
       else if (arg === '--url') options.url = value
       else if (arg === '--github') options.github = value
       else if (arg === '--tag') options.tag = value
+      else if (arg === '--version') options.version = value
+      else if (arg === '--input') options.input = value
+      else if (arg === '--request') options.request = value
+      else if (arg === '--query') options.query = value
+      else if (arg === '--cursor') options.cursor = value
+      else if (arg === '--run') options.run = value
+      else if (arg === '--timeout-ms') {
+        options.timeoutMs = Number(value)
+        if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 28_800_000) throw new AgentHostError('CLI_USAGE', '--timeout-ms must be an integer from 1 to 28800000')
+      }
       else if (arg === '--channel') {
         if (!['stable', 'preview'].includes(value)) throw new AgentHostError('CLI_USAGE', '--channel must be stable or preview')
         options.channel = value
@@ -280,6 +307,11 @@ function parseArgs(argv) {
         if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 500) throw new AgentHostError('CLI_USAGE', '--limit must be an integer from 1 to 500')
         options.limit = parsed
       }
+      else if (arg === '--budget-bytes') {
+        const parsed = Number(value)
+        if (!Number.isSafeInteger(parsed) || parsed < 1024 || parsed > 262144) throw new AgentHostError('CLI_USAGE', '--budget-bytes must be an integer from 1024 to 262144')
+        options.budgetBytes = parsed
+      }
       else if (arg === '--max-events') {
         const parsed = Number(value)
         if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 5_000) throw new AgentHostError('CLI_USAGE', '--max-events must be an integer from 1 to 5000')
@@ -308,6 +340,9 @@ function parseArgs(argv) {
   }
   if (route === 'tools update' && options.all !== true && options.tools === undefined) {
     throw new AgentHostError('CLI_USAGE', 'tools update requires --tool or --all')
+  }
+  if (route === 'procedure list' && options.limit !== undefined && options.limit > 100) {
+    throw new AgentHostError('CLI_USAGE', 'procedure list --limit must be an integer from 1 to 100')
   }
   if (route === 'observability trace-sources') {
     if (typeof options.provider !== 'string' || options.provider.length === 0) throw new AgentHostError('CLI_USAGE', 'observability trace-sources requires --provider')
@@ -349,6 +384,34 @@ function parseArgs(argv) {
     }
   }
   return options
+}
+
+async function readProcedureInput(path, dependencies, maximum = 256_000) {
+  if (dependencies.procedureRequest !== undefined) return structuredClone(dependencies.procedureRequest)
+  if (dependencies.procedureInput !== undefined) return structuredClone(dependencies.procedureInput)
+  if (typeof path !== 'string') throw new AgentHostError('CLI_USAGE', 'Procedure command requires a JSON input path or -')
+  let bytes
+  if (path === '-') {
+    const chunks = []
+    let size = 0
+    for await (const chunk of process.stdin) {
+      size += chunk.length
+      if (size > maximum) throw new AgentHostError('PROCEDURE_INPUT_LIMIT', 'Procedure JSON exceeds its byte limit')
+      chunks.push(chunk)
+    }
+    bytes = Buffer.concat(chunks)
+  } else {
+    if (!isAbsolute(path)) throw new AgentHostError('CLI_USAGE', 'Procedure JSON path must be absolute or -')
+    bytes = await readFile(path)
+    if (bytes.length > maximum) throw new AgentHostError('PROCEDURE_INPUT_LIMIT', 'Procedure JSON exceeds its byte limit')
+  }
+  try {
+    const value = JSON.parse(bytes.toString('utf8'))
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('input must be an object')
+    return value
+  } catch (error) {
+    throw new AgentHostError('PROCEDURE_INPUT_INVALID', 'Procedure input must be one JSON object', { cause: error.message })
+  }
 }
 
 function formatBytes(value) {
@@ -454,7 +517,7 @@ export function human(result) {
       }),
     ].join('\n')
   }
-  if (result.schemaVersion === 'openadam.agent-host-tool-set.v0.1') {
+  if (['openadam.agent-host-tool-set.v0.1', 'openadam.agent-host-tool-set.v0.2'].includes(result.schemaVersion)) {
     const active = result.activeAgentComponents?.length ?? 0
     const available = result.availableAgentComponents?.length ?? active + (result.inactiveAgentComponents?.length ?? 0)
     const suffix = result.restartRequired === true ? ' · start a fresh Agent task' : ''
@@ -468,7 +531,7 @@ export function human(result) {
       : 'monitoring off'
     return `Agent Host ${result.environment.suiteVersion} · ${result.environment.profile} · ${observation} · ${formatBytes(result.storage.allocatedBytes)} allocated`
   }
-  if (result.schemaVersion === 'openadam.skill-link-catalog.v0.2') {
+  if (result.schemaVersion === 'openadam.skill-link-catalog.v0.3') {
     const counts = Object.groupBy(result.entries, (entry) => entry.kind)
     return `Host contract catalog · ${counts.capability?.length ?? 0} Capabilities · ${counts.procedure?.length ?? 0} Procedures · ${counts.tool?.length ?? 0} Tools`
   }
@@ -589,8 +652,22 @@ async function status(options) {
     ...(state.agentToolsPaused === true ? { resumeAgentComponents: state.resumeAgentComponents ?? [] } : {}),
     installedAt: state.installedAt, updatedAt: state.updatedAt, releaseActivatedAt: state.releaseActivatedAt ?? null,
     bindingsActivatedAt: state.bindingsActivatedAt ?? state.releaseActivatedAt ?? null,
-    components: Object.fromEntries(Object.entries(state.components).map(([id, component]) => [id, {
+    components: Object.fromEntries(Object.entries(state.components).map(([id, component]) => {
+      const procedureAvailability = component.productType === 'procedure'
+        ? projectProcedureAvailability(state, component)
+        : null
+      return [id, {
       version: component.version,
+      productType: component.productType ?? (component.procedureProvider === undefined ? null : 'procedure'),
+      agentAvailable: component.productType === 'procedure'
+        ? procedureAvailability.invocationEvidence.valid === true
+        : (state.agentComponents ?? []).includes(id),
+      ...(component.procedureId === undefined ? {} : {
+        procedureId: component.procedureId,
+        procedureVersion: component.procedureVersion,
+        procedureExecution: component.procedureExecution?.kind ?? null,
+        procedureAvailability,
+      }),
       onDemandAvailable: component.providerSkill !== undefined,
       private: state.privateComponents?.[id]?.current?.component !== undefined,
       ...(component.displayName === undefined ? {} : { displayName: component.displayName, summary: component.summary }),
@@ -598,7 +675,8 @@ async function status(options) {
       ...(component.homepage === undefined ? {} : { homepage: component.homepage }),
       ...(component.logo === undefined ? {} : { logo: component.logo }),
       ...(component.origin === undefined ? {} : { origin: component.origin }),
-    }])),
+      }]
+    })),
     hosts: Object.fromEntries(Object.entries(state.hosts).map(([id, host]) => [id, {
       installed: true,
       version: host.version,
@@ -685,6 +763,45 @@ async function run(options, dependencies = {}) {
       return rollbackLocalComponent(options)
     }
     throw new AgentHostError('CLI_USAGE', `Unknown component action: ${options.action}`)
+  }
+  if (options.command === 'procedure') {
+    if (options.action === 'describe' && (options.id === undefined || options.version === undefined)) {
+      throw new AgentHostError('CLI_USAGE', 'procedure describe requires --id and --version')
+    }
+    if (options.action === 'invoke' && options.request === undefined) {
+      throw new AgentHostError('CLI_USAGE', 'procedure invoke requires --request')
+    }
+    if (options.action === 'status' && options.run === undefined) {
+      throw new AgentHostError('CLI_USAGE', 'procedure status requires --run')
+    }
+    if (options.action === 'continue' && options.run === undefined) {
+      throw new AgentHostError('CLI_USAGE', 'procedure continue requires --run')
+    }
+    const {
+      continueProcedureRun,
+      describeInstalledProcedure,
+      inspectProcedureRun,
+      invokeInstalledProcedure,
+      listInstalledProcedures,
+    } = await import('./procedure-products.mjs')
+    if (options.action === 'list') return listInstalledProcedures(options)
+    if (options.action === 'describe') return describeInstalledProcedure(options)
+    if (options.action === 'invoke') {
+      return invokeInstalledProcedure({
+        ...options,
+        request: await readProcedureInput(options.request, dependencies, 512_000),
+      }, dependencies)
+    }
+    if (options.action === 'status') {
+      return inspectProcedureRun(options, dependencies)
+    }
+    if (options.action === 'continue') {
+      return continueProcedureRun({
+        ...options,
+        input: await readProcedureInput(options.input, dependencies),
+      }, dependencies)
+    }
+    throw new AgentHostError('CLI_USAGE', `Unknown procedure action: ${options.action}`)
   }
   if (options.command === 'tools') {
     if (options.action === 'status') return toolSetStatus(options)

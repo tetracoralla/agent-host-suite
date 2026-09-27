@@ -9,7 +9,9 @@ export function resolveDirectBindings(manifest, { workspaceRoot } = {}) {
   const providerIds = new Set()
   const bindings = []
   for (const [componentId, component] of Object.entries(manifest.components)) {
-    const binding = Object.hasOwn(component, 'capabilityProvider')
+    const binding = Object.hasOwn(component, 'procedureProvider')
+      ? { provider: component.procedureProvider, diagnostic: null }
+      : Object.hasOwn(component, 'capabilityProvider')
       ? { provider: component.capabilityProvider, diagnostic: null }
       : resolvePilotBinding(componentId, component)
     if (binding === null) continue

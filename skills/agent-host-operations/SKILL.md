@@ -1,6 +1,6 @@
 ---
 name: agent-host-operations
-description: Analyze the installed Agent Host environment's health, tool activity, version history, reliability, storage and monitoring through packaged commands. Use for operations questions or an explicitly requested environment change.
+description: Discover and invoke installed Procedure products, or analyze the Agent Host environment's health, tool activity, version history, reliability, storage and monitoring through packaged commands.
 ---
 
 # Agent Host operations
@@ -8,6 +8,44 @@ description: Analyze the installed Agent Host environment's health, tool activit
 Resolve the packaged launcher relative to this Skill: `scripts/agent-host` on
 macOS/Linux or `scripts/agent-host.cmd` on Windows. Installed facts come from
 these product commands, not a development checkout or private database query.
+
+## Use an installed Procedure
+
+When a task matches a reusable Procedure, use the Host product boundary instead
+of reconstructing its internal stages:
+
+1. Run `procedure list --json` for compact summaries. Use `--query TEXT`,
+   `--limit 1..100`, `--budget-bytes 1024..262144`, and the returned
+   `page.nextCursor` when the catalog is larger than the current context budget.
+   Do not expect full schemas in list results.
+2. Select one exact `id` and `version`, then run `procedure describe --id ID
+   --version VERSION --json`. Use its full input/output schemas, declared
+   permissions, installed `permissionCeiling`, resource requirements and Run
+   Request defaults. Do not switch versions between describe and invoke.
+3. Build one `openadam.agent-host-procedure-run-request.v0.1` object containing
+   that exact `{id, version}`, schema-valid `inputs`, the explicit task `grants`,
+   all required `resources`, bounded `limits`, and a caller-owned idempotency
+   key. A declaration says what the product may need; it is not task authority.
+   Grant only what the current task authorizes and never more than the installed
+   ceiling. Bind workspace, file and account resources exactly as described.
+4. Pipe the whole request to `procedure invoke --request - --json`. Retry an
+   uncertain invocation with the exact same request and idempotency key; changing
+   content under that key is a conflict.
+5. Consume only the declared `outputs` in the returned result. If the result is
+   not complete, preserve its `taskId`, interaction or error exactly. Inspect it
+   with `procedure status --run TASK_ID --json`; answer a reported question or
+   resume a failed or paused run by piping the corresponding action object to
+   `procedure continue --run TASK_ID --input - --json`.
+
+Keep availability fields separate. `lastSuccessfulInvocationAt` is historical;
+`invocationEvidence.valid` is current only while the Procedure, runtime and
+binding fingerprints still match. `currentHealth` and
+`currentSessionDiscovery` are independent, and `not-observed` is not success.
+Provider one-time permission requests cannot add authority: the Runner rejects
+one unless its required grant already exists on both the Run and active node.
+
+Do not inspect or narrate the Procedure's private stage graph, provider routing,
+logs or intermediate artifacts unless the user is diagnosing that product.
 
 ## Choose the report for the question
 
@@ -100,6 +138,9 @@ one selected session with `observability export-task --provider PROVIDER
 `direct-execution-observation` from `static-reference`; an orchestration source
 mention is not a child execution receipt. Start with the human-readable summary
 and open the detailed JSON only when the decision needs it.
+These task-activity commands require installed Observer 0.6.5 or newer. If the
+installed component is older, report the update requirement; aggregate `usage`
+cannot reconstruct the missing task pack.
 
 Interpret the selected activity together with the task-native artifact and
 relevant tests. Provider-reported rationale presence or stable completion

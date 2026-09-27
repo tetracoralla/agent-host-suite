@@ -12,6 +12,13 @@ struct ToolLogo: Decodable, Equatable, Sendable {
 
 struct ComponentSummary: Decodable, Equatable, Sendable {
     let version: String
+    let productType: String?
+    let agentAvailable: Bool?
+    let procedureId: String?
+    let procedureVersion: String?
+    let procedureExecution: String?
+    let procedureAvailability: ProcedureAvailability?
+    let isPrivate: Bool?
     let onDemandAvailable: Bool?
     let displayName: String?
     let summary: String?
@@ -21,6 +28,13 @@ struct ComponentSummary: Decodable, Equatable, Sendable {
 
     init(
         version: String,
+        productType: String? = nil,
+        agentAvailable: Bool? = nil,
+        procedureId: String? = nil,
+        procedureVersion: String? = nil,
+        procedureExecution: String? = nil,
+        procedureAvailability: ProcedureAvailability? = nil,
+        isPrivate: Bool? = nil,
         onDemandAvailable: Bool? = nil,
         displayName: String? = nil,
         summary: String? = nil,
@@ -29,6 +43,13 @@ struct ComponentSummary: Decodable, Equatable, Sendable {
         logo: ToolLogo? = nil
     ) {
         self.version = version
+        self.productType = productType
+        self.agentAvailable = agentAvailable
+        self.procedureId = procedureId
+        self.procedureVersion = procedureVersion
+        self.procedureExecution = procedureExecution
+        self.procedureAvailability = procedureAvailability
+        self.isPrivate = isPrivate
         self.onDemandAvailable = onDemandAvailable
         self.displayName = displayName
         self.summary = summary
@@ -36,6 +57,42 @@ struct ComponentSummary: Decodable, Equatable, Sendable {
         self.homepage = homepage
         self.logo = logo
     }
+
+    enum CodingKeys: String, CodingKey {
+        case version, productType, agentAvailable, procedureId, procedureVersion
+        case procedureExecution, procedureAvailability, onDemandAvailable
+        case displayName, summary, author, homepage, logo
+        case isPrivate = "private"
+    }
+}
+
+struct ProcedureAvailability: Decodable, Equatable, Sendable {
+    let installed: Bool
+    let contractValidated: Bool
+    let discoverable: Bool
+    let lastSuccessfulInvocationAt: String?
+    let invocationEvidence: ProcedureInvocationEvidence
+    let currentHealth: ProcedureAvailabilityObservation
+    let currentSessionDiscovery: ProcedureAvailabilityObservation
+}
+
+struct ProcedureInvocationEvidence: Decodable, Equatable, Sendable {
+    let valid: Bool
+    let verifiedAt: String?
+    let invalidatedAt: String?
+    let invalidatedReason: String?
+    let dependencies: ProcedureInvocationDependencies?
+}
+
+struct ProcedureInvocationDependencies: Decodable, Equatable, Sendable {
+    let procedureFingerprint: String?
+    let runtimeFingerprint: String?
+    let bindingFingerprint: String?
+}
+
+struct ProcedureAvailabilityObservation: Decodable, Equatable, Sendable {
+    let status: String
+    let observedAt: String?
 }
 
 struct UpdateItem: Decodable, Equatable, Identifiable, Sendable {
@@ -278,6 +335,14 @@ enum ManagerSetupPolicy {
         default:
             tools(for: "featured").filter { ["math-anchor", "migratory-time"].contains($0.id) }
         }
+    }
+
+    static func examplePrompt(_ id: String) -> String? {
+        [
+            "decision-table": "For a $120 order by a verified customer, apply these rules: verified orders of at least $100 get free shipping; all others pay shipping. Return the decision and the rule that matched.",
+            "state-machine": "An order can move draft → paid → shipped. It may be cancelled only from draft or paid. Starting at paid, process ship then cancel; report each result and the final state.",
+            "schedule-algebra": "For October 15, 2026 in Asia/Shanghai, find free intervals from 09:00 to 12:00 after excluding meetings 09:30–10:00 and 10:30–11:00. Return the remaining slots.",
+        ][id]
     }
 
     static func connectsHost(_ appInstalled: Bool?) -> Bool {
@@ -1485,7 +1550,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .overview: "Overview"
-        case .tools: "Tools"
+        case .tools: "Library"
         case .updates: "Browse"
         case .agentApps: "Agents"
         case .activity: "History"
@@ -1519,6 +1584,19 @@ struct ManagedTool: Identifiable, Equatable {
     let ownership: String
     let active: Bool
     var onDemandAvailable: Bool = false
+}
+
+struct ManagedProcedure: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let summary: String
+    let version: String
+    let procedureId: String
+    let procedureVersion: String
+    let execution: String?
+    let availability: ProcedureAvailability?
+    let isPrivate: Bool
+    let logo: ToolLogo?
 }
 
 enum ManagedItemState: Equatable {

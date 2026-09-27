@@ -16,6 +16,7 @@ released tools, and their Agent-app integrations.
 | **Agent Host components** | **Agent Host 基础组件** | Installation, compatibility, Agent-app connection, health, lifecycle, and Direct Runtime components. These support the environment; they are not Agent tools and are not a separate user-facing product. |
 | **Agent app** | **Agent 应用** | A product such as Codex, ZCode, or Claude Code that hosts an Agent and loads tool integrations. Use **host** only in technical contracts, adapters, commands, and stable data fields. Do not describe an Agent app as an Agent Host client. |
 | **Agent tool** | **Agent 工具** | An independently released product that an Agent calls to perform domain work, such as Math Anchor or Migratory Time. Each tool retains its own name, release, license, and semantics. |
+| **Procedure product** | **Procedure 产品** | A developer-produced, versioned reusable method installed for a user's Agent. The human manages its installation, health, update and removal; the Agent selects an exact version, supplies declared inputs and consumes declared outputs. The Manager does not expose Run internals. |
 | **Standard tool set** | **标准工具集** | The small set of Agent tools selected by the `standard` profile. Direct Runtime is an infrastructure component and is not counted as a Standard tool. |
 | **Featured tool set** | **精选工具集** | The external-user admission list selected by the `featured` profile. It is not a marketplace and is not the `local-dogfood` inventory. |
 | **tool integration** | **工具接入** or **工具集成包** | The supported carrier that makes one Agent tool available in one Agent app, such as a Codex Plugin or ZCode/Claude MCP binding. A plugin or binding is not the tool itself. |
@@ -27,9 +28,10 @@ released tools, and their Agent-app integrations.
 | **local tool monitoring** | **本地工具监测** | The user-facing name for optional local operational metadata. Use **observability** for the technical profile, commands, schemas, and source identifiers. |
 
 Capability Contracts and Procedure Contracts remain independent semantic
-standards. They define reusable operation meaning and settled method; they are
-not Agent Host components, Agent tools, or objects an ordinary user manages in
-the primary interface.
+standards. They define reusable operation meaning and settled method; the
+standards themselves are not Agent Host components or objects an ordinary user
+manages. An installed **Procedure product** is a separate concrete product that
+adopts such semantics and is managed in the Library.
 
 ## Relationship
 
@@ -41,6 +43,7 @@ Agent-Host Execution Architecture
    └─ Agent environment        installed state on one device
       ├─ Agent apps             Codex, ZCode, Claude Code
       ├─ Agent tools            Math Anchor, Migratory Time
+      ├─ Procedure products     installed reusable methods
       └─ tool integrations      Codex Plugin, ZCode/Claude MCP binding
 ```
 

@@ -14,7 +14,7 @@ try {
   const packed = await execFileAsync(process.execPath, [npmExecPath, 'pack', '--json', '--pack-destination', temporary], { cwd: root, maxBuffer: 4 * 1024 * 1024 })
   const report = JSON.parse(packed.stdout)[0]
   const names = new Set(report.files.map((item) => item.path))
-  for (const required of ['bin/agent-host.mjs', 'src/cli.mjs', 'src/service-recovery.mjs', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'README.zh-CN.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md', 'docs/TRACE_PLANE.md', 'docs/TRACE_PLANE.zh-CN.md', 'schemas/agent-host-task-source-catalog.schema.v0.1.json', 'schemas/agent-host-task-activity-pack.schema.v0.1.json', 'catalog/profiles/standard.json', 'catalog/profiles/featured.json', 'skills/agent-host-operations/SKILL.md', 'skills/agent-host-operations/scripts/agent-host', 'skills/agent-host-operations/scripts/agent-host.cmd']) {
+  for (const required of ['bin/agent-host.mjs', 'src/cli.mjs', 'src/service-recovery.mjs', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.txt', 'README.md', 'README.zh-CN.md', 'docs/WINDOWS.md', 'docs/WINDOWS.zh-CN.md', 'docs/TRACE_PLANE.md', 'docs/TRACE_PLANE.zh-CN.md', 'schemas/agent-host-task-source-catalog.schema.v0.1.json', 'schemas/agent-host-task-activity-pack.schema.v0.1.json', 'schemas/agent-host-method-graph.schema.v2.json', 'schemas/agent-host-procedure-run-request.schema.v0.1.json', 'catalog/profiles/standard.json', 'catalog/profiles/featured.json', 'skills/agent-host-operations/SKILL.md', 'skills/agent-host-operations/scripts/agent-host', 'skills/agent-host-operations/scripts/agent-host.cmd']) {
     if (!names.has(required)) throw new Error(`package is missing ${required}`)
   }
   const packagePath = join(temporary, report.filename)

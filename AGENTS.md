@@ -17,6 +17,7 @@ boundary being changed:
 - `docs/TERMINOLOGY.md` for product copy, naming, or stable identifiers; and
 - the relevant sections of `docs/REVIEW_CONTRACT.md` for review scope,
   evidence selection and affected high-risk seams.
+- Manager product copy and CTAs follow the shared Agent Host versus Agent Shell boundary in `~/.codex/AGENTS.md` (Product and communication) and the Human surface rules in `docs/PRODUCT_MODEL.md`; do not add Shell-marketplace "try in a new task" adoption funnels.
 
 Do not treat README prose, a dated history entry, a prior generated catalog, or
 an earlier runtime report as current installation or release authority. Profile

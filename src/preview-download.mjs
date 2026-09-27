@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { AgentHostError } from './errors.mjs'
+import { fetchExternal } from './external-fetch.mjs'
 import { acquireHttpsFile } from './release-artifacts.mjs'
 import { currentReleasePlatform, defaultReleaseManifestPath, RELEASE_SCHEMA } from './release-manifest.mjs'
 
@@ -272,7 +273,7 @@ export async function fetchPreviewDocument(url, downloads, options = {}) {
   const destination = join(downloads, 'preview-index', 'downloaded.json')
   await rm(destination, { force: true })
   const document = await downloadJsonFile(normalized, destination, {
-    fetch: options.fetch ?? globalThis.fetch,
+    fetch: options.fetch ?? fetchExternal,
     signal: options.signal,
     label: 'preview index',
   })
@@ -287,7 +288,7 @@ async function materializeCatalogFiles(catalogUrl, pointer, downloads, options) 
   const manifest = await downloadJsonFile(catalogUrl, manifestPath, {
     expectedBytes: pointer?.bytes,
     expectedSha256: pointer?.sha256,
-    fetch: options.fetch ?? globalThis.fetch,
+    fetch: options.fetch ?? fetchExternal,
     signal: options.signal,
     label: 'bound current.json',
   })
@@ -302,7 +303,7 @@ async function materializeCatalogFiles(catalogUrl, pointer, downloads, options) 
     await downloadJsonFile(provenanceUrl, provenancePath, {
       expectedBytes: null,
       expectedSha256: pointer?.provenanceSha256 ?? null,
-      fetch: options.fetch ?? globalThis.fetch,
+      fetch: options.fetch ?? fetchExternal,
       signal: options.signal,
       label: 'build-provenance.json',
     })
@@ -378,7 +379,7 @@ export async function fetchPreviewCarrier(index, downloads, options = {}) {
     expectedBytes: carrier.bytes,
     maxBytes: carrier.bytes,
     expectedSha256: carrier.sha256,
-    fetch: options.fetch ?? globalThis.fetch,
+    fetch: options.fetch ?? fetchExternal,
     signal: options.signal,
     label: carrier.filename,
     codes: PREVIEW_DOWNLOAD_CODES,

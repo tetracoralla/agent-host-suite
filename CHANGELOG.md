@@ -5,11 +5,11 @@
 ### Added
 
 - Product-first capability discovery in native and browser Managers: compact
-  rows use the tools' upstream product marks, one short job label, availability,
-  and a direct **Use** action. Editable example tasks are handed off only after
-  that action instead of filling the primary UI with explanatory copy. Copying
-  an example explains its next step in both Managers, and connected Agent apps
-  can be opened from the Agents page. Contributor documentation connects the
+  rows use the tools' upstream product marks, one short job label, and
+  availability. Environment actions stay install, connect, enable, repair, and
+  resume. An editable example stays collapsed on the tool detail; copying it
+  confirms the copy and does not open an Agent app. Connected Agent apps can
+  be opened from the Agents page. Contributor documentation connects the
   public GitHub Release and
   Developer Kit/private-component paths while keeping provider judgment and
   owner decisions outside Host.
@@ -25,9 +25,13 @@
   sessions, keep direct executions separate from nested static references, and
   leave adoption, usefulness, and value judgments with the user or their Agent.
 
-- Post-setup / Overview success handoff: after install, Manager (native + web) leads with **start work** (open a new Agent task or connect an Agent), Host-observed facts, remaining gaps, and classified recovery paths (`not-connected` / `stale-session` / `permission` / `tool-fault`). Status rows stay supporting detail, not the destination. Setup CLI results include `guidance`.
+- Post-setup guidance: after install, Manager (native + web) leads with the environment action that is still missing (open the connected app, connect, repair, or resume), Host-observed facts, remaining gaps, and classified recovery paths (`not-connected` / `stale-session` / `permission` / `tool-fault`). A caption that new tasks load the current tools appears only after a binding change. Setup CLI results include `guidance`.
 
 ### Changed
+
+- Manager no longer uses “try in a new task” or “Use in Agent” as the primary
+  action on an installed tool. Copying an example reports that it was copied
+  and does not switch to an Agent-app paste tutorial.
 
 - The unnamed capability exercise now keeps Host readiness, neutral session
   observations, rendered work, and participant interpretation separate. It no

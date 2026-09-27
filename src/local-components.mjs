@@ -3,7 +3,7 @@ import { lstat, mkdtemp, realpath, rm, rmdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { AgentHostError } from './errors.mjs'
-import { materializeToolComponent } from './tool-component.mjs'
+import { materializeProcedureComponent, materializeToolComponent } from './tool-component.mjs'
 import { recordActivity } from './activity.mjs'
 import { currentReleasePlatformOrLocal, installDirectoryName } from './release-manifest.mjs'
 import { materializeObservedLocalComponentArtifact, observeLocalComponentArtifact, verifyReleaseComponent } from './release-artifacts.mjs'
@@ -13,11 +13,13 @@ import { loadState, prepareStatePaths, readStatePaths, statePaths } from './stat
 import { transitionComponentInventory } from './lifecycle.mjs'
 import { resolveWorkspaceRoot } from './hosts/codex-projection.mjs'
 import { resolvePathGrant, validateComponentPathGrants } from './component-environment.mjs'
-import { readJson } from './json.mjs'
+import { readJson, writePrivateJson } from './json.mjs'
+import { runFile } from './process.mjs'
 import { isSpdxExpressionSyntax } from './spdx-expression.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
 import { readToolSources, recordToolSourceAfterRemove, restoreToolSourceAfterRollback } from './tool-sources.mjs'
 import { clearUpdateCandidate } from './update-candidates.mjs'
+import { initialProcedureAvailability, projectProcedureAvailability } from './procedure-availability.mjs'
 
 const PRIVATE_COMPONENT_STATE_SCHEMA = 'openadam.agent-host-private-component-state.v0.1'
 const PREVIEW_SCHEMA = 'openadam.agent-host-local-component-preview.v0.1'
@@ -120,10 +122,11 @@ function bindingFromObservation(observation, spdx) {
   }
 }
 
-function assertAgentTool(installed) {
-  if (installed.descriptor.kind !== 'agent-tool') {
-    fail('LOCAL_COMPONENT_KIND_UNSUPPORTED', 'Local import accepts only a sealed agent-tool component')
+function assertSupportedProduct(installed) {
+  if (!['agent-tool', 'procedure'].includes(installed.descriptor.kind)) {
+    fail('LOCAL_COMPONENT_KIND_UNSUPPORTED', 'Local import accepts a sealed Provider or Procedure product')
   }
+  if (installed.descriptor.kind !== 'agent-tool') return
   const integration = installed.descriptor.integration
   const command = installed.descriptor.files.find((file) => file.path === integration.runtime.command)
   if (integration.runtime.executor !== 'suite-node' && command?.executable !== true) {
@@ -132,8 +135,68 @@ function assertAgentTool(installed) {
 }
 
 async function runtimeComponent(installed, releaseComponent, state) {
-  assertAgentTool(installed)
-  return materializeToolComponent(installed, releaseComponent, state.components['node-runtime']?.command)
+  assertSupportedProduct(installed)
+  return installed.descriptor.kind === 'procedure'
+    ? materializeProcedureComponent(installed, releaseComponent)
+    : materializeToolComponent(installed, releaseComponent, state.components['node-runtime']?.command)
+}
+
+async function validateProcedureBinding(component, state, dependencies) {
+  if (component.procedureExecution.kind === 'agentic-runner') {
+    const { loadAgenticProcedure } = await import('./procedure-products.mjs')
+    await loadAgenticProcedure(component.releaseArtifact?.id ?? component.procedure.id, component)
+    return
+  }
+  if (typeof dependencies.prepareRuntimeConfig === 'function') {
+    await dependencies.prepareRuntimeConfig({
+      schemaVersion: 'openadam.direct-provider-config.v0.2',
+      providers: [component.procedureProvider],
+    })
+    return
+  }
+  const runtime = state.components?.['direct-execution-runtime']
+  if (typeof runtime?.command !== 'string' || !Array.isArray(runtime.args)) {
+    fail('PROCEDURE_RUNTIME_UNAVAILABLE', 'Procedure admission requires an installed Direct Runtime with configuration validation support')
+  }
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'agent-host-procedure-config-'))
+  try {
+    const configPath = join(temporaryRoot, 'providers.json')
+    await writePrivateJson(configPath, {
+      schemaVersion: 'openadam.direct-provider-config.v0.2',
+      providers: [component.procedureProvider],
+    })
+    const runner = dependencies.runtimeConfigRunner ?? runFile
+    const result = await runner(runtime.command, [...runtime.args, 'check-config', '--config', configPath], {
+      allowFailure: true,
+      timeoutMs: 15_000,
+      maxBuffer: 64 * 1024,
+    })
+    let output = null
+    try { output = JSON.parse(result.stdout) } catch {}
+    if (result.status !== 0 || output?.schemaVersion !== 'openadam.direct-config-check.v0.1' || output?.status !== 'valid') {
+      fail('PROCEDURE_RUNTIME_BINDING_INVALID', 'The installed Direct Runtime rejected this Procedure contract and launch binding')
+    }
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
+}
+
+async function inspectComponentHealth(component, workspaceRoot, state, dependencies) {
+  if (component.productType === 'procedure') {
+    await validateProcedureBinding(component, state, dependencies)
+    return {
+      status: 'ok',
+      boundary: 'installed-product-contract-and-execution-binding',
+      procedureId: component.procedureId,
+      procedureVersion: component.procedureVersion,
+      execution: component.procedureExecution.kind,
+      executed: false,
+    }
+  }
+  return (dependencies.mcpProbe ?? probeMcpToolsFirstAndRepeat)({
+    ...component,
+    healthWorkspaceRoot: workspaceRoot,
+  })
 }
 
 async function bindOptionalPathGrants(component, inputs, previous = {}) {
@@ -174,13 +237,38 @@ function inventoryFromState(state) {
   }
 }
 
-function publicRecord(id, record, active) {
+function projectedInventoryState(previous, inventory, transition) {
+  return transition.next ?? { ...previous, ...inventory }
+}
+
+function publicTransition(transition) {
+  const { next: _next, ...result } = transition
+  return result
+}
+
+function publicRecord(id, record, active, state) {
   const current = record.current
   const rollback = record.rollback
+  const component = current?.component
+  const availability = component?.productType === 'procedure'
+    ? projectProcedureAvailability(state, component)
+    : null
   return {
     id,
+    productType: component?.productType ?? rollback?.component?.productType ?? null,
     installed: current !== null,
     active: current !== null && active.includes(id),
+    agentAvailable: current !== null && (
+      component?.productType === 'procedure'
+        ? availability?.invocationEvidence.valid === true
+        : active.includes(id)
+    ),
+    ...(component?.productType !== 'procedure' ? {} : {
+      procedureId: component.procedureId,
+      procedureVersion: component.procedureVersion,
+      execution: component.procedureExecution?.kind ?? null,
+      availability,
+    }),
     version: current?.binding.version ?? null,
     archiveSha256: current?.binding.archiveSha256 ?? null,
     importedAt: current?.importedAt ?? null,
@@ -209,10 +297,10 @@ async function materializeForPreview(options, state, dependencies) {
     let component = await runtimeComponent(prepared.installed, prepared.releaseComponent, state)
     component = await bindOptionalPathGrants(component, options.pathGrants)
     const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? state.workspaceRoot)
-    if (component.workspaceEnvironment.length > 0 && workspaceRoot === null) {
+    if ((component.workspaceEnvironment ?? []).length > 0 && workspaceRoot === null) {
       fail('WORKSPACE_GRANT_REQUIRED', `${component.displayName} requires --workspace-root before its private component can be admitted`)
     }
-    const health = await (dependencies.mcpProbe ?? probeMcpToolsFirstAndRepeat)({ ...component, healthWorkspaceRoot: workspaceRoot })
+    const health = await inspectComponentHealth(component, workspaceRoot, state, dependencies)
     return { initial, binding, component, health }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })
@@ -235,18 +323,32 @@ export async function previewLocalComponent(options, dependencies = {}) {
       kind: initial.descriptor.kind,
       displayName: initial.descriptor.integration.displayName,
       integrationSchema: initial.descriptor.integration.schemaVersion,
-      executor: initial.descriptor.integration.runtime.executor ?? 'component',
-      expectedTools: initial.descriptor.integration.runtime.expectedTools,
+      productType: initial.descriptor.kind === 'procedure' ? 'procedure' : 'provider',
+      ...(initial.descriptor.integration.runtime === undefined ? {} : {
+        executor: initial.descriptor.integration.runtime.executor ?? 'component',
+        expectedTools: initial.descriptor.integration.runtime.expectedTools,
+      }),
+      ...(initial.descriptor.integration.procedure === undefined ? {} : {
+        procedureId: initial.descriptor.integration.procedure.id,
+        procedureVersion: initial.descriptor.integration.procedure.version,
+        execution: initial.descriptor.integration.execution.kind,
+        permissions: [...initial.descriptor.integration.procedure.permissions],
+        permissionCeiling: [...initial.descriptor.integration.procedure.permissions],
+        resources: structuredClone(initial.descriptor.integration.procedure.resources),
+        lifecycle: structuredClone(initial.descriptor.integration.procedure.lifecycle),
+      }),
       files: initial.observed.fileCount,
       expandedBytes: initial.observed.expandedBytes,
     },
     limits: initial.limits,
     health,
     assessment: {
-      establishes: ['archive-and-descriptor-integrity', 'contained-file-inventory', 'closed-tool-integration', 'current-mcp-catalog-health'],
+      establishes: initial.descriptor.kind === 'procedure'
+        ? ['archive-and-descriptor-integrity', 'contained-file-inventory', 'procedure-product-contract', 'execution-binding']
+        : ['archive-and-descriptor-integrity', 'contained-file-inventory', 'closed-tool-integration', 'current-mcp-catalog-health'],
       doesNotEstablish: ['license-rights', 'tool-value', 'semantic-correctness', 'agent-selection', 'task-quality'],
       execution: {
-        componentProcessStarted: true,
+        componentProcessStarted: initial.descriptor.kind !== 'procedure',
         agentHostStateChanged: false,
         effectsOutsideAgentHostState: 'not-observed',
       },
@@ -278,21 +380,35 @@ async function importLocalComponentUnlocked(options, dependencies = {}, prepared
     let component = await runtimeComponent(prepared.installed, prepared.releaseComponent, state)
     component = await bindOptionalPathGrants(component, options.pathGrants, record?.current?.component?.pathGrants)
     const workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? state.workspaceRoot)
-    if (component.workspaceEnvironment.length > 0 && workspaceRoot === null) {
+    if ((component.workspaceEnvironment ?? []).length > 0 && workspaceRoot === null) {
       fail('WORKSPACE_GRANT_REQUIRED', `${component.displayName} requires --workspace-root before its private component can be admitted`)
     }
-    const health = await (dependencies.mcpProbe ?? probeMcpToolsFirstAndRepeat)({ ...component, healthWorkspaceRoot: workspaceRoot })
+    if (component.productType === 'procedure' && options.activate === true) {
+      fail('LOCAL_COMPONENT_ACTIVATION_UNSUPPORTED', 'Installed Procedures are available through their exact contract and are not part of the MCP tool toggle')
+    }
+    const health = await inspectComponentHealth(component, workspaceRoot, state, dependencies)
+    if (component.productType === 'procedure') {
+      component.procedureAvailability = initialProcedureAvailability(
+        component,
+        health.status === 'ok',
+      )
+    }
     const inventory = inventoryFromState(state)
     const wasActive = inventory.agentComponents.includes(binding.id)
-    const active = options.activate === true || wasActive
+    const active = component.productType === 'provider' && (options.activate === true || wasActive)
     const previousCurrent = record === undefined
       ? null
       : record.current === null
         ? structuredClone(REMOVED_ROLLBACK_TARGET)
         : { ...record.current, active: wasActive }
     inventory.components[binding.id] = component
-    if (!inventory.availableAgentComponents.includes(binding.id)) inventory.availableAgentComponents.push(binding.id)
-    if (active && !inventory.agentComponents.includes(binding.id)) inventory.agentComponents.push(binding.id)
+    if (component.productType === 'provider') {
+      if (!inventory.availableAgentComponents.includes(binding.id)) inventory.availableAgentComponents.push(binding.id)
+      if (active && !inventory.agentComponents.includes(binding.id)) inventory.agentComponents.push(binding.id)
+    } else {
+      inventory.availableAgentComponents = inventory.availableAgentComponents.filter((id) => id !== binding.id)
+      inventory.agentComponents = inventory.agentComponents.filter((id) => id !== binding.id)
+    }
     inventory.privateComponents[binding.id] = {
       schemaVersion: PRIVATE_COMPONENT_STATE_SCHEMA,
       current: { binding: structuredClone(binding), component, importedAt: new Date().toISOString(), active },
@@ -330,7 +446,12 @@ async function importLocalComponentUnlocked(options, dependencies = {}, prepared
     ]
     return {
       status: 'imported',
-      component: publicRecord(binding.id, inventory.privateComponents[binding.id], inventory.agentComponents),
+      component: publicRecord(
+        binding.id,
+        inventory.privateComponents[binding.id],
+        inventory.agentComponents,
+        projectedInventoryState(state, inventory, transition),
+      ),
       health,
       restartRequired: transition.restartRequired,
       projectionCleanup: transition.projectionCleanup,
@@ -347,7 +468,7 @@ export async function localComponentStatus(options = {}) {
   const active = state.agentComponents ?? []
   const records = Object.entries(state.privateComponents ?? {})
     .filter(([id]) => options.target === undefined || options.target === id)
-    .map(([id, record]) => publicRecord(id, record, active))
+    .map(([id, record]) => publicRecord(id, record, active, state))
     .sort((left, right) => left.id.localeCompare(right.id))
   if (options.target !== undefined && records.length === 0) fail('LOCAL_COMPONENT_UNKNOWN', `No private component is recorded for ${options.target}`)
   return { status: 'ok', components: records }
@@ -383,9 +504,14 @@ async function removeLocalComponentUnlocked(options, dependencies = {}, prepared
     }))
   }
   return {
-    ...transition,
+    ...publicTransition(transition),
     status: options.dryRun === true ? 'ready' : 'removed',
-    component: publicRecord(options.target, inventory.privateComponents[options.target], inventory.agentComponents),
+    component: publicRecord(
+      options.target,
+      inventory.privateComponents[options.target],
+      inventory.agentComponents,
+      projectedInventoryState(state, inventory, transition),
+    ),
     ...(warnings.length === 0 ? {} : { warnings }),
   }
 }
@@ -437,10 +563,21 @@ async function verifyRetainedRollbackTarget(paths, state, target, options, depen
   }
   component = await bindOptionalPathGrants(component, options.pathGrants, target.component.pathGrants)
   workspaceRoot = await resolveWorkspaceRoot(options.workspaceRoot ?? state.workspaceRoot)
-  if (component.workspaceEnvironment.length > 0 && workspaceRoot === null) {
+  if ((component.workspaceEnvironment ?? []).length > 0 && workspaceRoot === null) {
     fail('WORKSPACE_GRANT_REQUIRED', `${component.displayName} requires --workspace-root before its private component can be restored`)
   }
-  const health = await (dependencies.mcpProbe ?? probeMcpToolsFirstAndRepeat)({ ...component, healthWorkspaceRoot: workspaceRoot })
+  const health = await inspectComponentHealth(component, workspaceRoot, state, dependencies)
+  if (component.productType === 'procedure') {
+    const retained = target.component.procedureAvailability
+    component.procedureAvailability = retained === undefined
+      ? initialProcedureAvailability(component, health.status === 'ok')
+      : {
+          ...structuredClone(retained),
+          installed: true,
+          contractValidated: health.status === 'ok',
+          discoverable: component.procedureInvocation !== undefined,
+        }
+  }
   return { component, health }
 }
 
@@ -507,9 +644,14 @@ async function rollbackLocalComponentUnlocked(options, dependencies = {}, prepar
       }))
     }
     return {
-      ...transition,
+      ...publicTransition(transition),
       status: options.dryRun === true ? 'ready' : 'rolled-back',
-      component: publicRecord(options.target, inventory.privateComponents[options.target], inventory.agentComponents),
+      component: publicRecord(
+        options.target,
+        inventory.privateComponents[options.target],
+        inventory.agentComponents,
+        projectedInventoryState(state, inventory, transition),
+      ),
       ...(warnings.length === 0 ? {} : { warnings }),
     }
   }
@@ -517,9 +659,10 @@ async function rollbackLocalComponentUnlocked(options, dependencies = {}, prepar
   const verifiedTarget = { ...target, component: verified.component }
   const inventory = inventoryFromState(state)
   inventory.components[options.target] = verifiedTarget.component
-  if (!inventory.availableAgentComponents.includes(options.target)) inventory.availableAgentComponents.push(options.target)
+  if (verifiedTarget.component.productType === 'provider' && !inventory.availableAgentComponents.includes(options.target)) inventory.availableAgentComponents.push(options.target)
+  if (verifiedTarget.component.productType === 'procedure') inventory.availableAgentComponents = inventory.availableAgentComponents.filter((id) => id !== options.target)
   inventory.agentComponents = inventory.agentComponents.filter((id) => id !== options.target)
-  if (verifiedTarget.active) inventory.agentComponents.push(options.target)
+  if (verifiedTarget.component.productType === 'provider' && verifiedTarget.active) inventory.agentComponents.push(options.target)
   inventory.privateComponents[options.target] = {
     schemaVersion: PRIVATE_COMPONENT_STATE_SCHEMA,
     current: verifiedTarget,
@@ -539,9 +682,14 @@ async function rollbackLocalComponentUnlocked(options, dependencies = {}, prepar
     }))
   }
   return {
-    ...transition,
+    ...publicTransition(transition),
     status: options.dryRun === true ? 'ready' : 'rolled-back',
-    component: publicRecord(options.target, inventory.privateComponents[options.target], inventory.agentComponents),
+    component: publicRecord(
+      options.target,
+      inventory.privateComponents[options.target],
+      inventory.agentComponents,
+      projectedInventoryState(state, inventory, transition),
+    ),
     health: verified.health,
     ...(warnings.length === 0 ? {} : { warnings }),
   }

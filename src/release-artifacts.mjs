@@ -9,6 +9,7 @@ import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { materializeToolComponent } from './tool-component.mjs'
 import { AgentHostError } from './errors.mjs'
+import { fetchExternal } from './external-fetch.mjs'
 import { fingerprintIdentityFiles, fingerprintRelativeFiles } from './development-manifest.mjs'
 import { readJson } from './json.mjs'
 import { ensurePrivateDirectory } from './paths.mjs'
@@ -270,7 +271,7 @@ export async function acquireHttpsFile({
   expectedBytes = null,
   maxBytes,
   expectedSha256 = null,
-  fetch = globalThis.fetch,
+  fetch = fetchExternal,
   signal,
   timeoutMs,
   stallTimeoutMs = DEFAULT_DOWNLOAD_STALL_TIMEOUT_MS,
@@ -337,7 +338,7 @@ export async function acquireArtifact(component, manifestPath, paths, options = 
       await copyFile(fileURLToPath(url), temporary)
     } else if (url.protocol === 'https:') {
       await downloadHttpsArtifact(component, url, temporary, {
-        fetch: options.fetch ?? globalThis.fetch,
+        fetch: options.fetch ?? fetchExternal,
         signal: options.signal,
         timeoutMs: options.timeoutMs ?? archiveCommandTimeoutMs(component.artifact.bytes),
         stallTimeoutMs: options.stallTimeoutMs ?? DEFAULT_DOWNLOAD_STALL_TIMEOUT_MS,

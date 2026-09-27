@@ -27,15 +27,6 @@ struct AgentAppsView: View {
                     }
                 }
 
-                if let handoff = store.exampleTaskHandoff {
-                    NoticeView(
-                        title: "Task copied",
-                        message: handoff,
-                        systemImage: "doc.on.clipboard.fill",
-                        color: .blue
-                    )
-                }
-
                 if store.suite?.configured == true {
                     startWorkHandoff
                 }

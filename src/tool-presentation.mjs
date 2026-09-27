@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, join, posix } from 'node:path'
 import { AgentHostError } from './errors.mjs'
+import { fetchExternal } from './external-fetch.mjs'
 import { integrationRelativePath } from './tool-integration.mjs'
 
 export const LOGO_MAX_BYTES = 256 * 1024
@@ -176,7 +177,7 @@ export function fallbackPresentation(id) {
   }
 }
 
-export async function fetchRemotePreviewImage(url, { fetch = globalThis.fetch, signal, maxBytes = REMOTE_IMAGE_MAX_BYTES } = {}) {
+export async function fetchRemotePreviewImage(url, { fetch = fetchExternal, signal, maxBytes = REMOTE_IMAGE_MAX_BYTES } = {}) {
   let parsed
   try {
     parsed = new URL(url)

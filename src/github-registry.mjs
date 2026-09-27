@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { AgentHostError } from './errors.mjs'
+import { fetchExternal } from './external-fetch.mjs'
 import { fetchGitHubRelease } from './github-api.mjs'
 import { currentReleasePlatform } from './release-manifest.mjs'
 import { validateRepositoryPlugin } from './repository-plugin.mjs'
@@ -59,7 +60,7 @@ export async function loadBundledGitHubToolCatalog() {
   return parseGitHubToolCatalog(await readTrackedJson(CATALOG_URL, 'GitHub tool catalog'))
 }
 
-export async function fetchPublishedGitHubCatalog({ fetch = globalThis.fetch, signal } = {}) {
+export async function fetchPublishedGitHubCatalog({ fetch = fetchExternal, signal } = {}) {
   const registry = await loadGitHubToolRegistry()
   const tag = registry.host.catalogTag
   const release = await fetchGitHubRelease(registry.host.repository, tag, { fetch, signal })
@@ -130,7 +131,7 @@ export async function loadGitHubToolCatalog(options = {}) {
   if (options.bundledOnly === true) return bundled
   try {
     const live = await fetchPublishedGitHubCatalog({
-      fetch: options.fetch ?? globalThis.fetch,
+      fetch: options.fetch ?? fetchExternal,
       signal: options.signal,
     })
     if (typeof options.onFetched === 'function') await options.onFetched(live)

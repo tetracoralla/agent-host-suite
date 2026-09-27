@@ -31,6 +31,7 @@ import { browseRecommendedTools, installGitHubTool, updatesCheck, updatesInstall
 import { buildPostSetupGuidance } from './post-setup-guidance.mjs'
 import { readVerifiedLogoBytes } from './tool-presentation.mjs'
 import { pickDirectory as pickLocalDirectory } from './directory-picker.mjs'
+import { removeLocalComponent } from './local-components.mjs'
 
 export const MANAGER_SETUP_PROFILES = Object.freeze(['featured', 'standard', 'developer', 'observability'])
 
@@ -177,6 +178,7 @@ export function environmentActionInvalidatesDoctor(payload) {
     case 'uninstall':
     case 'updates-install':
     case 'cleanup':
+    case 'component-remove':
     case 'monitoring':
       return true
     case 'github':
@@ -349,6 +351,12 @@ async function action(value, stateRoot, dependencies = {}) {
     })
   }
   if (value.action === 'rollback') return rollbackInstallation({ stateRoot, dryRun: false })
+  if (value.action === 'component-remove') {
+    if (typeof value.id !== 'string' || !/^[a-z][a-z0-9-]*$/u.test(value.id)) {
+      throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Choose one installed Procedure')
+    }
+    return removeLocalComponent({ stateRoot, target: value.id, dryRun: false })
+  }
   if (value.action === 'cleanup') return cleanupStorage({ stateRoot })
   if (value.action === 'uninstall') {
     if (typeof value.purgeData !== 'boolean') throw new AgentHostError('MANAGER_REQUEST_INVALID', 'Uninstall requires an explicit data choice')
@@ -725,13 +733,20 @@ button.action{border:1px solid var(--line);background:var(--canvas);border-radiu
 </style></head><body><div class="shell"><aside class="side"><div class="brand">Agent Host</div><nav class="nav" id="nav"><button data-page="tools" aria-current="true"></button><button data-page="updates"></button><button data-page="environment"></button><button data-page="activity"></button><button data-page="usage"></button></nav><div class="side-footer"><button id="refreshButton"></button><button id="settingsButton"></button><div class="version" id="version"></div></div></aside><main class="main"><div id="error" class="notice hidden" role="alert"></div><section id="tools"></section><section id="updates" class="hidden"></section><section id="environment" class="hidden"></section><section id="usage" class="hidden"></section><section id="activity" class="hidden"></section><section id="tool-detail" class="hidden"></section></main></div><dialog id="settingsDialog"><h2 id="settingsTitle"></h2><label class="setting-row"><span id="languageLabel"></span><select id="languageSelect"></select></label><div id="versionPlanes"></div><div id="sourceSettings"></div><div class="actions"><button class="action primary" id="settingsDone"></button></div></dialog><div id="busy" class="busy hidden" role="status" aria-live="polite"><div id="busyText"></div></div>
 <script>
 const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};let data,languageSelection='system',changing=false,lastPreview=null,lastUpdates=null,lastGithubTarget='',lastGithubPreviewed='',githubConflictURL=null,lastDoctor=null;
-const view={page:'tools',queries:{tools:'',updates:''},detail:null,returnPage:'tools',scroll:0,drafts:{},githubOpen:false,managementOpen:false};
+const view={page:'tools',queries:{tools:'',updates:''},detail:null,returnPage:'tools',scroll:0,drafts:{},githubOpen:false,managementOpen:false,needsFreshTask:false};
 const names={zcode:'ZCode',codex:'Codex',claude:'Claude Code','deepseek-harness':'DeepSeek Harness','gemini-cli':'Gemini CLI','github-copilot-cli':'GitHub Copilot CLI'};
 const zh={
 'Decision rules':'决策规则','State transitions':'状态流转','Schedule calculation':'日程计算',
+'For a $120 order by a verified customer, apply these rules: verified orders of at least $100 get free shipping; all others pay shipping. Return the decision and the rule that matched.':'对于已验证顾客的 120 美元订单，按规则判断：已验证且金额至少 100 美元的订单免运费，其他订单需付运费。给出结论和命中的规则。',
+'An order can move draft → paid → shipped. It may be cancelled only from draft or paid. Starting at paid, process ship then cancel; report each result and the final state.':'订单可从草稿依次进入已付款、已发货；只有草稿或已付款状态可取消。从已付款开始，依次执行发货、取消，报告每一步结果与最终状态。',
+'For October 15, 2026 in Asia/Shanghai, find free intervals from 09:00 to 12:00 after excluding meetings 09:30–10:00 and 10:30–11:00. Return the remaining slots.':'按 Asia/Shanghai 时区，求 2026 年 10 月 15 日 09:00–12:00 扣除 09:30–10:00、10:30–11:00 两场会议后的空闲时段。',
+'Task activity requires Observer 0.6.5 or newer. Update the Agent environment, then retry.':'任务活动需要 Observer 0.6.5 或更新版本。请更新 Agent 环境后重试。',
+'Make deterministic decisions from explicit facts.':'依据明确事实作出可复核的决策。',
+'Make state transitions deterministic.':'按明确事件与状态规则推进流转。',
+'Compute exact bounded schedule intervals.':'计算指定范围内的精确时间区间。',
 'Take over existing connections':'接管现有连接','Previous connections are saved and restored when the tools are removed.':'原连接会被保存，并在移除工具时恢复。',
 'Tool activity':'工具使用情况','Calls mapped to tools managed by Agent Host. Independently configured tools are outside this view.':'此处统计映射到 Host 管理工具的调用，不包含独立配置的工具。','Take over connection and add':'接管连接并添加','This tool is already configured independently. Agent Host can take over its connection and restore the previous configuration when you remove it.':'这个工具已有独立配置。Agent Host 可以接管连接，并在移除工具时恢复原配置。',
-'My tools':'我的工具','Install Agent Host before adding a GitHub tool.':'请先安装 Agent Host，再添加 GitHub 工具。','Collection details':'采集详情','Static references do not prove execution.':'静态引用不代表执行。','Script references are not execution; open tasks may use older bindings.':'脚本引用不代表执行；未关闭的任务可能仍使用旧绑定。','Pause all tools? On-demand tools will also pause.':'暂停全部工具？按需工具也将暂停。','Disconnect this Agent app?':'断开此 Agent 的连接？','Tool options':'更多操作','Inspection unavailable':'无法检查','Error report copied':'已复制错误报告','Open':'打开','Manage':'管理','Back':'返回','Try a task':'试一试','Example task':'示例任务','Enable by default':'默认启用','Version':'版本','Project website':'项目网站','Use in Agent':'在 Agent 中使用','Clear search':'清除搜索','No matching tools':'没有匹配的工具','Connected, not checked':'已连接，尚未检查','Copy error report':'复制错误报告','Browse more tools':'浏览更多工具','Tool status unavailable':'工具状态暂不可用','Structured data':'结构化数据','Mind maps':'思维导图','Projective layouts':'投影布局','Standard expressions':'标准表达式','File inspection':'文件检查','Spatial composition':'空间编排','Unicode inspection':'Unicode 检查','Responsive layouts':'响应式布局','Visual documents':'可视化文档','Task copied':'任务已复制',
+'Install Agent Host before adding a GitHub tool.':'请先安装 Agent Host，再添加 GitHub 工具。','Collection details':'采集详情','Static references do not prove execution.':'静态引用不代表执行。','Script references are not execution; open tasks may use older bindings.':'脚本引用不代表执行；未关闭的任务可能仍使用旧绑定。','Pause all tools? On-demand tools will also pause.':'暂停全部工具？按需工具也将暂停。','Disconnect this Agent app?':'断开此 Agent 的连接？','Tool options':'更多操作','Inspection unavailable':'无法检查','Error report copied':'已复制错误报告','Open':'打开','Manage':'管理','Back':'返回','Example':'示例','Example task':'示例任务','Copy':'复制','Copied':'已复制','Enable by default':'默认启用','Version':'版本','Project website':'项目网站','Clear search':'清除搜索','No matching tools':'没有匹配的工具','Connected, not checked':'已连接，尚未检查','Copy error report':'复制错误报告','Browse more tools':'浏览更多工具','Tool status unavailable':'工具状态暂不可用','Structured data':'结构化数据','Mind maps':'思维导图','Projective layouts':'投影布局','Standard expressions':'标准表达式','File inspection':'文件检查','Spatial composition':'空间编排','Unicode inspection':'Unicode 检查','Responsive layouts':'响应式布局','Visual documents':'可视化文档',
 
 "Tool activity":"工具使用情况",
 "Version history":"版本历史",
@@ -756,14 +771,14 @@ const zh={
 "Script references do not prove execution. Binding counts can include older open sessions.":"脚本引用不能证明实际执行。绑定期间统计可能包括尚未关闭的旧会话。",
 "Use the installed Agent Host operations skill to analyze the current usage report, version history, runtime errors and coverage. Separate tasks from diagnostics and script references from observed execution. Compare findings with the current task before proposing changes; counts alone do not establish adoption or correctness.":"请使用已安装的 Agent Host operations 技能分析当前使用报告、版本历史、运行错误和采集覆盖。区分真实任务与健康检查、脚本引用与实际执行。结合当前任务提出改进，不要仅凭次数推断采纳或正确性。",
 
-  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','Off keeps an on-demand Skill. Pause all withholds both.':'关闭单项仍保留按需 Skill；全部暂停则两者都不投影。','All tools are paused.':'所有工具已暂停。','Enable to use':'启用后使用','Enable this tool, then start a fresh Agent task to use it.':'启用此工具后，在新的 Agent 任务中使用。','On-demand':'按需','Paused':'已暂停','Use':'使用','Use {tool} in a new Agent task':'在新的 Agent 任务中使用 {tool}','For new tasks':'用于新任务','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源','Task provider':'任务来源',
-  'Overview':'总览','Environment':'环境','Tools':'工具','Browse':'浏览','Agents':'Agent','Updates':'更新','Tool Library':'工具库','Installed':'已安装','Recommended':'推荐','See all':'查看更多','No installed tools':'本机还没有安装工具','No installed tools match this search.':'已安装工具中没有匹配项。','No compatible tools match this search.':'兼容工具中没有匹配项。','Choose a compatible tool below, or browse the full library.':'可从下方选择兼容工具，也可浏览完整工具库。','Search tools':'搜索工具','Search compatible tools':'搜索兼容工具','Install featured tools':'安装精选工具','Install missing':'安装缺少项','Available to install':'可安装','Available to Agent apps':'对 Agent 可用','Compatible':'兼容','Not compatible':'不兼容','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…','Browse recommended tools':'浏览推荐工具','Add GitHub project':'添加 GitHub 项目','GitHub repository or Release URL':'GitHub 仓库或 Release 地址','Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it.':'粘贴 GitHub 仓库或 Release 地址。预览只读取项目元数据；通过兼容性检查后才能添加。','Preview GitHub project':'预览 GitHub 项目','Add from GitHub':'从 GitHub 添加','Previewing GitHub project…':'正在预览 GitHub 项目…','Adding GitHub tool…':'正在添加 GitHub 工具…','Check for updates':'检查更新','Checking updates…':'正在检查更新…','This platform':'当前平台','No asset for this platform':'当前平台无安装包','profiles fetch --carrier downloads an installer. It does not replace Agent Host.':'profiles fetch --carrier 只下载安装包，不会替换或重启 Agent Host。',
+  'Refresh':'刷新','Refreshing…':'正在刷新…','Change completed; the current status could not be refreshed. Use Refresh to try again.':'更改已完成，但当前状态刷新失败。请点击“刷新”重试。','The request ended without a confirmed result. Refresh the environment before repeating the action.':'请求结束，但未能确认操作结果。请先刷新环境，再决定是否重试操作。','Completed with a warning: {message}':'已完成，但有一项提醒：{message}','Installed tools':'已安装工具','This environment has no Agent tools to activate. Its developer Skill remains available.':'此环境没有需要启用的 Agent 工具，开发者 Skill 仍然可用。','Choose at least one installed tool.':'请至少选择一个已安装工具。','Empty selection pauses all ordinary tools.':'空选择会完全暂停全部普通工具。','Pause all tools':'暂停全部工具','Resume tools':'恢复工具','Pausing tools…':'正在暂停工具…','Resuming tools…':'正在恢复工具…','All ordinary tools are fully paused. On-demand Skills are also withheld until you resume. Developer Kit Skills, if installed, remain available.':'全部普通工具已完全暂停；恢复前也不会投影按需 Skill。若已安装开发者 Kit，其 Skill 仍然可用。','Off keeps an on-demand Skill. Pause all withholds both.':'关闭单项仍保留按需 Skill；全部暂停则两者都不投影。','All tools are paused.':'所有工具已暂停。','Enable to use':'启用后使用','On-demand':'按需','Paused':'已暂停','New tasks load this tool selection. Tasks already open keep the tools they started with.':'新任务会载入当前工具选择；已打开的任务保留启动时的工具。','For new tasks':'用于新任务','Tool profile':'工具配置','Agent app':'Agent 应用','Trace provider':'轨迹来源','Task provider':'任务来源',
+  'Overview':'总览','Environment':'环境','Tools':'工具','Library':'产品','Browse':'浏览','Agents':'Agent','Updates':'更新','Tool Library':'工具库','Installed':'已安装','Recommended':'推荐','See all':'查看更多','No installed tools':'本机还没有安装工具','No installed tools match this search.':'已安装工具中没有匹配项。','No compatible tools match this search.':'兼容工具中没有匹配项。','Choose a compatible tool below, or browse the full library.':'可从下方选择兼容工具，也可浏览完整工具库。','Search tools':'搜索工具','Search compatible tools':'搜索兼容工具','Install featured tools':'安装精选工具','Install missing':'安装缺少项','Available to install':'可安装','Available to Agent apps':'对 Agent 可用','Compatible':'兼容','Not compatible':'不兼容','Usage':'使用情况','History':'记录','Activity':'活动','Settings':'设置','Language':'语言','System default':'跟随系统','English':'English','Simplified Chinese':'简体中文','Done':'完成','Working…':'处理中…','Saving language…':'正在保存语言…','Browse recommended tools':'浏览推荐工具','Add GitHub project':'添加 GitHub 项目','GitHub repository or Release URL':'GitHub 仓库或 Release 地址','Paste a GitHub repository or Release URL. Preview uses project metadata; the package is downloaded only when you add it.':'粘贴 GitHub 仓库或 Release 地址。预览只读取项目元数据；通过兼容性检查后才能添加。','Preview GitHub project':'预览 GitHub 项目','Add from GitHub':'从 GitHub 添加','Previewing GitHub project…':'正在预览 GitHub 项目…','Adding GitHub tool…':'正在添加 GitHub 工具…','Check for updates':'检查更新','Checking updates…':'正在检查更新…','This platform':'当前平台','No asset for this platform':'当前平台无安装包','profiles fetch --carrier downloads an installer. It does not replace Agent Host.':'profiles fetch --carrier 只下载安装包，不会替换或重启 Agent Host。',
   'Versions':'版本','Application':'应用','Environment release':'环境兼容版本','Catalog source':'目录来源','Catalog assets are unpublished.':'目录资产尚未发布。','Not Apple-notarized. Not a store.':'未经 Apple 公证，也不是应用商店。','Check source':'检查来源','Checking source…':'正在检查来源…','Use local catalog':'使用本地目录','Set HTTPS catalog':'设置 HTTPS 目录','Clear source':'清除来源','Last check':'最近检查','Retry':'重试','HTTPS catalog URL':'HTTPS 目录 URL','Local catalog path':'本地目录路径','not installed':'未安装','source-checkout':'源码 checkout','The Manager application and the installed Agent environment can share this product name with different payloads. Application build, environment release, and tool versions are separate.':'管理器应用与已安装的 Agent 环境可以同名但载荷不同。应用 build、环境兼容版本和工具版本是分开的。','Install update':'安装更新','Install all updates':'安装全部更新','update available':'可更新','Check for updates to load current and available versions.':'请检查更新以查看当前版本和可用版本。','compatible after Host update':'需先更新 Host','official upgrade':'官方升级','installed, version unread':'已安装，未能读取版本','check failed':'检查失败',
 
-  'Agent environment':'Agent 环境','Installed locally on this PC':'已安装在这台电脑上','Set up a compatible local tool environment':'设置兼容的本地工具环境','Set up tools':'设置工具','Standard tools':'标准工具','Featured tools':'精选工具','Developer Kit':'开发者 Kit','Standard + monitoring':'标准工具 + 监控','Set up':'设置','Setting up tools…':'正在设置工具…','Check again':'重新检测','Connect later':'稍后连接','Detected on this PC':'已在这台电脑上检测到','Math Anchor':'Math Anchor','Migratory Time':'Migratory Time','Armorial':'Armorial','Exact and scientific calculation':'精确与科学计算','Reliable worldwide time conversion':'可靠的全球时区转换','Choose project-aware icons without redrawing them':'按项目选用图标，无需重绘','Skill-only kit; this profile adds no Agent MCP tools':'仅 Skill；此配置不添加 Agent MCP 工具','Choose a tool set, then install.':'先选择工具集并安装 Agent Host；受支持的 Agent 应用可以现在连接，也可以稍后连接。','Install now; connect later.':'安装时可以不连接 Agent 应用。若未检测到受支持应用，可先安装 Agent Host，稍后再从“Agent 应用”连接。','Install complete — start work':'安装完成 — 可以开始工作','Ready to start work':'可以开始工作','Ready — start work in a new Agent task':'已就绪 — 请在新的 Agent 任务中开始工作','Install finished — connect an Agent to start work':'安装已完成 — 请连接 Agent 以开始工作','Open a new Agent task to start work':'打开新的 Agent 任务以开始工作','Connect an Agent app':'连接 Agent 应用','Review Repair':'查看修复','What Host confirmed':'Host 已确认的内容','Still open':'仍需注意','Next step':'下一步','Recovery path':'继续路径','Problem class':'问题类别','not-connected':'未连接','stale-session':'旧会话','permission':'权限','tool-fault':'工具故障','tools-paused':'工具已暂停','unverified':'尚未核验','Health details':'健康详情','Start work':'开始工作','Details':'详情','Ready':'就绪','Connect Agent to use':'连接 Agent 后即可使用','Tools paused':'工具已暂停','No tools selected':'尚未选择工具','Needs repair':'需要修复','Needs check':'需要检查','Permission blocked':'权限受阻','Bindings need repair':'绑定需要修复','Connect':'连接','Resume':'恢复','Repair':'修复','Check':'检查','Fix access':'修复访问','Choose folder':'选择文件夹','Need a project folder':'需要项目文件夹','Choose a project folder':'选择项目文件夹','Absolute folder path':'项目文件夹的绝对路径','Enter path':'输入路径','Grant folder':'授予文件夹','Granting folder…':'正在授予文件夹…','Open Agent Host on this computer to choose a folder.':'请在本机打开 Agent Host 以选择文件夹。','Folder granted. Start a new Agent task so tools see it.':'已授予文件夹。请启动新的 Agent 任务，工具才能看到它。','Check found a problem':'检查发现问题','Check passed':'检查通过','app-missing':'应用缺失','Connect Codex':'连接 Codex','Connect ZCode':'连接 ZCode','Connect Claude Code':'连接 Claude Code','Choose Agent':'选择 Agent','{name} is not installed':'{name} 未安装','Install {name}, or connect a different installed app.':'请安装 {name}，或改连另一个已安装的应用。','Start a new Agent task so tools see the folder.':'请启动新的 Agent 任务，工具才能看到该文件夹。','Open Agent':'打开 Agent','Open Codex':'打开 Codex','Open ZCode':'打开 ZCode','Open Claude Code':'打开 Claude Code','Start a new task in the app':'在应用中开始新任务','Opening…':'正在打开…','Repairing…':'正在修复…','Checking…':'正在检查…','Set up':'设置','Set up tools':'设置工具','Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.':'Host 已确认它能观察到的本地环境。下一步是打开新的 Agent 任务开始真实工作，而不是停留在状态清单。','Host cannot confirm that an already-open Agent task has loaded these tools.':'Host 无法确认已经打开的 Agent 任务已载入这些工具。','Tools are on this machine, but no Agent app is connected yet.':'工具已在本机，但尚未连接 Agent 应用。','Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.':'打开「Agent 应用」→ 连接受支持的应用 → 在该应用中启动新任务。旧任务不会自动获得这些工具。','Public download is not configured.':'尚未配置公开下载。','Featured catalog download':'精选目录下载','Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, try to open Agent Host.app (or the app inside the DMG). If macOS blocks it, open System Settings → Privacy & Security and choose Open Anyway. That warning is expected for this preview. On macOS 14, Control-click → Open may still work; it does not on macOS 15 Sequoia and later. Do not turn off Gatekeeper.':'未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请先尝试打开 Agent Host.app（或 DMG 中的应用）。若 macOS 拦截，请打开系统设置 → 隐私与安全性，选择“仍要打开”。该提示是此预览的预期步骤。macOS 14 仍可用按住 Control 点击 → 打开；macOS 15 Sequoia 及之后不能再靠这一步覆盖 Gatekeeper。不要关闭系统防护。','Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.':'未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。',
+  'Agent environment':'Agent 环境','Installed locally on this PC':'已安装在这台电脑上','Set up a compatible local tool environment':'设置兼容的本地工具环境','Set up tools':'设置工具','Standard tools':'标准工具','Featured tools':'精选工具','Developer Kit':'开发者 Kit','Standard + monitoring':'标准工具 + 监控','Set up':'设置','Setting up tools…':'正在设置工具…','Check again':'重新检测','Connect later':'稍后连接','Detected on this PC':'已在这台电脑上检测到','Math Anchor':'Math Anchor','Migratory Time':'Migratory Time','Armorial':'Armorial','Exact and scientific calculation':'精确与科学计算','Reliable worldwide time conversion':'可靠的全球时区转换','Choose project-aware icons without redrawing them':'按项目选用图标，无需重绘','Skill-only kit; this profile adds no Agent MCP tools':'仅 Skill；此配置不添加 Agent MCP 工具','Choose a tool set, then install.':'先选择工具集并安装 Agent Host；受支持的 Agent 应用可以现在连接，也可以稍后连接。','Install now; connect later.':'安装时可以不连接 Agent 应用。若未检测到受支持应用，可先安装 Agent Host，稍后再从“Agent 应用”连接。','Connect an Agent app':'连接 Agent 应用','Review Repair':'查看修复','What Host confirmed':'Host 已确认的内容','Still open':'仍需注意','Next step':'下一步','Recovery path':'继续路径','Problem class':'问题类别','not-connected':'未连接','stale-session':'旧会话','permission':'权限','tool-fault':'工具故障','tools-paused':'工具已暂停','unverified':'尚未核验','Health details':'健康详情','Start work':'开始工作','Details':'详情','Ready':'就绪','Connect Agent to use':'连接 Agent 后即可使用','Tools paused':'工具已暂停','No tools selected':'尚未选择工具','Needs repair':'需要修复','Needs check':'需要检查','Permission blocked':'权限受阻','Bindings need repair':'绑定需要修复','Connect':'连接','Resume':'恢复','Repair':'修复','Check':'检查','Fix access':'修复访问','Choose folder':'选择文件夹','Need a project folder':'需要项目文件夹','Choose a project folder':'选择项目文件夹','Absolute folder path':'项目文件夹的绝对路径','Enter path':'输入路径','Grant folder':'授予文件夹','Granting folder…':'正在授予文件夹…','Open Agent Host on this computer to choose a folder.':'请在本机打开 Agent Host 以选择文件夹。','Folder granted. Start a new Agent task so tools see it.':'已授予文件夹。请启动新的 Agent 任务，工具才能看到它。','Check found a problem':'检查发现问题','Check passed':'检查通过','app-missing':'应用缺失','Connect Codex':'连接 Codex','Connect ZCode':'连接 ZCode','Connect Claude Code':'连接 Claude Code','Choose Agent':'选择 Agent','{name} is not installed':'{name} 未安装','Install {name}, or connect a different installed app.':'请安装 {name}，或改连另一个已安装的应用。','Start a new Agent task so tools see the folder.':'请启动新的 Agent 任务，工具才能看到该文件夹。','Open Agent':'打开 Agent','Open Codex':'打开 Codex','Open ZCode':'打开 ZCode','Open Claude Code':'打开 Claude Code','Opening…':'正在打开…','Repairing…':'正在修复…','Checking…':'正在检查…','Set up':'设置','Set up tools':'设置工具','Host cannot confirm that an already-open Agent task has loaded these tools.':'Host 无法确认已经打开的 Agent 任务已载入这些工具。','Tools are on this machine, but no Agent app is connected yet.':'工具已在本机，但尚未连接 Agent 应用。','Open Agents → Connect a supported app → start a new task in that app. Old tasks will not pick this up.':'打开「Agent 应用」→ 连接受支持的应用 → 在该应用中启动新任务。旧任务不会自动获得这些工具。','Public download is not configured.':'尚未配置公开下载。','Featured catalog download':'精选目录下载','Unsigned macOS builds are not Apple-notarized, and this product does not ship Developer ID signed or App Store builds. After download, try to open Agent Host.app (or the app inside the DMG). If macOS blocks it, open System Settings → Privacy & Security and choose Open Anyway. That warning is expected for this preview. On macOS 14, Control-click → Open may still work; it does not on macOS 15 Sequoia and later. Do not turn off Gatekeeper.':'未签名的 macOS 安装包未经 Apple 公证，本产品也不提供 Developer ID 签名或 App Store 版本。下载后请先尝试打开 Agent Host.app（或 DMG 中的应用）。若 macOS 拦截，请打开系统设置 → 隐私与安全性，选择“仍要打开”。该提示是此预览的预期步骤。macOS 14 仍可用按住 Control 点击 → 打开；macOS 15 Sequoia 及之后不能再靠这一步覆盖 Gatekeeper。不要关闭系统防护。','Unsigned preview. Not Apple-notarized. Not an app store. Host can fetch the bound catalog from this URL.':'未公证预览，不是应用商店。Host 可以从该 URL 拉取绑定目录。',
   'Choose another tool set':'选择其他工具集','Exact calculation':'精确计算','World time':'全球时间','Project icons':'项目图标',
-  'Choose by the work you want to do.':'从你想完成的事情开始选择。','Start from a task':'从真实任务开始','Verify exact math without approximation':'核验精确计算，不接受近似猜测','Exact result with the calculation checked':'得到精确结果，并完成计算核验','Coordinate a time across cities':'协调不同城市之间的时间','Local date and time with zone rules applied':'得到已应用时区规则的当地日期与时间','Choose an icon that fits the project':'选择真正适合项目的图标','A reusable SVG from the project-aware set':'得到来自项目语境图标集的可复用 SVG','Calculate 9,999,999,999 × 87 exactly, show the result, and verify it.':'精确计算 9,999,999,999 × 87，给出结果并核验。','Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.':'把 2026 年 10 月 15 日上海上午 9:00 换算成旧金山当地时间，并说明当地日期。','Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.':'为主要的“开始”操作选择并渲染一个符合项目语境的图标，并简要说明视觉上为何合适。','Try: {task}':'试试看：{task}','Try in a new task':'在新任务中试用','Task copied':'任务已复制','Task copied. Paste it into a new Agent task.':'任务已复制，请粘贴到新的 Agent 任务中。','Task copied. Connect an Agent app to continue.':'任务已复制，请先连接 Agent 应用再继续。','Task copied. Choose an Agent app to continue.':'任务已复制，请选择一个 Agent 应用继续。','The example task could not be copied.':'未能复制示例任务。',
-  'Installed components':'已安装组件','Connected Agent apps':'已连接的 Agent 应用','Allocated bytes':'占用空间（字节）','Local monitoring':'本地监控','On':'已开启','Off':'已关闭','Agent apps':'Agent 应用','Not installed':'未安装','Connected':'已连接','Available':'可连接','Disconnect':'断开连接','Connect':'连接','Disconnecting…':'正在断开连接…','Connecting…':'正在连接…',
+  'Choose by the work you want to do.':'从你想完成的事情开始选择。','Start from a task':'从真实任务开始','Verify exact math without approximation':'核验精确计算，不接受近似猜测','Exact result with the calculation checked':'得到精确结果，并完成计算核验','Coordinate a time across cities':'协调不同城市之间的时间','Local date and time with zone rules applied':'得到已应用时区规则的当地日期与时间','Choose an icon that fits the project':'选择真正适合项目的图标','A reusable SVG from the project-aware set':'得到来自项目语境图标集的可复用 SVG','Calculate 9,999,999,999 × 87 exactly, show the result, and verify it.':'精确计算 9,999,999,999 × 87，给出结果并核验。','Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.':'把 2026 年 10 月 15 日上海上午 9:00 换算成旧金山当地时间，并说明当地日期。','Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.':'为主要的“开始”操作选择并渲染一个符合项目语境的图标，并简要说明视觉上为何合适。','The example task could not be copied.':'未能复制示例任务。',
+  'Installed components':'已安装组件','Connected Agent apps':'已连接的 Agent 应用','Allocated bytes':'占用空间（字节）','Local monitoring':'本地监控','On':'已开启','Off':'已关闭','Agent apps':'Agent 应用','Not installed':'未安装','Connected':'已连接','Available':'可连接','Disconnect':'断开连接','Connect':'连接','Disconnecting…':'正在断开连接…','Connecting…':'正在连接…','Available to Agents':'Agent 可用','Providers':'Provider','Procedures':'Procedure','Search providers and procedures':'搜索 Provider 和 Procedure','No installed products':'尚未安装可用产品','Available by contract':'Agent 可通过合同识别','Ready; current invocation evidence is healthy':'可调用，当前调用证据健康','Ready; prior invocation recorded, current binding not checked':'可调用；有历史成功记录，当前绑定尚未检查','Ready; no successful invocation recorded':'可调用，尚无成功调用记录','Procedure':'Procedure','Execution':'执行方式','Agentic Runner':'Agentic Runner','Direct Runtime':'Direct Runtime','Contract':'合同','Validated':'已验证','Agent discovery':'Agent 发现','Discoverable':'可发现','Not discoverable':'不可发现','Current health':'当前健康','Last successful invocation':'上次成功调用','Current Agent session':'当前 Agent 会话','Healthy':'健康','Not checked for current binding':'当前绑定尚未检查','Never':'从未','Observed':'已观测','Not observed':'未观测','Yes':'是','No':'否','Remove':'移除','Remove this Procedure?':'移除这个 Procedure？','Removing Procedure…':'正在移除 Procedure…',
   'Tool environment actions':'工具环境操作','Update tools':'更新工具','Restore previous tools':'恢复上一版工具','Clean old packages':'清理旧软件包','Disconnect, keep data':'断开并保留数据','Disconnect, remove Host data':'断开并移除 Host 数据','Updating tools…':'正在更新工具…','Restoring tools…':'正在恢复工具…','Cleaning storage…':'正在清理存储…','Disconnecting tools…':'正在断开工具…','Disconnect tools and remove Agent Host private Suite data? Observer history remains separately owned.':'断开工具并移除 Agent Host 私有数据？Observer 历史记录仍由其独立保留。','On Windows, application restore and uninstall are also available in the openAdam Start menu folder.':'在 Windows 上，也可从“开始”菜单的 openAdam 文件夹恢复或卸载应用。',
   'Working set for new tasks':'新任务的工作集','Get featured tools':'获取精选工具','Getting featured tools…':'正在获取精选工具…','Not installed in this environment':'此环境尚未安装','Featured':'所有者精选的工具；不是应用市场、商店、排行或付费目录。','No Agent environment is installed.':'尚未安装 Agent 环境。','Available tools':'可用工具','Changes take effect in a fresh Agent task.':'更改会在新的 Agent 任务中生效。','Apply tool set':'应用工具集',
   'Usage & Reliability':'使用情况与可靠性','Local monitoring is off':'本地监控已关闭','{days} day local metadata window':'最近 {days} 天的本地元数据','Monitoring':'监控','Collect metadata-only activity, Token, and runtime outcome observations. No prompts, arguments, results, source paths, network calls, or model calls are used.':'仅采集活动、Token 与运行结果的元数据。不使用提示词、参数、结果、源码路径、网络请求或模型调用。','Turn on monitoring':'开启监控','Turning on monitoring…':'正在开启监控…','Live snapshots are unavailable; showing the last completed refresh.':'实时快照不可用，当前显示上次完成的刷新结果。',
@@ -775,19 +790,19 @@ function activeLanguage(){if(languageSelection==='zh-Hans')return'zh-Hans';if(la
 function t(key){return activeLanguage()==='zh-Hans'?(zh[key]||key):key}
 function f(key,values){let value=t(key);for(const[name,replacement]of Object.entries(values))value=value.replaceAll('{'+name+'}',String(replacement));return value}
 function number(v){if(v==null)return'—';if(typeof v!=='number'&&typeof v!=='bigint')return String(v);return new Intl.NumberFormat(activeLanguage()==='zh-Hans'?'zh-CN':'en-US').format(v)}
-function applyChrome(){document.documentElement.lang=activeLanguage()==='zh-Hans'?'zh-Hans':'en';for(const b of document.querySelectorAll('#nav button'))b.textContent=t({environment:'Agents',tools:'Tools',updates:'Browse',usage:'Usage',activity:'History'}[b.dataset.page]);$('#settingsButton').textContent=t('Settings');$('#refreshButton').textContent=t('Refresh');$('#settingsTitle').textContent=t('Settings');$('#languageLabel').textContent=t('Language');$('#settingsDone').textContent=t('Done');const select=$('#languageSelect'),selected=languageSelection;select.replaceChildren();for(const[id,label]of[['system','System default'],['en','English'],['zh-Hans','Simplified Chinese']]){const o=el('option',t(label));o.value=id;o.selected=id===selected;select.append(o)}}
+function applyChrome(){document.documentElement.lang=activeLanguage()==='zh-Hans'?'zh-Hans':'en';for(const b of document.querySelectorAll('#nav button'))b.textContent=t({environment:'Agents',tools:'Library',updates:'Browse',usage:'Usage',activity:'History'}[b.dataset.page]);$('#settingsButton').textContent=t('Settings');$('#refreshButton').textContent=t('Refresh');$('#settingsTitle').textContent=t('Settings');$('#languageLabel').textContent=t('Language');$('#settingsDone').textContent=t('Done');const select=$('#languageSelect'),selected=languageSelection;select.replaceChildren();for(const[id,label]of[['system','System default'],['en','English'],['zh-Hans','Simplified Chinese']]){const o=el('option',t(label));o.value=id;o.selected=id===selected;select.append(o)}}
 function card(title){const c=el('div',undefined,'card');c.append(el('h2',t(title)));return c}
 function row(label,value){const r=el('div',undefined,'row');r.append(el('div',label,'grow'),el('div',value));return r}
 function button(label,run,cls='action'){const b=el('button',t(label),cls);b.onclick=run;return b}
 function setPage(page){
   if(page!==view.page&&page!=='tool-detail')window.scrollTo(0,0);view.page=page;if(page!=='tool-detail')view.detail=null;
-  for(const section of document.querySelectorAll('main section'))section.classList.toggle('hidden',section.id!==page);
+  for(const section of document.querySelectorAll('main > section'))section.classList.toggle('hidden',section.id!==page);
   for(const b of document.querySelectorAll('#nav button'))b.setAttribute('aria-current',b.dataset.page===(page==='tool-detail'?view.returnPage:page));
 }
 function pageHead(root,title,action){const head=el('div',undefined,'page-head');head.append(el('h1',t(title)));if(action)head.append(action);root.append(head)}
 function searchField(root,page,renderList){
   const field=el('div',undefined,'search-field'),search=el('input'),clear=button('×',()=>{search.value='';view.queries[page]='';renderList('');search.focus()},'clear-search');
-  search.type='search';search.value=view.queries[page];search.placeholder=t('Search tools');search.setAttribute('aria-label',t('Search tools'));clear.setAttribute('aria-label',t('Clear search'));
+  const prompt=page==='tools'?'Search providers and procedures':'Search tools';search.type='search';search.value=view.queries[page];search.placeholder=t(prompt);search.setAttribute('aria-label',t(prompt));clear.setAttribute('aria-label',t('Clear search'));
   const update=()=>{view.queries[page]=search.value;clear.hidden=!search.value;renderList(search.value.trim().toLocaleLowerCase())};
   search.oninput=update;field.append(el('span','⌕','search-icon'),search,clear);root.append(field);update();
 }
@@ -846,6 +861,7 @@ async function call(action,label){
       return
     }
     confirmed=true;
+    if(v.result&&Object.prototype.hasOwnProperty.call(v.result,'restartRequired'))view.needsFreshTask=v.result.restartRequired===true;
     if(action.action==='preferences'){languageSelection=action.language;applyChrome()}
     if(action.action==='doctor') lastDoctor=v.result;
     if(v.dashboard)acceptDashboard(v.dashboard);
@@ -879,7 +895,8 @@ function logoNode(logo,id){
     if(glyph){const image=el('img');image.src='/api/tool-logo?id=fallback-'+glyph;image.alt='';box.append(image);box.classList.add('has-glyph')}
     return box;
   };
-  if(logo?.dataUrl||id){const image=el('img');image.src=logo?.dataUrl||'/api/tool-logo?id='+encodeURIComponent(id);image.alt='';image.className='tool-logo';image.onerror=()=>image.replaceWith(fallback());return image}
+  const bundled=new Set(['laniakea','worldbend','calligram','equatorium','math-anchor','migratory-time','armorial']);
+  if(logo?.dataUrl||logo||bundled.has(id)){const image=el('img');image.src=logo?.dataUrl||'/api/tool-logo?id='+encodeURIComponent(id);image.alt='';image.className='tool-logo';image.onerror=()=>image.replaceWith(fallback());return image}
   return fallback();
 }
 function availabilityLabel(value){
@@ -989,15 +1006,16 @@ const featuredExperiences=[
   {id:'migratory-time',name:'Migratory Time',summary:'World time',prompt:'Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.'},
   {id:'armorial',name:'Armorial',summary:'Project icons',prompt:'Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.'},
 ];
-async function copyCapabilityTask(experience,trigger){
+async function copyExamplePrompt(prompt){
+  const text=String(prompt??'');
+  if(!text.trim())return;
   try{
-    if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(experience.prompt);
-    else{const copy=document.createElement('textarea');copy.value=experience.prompt;copy.setAttribute('readonly','');copy.style.position='fixed';copy.style.opacity='0';document.body.append(copy);copy.select();const copied=document.execCommand('copy');copy.remove();if(!copied)throw new Error('copy failed')}
+    if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(text);
+    else{const copy=document.createElement('textarea');copy.value=text;copy.setAttribute('readonly','');copy.style.position='fixed';copy.style.opacity='0';document.body.append(copy);copy.select();const copied=document.execCommand('copy');copy.remove();if(!copied)throw new Error('copy failed')}
   }catch{notice(t('The example task could not be copied.'));return}
-  trigger.textContent=t('Task copied');if(view.detail)view.copiedTool=view.detail;
-  const hostIds=Object.keys(data.snapshot?.environment?.hosts||{}).filter(id=>data.snapshot.environment.hosts[id]);
-  if(hostIds.length===1){await call({action:'open-app',host:hostIds[0]},t('Opening…'));return}
-  view.handoff=t(hostIds.length>1?'Task copied. Choose an Agent app to continue.':'Task copied. Connect an Agent app to continue.');renderEnvironment(data.snapshot,data.usage);setPage('environment');
+  if(view.detail)view.copiedTool=view.detail;
+  notice(t('Copied'));
+  if(view.detail)renderToolDetail();
 }
 function navigatePage(page){
   const nav=document.querySelector('#nav button[data-page="'+page+'"]');
@@ -1078,7 +1096,6 @@ function renderPostSetupGuidance(root, guidance){
 function renderEnvironment(s,u){
   const root=$('#environment');root.replaceChildren();
   root.append(el('h1',t('Agents')));
-  if(view.handoff)root.append(el('p',view.handoff,'handoff-note'));
   const hc=el('div',undefined,'agent-list');hc.id='agent-apps';
   for(const h of data.hosts){
     const connected=Boolean(s.environment?.hosts?.[h.host]),installed=h.appInstalled===true;
@@ -1112,6 +1129,7 @@ function renderEnvironment(s,u){
   moreBody.append(row(t('Catalog source'), loc.unpublished?t('Catalog assets are unpublished.'):(loc.url||loc.path||t('Catalog source'))));
   if(loc.lastCheck)moreBody.append(row(t('Last check'),loc.lastCheck.status+(loc.lastCheck.code?' · '+loc.lastCheck.code:'')));
   moreBody.append(row(t('Installed tools'),number((s.environment.availableAgentComponents||[]).length)));
+  moreBody.append(row(t('Procedures'),number((data.tools?.procedures||[]).length)));
   moreBody.append(row(t('Connected Agent apps'),number(Object.keys(s.environment.hosts).length)));
   moreBody.append(row(t('Local monitoring'),u.enabled?t('On'):t('Off')));
   const ops=el('div',undefined,'actions');
@@ -1127,15 +1145,27 @@ function renderEnvironment(s,u){
   root.append(more);
 }
 const shortJobs={'decision-table':'Decision rules','state-machine':'State transitions','schedule-algebra':'Schedule calculation','math-anchor':'Exact calculation','migratory-time':'World time','armorial':'Project icons','data-transformer':'Structured data','laniakea':'Mind maps','projective':'Projective layouts','equatorium':'Standard expressions','file-vitals':'File inspection','worldbend':'Spatial composition','text-integrity':'Unicode inspection','layout-contract-conformance':'Responsive layouts','calligram':'Visual documents'};
+const catalogPrompts={
+  'decision-table':'For a $120 order by a verified customer, apply these rules: verified orders of at least $100 get free shipping; all others pay shipping. Return the decision and the rule that matched.',
+  'state-machine':'An order can move draft → paid → shipped. It may be cancelled only from draft or paid. Starting at paid, process ship then cancel; report each result and the final state.',
+  'schedule-algebra':'For October 15, 2026 in Asia/Shanghai, find free intervals from 09:00 to 12:00 after excluding meetings 09:30–10:00 and 10:30–11:00. Return the remaining slots.',
+};
 function catalogTools(){
   const remote=data.recommended?.tools||[],byId=Object.fromEntries(remote.map(item=>[item.id,item]));
   return [...featuredExperiences.map(item=>({id:item.id,name:item.name,summary:item.summary,prompt:item.prompt,compatible:byId[item.id]?.compatible!==false,homepage:byId[item.id]?.homepage,...byId[item.id]?.presentation})),
-    ...remote.filter(item=>!featuredExperiences.some(x=>x.id===item.id)).map(item=>({id:item.id,homepage:item.homepage,...item.presentation,name:item.presentation?.displayName||item.id,compatible:item.compatible}))];
+    ...remote.filter(item=>!featuredExperiences.some(x=>x.id===item.id)).map(item=>({id:item.id,homepage:item.homepage,...item.presentation,name:item.presentation?.displayName||item.id,compatible:item.compatible,prompt:catalogPrompts[item.id]}))];
 }
 function installedTools(){
   if(data.tools?.status==='error')return [];
   const meta=Object.fromEntries((data.tools?.tools||[]).map(item=>[item.id,item]));
   return (data.tools?.availableAgentComponents||[]).map(id=>({id,...meta[id],name:meta[id]?.displayName&&meta[id].displayName!==id?meta[id].displayName:featuredToolName(id),summary:shortJobs[id]||meta[id]?.summary||''}));
+}
+function installedProcedures(){
+  return (data.tools?.procedures||[]).map(item=>({
+    ...item,
+    name:item.displayName||item.procedureId||item.id,
+    summary:item.summary||item.procedureId||'',
+  }));
 }
 function matchesTool(item,query){return !query||(item.name+' '+t(shortJobs[item.id]||item.summary||'')).toLocaleLowerCase().includes(query)}
 function toolState(id){
@@ -1152,6 +1182,14 @@ function toolRow(item){
   const mark=el('span',state.symbol,'tool-state '+(state.tone||''));mark.title=t(state.label);mark.setAttribute('aria-label',t(state.label));
   r.append(logoNode(item.logo,item.id),content,mark);return r;
 }
+function procedureRow(item){
+  const r=el('button',undefined,'tool-row');r.type='button';r.dataset.toolId=item.id;r.dataset.procedureId=item.procedureId||item.id;r.onclick=()=>openToolDetail(item.id);
+  const content=el('span',undefined,'tool-copy');content.append(el('strong',item.name),el('span',t(item.summary||''),'muted'));
+  const state=item.availability||{},evidence=state.invocationEvidence?.valid===true,ready=state.contractValidated===true&&state.discoverable===true;
+  const label=!ready?'Needs attention':evidence?'Ready; current invocation evidence is healthy':state.lastSuccessfulInvocationAt?'Ready; prior invocation recorded, current binding not checked':'Ready; no successful invocation recorded';
+  const mark=el('span',evidence?'✓':ready?'○':'!',ready?'tool-state':'tool-state attention');mark.title=t(label);mark.setAttribute('aria-label',t(label));
+  r.append(logoNode(item.logo,item.id),content,mark);return r;
+}
 function acquireFeatured(){
   if(data.snapshot.configured){call({action:'update',profile:'featured'},t('Getting featured tools…'));return}
   const detected=(data.hosts||[]).find(host=>host.appInstalled===true),request={action:'setup',profile:'featured'};
@@ -1163,48 +1201,54 @@ function renderTools(value){
   const controls=el('div',undefined,'management-actions');
   controls.append(button('Check for updates',()=>call({action:'updates-check'},t('Checking updates…'))));
   if(data.snapshot.configured)controls.append(value?.paused?button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…'))):button('Pause all tools',()=>call({action:'tools',pause:true},t('Pausing tools…'))));
-  management.append(controls);pageHead(root,'My tools',data.snapshot.configured?management:null);
-  const list=el('div',undefined,'tool-collection'),recommended=el('div',undefined,'recommendations'),recommendedList=el('div',undefined,'tool-collection');
-  const installed=installedTools(),ids=new Set(installed.map(item=>item.id)),missing=catalogTools().filter(item=>!ids.has(item.id));
+  management.append(controls);pageHead(root,'Library',data.snapshot.configured?management:null);
+  const providerSection=el('section'),procedureSection=el('section'),list=el('div',undefined,'tool-collection'),procedureList=el('div',undefined,'tool-collection'),recommended=el('div',undefined,'recommendations'),recommendedList=el('div',undefined,'tool-collection');
+  providerSection.append(el('h2',t('Providers')),list);procedureSection.append(el('h2',t('Procedures')),procedureList);
+  const installed=installedTools(),procedures=installedProcedures(),ids=new Set(installed.map(item=>item.id)),missing=catalogTools().filter(item=>!ids.has(item.id));
   searchField(root,'tools',query=>{
-    list.replaceChildren();recommendedList.replaceChildren();
+    list.replaceChildren();procedureList.replaceChildren();recommendedList.replaceChildren();
     for(const item of installed.filter(item=>matchesTool(item,query)))list.append(toolRow(item));
-    if(!list.children.length)list.append(el('p',t(value?.status==='error'&&data.snapshot.configured?'Tool status unavailable':query?'No matching tools':'No installed tools'),'empty'));
+    for(const item of procedures.filter(item=>matchesTool(item,query)))procedureList.append(procedureRow(item));
+    providerSection.hidden=!list.children.length;
+    procedureSection.hidden=!procedureList.children.length;
+    if(!list.children.length&&!procedureList.children.length){providerSection.hidden=false;list.append(el('p',t(value?.status==='error'&&data.snapshot.configured?'Tool status unavailable':query?'No matching tools':'No installed products'),'empty'))}
     for(const item of missing.filter(item=>matchesTool(item,query)).slice(0,query?undefined:4))recommendedList.append(toolRow(item));
     recommended.hidden=!recommendedList.children.length;
   });
   if(value?.paused){const pause=el('div',undefined,'pause-note');pause.append(el('span',t('All tools are paused.')),button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…'))));root.append(pause)}
-  root.append(list);
+  if(view.needsFreshTask)root.append(el('p',t('New tasks load this tool selection. Tasks already open keep the tools they started with.'),'muted'));
+  root.append(providerSection,procedureSection);
   const heading=el('div',undefined,'section-head');const more=button('→',()=>setPage('updates'),'text-action');more.setAttribute('aria-label',t('See all'));heading.append(el('h2',t('Recommended')),more);recommended.append(heading,recommendedList);root.append(recommended);
   if(!missing.length)root.append(button('Browse more tools',()=>setPage('updates'),'text-action browse-more'));
 }
 function renderToolDetail(){
   const id=view.detail;if(!id)return;
+  const procedure=installedProcedures().find(item=>item.id===id);
+  if(procedure){renderProcedureDetail(procedure);return}
   const installed=installedTools().find(item=>item.id===id),catalog=catalogTools().find(item=>item.id===id),item=installed||catalog;
   if(!item){closeToolDetail();return}
+  const prompt=catalog?.prompt||catalogPrompts[id];
   const root=$('#tool-detail');root.replaceChildren(button('Back',closeToolDetail,'text-action back'));
   const head=el('div',undefined,'detail-head'),identity=el('div',undefined,'detail-identity'),title=el('div');
   title.append(el('h1',item.name),el('p',t(shortJobs[id]||item.summary||''),'muted'));identity.append(logoNode(item.logo,id),title);head.append(identity);
-  let useButton;
   if(!installed){const featured=featuredExperiences.some(x=>x.id===id);const install=button(featured?'Install featured tools':'Add from GitHub',featured?acquireFeatured:()=>{lastGithubTarget=catalog.homepage||'';view.githubOpen=true;setPage('updates');renderUpdates();$('#github-import input')?.focus()},'action primary');install.disabled=catalog?.compatible===false;head.append(install)}
   else if(data.tools.paused)head.append(button('Resume tools',()=>call({action:'tools',resume:true},t('Resuming tools…')),'action primary'));
   else if(!(data.tools.activeAgentComponents||[]).includes(id)&&!installed.onDemandAvailable)head.append(button('Enable to use',()=>call({action:'tools',tools:[...new Set([...(data.tools.activeAgentComponents||[]),id])]},t('Updating tools…')),'action primary'));
-  else if(catalog?.prompt){
-    useButton=button('Use in Agent',()=>copyCapabilityTask({...catalog,prompt:view.drafts[id]},useButton),'action primary');head.append(useButton);
-  }
   root.append(head);
   if(!installed&&catalog?.compatible===false)root.append(el('p',t('No asset for this platform'),'muted'));
   if(data.tools?.paused&&installed)root.append(el('p',t('All tools are paused.'),'muted'));
-  if(catalog?.prompt){
-    const example=el('div',undefined,'task-example'),input=el('textarea');input.setAttribute('aria-label',t('Example task'));
-    if(view.drafts[id]===undefined)view.drafts[id]=t(catalog.prompt);input.value=view.drafts[id];
-    const update=()=>{view.drafts[id]=input.value;if(useButton)useButton.disabled=!input.value.trim()};input.oninput=()=>{view.copiedTool=null;example.querySelector('p')?.remove();update()};update();
-    example.append(el('h2',t('Try a task')),input);if(view.copiedTool===id)example.append(el('p',t('Task copied'),'muted'));root.append(example);
+  if(prompt){
+    const example=el('details');example.className='task-example';example.append(el('summary',t('Example')));
+    const input=el('textarea');input.setAttribute('aria-label',t('Example task'));
+    if(view.drafts[id]===undefined)view.drafts[id]=t(prompt);input.value=view.drafts[id];
+    const copy=button('Copy',()=>copyExamplePrompt(view.drafts[id]||input.value));
+    const update=()=>{view.drafts[id]=input.value;copy.disabled=!String(input.value||'').trim()};input.oninput=()=>{view.copiedTool=null;example.querySelector('p')?.remove();update()};update();
+    example.append(input,copy);if(view.copiedTool===id)example.append(el('p',t('Copied'),'muted'));root.append(example);
   }else if(item.summary)root.append(el('p',t(item.summary),'detail-description'));
   const metadata=el('div',undefined,'detail-metadata');
   if(installed){
     const label=el('label',undefined,'row'),toggle=el('input');toggle.type='checkbox';toggle.dataset.focusKey='tool-toggle-'+id;toggle.setAttribute('role','switch');toggle.checked=(data.tools.activeAgentComponents||[]).includes(id);toggle.disabled=data.tools.paused===true;
-    toggle.title=t(data.tools?.tools?.find(tool=>tool.id===id)?.onDemandAvailable===true?'Off keeps an on-demand Skill. Pause all withholds both.':'Enable this tool, then start a fresh Agent task to use it.');
+    toggle.title=t(data.tools?.tools?.find(tool=>tool.id===id)?.onDemandAvailable===true?'Off keeps an on-demand Skill. Pause all withholds both.':'New tasks load this tool selection. Tasks already open keep the tools they started with.');
     toggle.onchange=async()=>{const ids=new Set(data.tools.activeAgentComponents||[]);if(toggle.checked)ids.add(id);else ids.delete(id);if(!ids.size&&!confirm(t('Pause all tools? On-demand tools will also pause.'))){toggle.checked=true;return}await call({action:'tools',tools:[...ids]},t('Updating tools…'));if(toggle.isConnected)toggle.checked=(data.tools.activeAgentComponents||[]).includes(id)};
     label.append(el('span',t('Enable by default'),'grow'),toggle);metadata.append(label);
     if(installed.version)metadata.append(row(t('Version'),installed.version));
@@ -1214,6 +1258,30 @@ function renderToolDetail(){
   const update=(lastUpdates?.items||data.updates?.items||[]).find(item=>item.id===id&&item.availability==='update-available');
   if(update)metadata.append(button('Install update',()=>call({action:'updates-install',id},t('Updating tools…'))));
   root.append(metadata);
+}
+function renderProcedureDetail(item){
+  const root=$('#tool-detail');root.replaceChildren(button('Back',closeToolDetail,'text-action back'));
+  const head=el('div',undefined,'detail-head'),identity=el('div',undefined,'detail-identity'),title=el('div');
+  title.append(el('h1',item.name),el('p',t(item.summary||''),'muted'));identity.append(logoNode(item.logo,item.id),title);head.append(identity);root.append(head);
+  const availability=item.availability||{},metadata=el('div',undefined,'detail-metadata');
+  metadata.append(
+    row(t('Procedure'),item.procedureId+' @ '+item.procedureVersion),
+    row(t('Execution'),t(item.execution==='agentic-runner'?'Agentic Runner':'Direct Runtime')),
+    row(t('Installed'),availability.installed===true?t('Yes'):t('No')),
+    row(t('Contract'),availability.contractValidated===true?t('Validated'):t('Needs attention')),
+    row(t('Agent discovery'),availability.discoverable===true?t('Discoverable'):t('Not discoverable')),
+    row(t('Current health'),availability.currentHealth?.status==='healthy'?t('Healthy'):availability.currentHealth?.status==='unavailable'?t('Unavailable'):t('Not checked for current binding')),
+    row(t('Last successful invocation'),availability.lastSuccessfulInvocationAt?new Date(availability.lastSuccessfulInvocationAt).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US'):t('Never')),
+    row(t('Current Agent session'),availability.currentSessionDiscovery?.status==='observed'?t('Observed'):t('Not observed'))
+  );
+  root.append(metadata);
+  const actions=el('div',undefined,'actions');
+  const update=(lastUpdates?.items||data.updates?.items||[]).find(candidate=>candidate.id===item.id&&candidate.availability==='update-available');
+  if(update)actions.append(button('Install update',()=>call({action:'updates-install',id:item.id},t('Updating tools…')),'action primary'));
+  actions.append(button('Check for updates',()=>call({action:'updates-check'},t('Checking updates…'))));
+  if(availability.contractValidated!==true||availability.discoverable!==true)actions.append(button('Repair',()=>call({action:'repair'},t('Repairing…')),'action primary'));
+  if(item.private===true)actions.append(button('Remove',()=>{if(confirm(t('Remove this Procedure?')))call({action:'component-remove',id:item.id},t('Removing Procedure…'))},'action danger'));
+  root.append(actions);
 }
 async function downloadTrace(provider,session){$('#busyText').textContent=t('Preparing trace export…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/trace-export',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider,session})});if(!r.ok){const v=await r.json();throw new Error(t(v.error?.message||'Trace export failed'))}const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='agent-host-'+provider+'-trace-'+session.slice(0,12)+'.json';document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url)}catch(e){$('#error').textContent=e.message;$('#error').classList.remove('hidden')}finally{$('#busy').classList.add('hidden')}}
 async function loadTraceSessions(provider,container){$('#busyText').textContent=t('Loading trace sessions…');$('#busy').classList.remove('hidden');$('#error').classList.add('hidden');try{const r=await fetch('/api/trace-sources?provider='+encodeURIComponent(provider)+'&limit=25'),v=await r.json();if(!r.ok)throw new Error(t(v.error?.message||'Trace session list failed'));container.replaceChildren();for(const item of v.sources){const line=el('div',undefined,'row'),label=el('div',undefined,'grow');label.append(el('div',(names[provider]||provider)+' · '+item.sessionHash.slice(0,12)+'…'),el('div',f('{events} events · last observed {date}',{events:number(item.totalEvents),date:new Date(item.lastEventAtMs).toLocaleString(activeLanguage()==='zh-Hans'?'zh-CN':'en-US')}),'muted'));line.append(label,button('Export metadata',()=>downloadTrace(provider,item.sessionHash)));container.append(line)}if(!v.sources.length)container.append(el('p',t('No retained sessions for this provider.'),'muted'))}catch(e){container.replaceChildren(el('p',e.message||t('Trace session list failed'),'notice'))}finally{$('#busy').classList.add('hidden')}}

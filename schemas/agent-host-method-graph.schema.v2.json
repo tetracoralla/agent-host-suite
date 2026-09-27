@@ -1,0 +1,384 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-method-graph.schema.v2.json",
+  "title": "Agent Host Method Graph v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profile", "id", "revision", "name", "description", "roles", "inputs", "artifacts", "permissions", "resources", "graph"],
+  "properties": {
+    "schema": { "const": "openadam.method-graph.v2" },
+    "profile": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9_.-]{0,79}$" },
+    "id": { "$ref": "#/$defs/localId" },
+    "revision": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "description": { "type": "string", "maxLength": 1000 },
+    "roles": {
+      "type": "array",
+      "maxItems": 40,
+      "items": { "$ref": "#/$defs/role" }
+    },
+    "inputs": {
+      "type": "array",
+      "maxItems": 40,
+      "items": { "$ref": "#/$defs/input" }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 80,
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "permissions": {
+      "type": "array",
+      "maxItems": 40,
+      "items": { "$ref": "#/$defs/named" }
+    },
+    "resources": {
+      "type": "array",
+      "maxItems": 40,
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "graph": { "$ref": "#/$defs/graph" }
+  },
+  "$defs": {
+    "localId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,79}$"
+    },
+    "productId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "named": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "independentFrom": { "type": "array", "maxItems": 40, "uniqueItems": true, "items": { "$ref": "#/$defs/localId" } },
+        "includeReports": { "type": "boolean" },
+        "defaultBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider"],
+          "properties": {
+            "provider": { "enum": ["codex", "grok", "zcode"] },
+            "model": { "type": ["string", "object"] }
+          }
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "required"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "type": { "enum": ["text", "string", "boolean", "json", "reference"] },
+        "required": { "type": "boolean" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "required"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "type": { "enum": ["text", "json", "reference", "file-set", "git-candidate"] },
+        "required": { "type": "boolean" }
+      }
+    },
+    "resource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "type", "required", "adapter"],
+          "properties": {
+            "id": { "$ref": "#/$defs/localId" },
+            "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "type": { "const": "workspace" },
+            "required": { "type": "boolean" },
+            "adapter": { "const": "git" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "type", "required", "access"],
+          "properties": {
+            "id": { "$ref": "#/$defs/localId" },
+            "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "type": { "const": "file" },
+            "required": { "type": "boolean" },
+            "access": { "enum": ["read", "write"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "type", "required"],
+          "properties": {
+            "id": { "$ref": "#/$defs/localId" },
+            "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "type": { "const": "account" },
+            "required": { "type": "boolean" },
+            "provider": { "type": "string", "minLength": 1, "maxLength": 160 }
+          }
+        }
+      ]
+    },
+    "expression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": { "path": { "type": "string", "pattern": "^(inputs|outputs|resources|result)(\\.[a-zA-Z0-9_-]+)*$", "maxLength": 200 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["literal"],
+          "properties": { "literal": true }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object"],
+          "properties": { "object": { "type": "object", "maxProperties": 100, "additionalProperties": { "$ref": "#/$defs/expression" } } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["array"],
+          "properties": { "array": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/expression" } } }
+        }
+      ]
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operator"],
+          "properties": { "operator": { "const": "always" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "operator"],
+          "properties": {
+            "path": { "type": "string", "pattern": "^(outcome|facts|inputs|outputs|resources)(\\.[a-zA-Z0-9_-]+)*$", "maxLength": 120 },
+            "operator": { "enum": ["equals", "not_equals", "exists"] },
+            "value": true
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "operator", "value"],
+          "properties": {
+            "path": { "type": "string", "pattern": "^(outcome|facts|inputs|outputs|resources)(\\.[a-zA-Z0-9_-]+)*$", "maxLength": 120 },
+            "operator": { "const": "in" },
+            "value": { "type": "array", "maxItems": 100 }
+          }
+        }
+      ]
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "to"],
+      "properties": {
+        "when": { "$ref": "#/$defs/condition" },
+        "to": { "oneOf": [{ "$ref": "#/$defs/localId" }, { "type": "null" }] },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "nodeBase": {
+      "type": "object",
+      "required": ["id", "name", "kind", "consumes", "produces", "permissions", "resources", "transitions"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "kind": { "enum": ["agent-turn", "direct-call", "procedure-call", "human-input", "condition", "transform", "extension"] },
+        "consumes": { "type": "array", "maxItems": 80, "uniqueItems": true, "items": { "$ref": "#/$defs/localId" } },
+        "produces": { "type": "array", "maxItems": 80, "uniqueItems": true, "items": { "$ref": "#/$defs/localId" } },
+        "permissions": { "type": "array", "maxItems": 40, "uniqueItems": true, "items": { "$ref": "#/$defs/localId" } },
+        "resources": { "type": "array", "maxItems": 40, "uniqueItems": true, "items": { "$ref": "#/$defs/localId" } },
+        "transitions": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "$ref": "#/$defs/transition" } }
+      }
+    },
+    "node": {
+      "oneOf": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/nodeBase" },
+            {
+              "type": "object",
+              "required": ["role", "instruction", "access"],
+              "properties": {
+                "kind": { "const": "agent-turn" },
+                "role": { "$ref": "#/$defs/localId" },
+                "instruction": { "type": "string", "minLength": 1, "maxLength": 8000 },
+                "access": { "enum": ["none", "read", "write"] }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/nodeBase" },
+            {
+              "type": "object",
+              "required": ["target", "input", "output"],
+              "properties": {
+                "kind": { "const": "direct-call" },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "providerId", "capabilityId", "capabilityVersion", "operationId"],
+                  "properties": {
+                    "kind": { "const": "capability" },
+                    "providerId": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "capabilityId": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "capabilityVersion": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "operationId": { "type": "string", "minLength": 1, "maxLength": 200 }
+                  }
+                },
+                "input": { "$ref": "#/$defs/expression" },
+                "output": { "$ref": "#/$defs/outputMap" }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/nodeBase" },
+            {
+              "type": "object",
+              "required": ["procedure", "input", "output", "grants", "resourceBindings"],
+              "properties": {
+                "kind": { "const": "procedure-call" },
+                "procedure": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "version"],
+                  "properties": { "id": { "$ref": "#/$defs/productId" }, "version": { "$ref": "#/$defs/semver" } }
+                },
+                "input": { "$ref": "#/$defs/expression" },
+                "output": { "$ref": "#/$defs/outputMap" },
+                "grants": { "type": "array", "maxItems": 40, "uniqueItems": true, "items": { "$ref": "#/$defs/localId" } },
+                "resourceBindings": { "type": "object", "maxProperties": 40, "propertyNames": { "$ref": "#/$defs/productId" }, "additionalProperties": { "$ref": "#/$defs/localId" } }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/nodeBase" },
+            {
+              "type": "object",
+              "required": ["prompt", "interaction", "responseArtifact"],
+              "properties": {
+                "kind": { "const": "human-input" },
+                "prompt": { "type": "string", "minLength": 1, "maxLength": 4000 },
+                "interaction": { "enum": ["input", "checkpoint"] },
+                "responseArtifact": { "$ref": "#/$defs/localId" },
+                "options": { "type": "array", "minItems": 1, "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 200 } }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/nodeBase" },
+            { "type": "object", "properties": { "kind": { "const": "condition" } } }
+          ],
+          "unevaluatedProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/nodeBase" },
+            { "type": "object", "required": ["output"], "properties": { "kind": { "const": "transform" }, "output": { "$ref": "#/$defs/outputMap" } } }
+          ],
+          "unevaluatedProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/nodeBase" },
+            {
+              "type": "object",
+              "required": ["extension"],
+              "properties": {
+                "kind": { "const": "extension" },
+                "extension": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "version", "configuration"],
+                  "properties": {
+                    "id": { "enum": ["parallel", "wait"] },
+                    "version": { "type": "integer", "minimum": 1, "maximum": 1000 },
+                    "configuration": { "type": "object" }
+                  }
+                }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "outputMap": {
+      "type": "object",
+      "maxProperties": 80,
+      "propertyNames": { "$ref": "#/$defs/localId" },
+      "additionalProperties": { "$ref": "#/$defs/expression" }
+    },
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry", "extensions", "nodes"],
+      "properties": {
+        "entry": { "$ref": "#/$defs/localId" },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["parallel", "wait"],
+          "properties": {
+            "parallel": { "$ref": "#/$defs/reservedExtension" },
+            "wait": { "$ref": "#/$defs/reservedExtension" }
+          }
+        },
+        "nodes": { "type": "array", "minItems": 1, "maxItems": 80, "items": { "$ref": "#/$defs/node" } }
+      }
+    },
+    "reservedExtension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "supported"],
+      "properties": { "version": { "const": 1 }, "supported": { "const": false } }
+    }
+  }
+}

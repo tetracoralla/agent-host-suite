@@ -72,6 +72,26 @@ These surfaces are different facts:
 | `host status` without `--quick`, `doctor --deep` without `--skip-agent-apps` | Public `plugin list` plus Host receipt/live cache identity | Whether an **already open** session loaded those bytes |
 | A live Agent task | Whatever that session resolved at start | Host working-set intent |
 
+## Procedure discovery is a separate product route
+
+Provider MCP working-set selection does not control Procedures. Host projects
+the exact installed Procedure catalog through its operations Skill and packaged
+CLI. `procedure list --json` returns searchable, paged, byte-budgeted summaries;
+it deliberately omits full input/output schemas. `procedure describe --id ID
+--version VERSION --json` returns the exact full contract and Run Request shape.
+The Agent invokes that same identity with `procedure invoke --request ...`; it
+does not infer a Procedure from the Direct Runtime provider list or a Runner's
+local defaults.
+
+`installed`, `contractValidated` and `discoverable` are current structural
+facts. `lastSuccessfulInvocationAt` is historical. `invocationEvidence.valid`
+means that success still matches the current Procedure, runtime and binding
+fingerprints; replacing any of those invalidates current evidence without
+erasing the timestamp. `currentHealth` is a separate observation, and
+`currentSessionDiscovery` stays `not-observed` unless the active Agent session
+is actually checked. Discoverable therefore does not prove that an already-open
+session loaded the projected Skill.
+
 `hostFacingManifest` sets `skillOnly: false` only for components in the active
 working set. Inactive discovery Providers stay Skill-only (`on-demand`) unless
 the working set is fully paused. Providers without that discovery declaration

@@ -2,8 +2,9 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-Agent Host installs and manages a compatible local environment for Agent
-tools. It connects those tools to supported Agent apps through
+Agent Host installs and manages a compatible local environment for Provider and
+Procedure products. It connects Provider tools and the installed Procedure
+catalog to supported Agent apps through
 their public extension points and operates local execution without modifying
 the Agent apps themselves.
 
@@ -42,7 +43,17 @@ Public entry: **[GitHub Releases](https://github.com/tetracoralla/agent-host-sui
 ## Scope
 
 - Capability contracts define stable typed operation meaning.
-- Procedure contracts define stable multi-stage method when one exists.
+- Procedure contracts define stable reusable methods. A developer packages a
+  Procedure once; a user's Agent maps a task into its declared inputs and
+  consumes its outputs without rebuilding the internal workflow.
+- Every installed Procedure uses one product envelope for identity, version,
+  schemas, permissions and lifecycle, then declares either a Direct Runtime or
+  Agentic Runner execution binding. Host installed state is the only consumer
+  catalog; compact `procedure list`, exact `procedure describe`, formal
+  Run-Request `procedure invoke`, and durable `status|continue` form the
+  packaged Agent route. Agentic products use the same closed versioned graph
+  source for Agent, Direct Capability, exact subprocedure, human and
+  deterministic nodes.
 - Independently useful Providers own their domain behavior and releases.
 - Agent Host verifies and installs compatible artifacts, projects selected
   tools and thin Skills into supported Agent apps, manages the local runtime,
@@ -93,16 +104,26 @@ setup or Get featured tools (including Armorial) after a Standard install.
 It is not a marketplace. How Codex projections relate to session Skill/MCP
 paths is in [Discovery and projection](docs/DISCOVERY_PROJECTION.md).
 
-The Manager opens on tools installed on this machine. An empty installation
+The Manager opens on products installed on this machine, with Provider and
+Procedure inventory kept distinct. It manages availability and health; it does
+not author Procedures or expose their Runs, stages and logs. An empty installation
 stays visibly empty, with compatible recommendations below it; **Browse** opens
 the complete available catalog and GitHub compatibility preview. **Agents**
 shows local Agent shells and their connection state separately. Product rows
-use each admitted product's recognizable logo, short job label, current
-availability, and one direct action. Choosing **Use** hands an editable example
-to a new Agent task; the prompt does not compete with product identity in the
-main list, and it is not a rating or adoption verdict.
+use each admitted product's recognizable logo, short job label, and current
+availability. A ready tool has no action that opens a new Agent task. An
+editable example, when one exists, stays collapsed on the detail page; copying
+it does not open an Agent app or record adoption.
+Procedure details keep installation, contract validation, Agent discovery,
+current health, historical successful-invocation time and current-session
+observation visibly separate, and provide update, repair or removal only when
+that lifecycle action applies.
 Provider authors and private contributors can follow the separate
 [ecosystem participation paths](docs/ECOSYSTEM_PATHS.md).
+
+Procedure developers use a separate Developer Kit / Procedure Studio boundary
+for graphical authoring, validation, test Runs and packaging. The headless
+consumer runtime and Agent Host Manager are not substitutes for that tool.
 
 ## Profiles
 
@@ -153,28 +174,18 @@ static-reference, and error summary. `observability export-task` exports one
 bounded pseudonymous task record for closer inspection. It separates direct
 execution observations from tool names found only inside orchestration input;
 it does not decide whether a result was adopted, useful, or better than an
-alternative. The native and browser Managers expose the same facts as a
-visual-first Task activity card, with detail exported only on request. Those
-judgments remain with the user or the Agent they select. See
+alternative. The native and browser Managers expose the same facts in Usage, and
+export detail only on request. Those judgments remain with the user or the Agent
+they select. See
 [Trace Plane](docs/TRACE_PLANE.md).
 
 ## Unnamed capability exercise
 
-This checkout does not turn a Host check or call count into a verdict about an
-Agent. On a machine that already has Agent Host and a supported Agent app, the
-optional [unnamed capability exercise](docs/ADOPTION_ACCEPTANCE.md) lets a
-participant copy a page fixture out of this repository, start a **fresh Agent
-task**, inspect what entered the work without naming Armorial, and decide what
-that particular task means to them.
-
-```text
-agent-host doctor --featured-readiness --json
-```
-
-That command reports user-level Host readiness (required tools, connection,
-projection) separately from `recipe.consistency`. It always reports
-`adoptionEvidence: false`. A `local-dogfood` profile is not itself a
-user-level failure. The exercise has no fixed task quota or Host-owned score.
+Whether an Agent notices an installed capability without being told its name
+is an optional branch, documented in
+[unnamed capability exercise](docs/ADOPTION_ACCEPTANCE.md). It is not a setup
+step, a daily usage path, or a verdict. `doctor --featured-readiness` reports
+Host preconditions only and always sets `adoptionEvidence` to false.
 
 ## Typical operator flow
 

@@ -304,7 +304,9 @@ enum ManagerPostSetupPolicy {
             primaryActionID: .openApp,
             primaryActionLabel: label(for: .openApp, appName: app),
             primaryActionDetail: "",
-            hint: "Start a new task in the app",
+            hint: needsFreshTask
+                ? "New tasks load this tool selection. Tasks already open keep the tools they started with."
+                : nil,
             recoveryPath: "If the new task cannot see tools: decide whether it is not connected, a stale session, a permission issue, or a tool fault — then use Connect, a newer task, grant/repair, or Review Repair.",
             primaryHostID: resolvedPrimaryID,
             connectHostID: nil,

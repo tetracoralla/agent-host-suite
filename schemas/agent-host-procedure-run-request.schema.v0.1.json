@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadam.dev/schemas/agent-host-procedure-run-request.schema.v0.1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "procedure", "inputs", "grants", "resources", "limits", "idempotencyKey"],
+  "properties": {
+    "schemaVersion": { "const": "openadam.agent-host-procedure-run-request.v0.1" },
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "$ref": "#/$defs/semver" }
+      }
+    },
+    "inputs": { "type": "object" },
+    "grants": {
+      "type": "array",
+      "maxItems": 40,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "resources": {
+      "type": "object",
+      "maxProperties": 40,
+      "additionalProperties": { "$ref": "#/$defs/resourceBinding" }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxDurationMs", "maxNodeExecutions", "maxAgentTurns", "nodeTimeoutMs", "maxAttemptsPerNode", "maxOutputBytes"],
+      "properties": {
+        "maxDurationMs": { "type": "integer", "minimum": 1000, "maximum": 28800000 },
+        "maxNodeExecutions": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "maxAgentTurns": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "nodeTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 },
+        "maxAttemptsPerNode": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "maxOutputBytes": { "type": "integer", "minimum": 1024, "maximum": 4194304 }
+      }
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", "maxLength": 160 },
+    "semver": { "type": "string", "maxLength": 100, "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$" },
+    "resourceBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "adapter", "path", "allowExistingPaths"],
+          "properties": {
+            "type": { "const": "workspace" },
+            "adapter": { "const": "git" },
+            "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "allowExistingPaths": { "type": "array", "maxItems": 1000, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path", "access"],
+          "properties": {
+            "type": { "const": "file" },
+            "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "access": { "enum": ["read", "write"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "provider", "account"],
+          "properties": {
+            "type": { "const": "account" },
+            "provider": { "type": "string", "minLength": 1, "maxLength": 160 },
+            "account": { "type": "string", "minLength": 1, "maxLength": 320 }
+          }
+        }
+      ]
+    }
+  }
+}

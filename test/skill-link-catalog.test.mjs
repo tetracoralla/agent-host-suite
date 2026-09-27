@@ -54,6 +54,34 @@ async function fixture(t) {
         version: '1.2.3', command: '/fixture/server', args: [], cwd: root,
         expectedTools: ['fixture.check'], workspaceEnvironment: [], healthTimeoutMs: 5000,
       },
+      'fixture-procedure': {
+        productType: 'procedure',
+        version: '0.2.0',
+        procedure: {
+          id: 'fixture.document.prepare',
+          version: '0.2.0',
+          permissions: [],
+          lifecycle: { mode: 'synchronous', resumable: false, interaction: 'none' },
+          inputSchemaPath: join(contracts, 'procedure-input.json'),
+          outputSchemaPath: join(contracts, 'procedure-output.json'),
+        },
+        procedureExecution: { kind: 'direct-runtime' },
+        procedureInvocation: {
+          carrier: 'agent-host-cli', protocol: 'openadam.agent-host-procedure-invocation.v0.2', command: 'agent-host',
+          arguments: ['procedure', 'invoke', '--request', '-', '--json'],
+          describeArguments: ['procedure', 'describe', '--id', 'fixture.document.prepare', '--version', '0.2.0', '--json'],
+          statusArguments: ['procedure', 'status', '--run', '{taskId}', '--json'],
+          continueArguments: ['procedure', 'continue', '--run', '{taskId}', '--input', '-', '--json'],
+          input: 'json-stdin', output: 'json-stdout',
+        },
+        procedureAvailability: {
+          installed: true, contractValidated: true, discoverable: true,
+          lastSuccessfulInvocationAt: null,
+          invocationEvidence: { valid: false, verifiedAt: null, invalidatedAt: null, invalidatedReason: 'not-yet-invoked', dependencies: null },
+          currentHealth: { status: 'not-checked', observedAt: null },
+          currentSessionDiscovery: { status: 'not-observed', observedAt: null },
+        },
+      },
     },
     availableAgentComponents: ['fixture-tool'], agentComponents: ['fixture-tool'], privateComponents: {},
     hosts: {}, runtime: { configPath }, observability: { enabled: false },
@@ -69,10 +97,29 @@ test('Host exports exact configured Capability, Procedure, and active Tool links
     listMcpTools: async () => [{ name: 'fixture.check', inputSchema: toolInput, outputSchema: toolOutput }],
   })
   assert.deepEqual(catalog, {
-    schemaVersion: 'openadam.skill-link-catalog.v0.2',
+    schemaVersion: 'openadam.skill-link-catalog.v0.3',
     entries: [
       { kind: 'capability', identity: 'fixture.record.validate#validate', version: '0.1.0', schemaDigest: skillLinkSchemaDigest(capabilityInput, capabilityOutput) },
-      { kind: 'procedure', identity: 'fixture.document.prepare', version: '0.2.0', schemaDigest: skillLinkSchemaDigest(procedureInput, procedureOutput) },
+      {
+        kind: 'procedure', identity: 'fixture.document.prepare', version: '0.2.0', schemaDigest: skillLinkSchemaDigest(procedureInput, procedureOutput),
+        componentId: 'fixture-procedure', execution: 'direct-runtime', permissions: [], permissionCeiling: [],
+        lifecycle: { mode: 'synchronous', resumable: false, interaction: 'none' },
+        invocation: {
+          carrier: 'agent-host-cli', protocol: 'openadam.agent-host-procedure-invocation.v0.2', command: 'agent-host',
+          arguments: ['procedure', 'invoke', '--request', '-', '--json'],
+          describeArguments: ['procedure', 'describe', '--id', 'fixture.document.prepare', '--version', '0.2.0', '--json'],
+          statusArguments: ['procedure', 'status', '--run', '{taskId}', '--json'],
+          continueArguments: ['procedure', 'continue', '--run', '{taskId}', '--input', '-', '--json'],
+          input: 'json-stdin', output: 'json-stdout',
+        },
+        availability: {
+          installed: true, contractValidated: true, discoverable: true,
+          lastSuccessfulInvocationAt: null,
+          invocationEvidence: { valid: false, verifiedAt: null, invalidatedAt: null, invalidatedReason: 'not-yet-invoked', dependencies: null },
+          currentHealth: { status: 'not-checked', observedAt: null },
+          currentSessionDiscovery: { status: 'not-observed', observedAt: null },
+        },
+      },
       { kind: 'tool', identity: 'fixture.check', version: '1.2.3', schemaDigest: skillLinkSchemaDigest(toolInput, toolOutput) },
     ],
   })

@@ -11,6 +11,7 @@ import { JsonlObservationSink } from './observations.mjs'
 
 function usage() {
   return `Usage:
+  openadam-direct-exec check-config --config PATH [--pretty]
   openadam-direct-exec inspect (--config PATH | --socket PATH) [--pretty]
   openadam-direct-exec resolve --config PATH --requirement PATH|- [--pretty]
   openadam-direct-exec project (--config PATH | --socket PATH) --selection PATH|- [--pretty]
@@ -22,7 +23,7 @@ function usage() {
 
 function parseArguments(argv) {
   const [command, ...rest] = argv
-  if (!['inspect', 'resolve', 'project', 'validate', 'run', 'serve'].includes(command)) {
+  if (!['check-config', 'inspect', 'resolve', 'project', 'validate', 'run', 'serve'].includes(command)) {
     throw new HostError('HOST_CLI_USAGE', usage())
   }
   const options = { command, pretty: false, replaceStaleSocket: false }
@@ -63,6 +64,16 @@ function parseArguments(argv) {
     }
     if (options.workOrder !== undefined || options.selection !== undefined || options.requirement !== undefined) {
       throw new HostError('HOST_CLI_USAGE', '--work-order, --selection, and --requirement do not apply to serve')
+    }
+    return options
+  }
+  if (command === 'check-config') {
+    if (options.config === undefined || options.socket !== undefined) {
+      throw new HostError('HOST_CLI_USAGE', 'check-config requires --config and does not use a Socket')
+    }
+    if (options.workOrder !== undefined || options.selection !== undefined || options.requirement !== undefined
+      || options.observationLog !== undefined || options.replaceStaleSocket || options.maxConnections !== undefined) {
+      throw new HostError('HOST_CLI_USAGE', 'check-config accepts only --config and --pretty')
     }
     return options
   }
@@ -184,6 +195,14 @@ async function main() {
     }
 
     const config = await loadRuntimeConfig(options.config)
+    if (options.command === 'check-config') {
+      print({
+        schemaVersion: 'openadam.direct-config-check.v0.1',
+        status: 'valid',
+        providers: config.providers.size,
+      }, options.pretty)
+      return
+    }
     runtime = new DirectExecutionRuntime(config, {
       ...(options.observationLog === undefined ? {} : {
         observationSink: new JsonlObservationSink(resolve(options.observationLog)),

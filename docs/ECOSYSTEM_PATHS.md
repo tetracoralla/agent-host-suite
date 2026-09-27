@@ -83,8 +83,9 @@ The Manager's compact product rows are optional invitations. Local inventory is
 shown first; recommendations and the searchable compatible catalog are separate
 discovery surfaces. Each row gives a person a recognizable product mark, short
 job label, current availability, and one direct action. A GitHub project is not
-addable until its compatibility preview succeeds. A copyable starting prompt
-appears only after the person chooses to use the tool. The labels and examples
+addable until its compatibility preview succeeds. A copyable example, when the
+admitted tool has one, stays collapsed on the detail page. Copying it does not
+start an Agent task or record adoption. The labels and examples
 are Host editorial content for the current admitted set—not portable provider
 metadata, a quality certificate, or a requirement for every integration.
 

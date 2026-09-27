@@ -124,6 +124,7 @@ struct ToolDetailView: View {
 
     private var installed: ManagedTool? { store.managedTools.first { $0.id == toolID } }
     private var catalog: ManagerSetupTool? { store.featuredCatalogTools.first { $0.id == toolID } }
+    private var examplePrompt: String? { catalog?.examplePrompt ?? ManagerSetupPolicy.examplePrompt(toolID) }
     private var paused: Bool { store.suite?.agentToolsPaused == true }
     private var update: UpdateItem? { store.updates?.items?.first { $0.id == toolID && $0.availability == "update-available" } }
     private var name: String { installed?.name ?? catalog?.name ?? toolID }
@@ -163,20 +164,28 @@ struct ToolDetailView: View {
                     Label(L10n.text("No asset for this platform"), systemImage: "xmark.circle")
                         .foregroundStyle(.secondary)
                 }
-                if catalog?.examplePrompt != nil {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(L10n.text("Try a task")).font(.headline)
-                        TextEditor(text: $taskDraft)
-                            .font(.system(size: 14))
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 96, maxHeight: 180)
-                            .padding(14)
-                            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
-                            .accessibilityLabel(L10n.text("Example task"))
-                        if copied {
-                            Label(L10n.text("Task copied"), systemImage: "doc.on.clipboard")
-                                .foregroundStyle(.secondary).font(.caption)
+                if examplePrompt != nil {
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 12) {
+                            TextEditor(text: $taskDraft)
+                                .font(.system(size: 14))
+                                .scrollContentBackground(.hidden)
+                                .frame(minHeight: 96, maxHeight: 180)
+                                .padding(14)
+                                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+                                .accessibilityLabel(L10n.text("Example task"))
+                            HStack(spacing: 12) {
+                                Button(L10n.text("Copy")) { copied = store.copyExampleTask(taskDraft) }
+                                    .buttonStyle(.bordered)
+                                    .disabled(store.isBusy || taskDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                if copied {
+                                    Label(L10n.text("Copied"), systemImage: "doc.on.clipboard")
+                                        .foregroundStyle(.secondary).font(.caption)
+                                }
+                            }
                         }
+                    } label: {
+                        Text(L10n.text("Example"))
                     }
                 } else if let summary = installed?.summary, !summary.isEmpty {
                     Text(L10n.text(summary)).foregroundStyle(.secondary).textSelection(.enabled)
@@ -193,7 +202,7 @@ struct ToolDetailView: View {
                         ))
                         .toggleStyle(.switch)
                         .disabled(store.isBusy || paused)
-                        .help(L10n.text(installed.onDemandAvailable ? "Off keeps an on-demand Skill. Pause all withholds both." : "Enable this tool, then start a fresh Agent task to use it."))
+                        .help(L10n.text(installed.onDemandAvailable ? "Off keeps an on-demand Skill. Pause all withholds both." : "New tasks load this tool selection. Tasks already open keep the tools they started with."))
                         if let version = installed.version {
                             LabeledContent(L10n.text("Version")) { Text(version).textSelection(.enabled) }
                                 .foregroundStyle(.secondary)
@@ -220,7 +229,7 @@ struct ToolDetailView: View {
             Button(L10n.text("Cancel"), role: .cancel) {}
         } message: { Text(L10n.text("On-demand tools will also pause.")) }
         .onAppear {
-            taskDraft = store.exampleTaskDrafts[toolID] ?? L10n.text(catalog?.examplePrompt ?? "")
+            taskDraft = store.exampleTaskDrafts[toolID] ?? L10n.text(examplePrompt ?? "")
             backFocused = true
         }
         .onChange(of: taskDraft) { _, value in
@@ -251,10 +260,6 @@ struct ToolDetailView: View {
         } else if let installed, !installed.active && !installed.onDemandAvailable {
             Button(L10n.text("Enable to use")) { Task { await store.setTool(toolID, active: true) } }
                 .buttonStyle(.borderedProminent).disabled(store.isBusy)
-        } else if catalog?.examplePrompt != nil, installed != nil {
-            Button(L10n.text("Use in Agent")) { copied = store.beginExampleTask(taskDraft) }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.isBusy || taskDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 }

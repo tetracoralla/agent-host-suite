@@ -119,6 +119,32 @@ launcher location, and the same Host-created-only ownership. It cannot declare
 MCP tools, workspace grants, provider invocation, Capability or Procedure
 semantics, or publication state.
 
+## Procedure product integration v0.2
+
+`schemas/agent-host-procedure-integration.schema.v0.2.json` is the one closed
+package contract for installed Procedure products. Its common `procedure`
+envelope declares the exact product id/version, contained input and output
+schemas, possible permission requirements, resource requirements and lifecycle.
+On admission Host stores a separate permission ceiling, initially equal to the
+accepted declaration. Its `execution` union then binds exactly one executor:
+
+- `direct-runtime` binds an existing Direct Procedure Provider for synchronous,
+  non-resumable structured work; or
+- `agentic-runner` binds a contained Method plus the artifacts that form the
+  product's declared outputs for stateful, resumable, Agent-mediated work.
+
+The package version and Procedure version must match. All referenced files are
+contained in the sealed component inventory. Admission validates the common
+contract and its exact execution binding without claiming that the Procedure
+has already produced a correct result. Host records installation, contract
+validation and Agent discovery separately from historical success time, current
+invocation evidence, current health and current-session discovery. Product,
+runtime or binding changes invalidate current evidence without erasing the
+history. Installed Host state—not Direct Runtime configuration and not Runner
+constructor defaults—is the Procedure catalog authority. Per-task grants and
+workspace/file/account bindings arrive only in the formal Run Request; the
+declaration and installed ceiling never become Run authority automatically.
+
 Ratings, screenshots, categories for discovery, payment, reviews, featured
 placement, and speculative host adapters are deliberately absent. An
 owner-selected featured list, if used, is a profile or working set over these

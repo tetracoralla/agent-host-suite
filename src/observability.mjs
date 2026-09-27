@@ -12,6 +12,7 @@ import { loadState, prepareStatePaths, readStatePaths, saveState, statePaths } f
 import { recordActivity } from './activity.mjs'
 import { cleanupStorage } from './storage.mjs'
 import { withLifecycleMutation } from './lifecycle-lock.mjs'
+import { compareSuiteVersions } from './release-manifest.mjs'
 
 const OBSERVER_LABEL = 'com.openadam.agent-tool-observer'
 const WINDOWS_OBSERVER_TASK = '\\openAdam\\AgentToolObserver'
@@ -195,8 +196,8 @@ export function configuredSemanticProviderIds(state) {
   if (active.has('math-anchor')) ids.add('io.github.tetracoralla.math-anchor')
   if (active.has('migratory-time')) ids.add('io.github.tetracoralla.migratory-time')
   for (const [id, component] of Object.entries(state.components ?? {})) {
-    if (!active.has(id)) continue
-    const providerId = component.capabilityProvider?.providerId
+    if (!active.has(id) && component.procedureProvider === undefined) continue
+    const providerId = component.capabilityProvider?.providerId ?? component.procedureProvider?.providerId
     if (typeof providerId === 'string' && providerId.length > 0) ids.add(providerId)
   }
   return ids
@@ -681,7 +682,7 @@ export async function exportObservabilityTrace(options, dependencies = {}) {
   })
 }
 
-async function runObserverConfigurationCommand(options, commandArgs, dependencies = {}) {
+async function runObserverConfigurationCommand(options, commandArgs, dependencies = {}, minimumVersion = null) {
   const runner = dependencies.runner ?? runFile
   const paths = await readStatePaths(resolveStateRoot(options.stateRoot))
   const state = await loadState(paths)
@@ -689,6 +690,10 @@ async function runObserverConfigurationCommand(options, commandArgs, dependencie
   if (state.observability?.enabled !== true) throw new AgentHostError('OBSERVABILITY_DISABLED', 'Observability is not enabled')
   const observer = state.components['agent-tool-observer']
   if (observer === undefined) throw new AgentHostError('OBSERVABILITY_COMPONENT_MISSING', 'The installed Observer component is unavailable')
+  if (minimumVersion !== null && observer.version && compareSuiteVersions(observer.version, minimumVersion) < 0) {
+    throw new AgentHostError('OBSERVABILITY_COMPONENT_UPDATE_REQUIRED',
+      `Task activity requires Observer ${minimumVersion} or newer. Update the Agent environment, then retry.`)
+  }
   return runJson(observer, [...commandArgs, '--json'], runner, {
     env: observerEnvironment(state),
     signal: options.signal,
@@ -718,7 +723,7 @@ export async function observabilityTaskSources(options, dependencies = {}) {
   const args = ['task-sources', '--provider', options.provider, '--limit', String(options.limit ?? 50)]
   if (options.fromMs !== undefined) args.push('--from-ms', String(options.fromMs))
   if (options.toMs !== undefined) args.push('--to-ms', String(options.toMs))
-  return runObserverConfigurationCommand(options, args, dependencies)
+  return runObserverConfigurationCommand(options, args, dependencies, '0.6.5')
 }
 
 export async function exportObservabilityTask(options, dependencies = {}) {
@@ -734,7 +739,7 @@ export async function exportObservabilityTask(options, dependencies = {}) {
   ]
   if (options.fromMs !== undefined) args.push('--from-ms', String(options.fromMs))
   if (options.toMs !== undefined) args.push('--to-ms', String(options.toMs))
-  return runObserverConfigurationCommand(options, args, dependencies)
+  return runObserverConfigurationCommand(options, args, dependencies, '0.6.5')
 }
 
 export async function observabilityAdapterPlan(options, dependencies = {}) {

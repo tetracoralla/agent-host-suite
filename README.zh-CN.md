@@ -2,8 +2,9 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地工具环境。它只使用公开扩展
-入口连接工具，并在本机运行已选择的结构化任务，不修改 Agent 应用自身。
+Agent Host 为受支持的 Agent 应用安装并管理一套兼容的本地 Provider 与 Procedure 产品
+环境。它只使用公开扩展入口连接 Provider 工具和已安装的 Procedure 目录，并在本机运行
+已选择的结构化任务，不修改 Agent 应用自身。
 
 桌面 Manager 是可选的管理界面，CLI 使用同一套生命周期实现。配置完成后，工具通过受支持的
 MCP、Skill 和 CLI 入口供 Agent 调用，不需要一直打开 Manager 窗口。目标是在 Agent 环境变化时
@@ -32,8 +33,14 @@ GitHub 项目/Release，不必改 Host 源码；见 [GitHub 更新](docs/UPDATES
 
 ## 范围与事实来源
 
-- Capability contract 定义稳定的类型化操作语义；Procedure contract 定义已经稳定的多阶段
-  方法。
+- Capability contract 定义稳定的类型化操作语义；Procedure contract 定义已经稳定、可复用的
+  方法。开发者只需把 Procedure 产品化一次，使用者的 Agent 负责把具体任务整理成声明输入，
+  再消费输出，不必每次重新心算内部工作流。
+- 所有已安装 Procedure 共用一套产品外壳来声明标识、版本、输入输出、权限和生命周期，再明确
+  绑定 Direct Runtime 或 Agentic Runner。Host 安装态是唯一消费目录；打包后的 Agent 先用紧凑
+  `procedure list` 发现，再用精确 `procedure describe` 读取完整合同，并通过正式 Run Request 调用
+  `procedure invoke`，用 `status|continue` 延续状态。Agentic 产品的 Agent、Direct Capability、
+  精确子 Procedure、人工和确定性节点共用同一份封闭的版本化图源模型。
 - 独立 Provider 负责自己的领域行为和发布；Agent Host 负责校验、安装、连接、运行与本机
   生命周期。
 - Agent Host 不内嵌外部 Provider 源码，也不向模型暴露通用 Provider 调用工具。
@@ -65,9 +72,16 @@ GitHub 项目/Release，不必改 Host 源码；见 [GitHub 更新](docs/UPDATES
 不会安装尚未入库的工具。它不是市场。Codex 投影与会话 Skill/MCP 路径见
 [发现与投影](docs/DISCOVERY_PROJECTION.md)。
 
-设置与工具页还会用可选的视觉任务卡片呈现已准入工具。用户可以把示例复制到新的 Agent
-任务中，也可以修改、忽略或移除工具；卡片不是评分，也不代表已经采用。公开发布者与私有
-贡献者分别走[生态参与路径](docs/ECOSYSTEM_PATHS.md)，不必接受一套 Host 统一产品模板。
+Manager 把已安装的 Provider 与 Procedure 分开呈现，只管理可用性和健康状态，不编辑
+Procedure，也不暴露 Run、阶段和日志。产品行展示已准入产品的标识、短用途和当前是否可用。就绪的工具没有「打开新任务」
+的动作。若某个工具带有示例，示例折叠在详情页；复制它不会打开 Agent 应用，也不记录
+采用。公开发布者与私有贡献者分别走[生态参与路径](docs/ECOSYSTEM_PATHS.md)，不必接受
+一套 Host 统一产品模板。
+Procedure 详情分别显示安装、合同验证、Agent 发现、当前健康、历史成功调用时间和当前会话观测；
+只有适用时才提供更新、修复或移除。
+
+Procedure 开发者使用独立的 Developer Kit / Procedure Studio 来做图形化编排、验证、测试
+运行和打包；无头消费运行时与 Agent Host Manager 都不是这个开发工具的替代品。
 
 ## Profile
 
@@ -110,24 +124,16 @@ tools-dev 路径，不是 featured。详见
 `observability task-sources` 先给出容易扫读的会话数、直接调用、静态引用和
 错误数量；`observability export-task` 可再导出一个有界、匿名化的任务记录。
 它把直接执行与仅出现在编排输入里的工具名分开，但不替用户判断结果是否被
-采用、是否有用、是否优于其他方案。原生和浏览器 Manager 也以“任务活动”
-卡片呈现同样的关键数字，只有用户主动操作时才导出详情。详见
+采用、是否有用、是否优于其他方案。原生和浏览器 Manager 在「使用情况」里呈现
+同样的关键数字，只有用户主动操作时才导出详情。详见
 [轨迹平面](docs/TRACE_PLANE.zh-CN.md)。
 
 ## 不点名能力练习
 
-本 checkout 不会把 Host 检查或调用次数变成对 Agent 的判决。在已经装好 Agent Host
-并连接 Agent 应用的机器上，可按[不点名能力练习](docs/ADOPTION_ACCEPTANCE.md) 把页面
-夹具拷出仓库、开**新会话**，观察未点名 Armorial 时什么真正进入作品，再由参与者判断
-这一次任务对自己意味着什么。
-
-```text
-agent-host doctor --featured-readiness --json
-```
-
-该命令报告用户级就绪（所需工具、连接、投影），与 `recipe.consistency` 配方检查分开，
-并且 `adoptionEvidence` 恒为 `false`。仅因 profile 名为 `local-dogfood` 不会让用户级
-诊断失败。这个练习没有固定任务配额，也没有 Host 统一评分。
+不告诉产品名字、看 Agent 会不会自己用上已安装能力，是一条可选分支，写在
+[不点名能力练习](docs/ADOPTION_ACCEPTANCE.md)。它不是安装步骤，不是日常用法，
+也不是判决。`doctor --featured-readiness` 只报告 Host 前提，并且
+`adoptionEvidence` 恒为 `false`。
 
 ## 常用流程
 

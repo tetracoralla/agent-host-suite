@@ -5,11 +5,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readJson } from './json.mjs'
 import { AgentHostError } from './errors.mjs'
 import { isDeveloperKitIntegrationSchema, validateDeveloperKitIntegration } from './developer-kit-integration.mjs'
+import { isProcedureIntegrationSchema, validateProcedureIntegration } from './procedure-integration.mjs'
 import { isToolIntegrationSchema, validateToolIntegration } from './tool-integration.mjs'
 
 export const RELEASE_SCHEMA = 'openadam.agent-host-release.v0.2'
 export const COMPONENT_SCHEMA = 'openadam.agent-host-component.v0.1'
 export const COMPONENT_SCHEMA_V2 = 'openadam.agent-host-component.v0.2'
+export const COMPONENT_SCHEMA_V3 = 'openadam.agent-host-component.v0.3'
 export const REQUIRED_RELEASE_COMPONENTS = ['node-runtime', 'direct-execution-runtime', 'math-anchor', 'migratory-time']
 export const OBSERVABILITY_RELEASE_COMPONENTS = ['agent-tool-observer', 'context-surface-analyzer']
 
@@ -217,13 +219,20 @@ function relativePath(value, label) {
 
 export function validateComponentDescriptor(descriptor, releaseComponent) {
   const descriptorKeys = ['schemaVersion', 'id', 'version', 'kind', 'files', 'identityFiles', 'entrypoints', 'integration', 'legal']
-  if (descriptor?.schemaVersion === COMPONENT_SCHEMA_V2) descriptorKeys.push('presentation', 'origin')
+  if ([COMPONENT_SCHEMA_V2, COMPONENT_SCHEMA_V3].includes(descriptor?.schemaVersion)) descriptorKeys.push('presentation', 'origin')
   exactKeys(descriptor, descriptorKeys, 'component descriptor')
-  if (descriptor.schemaVersion !== COMPONENT_SCHEMA && descriptor.schemaVersion !== COMPONENT_SCHEMA_V2) {
+  if (![COMPONENT_SCHEMA, COMPONENT_SCHEMA_V2, COMPONENT_SCHEMA_V3].includes(descriptor.schemaVersion)) {
     fail('COMPONENT_DESCRIPTOR_INVALID', `Unsupported component descriptor schema: ${descriptor.schemaVersion ?? 'missing'}`)
   }
   if (descriptor.id !== releaseComponent.id || descriptor.version !== releaseComponent.version) fail('COMPONENT_DESCRIPTOR_INVALID', 'Component descriptor identity differs from the release manifest')
-  if (descriptor.kind !== expectedComponentKind(descriptor.id)) fail('COMPONENT_DESCRIPTOR_INVALID', `Unexpected component kind for ${descriptor.id}`)
+  const expectedKind = COMPONENT_KINDS.get(descriptor.id)
+  if (
+    (expectedKind !== undefined && descriptor.kind !== expectedKind) ||
+    (expectedKind === undefined && !['agent-tool', 'procedure'].includes(descriptor.kind))
+  ) fail('COMPONENT_DESCRIPTOR_INVALID', `Unexpected component kind for ${descriptor.id}`)
+  if (descriptor.kind === 'procedure' && descriptor.schemaVersion !== COMPONENT_SCHEMA_V3) {
+    fail('COMPONENT_DESCRIPTOR_INVALID', 'Procedure products require component schema v0.3')
+  }
   if (!Array.isArray(descriptor.files) || descriptor.files.length === 0) fail('COMPONENT_DESCRIPTOR_INVALID', `${descriptor.id} has no files`)
   const paths = new Set()
   for (const item of descriptor.files) {
@@ -246,6 +255,12 @@ export function validateComponentDescriptor(descriptor, releaseComponent) {
   }
   if (descriptor.kind === 'developer-kit' || isDeveloperKitIntegrationSchema(descriptor.integration?.schemaVersion)) {
     validateDeveloperKitIntegration(descriptor.integration, paths)
+  }
+  if (descriptor.kind === 'procedure' || isProcedureIntegrationSchema(descriptor.integration?.schemaVersion)) {
+    if (descriptor.kind !== 'procedure' || !isProcedureIntegrationSchema(descriptor.integration?.schemaVersion)) {
+      fail('COMPONENT_DESCRIPTOR_INVALID', 'Procedure kind and integration schema must be declared together')
+    }
+    validateProcedureIntegration(descriptor.integration, paths)
   }
   if (descriptor.presentation !== undefined) {
     exactKeys(descriptor.presentation, ['displayName', 'summary', 'author', 'homepage', 'license', 'logo'], `${descriptor.id} presentation`)

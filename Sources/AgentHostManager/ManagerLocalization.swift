@@ -71,14 +71,40 @@ enum L10n {
     }
 
     private static let simplifiedChinese: [String: String] = [
-        "My tools": "我的工具",
+        "Available to Agents": "Agent 可用",
+        "Library": "产品",
+        "Providers": "Provider",
+        "Procedures": "Procedure",
+        "Search providers and procedures": "搜索 Provider 和 Procedure",
+        "No installed products": "尚未安装可用产品",
+        "Available by contract": "Agent 可通过合同识别",
+        "Ready; current invocation evidence is healthy": "可调用，当前调用证据健康",
+        "Ready; prior invocation recorded, current binding not checked": "可调用；有历史成功记录，当前绑定尚未检查",
+        "Ready; no successful invocation recorded": "可调用，尚无成功调用记录",
+        "Procedure": "Procedure",
+        "Execution": "执行方式",
+        "Agentic Runner": "Agentic Runner",
+        "Direct Runtime": "Direct Runtime",
+        "Contract": "合同",
+        "Validated": "已验证",
+        "Agent discovery": "Agent 发现",
+        "Discoverable": "可发现",
+        "Not discoverable": "不可发现",
+        "Current health": "当前健康",
+        "Last successful invocation": "上次成功调用",
+        "Current Agent session": "当前 Agent 会话",
+        "Healthy": "健康",
+        "Not checked for current binding": "当前绑定尚未检查",
+        "Never": "从未",
+        "Yes": "是",
+        "No": "否",
+        "Remove this Procedure?": "移除这个 Procedure？",
         "Version totals survive updates and raw-event cleanup; earlier deleted records cannot be recovered.": "版本汇总在更新和原始记录清理后保留；此前已删除的记录无法恢复。",
         "Script references are not execution; open tasks may use older bindings.": "脚本引用不代表执行；未关闭的任务可能仍使用旧绑定。",
         "Static references do not prove execution.": "静态引用不代表执行。",
         "Paused": "已暂停",
         "On-demand": "按需",
         "Enable to use": "启用后使用",
-        "Enable this tool, then start a fresh Agent task to use it.": "启用此工具后，在新的 Agent 任务中使用。",
         "Responsive layouts": "响应式布局",
         "Visual documents": "可视化文档",
         "Pause all tools?": "暂停全部工具？",
@@ -87,8 +113,10 @@ enum L10n {
         "No matching tools": "没有匹配的工具",
         "Clear search": "清除搜索",
         "Back": "返回",
-        "Try a task": "试一试",
+        "Example": "示例",
         "Example task": "示例任务",
+        "Copy": "复制",
+        "Copied": "已复制",
         "Enable by default": "默认启用",
         "Connected, not checked": "已连接，尚未检查",
         "Structured data": "结构化数据",
@@ -124,7 +152,6 @@ enum L10n {
         "Agent Host compatible": "兼容 Agent Host",
         "GitHub": "GitHub",
         "GitHub repository": "GitHub 仓库",
-        "Use in Agent": "在 Agent 中使用",
         "Close": "关闭",
         "Project website": "项目网站",
         "Available to Agent apps": "对 Agent 可用",
@@ -151,7 +178,6 @@ enum L10n {
         "Install all updates": "安装全部更新",
         "Preview GitHub project": "预览 GitHub 项目",
         "Add from GitHub": "从 GitHub 添加",
-        "Use": "使用",
         "Tools included": "包含的工具",
         "Choose another tool set": "选择其他工具集",
         "Install missing": "安装缺少项",
@@ -230,13 +256,7 @@ enum L10n {
         "Tool catalog": "工具目录",
         "Your environment is ready": "环境已就绪",
         "Your local environment is ready": "本地环境已就绪",
-        "Open a fresh task in a connected Agent app to use the installed tools.": "请在已连接的 Agent 应用中打开新任务以使用已安装工具。",
-        "Install complete — start work": "安装完成 — 可以开始工作",
-        "Ready to start work": "可以开始工作",
-        "Ready — start work in a new Agent task": "已就绪 — 请在新的 Agent 任务中开始工作",
-        "Install finished — connect an Agent to start work": "安装已完成 — 请连接 Agent 以开始工作",
         "Set up tools before starting work": "开始工作前请先完成设置",
-        "Open a new Agent task to start work": "打开新的 Agent 任务以开始工作",
         "Connect an Agent app": "连接 Agent 应用",
         "Open Tools to enable a working set": "打开「工具」以启用工作集",
         "Fix permission / grant workspace": "修复权限 / 授予工作区",
@@ -283,18 +303,13 @@ enum L10n {
         "Open Codex": "打开 Codex",
         "Open ZCode": "打开 ZCode",
         "Open Claude Code": "打开 Claude Code",
-        "Start a new task in the app": "在应用中开始新任务",
+
         "Set up": "开始设置",
         "Update": "更新",
         "Health details": "健康详情",
-        "Status rows are supporting detail. Starting work is the destination.": "状态行只是辅助信息；终点是开始工作。",
         "Recovery path: {path}": "继续路径：{path}",
-        "Host confirmed the local environment it can observe. The next step is a new Agent task with real work, not more status rows.": "Host 已确认它能观察到的本地环境。下一步是打开新的 Agent 任务开始真实工作，而不是停留在状态清单。",
         "Host cannot confirm that an already-open Agent task has loaded these tools.": "Host 无法确认已经打开的 Agent 任务已载入这些工具。",
         "Tools are on this Mac, but no Agent app is connected yet.": "工具已在这台 Mac 上，但尚未连接 Agent 应用。",
-        "Already-open tasks keep the tools they started with. A new task is the path into real work.": "已打开的任务保留启动时的工具；新任务才是进入真实工作的路径。",
-        "Open Agents, connect one supported app, then start a new task there.": "打开「连接 Agent」，连接一个受支持的应用，然后在那里启动新任务。",
-        "Host installed and connected what it can see. Start a new Agent task — do not wait on a status checklist.": "Host 已安装并连接它能看到的内容。请启动新的 Agent 任务——不要停在状态清单上。",
         "Permission or workspace access is blocking work": "权限或工作区访问正在阻碍工作",
         "A tool or local service needs repair before work": "开始工作前需要修复工具或本地服务",
         "Tools are installed but not available for new tasks": "工具已安装，但尚未对新任务可用",
@@ -309,7 +324,6 @@ enum L10n {
         "Available in connected Agent apps": "可供已连接的 Agent 应用使用",
         "Selected for new Agent tasks": "已为新的 Agent 任务选中",
         "Check All": "检查全部",
-        "Start a fresh Agent task": "请启动新的 Agent 任务",
         "New tasks load this tool selection. Tasks already open keep the tools they started with.": "新任务会载入当前工具选择；已打开的任务保留启动时的工具。",
         "Context cost": "上下文成本",
         "Available": "可用",
@@ -364,6 +378,10 @@ enum L10n {
         "Showing the newest {count} retained tasks.": "正在显示最近的 {count} 个保留任务。",
         "Direct calls are observed execution. Static references are not. Exported details contain metadata only and no Host verdict.": "直接调用是已观测的执行；静态引用只是出现过，并不是执行。导出详情仅含元数据，不包含 Host 判断。",
         "The installed monitoring component could not complete this request. Update or repair Agent Host, then try again.": "当前安装的监控组件无法完成这项请求。请更新或修复 Agent Host 后重试。",
+        "Task activity requires Observer 0.6.5 or newer. Update the Agent environment, then retry.": "任务活动需要 Observer 0.6.5 或更新版本。请更新 Agent 环境后重试。",
+        "Make deterministic decisions from explicit facts.": "依据明确事实作出可复核的决策。",
+        "Make state transitions deterministic.": "按明确事件与状态规则推进流转。",
+        "Compute exact bounded schedule intervals.": "计算指定范围内的精确时间区间。",
         "The monitoring request was cancelled.": "监控请求已取消。",
         "Load sessions": "载入会话",
         "No retained sessions for this Agent app.": "此 Agent 应用没有保留的会话。",
@@ -417,8 +435,7 @@ enum L10n {
         "Install Agent Environment": "安装 Agent 环境",
         "Background service": "后台服务",
         "Will be installed": "将会安装",
-        "A new Agent task will be required": "需要启动新的 Agent 任务",
-        "The current task keeps its loaded catalog. Open a fresh task after this change.": "当前任务保留已载入的目录；更改后请打开新任务。",
+
         "Install": "安装",
         "Selected": "已选择",
         "Standard": "标准",
@@ -434,14 +451,10 @@ enum L10n {
         "Calculate 9,999,999,999 × 87 exactly, show the result, and verify it.": "精确计算 9,999,999,999 × 87，给出结果并核验。",
         "Convert 9:00 AM on October 15, 2026 from Shanghai to San Francisco and state the local date.": "把 2026 年 10 月 15 日上海上午 9:00 换算成旧金山当地时间，并说明当地日期。",
         "Choose and render one project-aware icon for a primary Start action. Explain the visual fit briefly.": "为主要的“开始”操作选择并渲染一个符合项目语境的图标，并简要说明视觉上为何合适。",
-        "Try: {task}": "试试看：{task}",
-        "Try in a new task": "在新任务中试用",
-        "Try {tool} in a new Agent task": "在新的 Agent 任务中试用 {tool}",
-        "Task copied": "任务已复制",
-        "Paste the {tool} task into a new Agent task.": "请把已复制的 {tool} 任务粘贴到新的 Agent 任务中。",
-        "Connect an Agent app, then start a new task and paste.": "请连接一个 Agent 应用，然后新建任务并粘贴。",
-        "Choose an Agent app to open, then start a new task and paste.": "请选择并打开一个 Agent 应用，然后新建任务并粘贴。",
-        "Open the connected Agent app, then start a new task and paste.": "请打开已连接的 Agent 应用，然后新建任务并粘贴。",
+        "For a $120 order by a verified customer, apply these rules: verified orders of at least $100 get free shipping; all others pay shipping. Return the decision and the rule that matched.": "对于已验证顾客的 120 美元订单，按规则判断：已验证且金额至少 100 美元的订单免运费，其他订单需付运费。给出结论和命中的规则。",
+        "An order can move draft → paid → shipped. It may be cancelled only from draft or paid. Starting at paid, process ship then cancel; report each result and the final state.": "订单可从草稿依次进入已付款、已发货；只有草稿或已付款状态可取消。从已付款开始，依次执行发货、取消，报告每一步结果与最终状态。",
+        "For October 15, 2026 in Asia/Shanghai, find free intervals from 09:00 to 12:00 after excluding meetings 09:30–10:00 and 10:30–11:00. Return the remaining slots.": "按 Asia/Shanghai 时区，求 2026 年 10 月 15 日 09:00–12:00 扣除 09:30–10:00、10:30–11:00 两场会议后的空闲时段。",
+
         "Open": "打开",
         "Agent Host could not copy the example task.": "Agent Host 未能复制示例任务。",
         "New tasks pick up changes": "更改会随新任务生效",
@@ -465,7 +478,6 @@ enum L10n {
         "Usage": "使用情况",
         "New tasks pick up tool changes.": "新任务会用上工具变更。",
         "Run Full Check to verify bindings.": "运行完整检查以核对绑定。",
-        "Open tasks keep their old tools.": "已打开的任务仍用旧工具。",
         "Unmeasured calls are not counted as success.": "未计量的调用不计为成功。",
         "Unsigned build: try to open, then System Settings → Privacy & Security → Open Anyway.": "未签名：尝试打开后，到系统设置 → 隐私与安全性 → 仍要打开。",
         "Public download is not configured.": "尚未配置公开下载。",
@@ -547,7 +559,7 @@ enum L10n {
         ,"Install without an Agent for now.": "先不连 Agent，直接安装。"
         ,"Connect later": "稍后连接"
         ,"Connect an Agent app when it is installed": "安装 Agent 应用后再连接"
-        ,"Connect an Agent afterward, then start a new task.": "装好后再连接 Agent，并新开任务。"
+
         ,"Agent Host will install the {toolSet}, connect them to {app}, and start local execution.": "Agent Host 将安装{toolSet}、连接到 {app} 并启动本地执行。"
         ,"Agent Host will install the {toolSet} and start local execution. No Agent app will be connected yet.": "Agent Host 将安装{toolSet}并启动本地执行，暂不连接 Agent 应用。"
         ,"Use {toolSet} for setup": "使用 {toolSet} 进行设置"
@@ -596,8 +608,7 @@ enum L10n {
         ,"ZCode has a conflicting tool installation that Agent Host left unchanged. Replace it with the managed installation to continue.": "ZCode 中存在冲突的工具安装，Agent Host 未对其修改。请替换为托管安装后继续。"
         ,"ZCode is not installed or cannot be found on this Mac.": "这台 Mac 上未安装或无法找到 ZCode。"
         ,"{toolSet} on this Mac": "这台 Mac 上的{toolSet}"
-        ,"A new {app} task will be required": "需要启动新的 {app} 任务"
-        ,"Open a fresh task after setup so {app} can load the installed tools.": "设置后请启动新的 {app} 任务，以载入已安装工具。"
+        ,"New {app} tasks load the installed tools. Tasks already open keep what they started with.": "新的 {app} 任务会载入已安装工具。已经打开的任务保留启动时的工具。"
         ,"Exact and scientific calculation": "精确与科学计算"
         ,"Reliable worldwide time conversion": "可靠的全球时间转换"
         ,"Confirm Environment Check": "确认环境检查"
