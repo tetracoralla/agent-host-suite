@@ -174,6 +174,7 @@ export class Coordinator extends EventEmitter {
       adapterFactory = (binding, options) => new AgentAdapter(binding, options),
       executeDirectCall = null,
       executeProcedureCall = null,
+      workspaceDelegation = null,
       methods = [],
       procedures = [],
     } = {},
@@ -183,6 +184,8 @@ export class Coordinator extends EventEmitter {
     this.adapterFactory = adapterFactory
     this.executeDirectCall = executeDirectCall
     this.executeProcedureCall = executeProcedureCall
+    this.workspaceDelegation = workspaceDelegation
+    this.sessionFinished = false
     this.workers = new Map()
     this.draining = false
     this.closing = false
@@ -262,7 +265,10 @@ export class Coordinator extends EventEmitter {
     return [...this.procedures.values()]
   }
   claim(task, workerPid = null) {
-    if (isGitTask(task)) this.store.claim(task.workspace, task.id, workerPid)
+    if (isGitTask(task)) this.store.claim(task.workspace, task.id, workerPid, this.workspaceDelegation)
+  }
+  reclaimDelegated(task) {
+    if (isGitTask(task)) this.store.reclaimDelegated(task.workspace, task.id)
   }
   release(task) {
     if (isGitTask(task)) this.store.release(task.id)
@@ -1149,22 +1155,43 @@ export class Coordinator extends EventEmitter {
         }
       } else if (node.kind === 'procedure-call') {
         assert(typeof this.executeProcedureCall === 'function', 'PROCEDURE_CALL_UNAVAILABLE', 'This Runner embedding has no subprocedure executor')
-        result = {
-          outcome: 'complete',
-          outputs: await this.executeProcedureCall({
-            procedure: clone(node.procedure),
-            inputs: evaluateExpression(node.input, context),
-            grants: clone(node.grants),
-            resources: Object.fromEntries(
-              Object.entries(node.resourceBindings).map(([childResource, parentResource]) => [
-                childResource,
-                clone(task.resources[parentResource]),
-              ]),
-            ),
-            limits: clone(task.limits),
-            idempotencyKey: task.active.requestId,
-          }),
+        const delegated = Object.keys(node.resourceBindings)
+        if (delegated.length > 0) {
+          // The child claims the delegated checkouts. The parent takes them
+          // back after the call, including a lease left by a closed child.
+          this.release(task)
         }
+        let delegationError = null
+        try {
+          result = {
+            outcome: 'complete',
+            outputs: await this.executeProcedureCall({
+              procedure: clone(node.procedure),
+              inputs: evaluateExpression(node.input, context),
+              grants: clone(node.grants),
+              resources: Object.fromEntries(
+                delegated.map((childResource) => [
+                  childResource,
+                  clone(task.resources[node.resourceBindings[childResource]]),
+                ]),
+              ),
+              limits: clone(task.limits),
+              idempotencyKey: task.active.requestId,
+              delegation: delegated.length > 0 ? { owner: this.store.root, taskId: task.id } : null,
+            }),
+          }
+        } catch (error) {
+          delegationError = error
+        }
+        if (delegated.length > 0) {
+          try {
+            this.reclaimDelegated(task)
+          } catch (error) {
+            if (!delegationError) delegationError = error
+            else delegationError.details = { ...(delegationError.details ?? {}), reclaim: errorValue(error) }
+          }
+        }
+        if (delegationError) throw delegationError
       } else {
         assert(false, 'METHOD_EXTENSION_UNSUPPORTED', `Method extension ${node.extension.id}@${node.extension.version} is declared but not supported by this Runner`)
       }
@@ -1186,7 +1213,19 @@ export class Coordinator extends EventEmitter {
       current.elapsedMs += Date.now() - Date.parse(active.startedAt)
       current.attempts.push({ ...active, finishedAt: now(), status: 'complete', candidate: after.identity })
       current.active = null
-      assert(after.identity === before.identity, 'NODE_EFFECT_VIOLATION', `${node.kind} changed the parent workspace outside an Agent turn`)
+      const delegatedWorkspace = node.kind === 'procedure-call'
+        && Object.keys(node.resourceBindings).length > 0
+        && isGitTask(current)
+      if (delegatedWorkspace && after.identity !== before.identity) {
+        current.candidate = {
+          identity: after.identity,
+          artifact: this.store.artifact(after),
+          paths: after.paths,
+        }
+        invalidateEvidence(current, 'delegated-procedure', after.identity)
+      } else {
+        assert(after.identity === before.identity, 'NODE_EFFECT_VIOLATION', `${node.kind} changed the parent workspace outside an Agent turn`)
+      }
       this.advanceGraphNode(current, node, result, attemptId, after.identity)
     })
     if (!['ready', 'finalizing'].includes(this.get(task.id).status)) this.release(this.get(task.id))
@@ -1874,16 +1913,25 @@ export class Coordinator extends EventEmitter {
         'Provider reports are attributed evidence, not independent verification. Session independence is enforced only where the selected method declares it.',
     }
   }
-  async close() {
+  async finishSession() {
+    if (this.sessionFinished) return
     this.closing = true
-    for (const [taskId, worker] of this.workers) {
+    const stopping = []
+    for (const [taskId, worker] of [...this.workers]) {
+      stopping.push(taskId)
       this.store.update(taskId, 'coordinator-stopping', (t) => {
         t.status = 'pausing'
       })
       await worker.interrupt().catch(() => {})
       await worker.close().catch(() => {})
     }
-    while (this.workers.size) await new Promise((r) => setTimeout(r, 20))
+    while (this.workers.size || stopping.some((taskId) => this.get(taskId).status === 'pausing')) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    this.sessionFinished = true
+  }
+  async close() {
+    await this.finishSession()
     this.store.close()
   }
 }

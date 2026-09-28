@@ -603,10 +603,33 @@ export function workerAlive(pid) {
     return error.code !== 'ESRCH'
   }
 }
-export function claimCheckout(root, stateRoot, taskId, workerPid = null) {
+function coordinatorLockReleased(stateRoot) {
+  const lock = join(stateRoot, 'coordinator.lock')
+  if (!existsSync(lock)) return true
+  try {
+    return !alive(JSON.parse(readFileSync(lock, 'utf8')).pid)
+  } catch {
+    return false
+  }
+}
+function leaseRecord(stateRoot, taskId, workerPid, delegation) {
+  const record = {
+    owner: realpathSync(stateRoot),
+    taskId,
+    pid: process.pid,
+    workerPid,
+  }
+  if (delegation?.owner && delegation?.taskId) {
+    record.delegatedBy = {
+      owner: realpathSync(delegation.owner),
+      taskId: delegation.taskId,
+    }
+  }
+  return record
+}
+export function claimCheckout(root, stateRoot, taskId, workerPid = null, delegation = null) {
   const path = leasePath(root)
-  const owner = realpathSync(stateRoot)
-  const record = { owner, taskId, pid: process.pid, workerPid }
+  const record = leaseRecord(stateRoot, taskId, workerPid, delegation)
   try {
     writeFileSync(path, JSON.stringify(record), { flag: 'wx', mode: 0o600 })
     return
@@ -614,7 +637,7 @@ export function claimCheckout(root, stateRoot, taskId, workerPid = null) {
     if (e.code !== 'EEXIST') throw e
   }
   const prior = JSON.parse(readFileSync(path, 'utf8'))
-  const same = prior.owner === owner && prior.taskId === taskId
+  const same = prior.owner === record.owner && prior.taskId === taskId
   assert(
     (same && prior.pid === process.pid) ||
       (!alive(prior.pid) && !workerAlive(prior.workerPid)),
@@ -625,13 +648,45 @@ export function claimCheckout(root, stateRoot, taskId, workerPid = null) {
   if (same && prior.pid === process.pid)
     writeFileSync(
       path,
-      JSON.stringify({ ...record, workerPid: workerPid ?? prior.workerPid }),
+      JSON.stringify({
+        ...record,
+        workerPid: workerPid ?? prior.workerPid,
+        ...(prior.delegatedBy ? { delegatedBy: prior.delegatedBy } : {}),
+      }),
       { mode: 0o600 },
     )
   else {
     unlinkSync(path)
     writeFileSync(path, JSON.stringify(record), { flag: 'wx', mode: 0o600 })
   }
+}
+export function reclaimDelegatedCheckout(root, stateRoot, taskId) {
+  const path = leasePath(root)
+  if (!existsSync(path)) {
+    claimCheckout(root, stateRoot, taskId)
+    return
+  }
+  const prior = JSON.parse(readFileSync(path, 'utf8'))
+  const owner = realpathSync(stateRoot)
+  const returned = prior.delegatedBy?.owner === owner && prior.delegatedBy?.taskId === taskId
+  const sameProcessClosed = prior.pid === process.pid
+    && !workerAlive(prior.workerPid)
+    && returned
+    && coordinatorLockReleased(prior.owner)
+  if (sameProcessClosed) {
+    unlinkSync(path)
+    try {
+      writeFileSync(
+        path,
+        JSON.stringify({ owner, taskId, pid: process.pid, workerPid: null }),
+        { flag: 'wx', mode: 0o600 },
+      )
+      return
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+    }
+  }
+  claimCheckout(root, stateRoot, taskId)
 }
 export function releaseCheckout(root, stateRoot, taskId) {
   const path = leasePath(root)

@@ -76,11 +76,11 @@
         "procedure": { "id": "org.openadam.example.verifier", "version": "1.4.2" },
         "input": { "object": { "candidate": { "path": "outputs.normalized" } } },
         "output": { "verified": { "path": "result.outputs.verdict" } },
-        "grants": ["network.read"],
+        "grants": ["model.invoke", "network.read"],
         "resourceBindings": { "workspace": "workspace" },
         "consumes": ["normalized"],
         "produces": ["verified"],
-        "permissions": ["procedure.invoke", "network.read"],
+        "permissions": ["procedure.invoke", "model.invoke", "network.read"],
         "resources": ["workspace"],
         "transitions": [{ "id": "verify-finalize", "when": { "operator": "always" }, "to": "finalize" }]
       },

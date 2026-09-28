@@ -7,6 +7,7 @@ import {
   rmSync,
   mkdirSync,
   symlinkSync,
+  existsSync,
 } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
@@ -1804,4 +1805,196 @@ test('multiple permissions approved before delivery all reach the same still-act
     mock.calls.filter((x) => x.permission).map((x) => x.permission),
     ['one', 'two'],
   )
+})
+
+function delegationMethod() {
+  return {
+    schema: 'openadam.method-graph.v2',
+    profile: null,
+    id: 'delegate-probe',
+    revision: 1,
+    name: 'Delegate probe',
+    description: 'One delegated workspace call.',
+    roles: [],
+    inputs: [],
+    artifacts: [{ id: 'out', name: 'Out', type: 'text', required: true }],
+    permissions: [
+      { id: 'procedure.invoke', name: 'Invoke' },
+      { id: 'model.invoke', name: 'Model' },
+    ],
+    resources: [{ id: 'workspace', name: 'Git workspace', type: 'workspace', required: true, adapter: 'git' }],
+    graph: {
+      entry: 'call',
+      extensions: {
+        parallel: { version: 1, supported: false },
+        wait: { version: 1, supported: false },
+      },
+      nodes: [{
+        id: 'call',
+        name: 'Call',
+        kind: 'procedure-call',
+        procedure: { id: 'org.openadam.example.child', version: '1.0.0' },
+        input: { literal: 'child' },
+        output: { out: { literal: 'ok' } },
+        grants: ['model.invoke'],
+        resourceBindings: { workspace: 'workspace' },
+        consumes: [],
+        produces: ['out'],
+        permissions: ['procedure.invoke', 'model.invoke'],
+        resources: ['workspace'],
+        transitions: [{ id: 'done', when: { operator: 'always' }, to: null }],
+      }],
+    },
+  }
+}
+function delegationTask(parent, workspace, method) {
+  return parent.create({
+    method,
+    inputs: {},
+    grants: ['procedure.invoke', 'model.invoke'],
+    resources: {
+      workspace: { type: 'workspace', adapter: 'git', path: workspace, allowExistingPaths: [] },
+    },
+  })
+}
+function leaseFile(workspace) {
+  return join(git(workspace, ['rev-parse', '--absolute-git-dir']).trim(), 'agent-procedure-lease.json')
+}
+
+test('ending the serving session pauses a permission wait before its result is observed', async (t) => {
+  const f = fixture(t)
+  const mock = fakeFactory({
+    hold: true,
+    onStart: ({ options }) => options.onPermission({
+      id: 'perm-1',
+      method: 'fixture/mark',
+      native: {},
+      requiredGrant: 'model.invoke',
+    }),
+  })
+  const coordinator = testCoordinator(f.state, { adapterFactory: mock.factory })
+  f.cleanup.push(() => coordinator.close())
+  const task = coordinator.create({
+    goal: 'Explain the pause',
+    inputs: { audience: 'Reviewers' },
+    method: researchBriefMethod,
+    bindings: {
+      researcher: { provider: 'codex' },
+      'fact-checker': { provider: 'grok' },
+      editor: { provider: 'zcode' },
+    },
+    grants: ['model.invoke', 'network.read'],
+  })
+  command(coordinator, task, 'start')
+  await waitFor(() => coordinator.get(task.id).status === 'waiting_user')
+  await coordinator.finishSession()
+  const settled = coordinator.get(task.id)
+  assert.equal(settled.status, 'paused')
+  assert.equal(settled.permissions.find((permission) => permission.id === 'perm-1').status, 'expired')
+  assert.equal(settled.active, null)
+})
+
+test('a closed child returns its delegated checkout and the parent keeps the child error', async (t) => {
+  const f = fixture(t)
+  const method = delegationMethod()
+  const childRoot = join(f.root, 'child')
+  mkdirSync(childRoot)
+  let calls = 0
+  const parent = new Coordinator(f.state, {
+    methods: [method],
+    executeProcedureCall: async (call) => {
+      calls += 1
+      if (calls > 1) return {}
+      const child = new Coordinator(childRoot, {
+        methods: [method],
+        workspaceDelegation: call.delegation,
+      })
+      try {
+        const childTask = child.create({
+          method,
+          inputs: {},
+          grants: ['procedure.invoke', 'model.invoke'],
+          resources: call.resources,
+        })
+        child.claim(childTask)
+      } finally {
+        await child.close()
+      }
+      const error = new Error('child exploded')
+      error.code = 'CHILD_BOOM'
+      throw error
+    },
+  })
+  f.cleanup.push(() => parent.close())
+  const task = delegationTask(parent, f.workspace, method)
+  command(parent, task, 'start')
+  await waitFor(() => parent.get(task.id).status === 'failed')
+  assert.equal(parent.get(task.id).problem.code, 'CHILD_BOOM')
+  assert.equal(existsSync(leaseFile(f.workspace)), false)
+  const again = delegationTask(parent, f.workspace, method)
+  command(parent, again, 'start')
+  await waitFor(() => ['complete', 'failed'].includes(parent.get(again.id).status))
+  assert.equal(parent.get(again.id).status, 'complete')
+})
+
+test('an open child keeps the delegated checkout without replacing the child error', async (t) => {
+  const f = fixture(t)
+  const method = delegationMethod()
+  const childRoot = join(f.root, 'child')
+  mkdirSync(childRoot)
+  let child
+  const parent = new Coordinator(f.state, {
+    methods: [method],
+    executeProcedureCall: async (call) => {
+      child = new Coordinator(childRoot, {
+        methods: [method],
+        workspaceDelegation: call.delegation,
+      })
+      const childTask = child.create({
+        method,
+        inputs: {},
+        grants: ['procedure.invoke', 'model.invoke'],
+        resources: call.resources,
+      })
+      child.claim(childTask)
+      const error = new Error('child exploded')
+      error.code = 'CHILD_BOOM'
+      throw error
+    },
+  })
+  f.cleanup.push(async () => {
+    await child?.close()
+    await parent.close()
+  })
+  const task = delegationTask(parent, f.workspace, method)
+  command(parent, task, 'start')
+  await waitFor(() => parent.get(task.id).status === 'failed')
+  assert.equal(parent.get(task.id).problem.code, 'CHILD_BOOM')
+  assert.equal(parent.get(task.id).problem.details.reclaim.code, 'WORKSPACE_BUSY')
+  assert.equal(existsSync(leaseFile(f.workspace)), true)
+  const again = delegationTask(parent, f.workspace, method)
+  assert.throws(() => command(parent, again, 'start'), { code: 'WORKSPACE_BUSY' })
+})
+
+test('a delegated subprocedure may change the workspace and the parent records that candidate', async (t) => {
+  const f = fixture(t)
+  const method = delegationMethod()
+  const parent = new Coordinator(f.state, {
+    methods: [method],
+    async executeProcedureCall() {
+      writeFileSync(join(f.workspace, 'child-write.txt'), 'written by child\n')
+      return {}
+    },
+  })
+  f.cleanup.push(() => parent.close())
+  const task = delegationTask(parent, f.workspace, method)
+  command(parent, task, 'start')
+  await waitFor(() => ['complete', 'failed', 'reconciling'].includes(parent.get(task.id).status))
+  const done = parent.get(task.id)
+  assert.equal(done.status, 'complete')
+  assert.equal(done.problem, null)
+  assert.equal(existsSync(join(f.workspace, 'child-write.txt')), true)
+  assert.equal(parent.store.readArtifact(done.outputs.out.artifact), 'ok')
+  assert.equal(existsSync(leaseFile(f.workspace)), false)
+  assert.equal(done.candidate.paths.includes('child-write.txt'), true)
 })

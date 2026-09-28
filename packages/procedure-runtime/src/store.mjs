@@ -8,7 +8,7 @@ import {
 } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { assert, hash, id, now } from './value.mjs'
-import { claimCheckout, releaseCheckout } from './workspace.mjs'
+import { claimCheckout, reclaimDelegatedCheckout, releaseCheckout } from './workspace.mjs'
 
 export class Store {
   constructor(root) {
@@ -266,7 +266,7 @@ export class Store {
       .prepare('UPDATE outbox SET status=? WHERE id=?')
       .run(status, commandId)
   }
-  claim(workspace, task, workerPid = null) {
+  claim(workspace, task, workerPid = null, delegation = null) {
     const row = this.db
       .prepare('SELECT task FROM workspace_leases WHERE workspace=?')
       .get(workspace)
@@ -276,7 +276,22 @@ export class Store {
       'Another task owns this checkout',
       { taskId: row?.task },
     )
-    claimCheckout(workspace, this.root, task, workerPid)
+    claimCheckout(workspace, this.root, task, workerPid, delegation)
+    this.db
+      .prepare('INSERT OR IGNORE INTO workspace_leases VALUES(?,?)')
+      .run(workspace, task)
+  }
+  reclaimDelegated(workspace, task) {
+    const row = this.db
+      .prepare('SELECT task FROM workspace_leases WHERE workspace=?')
+      .get(workspace)
+    assert(
+      !row || row.task === task,
+      'WORKSPACE_BUSY',
+      'Another task owns this checkout',
+      { taskId: row?.task },
+    )
+    reclaimDelegatedCheckout(workspace, this.root, task)
     this.db
       .prepare('INSERT OR IGNORE INTO workspace_leases VALUES(?,?)')
       .run(workspace, task)

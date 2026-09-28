@@ -204,6 +204,68 @@ function agentReport(outputs) {
   })
 }
 
+test('a provider permission request waits inside one Studio session and continues after approval', async (t) => {
+  const { stateRoot, project } = await fixture(t)
+  const report = (extra) => JSON.stringify({
+    outcome: 'complete',
+    summary: 'Completed the bounded Studio fixture step',
+    plan: 'Return declared outputs',
+    findings: [],
+    checks: [],
+    resolvedFindingIds: [],
+    acknowledgedDecisionIds: [],
+    ...extra,
+  })
+  const queues = new Map([
+    ['collect', [
+      { permission: 'read-workspace-note', outputs: { 'source-notes': { sources: ['fixture'] } } },
+    ]],
+    ['verify', [{ facts: { coverage: 'sufficient' } }]],
+    ['write', [{ outputs: { brief: 'Brief after the approved provider permission.' } }]],
+  ])
+  const routes = [
+    ['collect', '围绕问题收集可追溯材料'],
+    ['verify', '独立核对来源、关键反例与不确定性'],
+    ['write', '把已核对材料组织为面向目标读者的简洁结论'],
+  ]
+  const runtime = await StudioRuntime.open(join(stateRoot, 'runs'), project, {
+    adapterFactory(binding, options) {
+      const worker = { resolved: null, rejected: null }
+      return {
+        async initialize() { return { steer: 'unsupported', interrupt: 'supported' } },
+        async session(existing) { return { provider: binding.provider, id: existing ?? randomUUID(), model: 'fixture' } },
+        async start(prompt) {
+          const key = routes.find(([, marker]) => String(prompt).includes(marker))?.[0] ?? 'unknown'
+          const behavior = (queues.get(key) ?? []).shift() ?? {}
+          if (behavior.permission !== undefined) {
+            await new Promise((resolve, reject) => {
+              worker.resolved = resolve
+              worker.rejected = reject
+              options.onPermission({ id: behavior.permission, method: 'fixture/read-note', native: {} })
+            })
+          }
+          return { status: 'complete', text: report(behavior.outputs ? { outputs: behavior.outputs } : {}) }
+        },
+        respond() { worker.resolved?.(true); worker.resolved = null },
+        async interrupt() { worker.rejected?.(new Error('provider turn interrupted')); worker.rejected = null },
+        async close() {},
+      }
+    },
+  })
+  try {
+    const started = await runtime.start('covered-topic')
+    const waiting = await wait(runtime, started.id, 'waiting_user')
+    assert.equal(waiting.interaction ?? null, null)
+    assert.deepEqual(waiting.permissions.filter((permission) => permission.status === 'pending').map((permission) => permission.id), ['read-workspace-note'])
+    runtime.action(waiting.id, { action: 'permission', permissionId: 'read-workspace-note', allow: true })
+    const completed = await wait(runtime, waiting.id, 'complete')
+    assert.equal(completed.outputs.brief.value, 'Brief after the approved provider permission.')
+    assert.deepEqual(completed.permissions.filter((permission) => permission.delivered).map((permission) => [permission.id, permission.status]), [['read-workspace-note', 'approved']])
+  } finally {
+    await runtime.close()
+  }
+})
+
 test('failed workspace composition resumes through real Coordinator nodes and preserves replay evidence', async (t) => {
   const { root, stateRoot, project } = await fixture(t, 'workspace-composition')
   const workspace = join(root, 'workspace')
@@ -273,7 +335,7 @@ test('a structurally different workspace composition validates without being mis
   assert.deepEqual(new Set(project.document.method.graph.nodes.map((node) => node.kind)), new Set(['agent-turn', 'direct-call', 'procedure-call']))
   const subprocedure = project.document.method.graph.nodes.find((node) => node.kind === 'procedure-call')
   assert.deepEqual(subprocedure.procedure, { id: 'org.openadam.example.verifier', version: '1.4.2' })
-  assert.deepEqual(subprocedure.grants, ['network.read'])
+  assert.deepEqual(subprocedure.grants, ['model.invoke', 'network.read'])
   assert.deepEqual(subprocedure.resourceBindings, { workspace: 'workspace' })
 })
 

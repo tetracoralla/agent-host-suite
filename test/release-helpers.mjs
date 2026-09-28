@@ -459,11 +459,21 @@ export async function createProcedureComponentFixture(root, {
 export async function createAgenticProcedureComponentFixture(root, {
   id = 'research-brief-procedure',
   version = '1.0.0',
+  procedureId = 'org.openadam.test.research-brief',
+  method = null,
+  inputSchema: schemaOverride = null,
+  outputSchema: outputOverride = null,
+  permissions = ['model.invoke', 'network.read'],
+  resources = [],
+  outputArtifacts = ['brief'],
+  displayName = 'Research Brief',
+  summary = 'Produce a checked research brief without a Git workspace.',
 } = {}) {
   const catalogRoot = join(root, 'catalog')
   await mkdir(join(catalogRoot, 'artifacts'), { recursive: true })
   const { researchBriefMethod } = await import('../packages/procedure-runtime/src/profiles/research-brief.mjs')
-  const inputSchema = {
+  const resolvedMethod = method ?? researchBriefMethod
+  const inputSchema = schemaOverride ?? {
     type: 'object',
     additionalProperties: false,
     required: ['goal', 'audience'],
@@ -472,14 +482,14 @@ export async function createAgenticProcedureComponentFixture(root, {
       audience: { type: 'string', minLength: 1 },
     },
   }
-  const outputSchema = {
+  const outputSchema = outputOverride ?? {
     type: 'object',
     additionalProperties: false,
     required: ['brief'],
     properties: { brief: { type: 'string', minLength: 1 } },
   }
   const files = [
-    ['method.json', [Buffer.from(`${JSON.stringify(researchBriefMethod, null, 2)}\n`), false]],
+    ['method.json', [Buffer.from(`${JSON.stringify(resolvedMethod, null, 2)}\n`), false]],
     ['input.schema.json', [Buffer.from(`${JSON.stringify(inputSchema, null, 2)}\n`), false]],
     ['output.schema.json', [Buffer.from(`${JSON.stringify(outputSchema, null, 2)}\n`), false]],
   ]
@@ -492,21 +502,21 @@ export async function createAgenticProcedureComponentFixture(root, {
     identityFiles: ['method.json', 'input.schema.json', 'output.schema.json'],
     entrypoints: {},
     presentation: {
-      displayName: 'Research Brief',
-      summary: 'Produce a checked research brief without a Git workspace.',
+      displayName,
+      summary,
       author: 'Fixture Developer',
     },
     integration: {
       schemaVersion: 'openadam.agent-host-procedure-integration.v0.2',
-      displayName: 'Research Brief',
-      summary: 'Produce a checked research brief without a Git workspace.',
+      displayName,
+      summary,
       procedure: {
-        id: 'org.openadam.test.research-brief',
+        id: procedureId,
         version,
         inputSchema: 'input.schema.json',
         outputSchema: 'output.schema.json',
-        permissions: ['model.invoke', 'network.read'],
-        resources: [],
+        permissions,
+        resources,
         lifecycle: {
           mode: 'stateful',
           resumable: true,
@@ -516,7 +526,7 @@ export async function createAgenticProcedureComponentFixture(root, {
       execution: {
         kind: 'agentic-runner',
         method: 'method.json',
-        outputArtifacts: ['brief'],
+        outputArtifacts,
         identityFiles: ['method.json'],
       },
       ownership: { uninstall: 'agent-host-created-only' },

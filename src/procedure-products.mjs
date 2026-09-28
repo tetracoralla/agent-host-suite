@@ -158,6 +158,13 @@ async function waitForStop(coordinator, taskId, timeoutMs) {
 }
 
 function resultEnvelope(procedure, task, outputs = undefined) {
+  const pendingPermissions = (task.status === 'waiting_user' ? (task.permissions ?? []) : [])
+    .filter((permission) => permission.status === 'pending')
+    .map((permission) => ({
+      id: permission.id,
+      method: permission.method ?? null,
+      requiredGrant: permission.requiredGrant ?? null,
+    }))
   return {
     schemaVersion: 'openadam.agent-host-procedure-result.v0.1',
     status: task.status,
@@ -175,10 +182,25 @@ function resultEnvelope(procedure, task, outputs = undefined) {
         ...(task.question.options === undefined ? {} : { options: task.question.options }),
       },
     }),
+    ...(pendingPermissions.length === 0 ? {} : { pendingPermissions }),
     ...(task.problem === null || task.problem === undefined ? {} : {
       error: task.problem,
     }),
   }
+}
+
+function childRunSegment(idempotencyKey) {
+  const safe = idempotencyKey.replace(/[^a-zA-Z0-9._-]+/gu, '-').slice(0, 48) || 'child'
+  return `${safe}-${createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 12)}`
+}
+
+function procedureRunRoot(paths, request, dependencies) {
+  const stack = dependencies.procedureStack ?? []
+  if (stack.length === 0) return join(paths.runtime, 'procedure-runs')
+  // Subprocedure runs get their own coordinator state directory keyed by the
+  // delegating attempt's idempotency key: the parent coordinator stays open
+  // while the child executes, and one store root admits exactly one owner.
+  return join(paths.runtime, 'procedure-runs', 'children', childRunSegment(request.idempotencyKey))
 }
 
 function taskProcedure(task, current = undefined) {
@@ -546,10 +568,13 @@ function coordinatorOptions(state, paths, products, dependencies, stack = []) {
           limits: call.limits,
           idempotencyKey: call.idempotencyKey,
         },
-      }, { ...dependencies, procedureStack: [...stack, identity] })
+      }, {
+        ...dependencies,
+        procedureStack: [...stack, identity],
+        workspaceDelegation: call.delegation ?? null,
+      })
       if (result.status !== 'complete')
-        fail('SUBPROCEDURE_WAIT_REQUIRED', `Subprocedure ${identity} did not complete synchronously`, {
-          taskId: result.taskId,
+        fail('SUBPROCEDURE_WAIT_REQUIRED', `Subprocedure ${identity} stopped ${result.status} before completing. Resume or retry the parent Run; the nested Run is not continued on its own.`, {
           status: result.status,
         })
       return result.outputs
@@ -574,7 +599,7 @@ export async function invokeInstalledProcedure(options, dependencies = {}) {
   if (procedure.execution.kind === 'direct-runtime') {
     result = await cachedDirectInvocation(paths, state, component, procedure, request, dependencies)
   } else {
-    const coordinator = new Coordinator(join(paths.runtime, 'procedure-runs'), {
+    const coordinator = new Coordinator(procedureRunRoot(paths, request, dependencies), {
       ...coordinatorOptions(
         state,
         paths,
@@ -582,6 +607,7 @@ export async function invokeInstalledProcedure(options, dependencies = {}) {
         dependencies,
         dependencies.procedureStack ?? [`${procedure.id}@${procedure.version}`],
       ),
+      ...(dependencies.workspaceDelegation ? { workspaceDelegation: dependencies.workspaceDelegation } : {}),
     })
     try {
       let task
@@ -606,9 +632,10 @@ export async function invokeInstalledProcedure(options, dependencies = {}) {
           expectedRevision: task.revision,
           action: 'start',
         })
-      const final = stopped.has(coordinator.get(task.id).status)
-        ? coordinator.get(task.id)
-        : await waitForStop(coordinator, task.id, request.limits.maxDurationMs)
+      if (!stopped.has(coordinator.get(task.id).status))
+        await waitForStop(coordinator, task.id, request.limits.maxDurationMs)
+      await coordinator.finishSession()
+      const final = coordinator.get(task.id)
       result = resultEnvelope(
         procedure,
         final,
@@ -667,6 +694,12 @@ function continuation(task, input) {
   if (input.action === 'resume' || input.action === 'cancel') {
     return { ...common, action: input.action }
   }
+  if (input.action === 'permission') {
+    fail(
+      'PROCEDURE_PERMISSION_SESSION_REQUIRED',
+      'Provider permission decisions are accepted only by the live Runner session that holds the turn. One-shot procedure continue cannot answer them.',
+    )
+  }
   if (input.action === 'input') {
     if (typeof input.text !== 'string' || input.text.length === 0) fail('PROCEDURE_CONTINUATION_INVALID', 'Procedure input requires text')
     return {
@@ -699,7 +732,9 @@ export async function continueProcedureRun(options, dependencies = {}) {
       ? procedureDependencySnapshot(state, currentComponent)
       : null
     coordinator.command(task.id, continuation(task, options.input))
-    const final = await waitForStop(coordinator, task.id, options.timeoutMs ?? 30 * 60 * 1000)
+    await waitForStop(coordinator, task.id, options.timeoutMs ?? 30 * 60 * 1000)
+    await coordinator.finishSession()
+    const final = coordinator.get(task.id)
     const result = resultEnvelope(
       procedure,
       final,

@@ -153,6 +153,25 @@ definitions read-only and does not open a Studio project.
 Changing a Procedure requires a new validated product version; prior Runs keep
 the identity, Method and declared-output snapshot with which they started.
 
+Installed subprocedure execution resolves the exact child identity through the
+Host catalog and records the child Run in its own coordinator state directory
+under `procedure-runs/children/`, keyed by the delegating attempt. The parent
+releases a delegated checkout while the child runs. The child lease names the
+parent as the owner it must return to. When the child coordinator has closed
+and its worker is gone, the parent takes the checkout back and keeps the
+child's own error. A worker that is still alive keeps the checkout.
+
+A delegated subprocedure may change that workspace. The parent records the new
+candidate and continues. A direct call, condition, or transform still may not.
+
+Provider permission decisions are accepted by the live Runner session that
+holds the turn: Procedure Studio's Test Run action, or
+`POST /api/tasks/:id/command` with action `permission`. A one-shot
+`procedure invoke` or `procedure continue` ends that session first. The held
+turn is interrupted, pending permissions expire, and the returned result is
+the durable paused or completed Run. `procedure continue` does not accept
+`permission`.
+
 The schema is intentionally bounded rather than a universal DSL: conditions use
 `equals`, `not_equals`, `in` or `exists`; deterministic transforms use a bounded
 path/literal/object/array expression tree; the current workspace adapter is

@@ -176,7 +176,7 @@ export class StudioRuntime {
 
   action(runId, action) {
     const { coordinator, task } = this.find(runId)
-    const allowed = new Set(['start', 'resume', 'pause', 'cancel', 'answer', 'input', 'limits'])
+    const allowed = new Set(['start', 'resume', 'pause', 'cancel', 'answer', 'input', 'limits', 'permission'])
     if (!allowed.has(action.action)) throw studioError('STUDIO_RUN_ACTION_INVALID', `Unsupported Test Run action: ${action.action}`)
     coordinator.command(task.id, {
       ...structuredClone(action),
