@@ -1,105 +1,11 @@
-const outcome = (value, to, label) => ({
-  when: { path: 'outcome', operator: 'equals', value },
-  to,
-  label,
-})
+import { readFileSync } from 'node:fs'
 
-export const researchBriefMethod = {
-  schema: 'openadam.method-graph.v2',
-  profile: null,
-  id: 'research-brief',
-  revision: 1,
-  name: '研究简报',
-  description: '收集材料、核对覆盖范围，再形成面向指定读者的简报；不依赖 Git 或代码候选。',
-  roles: [
-    {
-      id: 'researcher',
-      name: '资料研究',
-      defaultBinding: { provider: 'codex' },
-    },
-    {
-      id: 'fact-checker',
-      name: '事实核对',
-      independentFrom: ['researcher'],
-      defaultBinding: { provider: 'grok' },
-    },
-    {
-      id: 'editor',
-      name: '简报编辑',
-      includeReports: true,
-      defaultBinding: { provider: 'zcode' },
-    },
-  ],
-  inputs: [
-    { id: 'goal', name: '研究问题', type: 'text', required: true },
-    { id: 'audience', name: '目标读者', type: 'string', required: true },
-  ],
-  artifacts: [
-    { id: 'source-notes', name: '来源笔记', type: 'json', required: true },
-    { id: 'brief', name: '研究简报', type: 'text', required: true },
-  ],
-  permissions: [
-    { id: 'model.invoke', name: '调用所选 Agent' },
-    { id: 'network.read', name: '读取公开资料' },
-  ],
-  resources: [],
-  graph: {
-    entry: 'collect',
-    extensions: {
-      parallel: { version: 1, supported: false },
-      wait: { version: 1, supported: false },
-    },
-    nodes: [
-    {
-      id: 'collect',
-      name: '收集材料',
-      kind: 'agent-turn',
-      role: 'researcher',
-      instruction: '围绕问题收集可追溯材料，区分观察、来源与推断。',
-      access: 'none',
-      consumes: ['goal', 'audience'],
-      produces: ['source-notes'],
-      permissions: ['model.invoke', 'network.read'],
-      resources: [],
-      transitions: [outcome('complete', 'verify', '进入核对')],
-    },
-    {
-      id: 'verify',
-      name: '核对覆盖',
-      kind: 'agent-turn',
-      role: 'fact-checker',
-      instruction: '独立核对来源、关键反例与不确定性。材料不足时返回 changes_requested。',
-      access: 'none',
-      consumes: ['goal', 'audience', 'source-notes'],
-      produces: [],
-      permissions: ['model.invoke', 'network.read'],
-      resources: [],
-      transitions: [
-        {
-          when: {
-            path: 'facts.coverage',
-            operator: 'equals',
-            value: 'insufficient',
-          },
-          to: 'collect',
-          label: '补充材料',
-        },
-        outcome('complete', 'write', '形成简报'),
-      ],
-    },
-    {
-      id: 'write',
-      name: '形成简报',
-      kind: 'agent-turn',
-      role: 'editor',
-      instruction: '把已核对材料组织为面向目标读者的简洁结论，保留来源与不确定性。',
-      access: 'none',
-      consumes: ['goal', 'audience', 'source-notes'],
-      produces: ['brief'],
-      permissions: ['model.invoke'],
-      resources: [],
-      transitions: [outcome('complete', null, '完成')],
-    },
-    ],
-  },
-}
+// The Studio project is the only Research Brief Method. This module exposes
+// that same graph to development references and fixtures; installed Runs load
+// the sealed component copy, not this source path.
+const methodUrl = new URL(
+  '../../../procedure-studio/examples/research-brief/method.json',
+  import.meta.url,
+)
+
+export const researchBriefMethod = JSON.parse(readFileSync(methodUrl, 'utf8'))

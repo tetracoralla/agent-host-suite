@@ -1,11 +1,11 @@
 {
   "schemaVersion": "openadam.procedure-studio-scenario.v0.1",
-  "id": "needs-clarification",
-  "name": "Agent asks for one clarification",
-  "description": "The researcher pauses for one Agent-mediated answer, then the same Run continues through coverage and the declared brief.",
+  "id": "coverage-rework",
+  "name": "Insufficient coverage returns to research",
+  "description": "The fact-checker sends coverage back to the researcher once, then the Run completes with the declared brief.",
   "inputs": {
-    "goal": "Explain local-first research workflows",
-    "audience": "Procedure developers"
+    "goal": "Compare two local research workflows",
+    "audience": "Maintainers"
   },
   "grants": ["model.invoke", "network.read"],
   "resources": {},

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, truncate, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -133,14 +133,14 @@ async function fileVitalsRepository(t) {
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.name', 'Agent Host Test'], { cwd: root })
   await execFileAsync((process.platform === 'win32' ? 'git.exe' : '/usr/bin/git'), ['config', 'user.email', 'agent-host@example.invalid'], { cwd: root })
   const bundle = 'file-vitals-0.3.3-darwin-arm64'
-  await mkdir(join(root, '.codex-plugin'), { recursive: true })
+  await mkdir(join(root, 'packaging/codex-plugin/.codex-plugin'), { recursive: true })
   await mkdir(join(root, 'payload', bundle, '.codex-plugin'), { recursive: true })
   await mkdir(join(root, 'payload', bundle, 'capabilities'), { recursive: true })
   await mkdir(join(root, 'payload', bundle, 'runtime'), { recursive: true })
   await mkdir(join(root, 'scripts'), { recursive: true })
   await writeFile(join(root, '.gitignore'), 'dist/\n')
   const plugin = `${JSON.stringify({ name: 'file-vitals', version: '0.3.3' })}\n`
-  await writeFile(join(root, '.codex-plugin/plugin.json'), plugin)
+  await writeFile(join(root, 'packaging/codex-plugin/.codex-plugin/plugin.json'), plugin)
   await writeFile(join(root, 'payload', bundle, '.codex-plugin/plugin.json'), plugin)
   await writeFile(join(root, 'payload', bundle, 'capabilities/provider.json'), `${JSON.stringify({
     provider: { id: 'io.github.tetracoralla.file-vitals', version: '0.3.3' },
@@ -321,11 +321,16 @@ test('remote-tagged File Vitals builds twice from tracked source without a prebu
     await assert.rejects(() => access(join(materialized['file-vitals'], 'dist')), (error) => error.code === 'ENOENT')
     const scratchRoot = join(runRoot, 'scratch')
     await mkdir(scratchRoot)
-    results.push(await buildFileVitalsPluginFromSource({
+    const resolvedScratch = await realpath(scratchRoot)
+    const built = await buildFileVitalsPluginFromSource({
       sourceRoot: materialized['file-vitals'],
       scratchRoot,
       sourceObservation: observation,
-    }))
+    })
+    assert.equal(built.pluginRoot.startsWith(materialized['file-vitals']), false)
+    assert.equal(built.pluginRoot.startsWith(resolvedScratch), true)
+    assert.equal(built.archivePath.startsWith(resolvedScratch), true)
+    results.push(built)
   }
   assert.equal(results[0].version, '0.3.3')
   assert.equal(results[0].sourceRevision, fixture.revision)

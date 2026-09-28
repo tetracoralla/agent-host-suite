@@ -3,73 +3,191 @@
   "profile": null,
   "id": "research-brief",
   "revision": 1,
-  "name": "Research brief",
-  "description": "Route complete topics directly and pause incomplete topics for one explicit clarification before producing a declared brief.",
-  "roles": [],
+  "name": "研究简报",
+  "description": "收集材料、核对覆盖范围，再形成面向指定读者的简报；不依赖 Git 或代码候选。",
+  "roles": [
+    {
+      "id": "researcher",
+      "name": "资料研究",
+      "defaultBinding": {
+        "provider": "codex"
+      }
+    },
+    {
+      "id": "fact-checker",
+      "name": "事实核对",
+      "independentFrom": [
+        "researcher"
+      ],
+      "defaultBinding": {
+        "provider": "grok"
+      }
+    },
+    {
+      "id": "editor",
+      "name": "简报编辑",
+      "includeReports": true,
+      "defaultBinding": {
+        "provider": "zcode"
+      }
+    }
+  ],
   "inputs": [
-    { "id": "topic", "name": "Topic", "type": "text", "required": true },
-    { "id": "coverage_complete", "name": "Coverage complete", "type": "boolean", "required": true }
+    {
+      "id": "goal",
+      "name": "研究问题",
+      "type": "text",
+      "required": true
+    },
+    {
+      "id": "audience",
+      "name": "目标读者",
+      "type": "string",
+      "required": true
+    }
   ],
   "artifacts": [
-    { "id": "answer", "name": "Working answer", "type": "text", "required": false },
-    { "id": "brief", "name": "Research brief", "type": "text", "required": true }
+    {
+      "id": "source-notes",
+      "name": "来源笔记",
+      "type": "json",
+      "required": true
+    },
+    {
+      "id": "brief",
+      "name": "研究简报",
+      "type": "text",
+      "required": true
+    }
   ],
-  "permissions": [],
+  "permissions": [
+    {
+      "id": "model.invoke",
+      "name": "调用所选 Agent"
+    },
+    {
+      "id": "network.read",
+      "name": "读取公开资料"
+    }
+  ],
   "resources": [],
   "graph": {
-    "entry": "check-coverage",
+    "entry": "collect",
     "extensions": {
-      "parallel": { "version": 1, "supported": false },
-      "wait": { "version": 1, "supported": false }
+      "parallel": {
+        "version": 1,
+        "supported": false
+      },
+      "wait": {
+        "version": 1,
+        "supported": false
+      }
     },
     "nodes": [
       {
-        "id": "check-coverage",
-        "name": "Check coverage",
-        "kind": "condition",
-        "consumes": ["coverage_complete"],
-        "produces": [],
-        "permissions": [],
+        "id": "collect",
+        "name": "收集材料",
+        "kind": "agent-turn",
+        "role": "researcher",
+        "instruction": "围绕问题收集可追溯材料，区分观察、来源与推断。",
+        "access": "none",
+        "consumes": [
+          "goal",
+          "audience"
+        ],
+        "produces": [
+          "source-notes"
+        ],
+        "permissions": [
+          "model.invoke",
+          "network.read"
+        ],
         "resources": [],
         "transitions": [
-          { "id": "check-coverage-covered", "when": { "path": "inputs.coverage_complete", "operator": "equals", "value": true }, "to": "use-topic", "label": "Covered" },
-          { "id": "check-coverage-clarify", "when": { "operator": "always" }, "to": "clarify", "label": "Needs clarification" }
+          {
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": "verify",
+            "label": "进入核对",
+            "id": "collect-verify"
+          }
         ]
       },
       {
-        "id": "use-topic",
-        "name": "Use scoped topic",
-        "kind": "transform",
-        "consumes": ["topic"],
-        "produces": ["answer"],
-        "permissions": [],
+        "id": "verify",
+        "name": "核对覆盖",
+        "kind": "agent-turn",
+        "role": "fact-checker",
+        "instruction": "独立核对来源、关键反例与不确定性。材料不足时在 facts.coverage 返回 insufficient；覆盖充分时返回 sufficient。",
+        "access": "none",
+        "consumes": [
+          "goal",
+          "audience",
+          "source-notes"
+        ],
+        "produces": [],
+        "permissions": [
+          "model.invoke",
+          "network.read"
+        ],
         "resources": [],
-        "output": { "answer": { "path": "inputs.topic" } },
-        "transitions": [{ "id": "use-topic-compose", "when": { "operator": "always" }, "to": "compose" }]
+        "transitions": [
+          {
+            "when": {
+              "path": "facts.coverage",
+              "operator": "equals",
+              "value": "insufficient"
+            },
+            "to": "collect",
+            "label": "补充材料",
+            "id": "verify-rework"
+          },
+          {
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": "write",
+            "label": "形成简报",
+            "id": "verify-write"
+          }
+        ]
       },
       {
-        "id": "clarify",
-        "name": "Request clarification",
-        "kind": "human-input",
-        "consumes": ["topic"],
-        "produces": ["answer"],
-        "permissions": [],
+        "id": "write",
+        "name": "形成简报",
+        "kind": "agent-turn",
+        "role": "editor",
+        "instruction": "把已核对材料组织为面向目标读者的简洁结论，保留来源与不确定性。",
+        "access": "none",
+        "consumes": [
+          "goal",
+          "audience",
+          "source-notes"
+        ],
+        "produces": [
+          "brief"
+        ],
+        "permissions": [
+          "model.invoke"
+        ],
         "resources": [],
-        "prompt": "What single constraint or audience detail should the final brief preserve?",
-        "interaction": "input",
-        "responseArtifact": "answer",
-        "transitions": [{ "id": "clarify-compose", "when": { "operator": "always" }, "to": "compose" }]
-      },
-      {
-        "id": "compose",
-        "name": "Compose declared output",
-        "kind": "transform",
-        "consumes": ["answer"],
-        "produces": ["brief"],
-        "permissions": [],
-        "resources": [],
-        "output": { "brief": { "path": "outputs.answer" } },
-        "transitions": [{ "id": "compose-complete", "when": { "operator": "always" }, "to": null, "label": "Complete" }]
+        "transitions": [
+          {
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": null,
+            "label": "完成",
+            "id": "write-complete"
+          }
+        ]
       }
     ]
   }

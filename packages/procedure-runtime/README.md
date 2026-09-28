@@ -144,12 +144,12 @@ If automatic staging was not selected, the calling Agent can explicitly
    commit hooks or sign commits; repositories requiring those policies should
    use their normal reviewed commit workflow instead.
 
-Procedure development is a separate source and packaging concern. The intended
-developer surface is a graphical Procedure Studio for structure, validation,
-test Runs and package/export—not this consumer API and not Agent Host Manager.
-That Studio is not implemented by this package. It must read and write the same
-Method Graph v2 source without a UI-private representation. The consumer HTTP
-API exposes installed definitions read-only.
+Procedure development is a separate source and packaging concern. The graphical
+Procedure Studio in `packages/procedure-studio` owns structure, validation,
+test Runs and package/export. This Runner package does not implement that
+interface. Studio reads and writes the same Method Graph v2 source; it does
+not keep a second graph format. The consumer HTTP API exposes installed
+definitions read-only and does not open a Studio project.
 Changing a Procedure requires a new validated product version; prior Runs keep
 the identity, Method and declared-output snapshot with which they started.
 

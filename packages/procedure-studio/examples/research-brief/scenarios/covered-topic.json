@@ -1,18 +1,25 @@
 {
   "schemaVersion": "openadam.procedure-studio-scenario.v0.1",
   "id": "covered-topic",
-  "name": "Coverage already complete",
-  "description": "Takes the deterministic branch and completes without a human checkpoint.",
-  "inputs": { "topic": "A concise brief for local-first Procedure developers", "coverage_complete": true },
-  "grants": [],
+  "name": "Coverage already sufficient",
+  "description": "Researcher, fact-checker, and editor each complete once and return the declared brief.",
+  "inputs": {
+    "goal": "Write a concise brief for local-first Procedure developers",
+    "audience": "Procedure developers"
+  },
+  "grants": ["model.invoke", "network.read"],
   "resources": {},
   "limits": {
     "maxDurationMs": 60000,
     "maxNodeExecutions": 12,
-    "maxAgentTurns": 0,
+    "maxAgentTurns": 8,
     "nodeTimeoutMs": 10000,
     "maxAttemptsPerNode": 4,
     "maxOutputBytes": 65536
   },
-  "bindings": {}
+  "bindings": {
+    "researcher": { "provider": "codex" },
+    "fact-checker": { "provider": "grok" },
+    "editor": { "provider": "zcode" }
+  }
 }

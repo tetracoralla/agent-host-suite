@@ -1,13 +1,13 @@
 {
   "schemaVersion": "openadam.agent-host-procedure-integration.v0.2",
   "displayName": "Research Brief",
-  "summary": "Turn a scoped topic into a declared brief, pausing for one structured clarification when coverage is incomplete.",
+  "summary": "Collect sources, check coverage, and write a brief for a named audience, pausing when an Agent needs one explicit clarification.",
   "procedure": {
     "id": "org.openadam.example.research-brief",
     "version": "1.0.0",
     "inputSchema": "input.schema.json",
     "outputSchema": "output.schema.json",
-    "permissions": [],
+    "permissions": ["model.invoke", "network.read"],
     "resources": [],
     "lifecycle": {
       "mode": "stateful",

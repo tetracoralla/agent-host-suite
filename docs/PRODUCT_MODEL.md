@@ -132,7 +132,9 @@ debugging and deliberate editing.
 
 The Git development-and-review profile owns its stronger candidate, independent
 review, staging and commit rules. A no-workspace research-brief method provides
-a structurally different Agent flow with a question/continuation branch. A
+a structurally different Agent flow: researcher, independent fact-checker and
+editor roles, a coverage rework route, and an Agent question that continues
+in the same Run. A
 workspace composition reference crosses an Agent turn, a Direct Capability and
 an exact subprocedure under explicit grants and resource bindings. These prove
 the local model is not defined by the development profile; they do not by

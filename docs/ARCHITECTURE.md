@@ -74,12 +74,13 @@ bindings, so admission rejects a Direct Procedure that declares resources
 instead of installing a product that can never run. An agentic graph may bind a
 workspace while calling a Direct node that needs no resource binding.
 
-The intended authoring client is a separate graphical Procedure Studio in the
-Developer Kit: graph editing, contract inspection, validation, test execution
-and packaging share one source model. This checkout does not currently contain
-that Studio implementation. The absence is an unfinished developer-product
-surface, not a reason to repurpose the headless runtime or consumer Manager as a
-long form editor.
+The authoring client is Procedure Studio in `packages/procedure-studio`: graph
+editing, contract inspection, validation, test execution and packaging share
+one Method Graph v2 source model. Studio project files are a development
+input. After preview admission, Host installs the sealed component into its
+own package directory, and later Runs read that installed Method, schemas and
+contract. They do not read the Studio project, and the consumer Manager is
+not a graph editor.
 
 Host adapters call documented Agent-app extension commands and write only state
 owned by those public mechanisms. An Agent-app update may require a fresh

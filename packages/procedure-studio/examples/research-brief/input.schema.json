@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["topic", "coverage_complete"],
+  "required": ["goal", "audience"],
   "properties": {
-    "topic": { "type": "string", "minLength": 1 },
-    "coverage_complete": { "type": "boolean" }
+    "goal": { "type": "string", "minLength": 1 },
+    "audience": { "type": "string", "minLength": 1 }
   }
 }

@@ -86,6 +86,7 @@ export class AgentAdapter {
     binding,
     {
       workspace,
+      workspaceAdapter = 'git',
       stateRoot,
       contextRoot,
       writable = false,
@@ -115,6 +116,7 @@ export class AgentAdapter {
     if (enclose) {
       const [wrapper, flags] = workerSandbox(workspace, {
         writable,
+        workspaceAdapter,
         stateRoot,
         contextRoot,
         protectedPaths,

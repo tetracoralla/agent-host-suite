@@ -771,6 +771,40 @@ test(
   },
 )
 
+test(
+  'no-workspace sandbox starts without Git and exposes only its attempt context inside Runner state',
+  { skip: process.platform !== 'darwin' },
+  (t) => {
+    const state = mkdtempSync(join(tmpdir(), 'procedure-no-workspace-state-'))
+    t.after(() => rmSync(state, { recursive: true, force: true }))
+    const contextRoot = join(state, 'worker-context', 'owned')
+    mkdirSync(contextRoot, { recursive: true })
+    writeFileSync(join(contextRoot, 'task-context.json'), 'own facts')
+    writeFileSync(join(state, 'other-task.json'), 'private other task')
+    const [program, args] = workerSandbox(state, {
+      stateRoot: state,
+      contextRoot,
+      workspaceAdapter: 'none',
+      writable: false,
+    })
+    assert.equal(execFileSync(
+      program,
+      [...args, '/bin/cat', join(contextRoot, 'task-context.json')],
+      { encoding: 'utf8' },
+    ), 'own facts')
+    assert.throws(() => execFileSync(
+      program,
+      [...args, '/bin/cat', join(state, 'other-task.json')],
+      { stdio: 'pipe' },
+    ))
+    assert.throws(() => execFileSync(
+      program,
+      [...args, '/bin/sh', '-c', 'printf overwrite > "$1"', 'fixture', join(contextRoot, 'task-context.json')],
+      { stdio: 'pipe' },
+    ))
+  },
+)
+
 test('prepared commit rejects newly staged candidate-path work and never clobbers it', (t) => {
   const f = fixture(t)
   const base = snapshot(f.workspace)
@@ -915,6 +949,7 @@ test('a non-development method runs without Git, uses open roles, conditional re
   const result = c.get(task.id)
   assert.equal(result.workspace, null)
   assert.equal(result.workspaceAdapter, 'none')
+  assert.equal(mock.calls[0].options.workspaceAdapter, 'none')
   assert.deepEqual(
     result.attempts.map((attempt) => attempt.stage),
     ['collect', 'verify', 'collect', 'verify', 'write'],

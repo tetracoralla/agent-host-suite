@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { constants } from 'node:fs'
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, join, sep } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { runFile } from '../src/process.mjs'
 import {
@@ -83,8 +83,9 @@ export async function buildFileVitalsPluginFromSource({
   }
   const source = await realpath(sourceRoot)
   const scratch = await realpath(scratchRoot)
+  const pluginManifestPath = join(source, 'packaging/codex-plugin/.codex-plugin/plugin.json')
   const plugin = parseManifest(
-    await readFile(join(source, '.codex-plugin/plugin.json'), 'utf8'),
+    await readFile(pluginManifestPath, 'utf8'),
     'File Vitals plugin manifest',
   )
   if (plugin.name !== 'file-vitals' || plugin.version !== FILE_VITALS_COMPATIBILITY_VERSION) {
@@ -194,9 +195,22 @@ export async function buildFileVitalsPluginFromSource({
     ) {
       throw new Error('File Vitals source build archive identity or launcher differs from the Host contract')
     }
+    const extracted = await extractVerifiedProviderPluginArchive({
+      sourceArchive: archivePath,
+      archiveWork: join(releaseDirectory, 'extracted'),
+      expectedRoot: bundleName,
+      expectedSha256: `sha256:${digest}`,
+      label: 'File Vitals isolated plugin',
+      targetFilesystem: 'macos-default',
+      runner,
+    })
+    const sourcePrefix = source.endsWith(sep) ? source : `${source}${sep}`
+    if (extracted.extractedRoot === source || extracted.extractedRoot.startsWith(sourcePrefix)) {
+      throw new Error('File Vitals isolated plugin root must not remain inside the source repository')
+    }
     return {
       archivePath,
-      pluginRoot: join(sourceReleaseRoot, bundleName),
+      pluginRoot: extracted.extractedRoot,
       archiveRoot: bundleName,
       version: FILE_VITALS_COMPATIBILITY_VERSION,
       sha256: `sha256:${digest}`,

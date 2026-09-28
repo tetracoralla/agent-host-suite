@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { importLocalComponent } from '../../../src/local-components.mjs'
 import { continueProcedureRun, invokeInstalledProcedure, listInstalledProcedures } from '../../../src/procedure-products.mjs'
+import { loadState, readStatePaths } from '../../../src/state.mjs'
 import { setup } from '../../../src/setup.mjs'
 import { compatibleApplicationState, createCodexRunner, healthyCatalogPreflight } from '../../../test/helpers.mjs'
 import { createReleaseFixture } from '../../../test/release-helpers.mjs'
@@ -41,14 +44,14 @@ test('canonical graph, source draft, save, reload, and external-change recovery 
   assert.equal(project.validation.valid, true)
   const original = project.publicState()
   const document = structuredClone(original.document)
-  document.method.graph.nodes.find((node) => node.id === 'clarify').prompt = 'Name the one audience constraint to preserve.'
+  document.method.graph.nodes.find((node) => node.id === 'collect').instruction = 'Name the one audience constraint to preserve.'
   const draft = await project.update({ expectedRevision: original.revision, document })
   assert.equal(draft.source.saved, false)
-  assert.equal((await StudioProject.open(projectRoot, stateRoot)).document.method.graph.nodes.find((node) => node.id === 'clarify').prompt, 'Name the one audience constraint to preserve.')
+  assert.equal((await StudioProject.open(projectRoot, stateRoot)).document.method.graph.nodes.find((node) => node.id === 'collect').instruction, 'Name the one audience constraint to preserve.')
   const saved = await project.save(draft.revision)
   assert.equal(saved.source.saved, true)
   const bytes = JSON.parse(await readFile(join(projectRoot, 'method.json'), 'utf8'))
-  assert.equal(bytes.graph.nodes.find((node) => node.id === 'clarify').prompt, 'Name the one audience constraint to preserve.')
+  assert.equal(bytes.graph.nodes.find((node) => node.id === 'collect').instruction, 'Name the one audience constraint to preserve.')
 
   const invalid = structuredClone(saved.document)
   invalid.method.graph.nodes[0].unknownStudioField = true
@@ -59,9 +62,9 @@ test('canonical graph, source draft, save, reload, and external-change recovery 
   await assert.rejects(project.save(invalidState.revision), (error) => error.code === 'STUDIO_VALIDATION_FAILED')
 
   const validDraft = structuredClone(saved.document)
-  validDraft.method.graph.nodes.find((node) => node.id === 'clarify').prompt = 'Preserve this private draft while reconciling.'
+  validDraft.method.graph.nodes.find((node) => node.id === 'collect').instruction = 'Preserve this private draft while reconciling.'
   const recoveredPresentation = structuredClone(invalidState.presentation)
-  recoveredPresentation.selection = ['clarify']
+  recoveredPresentation.selection = ['collect']
   const restored = await project.update({ expectedRevision: invalidState.revision, document: validDraft, presentation: recoveredPresentation })
   assert.equal(restored.validation.valid, true)
 
@@ -76,11 +79,11 @@ test('canonical graph, source draft, save, reload, and external-change recovery 
   assert.deepEqual(reconciled.presentation.selection, [])
   assert.equal(reconciled.document.method.description, 'Changed outside Studio.')
   assert.equal(reconciled.proposal.source, 'recovered-draft')
-  const recoveredNode = reconciled.proposal.changes.find((change) => change.kind === 'node-update' && change.affectedNodeIds.includes('clarify'))
+  const recoveredNode = reconciled.proposal.changes.find((change) => change.kind === 'node-update' && change.affectedNodeIds.includes('collect'))
   assert.ok(recoveredNode)
   const merged = await conflicted.decideProposal(reconciled.revision, { accept: [recoveredNode.id], reject: [] })
   assert.equal(merged.document.method.description, 'Changed outside Studio.')
-  assert.equal(merged.document.method.graph.nodes.find((node) => node.id === 'clarify').prompt, 'Preserve this private draft while reconciling.')
+  assert.equal(merged.document.method.graph.nodes.find((node) => node.id === 'collect').instruction, 'Preserve this private draft while reconciling.')
 })
 
 test('Agent source proposals expose semantic units and apply only accepted changes', async (t) => {
@@ -89,7 +92,7 @@ test('Agent source proposals expose semantic units and apply only accepted chang
   const candidate = structuredClone(current.document)
   candidate.integration.procedure.version = '1.1.0'
   candidate.method.revision = 2
-  candidate.method.graph.nodes.find((node) => node.id === 'compose').name = 'Assemble final brief'
+  candidate.method.graph.nodes.find((node) => node.id === 'write').name = 'Assemble final brief'
   const proposed = await project.loadProposal(current.revision, candidate)
   const version = proposed.proposal.changes.find((change) => change.kind === 'procedure-version')
   const node = proposed.proposal.changes.find((change) => change.kind === 'node-update')
@@ -97,23 +100,71 @@ test('Agent source proposals expose semantic units and apply only accepted chang
   assert.ok(node)
   const decided = await project.decideProposal(proposed.revision, { accept: [version.id], reject: [node.id] })
   assert.equal(decided.document.integration.procedure.version, '1.1.0')
-  assert.equal(decided.document.method.graph.nodes.find((item) => item.id === 'compose').name, 'Compose declared output')
+  assert.equal(decided.document.method.graph.nodes.find((item) => item.id === 'write').name, '形成简报')
   assert.equal(decided.proposalDecisions[version.id], 'accepted')
   assert.equal(decided.proposalDecisions[node.id], 'rejected')
 })
 
-test('Test Runs execute the real Coordinator, wait for human input, continue, cancel, and replay safely', async (t) => {
+function researchReport(extra) {
+  return JSON.stringify({
+    outcome: 'complete',
+    summary: 'Completed the Research Brief fixture step',
+    plan: 'Return the declared stage result',
+    findings: [],
+    checks: [],
+    resolvedFindingIds: [],
+    acknowledgedDecisionIds: [],
+    ...extra,
+  })
+}
+
+function researchAdapter(reports) {
+  return (binding) => ({
+    async initialize() { return { steer: 'unsupported', interrupt: 'supported' } },
+    async session(existing) { return { provider: binding.provider, id: existing ?? randomUUID(), model: 'fixture-only' } },
+    async start() { return { status: 'complete', text: reports.shift() } },
+    async interrupt() {},
+    async close() {},
+  })
+}
+
+function successfulBriefReports(brief) {
+  return [
+    researchReport({ outputs: { 'source-notes': { sources: ['fixture'], revision: 1 } } }),
+    researchReport({ facts: { coverage: 'sufficient' } }),
+    researchReport({ outputs: { brief } }),
+  ]
+}
+
+test('Test Runs execute the real Coordinator, wait for an Agent question, continue, cancel, recover, and replay safely', async (t) => {
   const { stateRoot, project } = await fixture(t)
-  const runtime = await StudioRuntime.open(join(stateRoot, 'runs'), project)
+  const reports = [
+    researchReport({ outcome: 'needs_user', question: 'Which audience constraint should the brief preserve?' }),
+    ...successfulBriefReports('A checked brief for Procedure developers.'),
+    researchReport({ outputs: { brief: 'A checked brief for Procedure developers.' } }),
+    researchReport({ outcome: 'needs_user', question: 'Cancel this clarification?' }),
+    researchReport({ outcome: 'failed', summary: 'The first research pass could not read its sources.' }),
+    ...successfulBriefReports('Recovered brief after the reported failure.'),
+    researchReport({ outputs: { 'source-notes': { sources: ['first'], revision: 1 } } }),
+    researchReport({ facts: { coverage: 'insufficient' } }),
+    researchReport({ outputs: { 'source-notes': { sources: ['first', 'counterexample'], revision: 2 } } }),
+    researchReport({ facts: { coverage: 'sufficient' } }),
+    researchReport({ outputs: { brief: 'Brief after one coverage rework.' } }),
+  ]
+  const runtime = await StudioRuntime.open(join(stateRoot, 'runs'), project, {
+    adapterFactory: researchAdapter(reports),
+  })
   try {
     const started = await runtime.start('needs-clarification')
     const waiting = await wait(runtime, started.id, 'waiting_user')
-    assert.equal(waiting.question.node, 'clarify')
+    assert.equal(waiting.question.kind, 'agent-question')
+    assert.equal(waiting.phase, 'collect')
     runtime.action(waiting.id, { action: 'answer', questionId: waiting.question.id, value: 'Keep the brief useful to local-first tool developers.' })
     const completed = await wait(runtime, waiting.id, 'complete')
-    assert.equal(completed.outputs.brief.value, 'Keep the brief useful to local-first tool developers.')
+    assert.equal(completed.outputs.brief.value, 'A checked brief for Procedure developers.')
+    assert.deepEqual(completed.attempts.map((attempt) => attempt.stage), ['collect', 'collect', 'verify', 'write'])
 
-    const replayed = await runtime.replay(completed.id, 'compose')
+    const replayed = await runtime.replay(completed.id, 'write')
     const replayComplete = await wait(runtime, replayed.id, 'complete')
     assert.equal(replayComplete.replayOf.taskId, completed.id)
     assert.equal(replayComplete.outputs.brief.value, completed.outputs.brief.value)
@@ -124,8 +175,17 @@ test('Test Runs execute the real Coordinator, wait for human input, continue, ca
     runtime.action(secondWaiting.id, { action: 'cancel' })
     assert.equal((await wait(runtime, second.id, 'cancelled')).question, null)
 
-    const deterministic = await runtime.start('covered-topic')
-    assert.equal((await wait(runtime, deterministic.id, 'complete')).outputs.brief.value, 'A concise brief for local-first Procedure developers')
+    const failed = await runtime.start('covered-topic')
+    const stopped = await wait(runtime, failed.id, 'failed')
+    assert.equal(stopped.problem.code, 'AGENT_REPORTED_FAILURE')
+    runtime.action(stopped.id, { action: 'resume' })
+    const recovered = await wait(runtime, failed.id, 'complete')
+    assert.equal(recovered.outputs.brief.value, 'Recovered brief after the reported failure.')
+
+    const reworked = await runtime.start('coverage-rework')
+    const reworkComplete = await wait(runtime, reworked.id, 'complete')
+    assert.equal(reworkComplete.outputs.brief.value, 'Brief after one coverage rework.')
+    assert.deepEqual(reworkComplete.attempts.map((attempt) => attempt.stage), ['collect', 'verify', 'collect', 'verify', 'write'])
   } finally {
     await runtime.close()
   }
@@ -223,17 +283,21 @@ test('a captured Run request saves as a new project Test scenario and runs', asy
   const saved = await project.saveScenario(project.revision, {
     name: 'Rushed Coverage',
     description: 'Captured from a completed review Run.',
-    inputs: { topic: 'scenario capture', coverage_complete: true },
-    grants: [],
+    inputs: { goal: 'Capture a reusable research scenario', audience: 'Reviewers' },
+    grants: ['model.invoke', 'network.read'],
     resources: {},
     limits,
-    bindings: {},
+    bindings: {
+      researcher: { provider: 'codex' },
+      'fact-checker': { provider: 'grok' },
+      editor: { provider: 'zcode' },
+    },
   })
   const scenario = saved.scenarios.find((item) => item.id === 'rushed-coverage')
   assert.ok(scenario)
   const persisted = JSON.parse(await readFile(join(projectRoot, 'scenarios', 'rushed-coverage.json'), 'utf8'))
   assert.equal(persisted.schemaVersion, 'openadam.procedure-studio-scenario.v0.1')
-  assert.equal(persisted.inputs.coverage_complete, true)
+  assert.equal(persisted.inputs.audience, 'Reviewers')
   const config = JSON.parse(await readFile(join(projectRoot, 'studio.project.json'), 'utf8'))
   assert.ok(config.scenarios.includes('scenarios/rushed-coverage.json'))
   const sourceSaved = await project.save(saved.revision)
@@ -241,11 +305,13 @@ test('a captured Run request saves as a new project Test scenario and runs', asy
   assert.equal(sourceSaved.source.saved, true)
 
   const reopened = await StudioProject.open(projectRoot, stateRoot)
-  assert.deepEqual(new Set(reopened.scenarios.map((item) => item.id)), new Set(['covered-topic', 'needs-clarification', 'rushed-coverage']))
-  const runtime = await StudioRuntime.open(join(stateRoot, 'runs'), reopened)
+  assert.deepEqual(new Set(reopened.scenarios.map((item) => item.id)), new Set(['covered-topic', 'needs-clarification', 'coverage-rework', 'rushed-coverage']))
+  const runtime = await StudioRuntime.open(join(stateRoot, 'runs'), reopened, {
+    adapterFactory: researchAdapter(successfulBriefReports('Captured research brief.')),
+  })
   try {
     const started = await runtime.start('rushed-coverage')
-    assert.equal((await wait(runtime, started.id, 'complete')).outputs.brief.value, 'scenario capture')
+    assert.equal((await wait(runtime, started.id, 'complete')).outputs.brief.value, 'Captured research brief.')
     const list = runtime.list()
     assert.equal(list.length, 1)
   } finally {
@@ -279,10 +345,10 @@ test('saved Test scenarios remain editable with stable identity and external-cha
   const current = project.publicState()
   const candidate = structuredClone(current.scenarios.find((item) => item.id === 'covered-topic'))
   candidate.name = 'Coverage with edited input'
-  candidate.inputs.topic = 'An edited reusable scenario'
+  candidate.inputs.goal = 'An edited reusable scenario'
   candidate.limits.maxNodeExecutions = 18
   const updated = await project.updateScenario(current.revision, candidate.id, candidate)
-  assert.equal(updated.scenarios.find((item) => item.id === candidate.id).inputs.topic, 'An edited reusable scenario')
+  assert.equal(updated.scenarios.find((item) => item.id === candidate.id).inputs.goal, 'An edited reusable scenario')
   const persisted = JSON.parse(await readFile(join(projectRoot, 'scenarios', 'covered-topic.json'), 'utf8'))
   assert.equal(persisted.name, 'Coverage with edited input')
   assert.equal(persisted.limits.maxNodeExecutions, 18)
@@ -304,9 +370,9 @@ test('saved Test scenarios remain editable with stable identity and external-cha
   const reloaded = await project.reloadScenarios(updated.revision)
   assert.equal(reloaded.scenarios.find((item) => item.id === candidate.id).description, 'Changed outside Studio.')
   const afterReload = structuredClone(reloaded.scenarios.find((item) => item.id === candidate.id))
-  afterReload.inputs.topic = 'Edited after external recovery'
+  afterReload.inputs.goal = 'Edited after external recovery'
   const recovered = await project.updateScenario(reloaded.revision, candidate.id, afterReload)
-  assert.equal(recovered.scenarios.find((item) => item.id === candidate.id).inputs.topic, 'Edited after external recovery')
+  assert.equal(recovered.scenarios.find((item) => item.id === candidate.id).inputs.goal, 'Edited after external recovery')
 })
 
 test('loopback Studio server requires its private token and same-origin mutation path', async (t) => {
@@ -329,7 +395,7 @@ test('loopback Studio server requires its private token and same-origin mutation
     const state = (await stateResponse.json()).state
 
     const scenario = structuredClone(state.scenarios.find((item) => item.id === 'covered-topic'))
-    scenario.inputs.topic = 'Updated through the private route'
+    scenario.inputs.goal = 'Updated through the private route'
     const scenarioUpdated = await fetch(`${studio.origin}/api/project/scenario/covered-topic`, {
       method: 'PUT',
       headers: { 'x-procedure-studio-token': studio.token, 'content-type': 'application/json' },
@@ -337,7 +403,7 @@ test('loopback Studio server requires its private token and same-origin mutation
     })
     assert.equal(scenarioUpdated.status, 200)
     const updatedState = (await scenarioUpdated.json()).state
-    assert.equal(updatedState.scenarios.find((item) => item.id === 'covered-topic').inputs.topic, 'Updated through the private route')
+    assert.equal(updatedState.scenarios.find((item) => item.id === 'covered-topic').inputs.goal, 'Updated through the private route')
     const scenariosReloaded = await fetch(`${studio.origin}/api/project/scenarios/reload`, {
       method: 'POST',
       headers: { 'x-procedure-studio-token': studio.token, 'content-type': 'application/json' },
@@ -369,8 +435,8 @@ test('loopback Studio server requires its private token and same-origin mutation
       body: JSON.stringify({
         expectedRevision: reloadedState.revision,
         name: 'Route Scenario',
-        inputs: { topic: 'route capture', coverage_complete: true },
-        grants: [],
+        inputs: { goal: 'Route capture', audience: 'Reviewers' },
+        grants: ['model.invoke', 'network.read'],
         resources: {},
         limits: state.scenarios[0].limits,
         bindings: {},
@@ -392,11 +458,42 @@ async function healthyComponentWarmup({ manifest, componentIds }) {
   return { status: 'ok', strategy: 'sequential-first-and-repeat', components: componentIds.map((id) => ({ id, version: manifest.components[id].version })) }
 }
 
-test('Studio package passes preview, isolated Host import/discovery, invocation, and continuation', async (t) => {
-  const { root, project } = await fixture(t)
+function hostProcedure(stateRoot, args, input) {
+  const cli = fileURLToPath(new URL('../../../bin/agent-host.mjs', import.meta.url))
+  return JSON.parse(execFileSync(process.execPath, [cli, ...args, '--state-root', stateRoot, '--json'], {
+    encoding: 'utf8',
+    input,
+  }))
+}
+
+test('Studio package passes preview, isolated Host import, Host CLI discovery/status/cancel, and installed runtime continuation without the project source', async (t) => {
+  const { root, projectRoot, stateRoot, project } = await fixture(t)
+  const opened = project.publicState()
+  const document = structuredClone(opened.document)
+  const marker = 'Installed Research Brief must run from sealed component bytes.'
+  document.method.graph.nodes.find((node) => node.id === 'collect').instruction = marker
+  const drafted = await project.update({ expectedRevision: opened.revision, document })
+  const saved = await project.save(drafted.revision)
+  assert.equal(saved.source.saved, true)
+  const studioRuntime = await StudioRuntime.open(join(stateRoot, 'runs'), project, {
+    adapterFactory: researchAdapter([
+      researchReport({ outcome: 'needs_user', question: 'Which constraint?' }),
+      ...successfulBriefReports('Studio scenario brief.'),
+    ]),
+  })
+  try {
+    const started = await studioRuntime.start('needs-clarification')
+    const waiting = await wait(studioRuntime, started.id, 'waiting_user')
+    studioRuntime.action(waiting.id, { action: 'answer', questionId: waiting.question.id, value: 'Keep the local constraint.' })
+    assert.equal((await wait(studioRuntime, waiting.id, 'complete')).outputs.brief.value, 'Studio scenario brief.')
+  } finally {
+    await studioRuntime.close()
+  }
+
   const packaged = await packageProject(project)
   assert.equal(packaged.preview.health.status, 'ok')
   assert.equal(packaged.effects.formalAgentHostStateChanged, false)
+  assert.equal(packaged.preview.component.procedureId, 'org.openadam.example.research-brief')
 
   const releaseManifest = await createReleaseFixture(join(root, 'host-release'), {
     suiteVersion: '0.1.1-studio-test',
@@ -434,31 +531,91 @@ test('Studio package passes preview, isolated Host import/discovery, invocation,
   assert.equal(imported.status, 'imported')
   const discovered = await listInstalledProcedures({ stateRoot: hostStateRoot })
   assert.deepEqual(discovered.procedures.map((item) => [item.id, item.version]), [['org.openadam.example.research-brief', '1.0.0']])
+  const listed = hostProcedure(hostStateRoot, ['procedure', 'list', '--query', 'research brief'])
+  assert.deepEqual(listed.procedures.map((item) => [item.id, item.version]), [['org.openadam.example.research-brief', '1.0.0']])
+  const described = hostProcedure(hostStateRoot, [
+    'procedure', 'describe', '--id', 'org.openadam.example.research-brief', '--version', '1.0.0',
+  ])
+  assert.deepEqual(described.procedure.inputSchema.required, ['goal', 'audience'])
+  assert.deepEqual(described.procedure.permissions, ['model.invoke', 'network.read'])
 
+  const installed = await loadState(await readStatePaths(hostStateRoot))
+  const component = installed.components['research-brief-procedure']
+  const methodPath = component.procedureExecution.methodPath
+  assert.equal(methodPath.includes(hostStateRoot), true)
+  assert.equal(methodPath.includes(projectRoot), false)
+  assert.match(await readFile(methodPath, 'utf8'), new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'))
+  const hiddenProject = join(root, 'studio-project-hidden')
+  await rename(projectRoot, hiddenProject)
+
+  const limits = {
+    maxDurationMs: 60_000,
+    maxNodeExecutions: 12,
+    maxAgentTurns: 8,
+    nodeTimeoutMs: 10_000,
+    maxAttemptsPerNode: 4,
+    maxOutputBytes: 65_536,
+  }
   const request = {
     schemaVersion: 'openadam.agent-host-procedure-run-request.v0.1',
     procedure: { id: 'org.openadam.example.research-brief', version: '1.0.0' },
-    inputs: { topic: 'Host-chain verification', coverage_complete: false },
-    grants: [],
+    inputs: { goal: 'Host-chain verification', audience: 'Reviewers' },
+    grants: ['model.invoke', 'network.read'],
     resources: {},
-    limits: {
-      maxDurationMs: 60_000,
-      maxNodeExecutions: 12,
-      maxAgentTurns: 0,
-      nodeTimeoutMs: 10_000,
-      maxAttemptsPerNode: 4,
-      maxOutputBytes: 65_536,
-    },
+    limits,
     idempotencyKey: 'studio-isolated-host-e2e',
   }
-  const invoked = await invokeInstalledProcedure({ stateRoot: hostStateRoot, request })
+  const reports = [
+    researchReport({ outcome: 'needs_user', question: 'Which constraint should the installed brief preserve?' }),
+    ...successfulBriefReports('Installed component brief.'),
+  ]
+  const adapterFactory = researchAdapter(reports)
+  const invoked = await invokeInstalledProcedure({ stateRoot: hostStateRoot, request }, { adapterFactory })
   assert.equal(invoked.status, 'waiting_user')
-  assert.equal(invoked.interaction.node, 'clarify')
+  assert.equal(invoked.interaction.kind, 'agent-question')
+  assert.equal(invoked.outputs, undefined)
+  const waiting = hostProcedure(hostStateRoot, ['procedure', 'status', '--run', invoked.taskId])
+  assert.equal(waiting.status, 'waiting_user')
+  assert.equal(waiting.interaction.kind, 'agent-question')
+
+  const cancelRequest = { ...request, idempotencyKey: 'studio-isolated-host-cancel' }
+  const cancelReports = [researchReport({ outcome: 'needs_user', question: 'Cancel from the Agent command?' })]
+  const cancelling = await invokeInstalledProcedure({ stateRoot: hostStateRoot, request: cancelRequest }, {
+    adapterFactory: researchAdapter(cancelReports),
+  })
+  const cancelled = hostProcedure(
+    hostStateRoot,
+    ['procedure', 'continue', '--run', cancelling.taskId, '--input', '-'],
+    `${JSON.stringify({ action: 'cancel' })}\n`,
+  )
+  assert.equal(cancelled.status, 'cancelled')
+
   const continued = await continueProcedureRun({
     stateRoot: hostStateRoot,
     run: invoked.taskId,
     input: { action: 'answer', value: 'Verified through the isolated Host chain.' },
-  })
+  }, { adapterFactory })
   assert.equal(continued.status, 'complete')
-  assert.deepEqual(continued.outputs, { brief: 'Verified through the isolated Host chain.' })
+  assert.deepEqual(continued.outputs, { brief: 'Installed component brief.' })
+
+  const failed = await invokeInstalledProcedure({
+    stateRoot: hostStateRoot,
+    request: { ...request, idempotencyKey: 'studio-isolated-host-failure' },
+  }, {
+    adapterFactory: researchAdapter([
+      researchReport({ outcome: 'failed', summary: 'The installed research pass failed before coverage.' }),
+    ]),
+  })
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.error.code, 'AGENT_REPORTED_FAILURE')
+  const recovered = await continueProcedureRun({
+    stateRoot: hostStateRoot,
+    run: failed.taskId,
+    input: { action: 'resume' },
+  }, {
+    adapterFactory: researchAdapter(successfulBriefReports('Recovered installed brief.')),
+  })
+  assert.equal(recovered.status, 'complete')
+  assert.deepEqual(recovered.outputs, { brief: 'Recovered installed brief.' })
+  assert.equal(methodPath.includes(hiddenProject), false)
 })

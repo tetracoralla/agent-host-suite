@@ -6,7 +6,8 @@
   "integration": "procedure.integration.json",
   "scenarios": [
     "scenarios/needs-clarification.json",
-    "scenarios/covered-topic.json"
+    "scenarios/covered-topic.json",
+    "scenarios/coverage-rework.json"
   ],
   "output": "dist"
 }

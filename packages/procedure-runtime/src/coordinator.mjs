@@ -1313,6 +1313,7 @@ export class Coordinator extends EventEmitter {
       mkdirSync(contextRoot, { recursive: true, mode: 0o700 })
       worker = this.adapterFactory(task.bindings[step.role], {
         workspace: task.workspace ?? this.store.root,
+        workspaceAdapter: task.workspaceAdapter,
         stateRoot: this.store.root,
         contextRoot,
         writable: isGitTask(task) && step.access === 'write',

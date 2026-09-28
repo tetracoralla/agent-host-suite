@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs'
 import { access, chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
 import { buildProvenance, inspectBuildSources, materializeGitSourceSnapshots } from './release-source-provenance.mjs'
@@ -767,6 +767,65 @@ async function buildAgentTool(workRoot, spec) {
   })
 }
 
+export async function buildFileVitalsComponent(workRoot, {
+  repositoryRoot = sourceRoots.fileVitals,
+  capabilityRoot = sourceRoots.capability,
+  pluginRoot,
+  pluginArchive,
+  pluginArchiveSha256,
+  sourceObservation,
+} = {}) {
+  const previousObservations = sourceObservations
+  if (sourceObservation !== undefined) {
+    sourceObservations = {
+      ...(sourceObservations ?? {}),
+      'file-vitals': sourceObservation,
+    }
+  }
+  try {
+    await mkdir(artifactRoot, { recursive: true })
+    const component = await buildAgentTool(workRoot, {
+      id: 'file-vitals',
+      displayName: 'File Vitals',
+      summary: 'Inspect and inventory files before acting on them.',
+      marketplace: 'file-vitals-local',
+      plugin: 'file-vitals',
+      sourceId: 'file-vitals',
+      repositoryRoot,
+      pluginRoot,
+      pluginArchive,
+      pluginArchiveSha256,
+      pluginArchiveRoot: `file-vitals-${FILE_VITALS_COMPATIBILITY_VERSION}-darwin-arm64`,
+      expectedVersion: FILE_VITALS_COMPATIBILITY_VERSION,
+      expectedTools: ['file_inspect', 'file_inspect_batch', 'workspace_inventory'],
+      workspaceEnvironment: ['UFI_WORKSPACE_ROOT'],
+      directCapability: {
+        providerId: 'io.github.tetracoralla.file-vitals',
+        capabilityId: 'org.openadam.file.inspect',
+        capabilityVersion: '0.1.0',
+        lifecycle: 'persistent',
+        workspaceRoot: 'host-required',
+        manifest: 'capabilities/provider.json',
+        adapterCommand: 'runtime/file-vitals-capability',
+        profileSource: join(capabilityRoot, 'catalog/capabilities/file-inspect.v0.1.json'),
+        contracts: [{
+          operationId: 'inspect',
+          inputSchemaSource: join(capabilityRoot, 'catalog/capabilities/schemas/file.inspect.v0.1.input.schema.json'),
+          outputSchemaSource: join(capabilityRoot, 'catalog/capabilities/schemas/file.inspect.v0.1.output.schema.json'),
+          providerInputSchema: 'capabilities/schemas/file.inspect.input.schema.json',
+          providerOutputSchema: 'capabilities/schemas/file.inspect.output.schema.json',
+        }],
+      },
+    })
+    return {
+      ...component,
+      artifactPath: join(artifactRoot, basename(component.artifact.url)),
+    }
+  } finally {
+    if (sourceObservation !== undefined) sourceObservations = previousObservations
+  }
+}
+
 async function buildMathAnchor(workRoot) {
   const root = join(workRoot, 'math-anchor')
   await copyPath(join(sourceRoots.math, '.agents/plugins/marketplace.json'), join(root, '.agents/plugins/marketplace.json'))
@@ -1034,38 +1093,12 @@ async function main() {
         pluginRoot: join(sourceRoots.equatorium, 'plugins/equatorium'),
         expectedTools: ['sei_run'],
       })),
-      await buildOrReuse('file-vitals', () => buildAgentTool(workRoot, {
-        id: 'file-vitals',
-        displayName: 'File Vitals',
-        summary: 'Inspect and inventory files before acting on them.',
-        marketplace: 'file-vitals-local',
-        plugin: 'file-vitals',
-        sourceId: 'file-vitals',
+      await buildOrReuse('file-vitals', () => buildFileVitalsComponent(workRoot, {
         repositoryRoot: sourceRoots.fileVitals,
+        capabilityRoot: sourceRoots.capability,
         pluginRoot: providerReleaseInputs.fileVitalsPluginRoot,
         pluginArchive: providerReleaseInputs.fileVitalsPluginArchive,
         pluginArchiveSha256: providerReleaseInputs.fileVitalsPluginArchiveSha256,
-        pluginArchiveRoot: `file-vitals-${FILE_VITALS_COMPATIBILITY_VERSION}-darwin-arm64`,
-        expectedVersion: FILE_VITALS_COMPATIBILITY_VERSION,
-        expectedTools: ['file_inspect', 'file_inspect_batch', 'workspace_inventory'],
-        workspaceEnvironment: ['UFI_WORKSPACE_ROOT'],
-        directCapability: {
-          providerId: 'io.github.tetracoralla.file-vitals',
-          capabilityId: 'org.openadam.file.inspect',
-          capabilityVersion: '0.1.0',
-          lifecycle: 'persistent',
-          workspaceRoot: 'host-required',
-          manifest: 'capabilities/provider.json',
-          adapterCommand: 'runtime/file-vitals-capability',
-          profileSource: join(sourceRoots.capability, 'catalog/capabilities/file-inspect.v0.1.json'),
-          contracts: [{
-            operationId: 'inspect',
-            inputSchemaSource: join(sourceRoots.capability, 'catalog/capabilities/schemas/file.inspect.v0.1.input.schema.json'),
-            outputSchemaSource: join(sourceRoots.capability, 'catalog/capabilities/schemas/file.inspect.v0.1.output.schema.json'),
-            providerInputSchema: 'capabilities/schemas/file.inspect.input.schema.json',
-            providerOutputSchema: 'capabilities/schemas/file.inspect.output.schema.json',
-          }],
-        },
       })),
     ]
     const unreused = [...reuseComponentIds].filter((id) => !reusedComponentIds.has(id))
@@ -1122,4 +1155,6 @@ async function main() {
   }
 }
 
-await main()
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main()
+}

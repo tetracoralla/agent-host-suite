@@ -47,10 +47,10 @@ test('layered and fixed plans share one stable graph identity and orthogonal rou
   assert.deepEqual(new Set(layered.edges.map((edge) => edge.id)), new Set(methodSemanticGraph(method).relations.map((relation) => relation.id)))
 
   const positions = positionsFromPlan(layered)
-  positions.clarify = { x: positions.clarify.x + 37, y: positions.clarify.y + 53 }
+  positions.write = { x: positions.write.x + 37, y: positions.write.y + 53 }
   const fixed = compileMethodGraphView(method, { positions, previousPlan: layered })
   assert.equal(fixed.profile.type, 'fixed')
-  assert.deepEqual({ x: fixed.nodes.find((node) => node.id === 'clarify').x, y: fixed.nodes.find((node) => node.id === 'clarify').y }, positions.clarify)
+  assert.deepEqual({ x: fixed.nodes.find((node) => node.id === 'write').x, y: fixed.nodes.find((node) => node.id === 'write').y }, positions.write)
   for (const edge of fixed.edges) {
     assert.ok(edge.route.points.length >= 2)
     for (let index = 1; index < edge.route.points.length; index += 1) {
@@ -63,27 +63,27 @@ test('layered and fixed plans share one stable graph identity and orthogonal rou
 
 test('branching, parallel endpoint pairs, a back edge, and a self loop remain separate view objects', async () => {
   const method = await exampleMethod()
-  const coverage = method.graph.nodes.find((node) => node.id === 'check-coverage')
-  coverage.transitions.splice(1, 0, {
-    id: 'check-coverage-second-topic-route',
-    when: { path: 'inputs.coverage_complete', operator: 'not_equals', value: false },
-    to: 'use-topic',
-    label: 'Alternative topic route',
+  const verify = method.graph.nodes.find((node) => node.id === 'verify')
+  verify.transitions.splice(1, 0, {
+    id: 'verify-second-collect-route',
+    when: { path: 'facts.coverage', operator: 'not_equals', value: 'sufficient' },
+    to: 'collect',
+    label: 'Alternative rework route',
   })
-  const compose = method.graph.nodes.find((node) => node.id === 'compose')
-  compose.transitions = [
-    { id: 'compose-rework', when: { path: 'outcome', operator: 'not_equals', value: 'complete' }, to: 'check-coverage', label: 'Rework' },
-    { id: 'compose-self-check', when: { path: 'outcome', operator: 'equals', value: 'retry' }, to: 'compose', label: 'Retry locally' },
-    compose.transitions[0],
+  const write = method.graph.nodes.find((node) => node.id === 'write')
+  write.transitions = [
+    { id: 'write-rework', when: { path: 'outcome', operator: 'not_equals', value: 'complete' }, to: 'verify', label: 'Rework' },
+    { id: 'write-self-check', when: { path: 'outcome', operator: 'equals', value: 'retry' }, to: 'write', label: 'Retry locally' },
+    write.transitions[0],
   ]
   const plan = compileMethodGraphView(method, { forceLayered: true })
   assert.deepEqual(
     new Set(plan.edges.map((edge) => edge.id)),
     new Set(methodSemanticGraph(method).relations.map((relation) => relation.id)),
   )
-  assert.equal(plan.edges.filter((edge) => edge.source === 'check-coverage' && edge.target === 'use-topic').length, 2)
-  assert.ok(plan.edges.some((edge) => edge.source === edge.target && edge.id === 'compose-self-check'))
-  assert.ok(plan.edges.some((edge) => edge.id === 'compose-rework'))
+  assert.equal(plan.edges.filter((edge) => edge.source === 'verify' && edge.target === 'collect').length, 2)
+  assert.ok(plan.edges.some((edge) => edge.source === edge.target && edge.id === 'write-self-check'))
+  assert.ok(plan.edges.some((edge) => edge.id === 'write-rework'))
   assert.deepEqual(plan.quality, {
     complete: true,
     edgeCrossings: 0,
@@ -102,9 +102,9 @@ test('auto arrangement retains a selected anchor and the rendered flow falls bac
   const method = await exampleMethod()
   const first = compileMethodGraphView(method, { forceLayered: true })
   const positions = positionsFromPlan(first)
-  const arranged = arrangeMethodPositions(method, positions, 'clarify')
+  const arranged = arrangeMethodPositions(method, positions, 'write')
   assert.equal(arranged.error, null)
-  assert.deepEqual(arranged.positions.clarify, positions.clarify)
+  assert.deepEqual(arranged.positions.write, positions.write)
 
   const invalid = structuredClone(method)
   invalid.graph.nodes[0].transitions[0].to = 'missing-node'

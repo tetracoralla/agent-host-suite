@@ -344,29 +344,36 @@ export function diff(root) {
 // It does not certify network effects or an external MCP service's permissions.
 export function workerSandbox(
   root,
-  { writable, stateRoot, contextRoot, protectedPaths = [], runtime },
+  { writable, workspaceAdapter = 'git', stateRoot, contextRoot, protectedPaths = [], runtime },
 ) {
   assert(
     process.platform === 'darwin',
     'ENCLOSURE_UNAVAILABLE',
     'This build verifies worker filesystem confinement on macOS only',
   )
+  assert(
+    ['git', 'none'].includes(workspaceAdapter),
+    'ENCLOSURE_UNAVAILABLE',
+    'Worker sandbox requires a supported workspace adapter',
+  )
   root = realpathSync(root)
   stateRoot = realpathSync(stateRoot)
-  const gitDir = realpathSync(
-    git(root, ['rev-parse', '--absolute-git-dir']).trim(),
-  )
-  const common = realpathSync(
-    resolve(root, git(root, ['rev-parse', '--git-common-dir']).trim()),
-  )
+  const gitDir = workspaceAdapter === 'git'
+    ? realpathSync(git(root, ['rev-parse', '--absolute-git-dir']).trim())
+    : null
+  const common = workspaceAdapter === 'git'
+    ? realpathSync(resolve(root, git(root, ['rev-parse', '--git-common-dir']).trim()))
+    : null
   const quoted = (p) => JSON.stringify(p)
-  const deny = [
-    gitDir,
-    common,
-    join(root, '.git'),
-    stateRoot,
-    ...protectedPaths.map((p) => safePath(root, p)),
-  ]
+  const deny = workspaceAdapter === 'git'
+    ? [
+        gitDir,
+        common,
+        join(root, '.git'),
+        stateRoot,
+        ...protectedPaths.map((p) => safePath(root, p)),
+      ]
+    : [stateRoot]
   const rules = ['(version 1)', '(allow default)']
   if (runtime === 'codex' || runtime === 'grok') {
     // Codex's supported externalSandbox mode avoids nested sandbox_apply on
