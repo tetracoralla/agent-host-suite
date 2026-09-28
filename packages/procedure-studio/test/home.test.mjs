@@ -4,7 +4,7 @@ import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createStudioProjectFromTemplate, listStudioTemplates, projectDisplayName, readRecentProjects, recordRecentProject } from '../src/home.mjs'
+import { createStudioProjectFromTemplate, listStudioTemplates, projectDisplayName, readRecentProjects, recordRecentProject, suggestedProjectDirectory } from '../src/home.mjs'
 import { packageProject } from '../src/packager.mjs'
 import { StudioProject } from '../src/project.mjs'
 import { StudioRuntime } from '../src/runtime.mjs'
@@ -61,10 +61,13 @@ test('template scaffolding refuses unknown templates, weak names, and occupied d
     createStudioProjectFromTemplate({ templateId: 'blank', name: 'Valid Name', directory: occupied }),
     (error) => error.code === 'STUDIO_PROJECT_DIRECTORY_INVALID',
   )
-  assert.equal(await createStudioProjectFromTemplate({ templateId: 'blank', name: '1st Number', directory: join(root, 'c') }).then(() => 'ok', (error) => error.code), 'STUDIO_PROJECT_NAME_INVALID')
-  const chinese = await createStudioProjectFromTemplate({ templateId: 'blank', name: '发布说明', directory: join(root, 'd') }).then(() => null, (error) => error)
-  assert.equal(chinese.code, 'STUDIO_PROJECT_NAME_INVALID')
-  assert.match(chinese.message, /Latin letter/u)
+  const numbered = await createStudioProjectFromTemplate({ templateId: 'blank', name: '1st Number', directory: join(root, 'c') })
+  assert.equal(JSON.parse(await readFile(join(numbered.projectRoot, 'procedure.integration.json'), 'utf8')).procedure.id, 'org.openadam.studio.procedure-1st-number')
+  const chinese = await createStudioProjectFromTemplate({ templateId: 'blank', name: '发布说明', directory: join(root, 'd') })
+  const chineseIntegration = JSON.parse(await readFile(join(chinese.projectRoot, 'procedure.integration.json'), 'utf8'))
+  assert.equal(chineseIntegration.displayName, '发布说明')
+  assert.match(chineseIntegration.procedure.id, /^org\.openadam\.studio\.procedure-[0-9a-f]{12}$/u)
+  assert.equal(suggestedProjectDirectory(root, '发布说明'), join(root, chineseIntegration.procedure.id.split('.').at(-1)))
 
   const kept = join(root, 'notes.txt')
   await writeFile(kept, 'keep-me')
@@ -206,6 +209,91 @@ test('the home server creates, opens, and switches Procedure projects behind its
     assert.equal(closed.projects.length, 2)
     const afterClose = await (await fetch(`${studio.origin}/api/project`, { headers })).json()
     assert.equal(afterClose.error.code, 'STUDIO_PROJECT_NOT_OPEN')
+  } finally {
+    await studio.close()
+  }
+})
+
+test('the home server uses the native folder picker without exposing path entry as the primary flow', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'procedure-studio-picker-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const createParent = join(root, 'projects')
+  await mkdir(createParent)
+  const existing = join(root, 'existing')
+  await cp(exampleUrl, existing, { recursive: true })
+  const selections = [
+    { status: 'picked', path: createParent },
+    { status: 'picked', path: existing },
+    { status: 'cancelled' },
+  ]
+  const studio = await serveStudio({
+    stateRoot: join(root, 'state'),
+    port: 0,
+    directoryPicker: async () => selections.shift(),
+  })
+  try {
+    const headers = { 'x-procedure-studio-token': studio.token, 'content-type': 'application/json' }
+    const createPick = await (await fetch(`${studio.origin}/api/home/pick-directory`, {
+      method: 'POST', headers, body: JSON.stringify({ purpose: 'create' }),
+    })).json()
+    assert.deepEqual(createPick, { status: 'picked', path: createParent })
+    const created = await fetch(`${studio.origin}/api/home/create`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ templateId: 'blank', name: '发布说明', parentDirectory: createPick.path }),
+    })
+    assert.equal(created.status, 201)
+    const createdValue = await created.json()
+    assert.equal(createdValue.state.document.integration.displayName, '发布说明')
+    assert.equal(createdValue.state.project.root, await realpath(suggestedProjectDirectory(createParent, '发布说明')))
+
+    const openPick = await (await fetch(`${studio.origin}/api/home/pick-directory`, {
+      method: 'POST', headers, body: JSON.stringify({ purpose: 'open' }),
+    })).json()
+    assert.deepEqual(openPick, { status: 'picked', path: existing })
+    const opened = await fetch(`${studio.origin}/api/home/open`, {
+      method: 'POST', headers, body: JSON.stringify({ path: openPick.path }),
+    })
+    assert.equal(opened.status, 200)
+    assert.equal((await opened.json()).state.document.integration.displayName, 'Research Brief')
+
+    const cancelled = await (await fetch(`${studio.origin}/api/home/pick-directory`, {
+      method: 'POST', headers, body: JSON.stringify({ purpose: 'open' }),
+    })).json()
+    assert.deepEqual(cancelled, { status: 'cancelled' })
+    const invalid = await fetch(`${studio.origin}/api/home/pick-directory`, {
+      method: 'POST', headers, body: JSON.stringify({ purpose: 'delete' }),
+    })
+    assert.equal((await invalid.json()).error.code, 'STUDIO_DIRECTORY_PURPOSE_INVALID')
+  } finally {
+    await studio.close()
+  }
+})
+
+test('the home server keeps a folder-picker failure inside the Studio product boundary', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'procedure-studio-picker-error-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const unavailable = Object.assign(new Error('manager-specific message'), {
+    code: 'DIRECTORY_PICKER_UNAVAILABLE',
+  })
+  const studio = await serveStudio({
+    stateRoot: join(root, 'state'),
+    port: 0,
+    directoryPicker: async () => { throw unavailable },
+  })
+  try {
+    const response = await fetch(`${studio.origin}/api/home/pick-directory`, {
+      method: 'POST',
+      headers: {
+        'x-procedure-studio-token': studio.token,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ purpose: 'open' }),
+    })
+    assert.equal(response.status, 400)
+    assert.deepEqual((await response.json()).error, {
+      code: 'STUDIO_DIRECTORY_PICKER_UNAVAILABLE',
+      message: "Procedure Studio could not open the system folder picker. Try again from this computer's desktop session.",
+    })
   } finally {
     await studio.close()
   }

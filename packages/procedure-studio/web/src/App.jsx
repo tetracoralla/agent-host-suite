@@ -284,6 +284,18 @@ function AppShell() {
     }
   }, [refresh, showError])
 
+  const pickDirectory = useCallback(async (purpose) => {
+    setBusyHome(true)
+    try {
+      return await api('/api/home/pick-directory', json('POST', { purpose }))
+    } catch (error) {
+      showError(error)
+      return { status: 'failed' }
+    } finally {
+      setBusyHome(false)
+    }
+  }, [showError])
+
   useEffect(() => {
     refresh().catch(showError)
   }, [refresh, showError])
@@ -822,7 +834,7 @@ function AppShell() {
 
   if (!studio) {
     if (home === null) return <div className="loading-screen"><LoaderCircle className="spin" size={26} /><span>Opening Procedure Studio…</span>{notice && <p>{notice.message}</p>}</div>
-    return <HomeScreen home={home} busy={busyHome} openProject={openProject} notice={notice} onDismissNotice={() => setNotice(null)} />
+    return <HomeScreen home={home} busy={busyHome} openProject={openProject} pickDirectory={pickDirectory} notice={notice} onDismissNotice={() => setNotice(null)} />
   }
 
   const invalid = !studio.validation.valid
@@ -1025,13 +1037,11 @@ function AppShell() {
   )
 }
 
-function HomeScreen({ home, busy, openProject, notice, onDismissNotice }) {
+function HomeScreen({ home, busy, openProject, pickDirectory, notice, onDismissNotice }) {
   const [templateId, setTemplateId] = useState(home.templates[0]?.id ?? '')
   const [name, setName] = useState('')
-  const [directory, setDirectory] = useState('')
-  const [openPath, setOpenPath] = useState('')
-  const createDisabled = busy || !name.trim() || !directory.trim() || templateId === ''
-  const openDisabled = busy || !openPath.trim()
+  const [parentDirectory, setParentDirectory] = useState('')
+  const createDisabled = busy || !name.trim() || !parentDirectory || templateId === ''
   return (
     <div className="home-screen">
       <header className="home-header">
@@ -1060,10 +1070,16 @@ function HomeScreen({ home, busy, openProject, notice, onDismissNotice }) {
         <form className="home-form" onSubmit={(event) => {
           event.preventDefault()
           if (createDisabled) return
-          openProject({ templateId, name: name.trim(), directory: directory.trim() }, '/api/home/create')
+          openProject({ templateId, name: name.trim(), parentDirectory }, '/api/home/create')
         }}>
           <label className="field"><span>Procedure name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Release Notes Digest" /></label>
-          <label className="field"><span>Project directory</span><input value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="/absolute/path/to/new-project" spellCheck={false} autoCapitalize="off" autoCorrect="off" /></label>
+          <div className="location-picker">
+            <div><span>Project location</span><small>{parentDirectory || 'Choose where Studio should create the new project folder.'}</small></div>
+            <button className="button quiet" type="button" disabled={busy} onClick={async () => {
+              const picked = await pickDirectory('create')
+              if (picked.status === 'picked') setParentDirectory(picked.path)
+            }}><FolderOpen size={15} />{parentDirectory ? 'Change location' : 'Choose location'}</button>
+          </div>
           <button className="button primary" type="submit" disabled={createDisabled}>
             <Plus size={15} />Create and open
           </button>
@@ -1071,16 +1087,10 @@ function HomeScreen({ home, busy, openProject, notice, onDismissNotice }) {
       </section>
       <section className="home-section">
         <h2>Open a project</h2>
-        <form className="home-form" onSubmit={(event) => {
-          event.preventDefault()
-          if (openDisabled) return
-          openProject({ path: openPath.trim() }, '/api/home/open')
-        }}>
-          <label className="field"><span>Project directory</span><input value={openPath} onChange={(event) => setOpenPath(event.target.value)} placeholder="/absolute/path/to/project" spellCheck={false} autoCapitalize="off" autoCorrect="off" /></label>
-          <button className="button quiet" type="submit" disabled={openDisabled}>
-            <FolderOpen size={15} />Open project
-          </button>
-        </form>
+        <button className="button quiet" type="button" disabled={busy} onClick={async () => {
+          const picked = await pickDirectory('open')
+          if (picked.status === 'picked') await openProject({ path: picked.path }, '/api/home/open')
+        }}><FolderOpen size={15} />Choose project folder</button>
         {home.projects.length > 0 && (
           <div className="recent-list">
             {home.projects.map((item) => (

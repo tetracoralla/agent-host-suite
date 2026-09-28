@@ -65,17 +65,66 @@ agent-host component preview \
   --artifact /absolute/provider.tar.gz \
   --license-spdx Apache-2.0 \
   --standalone \
-  --json
+  --json > /absolute/provider.preview.json
 
 agent-host component import \
   --artifact /absolute/provider.tar.gz \
-  --binding /absolute/binding.json \
+  --binding /absolute/provider.preview.json \
   --json
 ```
 
 Import defaults inactive and retains the Host-owned rollback/removal route.
 Publishing a GitHub Release, activating a live Agent tool, adding credentials,
 or granting paths remains a separate owner decision.
+
+## Build and privately try a Procedure
+
+Procedure Studio is the developer surface for reusable Procedure products. It
+starts at a template or an existing project, but the Method Graph, input/output
+contracts, scenarios and package identity remain ordinary source files owned by
+the Procedure project. The canvas and source editor are two views of that same
+model rather than a Host-only workflow format.
+
+```text
+npm run studio -- serve
+```
+
+The home surface uses the system folder picker, remembers recent projects and
+can create a project from Blank, Capability orchestration, human-decision,
+research/verification or Git development/review templates. A template is a
+starting composition, not a permanent product category: authors can add,
+remove, reconnect and configure Agent turns, direct Capability calls,
+subprocedures, transforms and checkpoints in the same project.
+
+`Package` saves the current canonical source, validates its contract and Test
+scenarios, emits one sealed Procedure component archive, and runs standalone
+Host preview. It does not install, activate, publish or modify a consumer Agent
+environment. A private trial then uses the same exact-byte admission and
+lifecycle path as another Host component:
+
+```text
+agent-host component preview \
+  --artifact /absolute/procedure.tar.gz \
+  --license-spdx Apache-2.0 \
+  --standalone \
+  --json > /absolute/procedure.preview.json
+
+agent-host component import \
+  --artifact /absolute/procedure.tar.gz \
+  --binding /absolute/procedure.preview.json \
+  --json
+```
+
+The import targets the selected installed Agent environment (the default one
+unless `--state-root` names another already established environment). A
+throwaway state directory is not an environment until the ordinary Agent Host
+setup path has created it.
+
+Agent Host Manager then owns installed availability, exact version, update,
+rollback and removal. It distinguishes contract discovery, current invocation
+evidence, current health and current-session observation; it does not become a
+Procedure editor or Run console. Consumer Agents discover and invoke the exact
+installed product through the headless Procedure route.
 
 ## Decide what the observations mean
 

@@ -150,9 +150,10 @@ private struct ProcedureRow: View {
     private var stateLabel: String {
         guard procedure.availability?.contractValidated == true,
               procedure.availability?.discoverable == true else { return "Needs attention" }
-        if procedure.availability?.invocationEvidence.valid == true { return "Ready; current invocation evidence is healthy" }
-        if procedure.availability?.lastSuccessfulInvocationAt != nil { return "Ready; prior invocation recorded, current binding not checked" }
-        return "Ready; no successful invocation recorded"
+        if procedure.availability?.currentHealth.status == "unavailable" { return "Unavailable" }
+        if procedure.availability?.invocationEvidence.valid == true { return "Available to Agents; current invocation verified" }
+        if procedure.availability?.lastSuccessfulInvocationAt != nil { return "Available by contract; current invocation not verified" }
+        return "Available by contract; not yet invoked"
     }
 
     private var evidenceCurrent: Bool {
@@ -161,6 +162,10 @@ private struct ProcedureRow: View {
 
     private var contractReady: Bool {
         procedure.availability?.contractValidated == true && procedure.availability?.discoverable == true
+    }
+
+    private var currentlyUnavailable: Bool {
+        procedure.availability?.currentHealth.status == "unavailable"
     }
 
     var body: some View {
@@ -172,9 +177,9 @@ private struct ProcedureRow: View {
                     Text(L10n.text(procedure.summary)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                Image(systemName: evidenceCurrent ? "checkmark" : contractReady ? "circle" : "exclamationmark.triangle.fill")
+                Image(systemName: currentlyUnavailable ? "xmark.circle.fill" : evidenceCurrent ? "checkmark" : contractReady ? "circle" : "exclamationmark.triangle.fill")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(procedure.availability?.contractValidated == true ? Color.secondary : Color.orange)
+                    .foregroundStyle(contractReady && !currentlyUnavailable ? Color.secondary : Color.orange)
                     .accessibilityLabel(L10n.text(stateLabel))
             }
             .padding(.vertical, 17).padding(.horizontal, 4)
@@ -270,11 +275,11 @@ private struct ProcedureDetailView: View {
                             .buttonStyle(.borderedProminent)
                     }
                     Button(L10n.text("Check for updates")) { Task { await store.checkUpdates() } }
-                    if availability?.contractValidated != true || availability?.discoverable != true {
+                    if availability?.contractValidated != true || availability?.discoverable != true || availability?.currentHealth.status == "unavailable" {
                         Button(L10n.text("Repair")) { Task { await store.prepareRepair() } }
                             .buttonStyle(.borderedProminent)
                     }
-                    if procedure.isPrivate, let rollbackVersion = procedure.rollbackVersion {
+                    if procedure.isPrivate, procedure.rollbackVersion != nil {
                         Button(L10n.text("Roll back")) { confirmingRollback = true }
                     }
                     if procedure.isPrivate {

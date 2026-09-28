@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -70,16 +70,24 @@ export function projectDisplayName(project) {
 }
 
 function projectSlug(name) {
-  const slug = String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-+|-+$/gu, '').slice(0, 48)
-  if (!/^[a-z][a-z0-9-]{1,}$/u.test(slug)) {
-    throw studioError('STUDIO_PROJECT_NAME_INVALID', 'Project name must include a Latin letter so Studio can derive a Procedure id')
-  }
-  return slug
+  const normalized = String(name ?? '').normalize('NFKD').toLowerCase()
+  const readable = normalized.replace(/[^a-z0-9]+/gu, '-').replace(/^-+|-+$/gu, '').slice(0, 48)
+  if (/^[a-z][a-z0-9-]{1,}$/u.test(readable)) return readable
+  if (/^[0-9][a-z0-9-]*$/u.test(readable)) return `procedure-${readable}`.slice(0, 48)
+  return `procedure-${createHash('sha256').update(String(name ?? '')).digest('hex').slice(0, 12)}`
 }
 
 export function absoluteDirectoryPath(value) {
   if (typeof value !== 'string' || value.length === 0 || value.includes('\0') || !isAbsolute(value)) return null
   return resolve(value)
+}
+
+export function suggestedProjectDirectory(parentDirectory, name) {
+  const parent = absoluteDirectoryPath(parentDirectory)
+  if (parent === null) {
+    throw studioError('STUDIO_PROJECT_DIRECTORY_INVALID', 'Choose one folder where Studio can create the project')
+  }
+  return join(parent, projectSlug(name))
 }
 
 async function discardScaffold(target, created) {

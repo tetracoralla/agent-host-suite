@@ -11,7 +11,7 @@ function fail(message) {
 }
 
 function usage() {
-  process.stdout.write(`Procedure Studio\n\nUsage:\n  procedure-studio serve [--project PATH] [--state-root PATH] [--port NUMBER] [--no-open]\n\nWithout --project the Studio opens on its home surface: create a Procedure\nfrom a template, open a recent project, or type any project directory.\n`)
+  process.stdout.write(`Procedure Studio\n\nUsage:\n  procedure-studio serve [--project PATH] [--state-root PATH] [--port NUMBER] [--no-open]\n\nWithout --project the Studio opens on its home surface: create a Procedure\nfrom a template, open a recent project, or choose another project folder.\n`)
 }
 
 function options(argv) {

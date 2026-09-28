@@ -3,11 +3,12 @@ import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pickDirectory as pickLocalDirectory } from '../../../src/directory-picker.mjs'
 import { packageProject } from './packager.mjs'
 import { StudioProject, publicProjectError } from './project.mjs'
 import { StudioRuntime } from './runtime.mjs'
 import { studioError } from './validation.mjs'
-import { absoluteDirectoryPath, createStudioProjectFromTemplate, listStudioTemplates, projectDisplayName, readRecentProjects, recordRecentProject } from './home.mjs'
+import { absoluteDirectoryPath, createStudioProjectFromTemplate, listStudioTemplates, projectDisplayName, readRecentProjects, recordRecentProject, suggestedProjectDirectory } from './home.mjs'
 
 const moduleRoot = dirname(fileURLToPath(import.meta.url))
 const webRoot = resolve(moduleRoot, '../web-dist')
@@ -71,7 +72,7 @@ async function staticResponse(res, pathname, token) {
   return true
 }
 
-export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
+export async function serveStudio({ project, stateRoot, port = 0, directoryPicker = pickLocalDirectory } = {}) {
   const token = randomBytes(32).toString('base64url')
   let session = null
   let turn = Promise.resolve()
@@ -137,6 +138,32 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
           json(res, 200, await activeHome())
           return
         }
+        if (req.method === 'POST' && url.pathname === '/api/home/pick-directory') {
+          const input = await body(req)
+          if (!['create', 'open'].includes(input.purpose)) {
+            throw studioError('STUDIO_DIRECTORY_PURPOSE_INVALID', 'Folder selection must be for creating or opening a project')
+          }
+          let picked
+          try {
+            picked = await directoryPicker()
+          } catch (error) {
+            if (error?.code === 'DIRECTORY_PICKER_UNAVAILABLE') {
+              throw studioError(
+                'STUDIO_DIRECTORY_PICKER_UNAVAILABLE',
+                'Procedure Studio could not open the system folder picker. Try again from this computer\'s desktop session.',
+              )
+            }
+            throw error
+          }
+          if (picked?.status !== 'picked') {
+            json(res, 200, { status: 'cancelled' })
+            return
+          }
+          const path = absoluteDirectoryPath(picked.path)
+          if (path === null) throw studioError('STUDIO_PROJECT_PATH_INVALID', 'The selected folder did not resolve to one absolute directory path')
+          json(res, 200, { status: 'picked', path })
+          return
+        }
         if (req.method === 'POST' && url.pathname === '/api/home/open') {
           const input = await body(req)
           const projectPath = absoluteDirectoryPath(input.path)
@@ -150,7 +177,8 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
         }
         if (req.method === 'POST' && url.pathname === '/api/home/create') {
           const input = await body(req)
-          const created = await createStudioProjectFromTemplate(input)
+          const directory = input.directory ?? suggestedProjectDirectory(input.parentDirectory, input.name)
+          const created = await createStudioProjectFromTemplate({ ...input, directory })
           const opened = await StudioProject.open(created.projectRoot, stateRoot)
           const next = await openSession(opened)
           json(res, 201, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list() })

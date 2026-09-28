@@ -83,6 +83,8 @@ test('local Manager requires its one-session cookie and same-origin action reque
   assert.match(document, /procedureId/u)
   assert.match(document, /component-remove/u)
   assert.match(document, /component-rollback/u)
+  assert.match(document, /Available by contract; current invocation not verified/u)
+  assert.match(document, /currentHealth\?\.status==='unavailable'/u)
   assert.match(document, /el\('h2',t\('Recommended'\)/u)
   assert.match(document, /data-page="tools" aria-current="true"/u)
   assert.match(document, /environment:'Agents',tools:'Library',updates:'Browse'/u)
