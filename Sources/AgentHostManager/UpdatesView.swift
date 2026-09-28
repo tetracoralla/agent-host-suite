@@ -194,6 +194,7 @@ private struct ProcedureDetailView: View {
     let procedure: ManagedProcedure
     let back: () -> Void
     @State private var confirmingRemoval = false
+    @State private var confirmingRollback = false
     @FocusState private var backFocused: Bool
 
     private var availability: ProcedureAvailability? { procedure.availability }
@@ -220,6 +221,22 @@ private struct ProcedureDetailView: View {
             ? L10n.text("Observed")
             : L10n.text("Not observed")
     }
+    private var invocationEvidence: String {
+        guard let evidence = availability?.invocationEvidence else { return L10n.text("No successful invocation recorded yet") }
+        if evidence.valid {
+            let stamp = evidence.verifiedAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+                .map { " · \(L10n.relativeAge(since: $0))" } ?? ""
+            return L10n.text("Verified for the current binding") + stamp
+        }
+        if let date = evidence.invalidatedAt.flatMap({ ISO8601DateFormatter().date(from: $0) }),
+           availability?.lastSuccessfulInvocationAt != nil {
+            return L10n.procedureEvidenceReason(evidence.invalidatedReason) + " · " + L10n.relativeAge(since: date)
+        }
+        if availability?.lastSuccessfulInvocationAt != nil {
+            return L10n.text("Prior invocation recorded; current binding not checked")
+        }
+        return L10n.text("No successful invocation recorded yet")
+    }
 
     var body: some View {
         ScrollView {
@@ -243,6 +260,7 @@ private struct ProcedureDetailView: View {
                     LabeledContent(L10n.text("Agent discovery"), value: L10n.text(availability?.discoverable == true ? "Discoverable" : "Not discoverable"))
                     LabeledContent(L10n.text("Current health"), value: currentHealth)
                     LabeledContent(L10n.text("Last successful invocation"), value: lastSuccessfulInvocation)
+                    LabeledContent(L10n.text("Invocation evidence"), value: invocationEvidence)
                     LabeledContent(L10n.text("Current Agent session"), value: currentSessionDiscovery)
                 }
                 .foregroundStyle(.secondary)
@@ -256,6 +274,9 @@ private struct ProcedureDetailView: View {
                         Button(L10n.text("Repair")) { Task { await store.prepareRepair() } }
                             .buttonStyle(.borderedProminent)
                     }
+                    if procedure.isPrivate, let rollbackVersion = procedure.rollbackVersion {
+                        Button(L10n.text("Roll back")) { confirmingRollback = true }
+                    }
                     if procedure.isPrivate {
                         Button(L10n.text("Remove"), role: .destructive) { confirmingRemoval = true }
                     }
@@ -265,6 +286,12 @@ private struct ProcedureDetailView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .padding(32)
             .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .confirmationDialog(
+            L10n.format("Roll back this Procedure to {version}?", ["version": procedure.rollbackVersion ?? ""]),
+            isPresented: $confirmingRollback
+        ) {
+            Button(L10n.text("Roll back")) { Task { await store.rollbackProcedure(id: procedure.id) } }
         }
         .confirmationDialog(L10n.text("Remove this Procedure?"), isPresented: $confirmingRemoval) {
             Button(L10n.text("Remove"), role: .destructive) {

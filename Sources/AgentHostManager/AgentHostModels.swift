@@ -196,8 +196,18 @@ struct SuiteStatus: Decodable, Equatable, Sendable {
     let agentToolsPaused: Bool?
     let resumeAgentComponents: [String]?
     let components: [String: ComponentSummary]?
+    let privateComponents: [String: PrivateComponentRecord]?
     let hosts: [String: HostSummary]?
     let service: ServiceSummary?
+}
+
+struct PrivateComponentRecord: Decodable, Equatable, Sendable {
+    let current: PrivateComponentRecordEntry?
+    let rollback: PrivateComponentRecordEntry?
+}
+
+struct PrivateComponentRecordEntry: Decodable, Equatable, Sendable {
+    let component: ComponentSummary?
 }
 
 enum ManagerToolPolicy {
@@ -1598,6 +1608,7 @@ struct ManagedProcedure: Identifiable, Equatable {
     let execution: String?
     let availability: ProcedureAvailability?
     let isPrivate: Bool
+    let rollbackVersion: String?
     let logo: ToolLogo?
 }
 

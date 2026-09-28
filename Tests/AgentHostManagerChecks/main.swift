@@ -939,6 +939,47 @@ do {
     expect(L10n.text("Usage") == "Usage", "the Manager must allow an explicit English override")
     expect(L10n.locale.identifier.hasPrefix("en"), "dates must follow the explicit English Manager language")
 
+do {
+    let payload = Data(#"""
+    {
+      "configured": true,
+      "components": {
+        "research-brief-procedure": {
+          "version": "1.1.0",
+          "productType": "procedure",
+          "procedureId": "org.openadam.test.research-brief",
+          "procedureVersion": "1.1.0",
+          "private": true,
+          "procedureAvailability": {
+            "installed": true,
+            "contractValidated": true,
+            "discoverable": true,
+            "lastSuccessfulInvocationAt": null,
+            "invocationEvidence": {"valid": false, "verifiedAt": null, "invalidatedAt": "2026-09-28T00:00:00.000Z", "invalidatedReason": "component-updated", "dependencies": null},
+            "currentHealth": {"status": "not-checked", "observedAt": null},
+            "currentSessionDiscovery": {"status": "not-observed", "observedAt": null}
+          }
+        }
+      },
+      "privateComponents": {
+        "research-brief-procedure": {
+          "current": {"component": {"version": "1.1.0", "productType": "procedure"}},
+          "rollback": {"component": {"version": "1.0.0", "productType": "procedure"}}
+        }
+      }
+    }
+    """#.utf8)
+    let status = try JSONDecoder().decode(SuiteStatus.self, from: payload)
+    expect(status.privateComponents?["research-brief-procedure"]?.rollback?.component?.version == "1.0.0", "private component rollback version must decode")
+    let evidence = status.components?["research-brief-procedure"]?.procedureAvailability?.invocationEvidence
+    expect(evidence?.valid == false && evidence?.invalidatedReason == "component-updated", "procedure invocation evidence must decode")
+    UserDefaults.standard.set(ManagerLanguage.simplifiedChinese.rawValue, forKey: ManagerLanguage.storageKey)
+    expect(L10n.procedureEvidenceReason("procedure-changed") == "Procedure 已更新", "procedure evidence reason must localize")
+    expect(L10n.text("Roll back this Procedure to {version}?") == "把这个 Procedure 回滚到 {version} 吗？", "procedure rollback confirmation must provide Simplified Chinese copy")
+    expect(L10n.text("Invocation evidence") == "调用证据", "procedure evidence row must provide Simplified Chinese copy")
+    UserDefaults.standard.set(ManagerLanguage.english.rawValue, forKey: ManagerLanguage.storageKey)
+}
+
     print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup, catalog locator flatten, post-setup start-work")
 } catch {
     FileHandle.standardError.write(Data("manager model check failed: \(error)\n".utf8))

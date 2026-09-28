@@ -1369,6 +1369,7 @@ export async function toolSetStatus(options = {}) {
       logo: await presentInstalledLogo(component),
       origin: component.origin ?? null,
       private: state.privateComponents?.[id]?.current?.component !== undefined,
+      rollbackVersion: state.privateComponents?.[id]?.rollback?.component?.version ?? null,
       execution: component.procedureExecution?.kind ?? null,
       lifecycle: structuredClone(component.procedure?.lifecycle ?? null),
       permissions: [...(component.procedure?.permissions ?? [])],

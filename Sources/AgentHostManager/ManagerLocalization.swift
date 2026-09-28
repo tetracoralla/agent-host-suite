@@ -49,6 +49,16 @@ enum L10n {
         }
     }
 
+    static func procedureEvidenceReason(_ reason: String?) -> String {
+        switch reason {
+        case "procedure-changed": return text("The Procedure was updated")
+        case "runtime-changed": return text("A dependency changed")
+        case "binding-changed": return text("The Agent binding changed")
+        case "legacy-evidence-unscoped": return text("The evidence predates scoped verification")
+        default: return text("The evidence expired")
+        }
+    }
+
     static func relativeAge(since date: Date, now: Date = Date()) -> String {
         let age = max(0, now.timeIntervalSince(date))
         if age < 60 { return text("just now") }
@@ -99,6 +109,18 @@ enum L10n {
         "Yes": "是",
         "No": "否",
         "Remove this Procedure?": "移除这个 Procedure？",
+        "Invocation evidence": "调用证据",
+        "Verified for the current binding": "当前绑定的调用证据有效",
+        "No successful invocation recorded yet": "尚无成功调用记录",
+        "The Procedure was updated": "Procedure 已更新",
+        "A dependency changed": "依赖已变化",
+        "The Agent binding changed": "Agent 绑定已变化",
+        "The evidence predates scoped verification": "证据早于范围化核验",
+        "Prior invocation recorded; current binding not checked": "有历史成功记录；当前绑定尚未核验",
+        "The evidence expired": "证据已过期",
+        "Roll back": "回滚",
+        "Roll back this Procedure to {version}?": "把这个 Procedure 回滚到 {version} 吗？",
+        "Procedure changes apply to new Agent tasks.": "Procedure 变更在新的 Agent 任务中生效。",
         "Version totals survive updates and raw-event cleanup; earlier deleted records cannot be recovered.": "版本汇总在更新和原始记录清理后保留；此前已删除的记录无法恢复。",
         "Script references are not execution; open tasks may use older bindings.": "脚本引用不代表执行；未关闭的任务可能仍使用旧绑定。",
         "Static references do not prove execution.": "静态引用不代表执行。",

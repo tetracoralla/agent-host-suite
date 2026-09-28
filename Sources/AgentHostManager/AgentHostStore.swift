@@ -319,6 +319,7 @@ final class AgentHostStore: ObservableObject {
                     execution: component.procedureExecution,
                     availability: component.procedureAvailability,
                     isPrivate: component.isPrivate == true,
+                    rollbackVersion: suite?.privateComponents?[id]?.rollback?.component?.version,
                     logo: component.logo
                 )
             }
@@ -884,6 +885,10 @@ final class AgentHostStore: ObservableObject {
 
     func removeProcedure(id: String) async {
         await action(["component", "remove", id], label: "Removing Procedure")
+    }
+
+    func rollbackProcedure(id: String) async {
+        await action(["component", "rollback", id], label: "Rolling back Procedure")
     }
 
     func installUpdate(id: String) async {

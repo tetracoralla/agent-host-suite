@@ -731,6 +731,9 @@ test('an installed non-development Procedure is discovered, invoked, read after 
   assert.equal(available.procedures[0].availability.invocationEvidence.valid, true)
   assert.equal(available.procedures[0].agentAvailable, true)
 
+  const beforeReplace = await toolSetStatus({ stateRoot })
+  assert.equal(beforeReplace.procedures[0].rollbackVersion, null)
+
   const second = await createAgenticProcedureComponentFixture(join(root, 'second'), { version: '1.1.0' })
   await importLocalComponent({
     stateRoot,
@@ -741,8 +744,14 @@ test('an installed non-development Procedure is discovered, invoked, read after 
   }, dependencies)
   const updated = await toolSetStatus({ stateRoot })
   assert.equal(updated.procedures[0].procedureVersion, '1.1.0')
+  assert.equal(updated.procedures[0].rollbackVersion, '1.0.0')
   assert.equal(updated.procedures[0].availability.invocationEvidence.valid, false)
   assert.deepEqual((await inspectProcedureRun({ stateRoot, run: completed.taskId })).outputs, completed.outputs)
+
+  await rollbackLocalComponent({ stateRoot, target: 'research-brief-procedure' }, dependencies)
+  const rolledBack = await toolSetStatus({ stateRoot })
+  assert.equal(rolledBack.procedures[0].procedureVersion, '1.0.0')
+  assert.equal(rolledBack.procedures[0].rollbackVersion, '1.1.0')
 
   await removeLocalComponent({ stateRoot, target: 'research-brief-procedure' }, dependencies)
   assert.deepEqual((await toolSetStatus({ stateRoot })).procedures, [])
