@@ -10,7 +10,17 @@ existing Procedure integration and input/output schemas. Node positions,
 selection, viewport, panel sizes, and unsaved recovery live in a private Studio
 state root; they are not a second Procedure graph format.
 
-## Run a source project
+## Start
+
+```sh
+npm run studio -- serve
+```
+
+Without `--project` the Studio opens on its home surface: create a Procedure
+from one of the bundled templates (blank, research-and-verify,
+develop-and-review, capability-orchestration, human-decision), open a recent
+project, or type any project directory. The home button in the activity rail
+returns there, and recent projects are remembered per state root.
 
 ```sh
 npm run studio -- serve --project packages/procedure-studio/examples/research-brief

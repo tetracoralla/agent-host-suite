@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "openadam.agent-host-procedure-integration.v0.2",
+  "displayName": "Blank Procedure",
+  "summary": "Start from one bounded Agent step and grow the graph from there.",
+  "procedure": {
+    "id": "org.openadam.studio.blank",
+    "version": "0.1.0",
+    "inputSchema": "input.schema.json",
+    "outputSchema": "output.schema.json",
+    "permissions": [
+      "model.invoke"
+    ],
+    "resources": [],
+    "lifecycle": {
+      "mode": "stateful",
+      "resumable": true,
+      "interaction": "agent-mediated"
+    }
+  },
+  "execution": {
+    "kind": "agentic-runner",
+    "method": "method.json",
+    "outputArtifacts": [
+      "result"
+    ],
+    "identityFiles": [
+      "method.json"
+    ]
+  },
+  "ownership": {
+    "uninstall": "agent-host-created-only"
+  }
+}

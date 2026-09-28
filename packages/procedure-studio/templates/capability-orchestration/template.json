@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "openadam.procedure-studio-template.v0.1",
+  "id": "capability-orchestration",
+  "name": "Capability Orchestration",
+  "summary": "Agent, Direct Capability, and Agent again in one flow."
+}

@@ -1,0 +1,175 @@
+{
+  "schema": "openadam.method-graph.v2",
+  "profile": null,
+  "id": "capability-orchestration",
+  "revision": 1,
+  "name": "Capability Orchestration",
+  "description": "Compose an Agent turn, one Direct Capability call, and a final Agent step.",
+  "roles": [
+    {
+      "id": "author",
+      "name": "Author",
+      "independentFrom": [],
+      "includeReports": false,
+      "defaultBinding": {
+        "provider": "codex"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "request",
+      "name": "Request",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "draft",
+      "name": "Draft",
+      "type": "text",
+      "required": true
+    },
+    {
+      "id": "normalized",
+      "name": "Normalized",
+      "type": "json",
+      "required": true
+    },
+    {
+      "id": "final",
+      "name": "Final",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "permissions": [
+    {
+      "id": "model.invoke",
+      "name": "Invoke the selected Agent"
+    },
+    {
+      "id": "capability.invoke",
+      "name": "Invoke the declared Capability"
+    }
+  ],
+  "resources": [],
+  "graph": {
+    "entry": "draft",
+    "extensions": {
+      "parallel": {
+        "version": 1,
+        "supported": false
+      },
+      "wait": {
+        "version": 1,
+        "supported": false
+      }
+    },
+    "nodes": [
+      {
+        "id": "draft",
+        "name": "Draft the payload",
+        "kind": "agent-turn",
+        "role": "author",
+        "instruction": "Turn the request into the bounded text payload for the Capability.",
+        "access": "none",
+        "consumes": [
+          "request"
+        ],
+        "produces": [
+          "draft"
+        ],
+        "permissions": [
+          "model.invoke"
+        ],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "draft-normalize",
+            "when": {
+              "operator": "always"
+            },
+            "to": "normalize",
+            "label": "Normalize"
+          }
+        ]
+      },
+      {
+        "id": "normalize",
+        "name": "Normalize with Capability",
+        "kind": "direct-call",
+        "target": {
+          "kind": "capability",
+          "providerId": "org.openadam.text-integrity",
+          "capabilityId": "text.normalize",
+          "capabilityVersion": "1.0.0",
+          "operationId": "normalize"
+        },
+        "input": {
+          "object": {
+            "text": {
+              "path": "outputs.draft"
+            }
+          }
+        },
+        "output": {
+          "normalized": {
+            "path": "result.outputs.value"
+          }
+        },
+        "consumes": [
+          "draft"
+        ],
+        "produces": [
+          "normalized"
+        ],
+        "permissions": [
+          "capability.invoke"
+        ],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "normalize-finalize",
+            "when": {
+              "operator": "always"
+            },
+            "to": "finalize",
+            "label": "Finalize"
+          }
+        ]
+      },
+      {
+        "id": "finalize",
+        "name": "Finalize",
+        "kind": "agent-turn",
+        "role": "author",
+        "instruction": "Use the normalized output and return the declared final text.",
+        "access": "none",
+        "consumes": [
+          "normalized"
+        ],
+        "produces": [
+          "final"
+        ],
+        "permissions": [
+          "model.invoke"
+        ],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "finalize-complete",
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": null,
+            "label": "Complete"
+          }
+        ]
+      }
+    ]
+  }
+}

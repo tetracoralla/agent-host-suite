@@ -1,0 +1,158 @@
+{
+  "schema": "openadam.method-graph.v2",
+  "profile": null,
+  "id": "git-dev-review",
+  "revision": 1,
+  "name": "Develop and Review",
+  "description": "One bounded change in a Git workspace, followed by one independent review.",
+  "roles": [
+    {
+      "id": "author",
+      "name": "Author",
+      "independentFrom": [],
+      "includeReports": false,
+      "defaultBinding": {
+        "provider": "codex"
+      }
+    },
+    {
+      "id": "reviewer",
+      "name": "Reviewer",
+      "independentFrom": [
+        "author"
+      ],
+      "includeReports": false,
+      "defaultBinding": {
+        "provider": "grok"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "change",
+      "name": "Requested change",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "draft",
+      "name": "Draft",
+      "type": "text",
+      "required": true
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "type": "json",
+      "required": true
+    }
+  ],
+  "permissions": [
+    {
+      "id": "model.invoke",
+      "name": "Invoke the selected Agent"
+    },
+    {
+      "id": "workspace.read",
+      "name": "Read the workspace"
+    },
+    {
+      "id": "workspace.write",
+      "name": "Change the workspace"
+    }
+  ],
+  "resources": [
+    {
+      "id": "workspace",
+      "name": "Git workspace",
+      "type": "workspace",
+      "required": true,
+      "adapter": "git"
+    }
+  ],
+  "graph": {
+    "entry": "develop",
+    "extensions": {
+      "parallel": {
+        "version": 1,
+        "supported": false
+      },
+      "wait": {
+        "version": 1,
+        "supported": false
+      }
+    },
+    "nodes": [
+      {
+        "id": "develop",
+        "name": "Develop the change",
+        "kind": "agent-turn",
+        "role": "author",
+        "instruction": "Implement the requested change in the workspace and summarize it.",
+        "access": "write",
+        "consumes": [
+          "change"
+        ],
+        "produces": [
+          "draft"
+        ],
+        "permissions": [
+          "model.invoke",
+          "workspace.read",
+          "workspace.write"
+        ],
+        "resources": [
+          "workspace"
+        ],
+        "transitions": [
+          {
+            "id": "develop-review",
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": "review",
+            "label": "Review"
+          }
+        ]
+      },
+      {
+        "id": "review",
+        "name": "Review independently",
+        "kind": "agent-turn",
+        "role": "reviewer",
+        "instruction": "Review the change independently against the request and return the structured verdict.",
+        "access": "read",
+        "consumes": [
+          "change",
+          "draft"
+        ],
+        "produces": [
+          "review"
+        ],
+        "permissions": [
+          "model.invoke",
+          "workspace.read"
+        ],
+        "resources": [
+          "workspace"
+        ],
+        "transitions": [
+          {
+            "id": "review-complete",
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": null,
+            "label": "Complete"
+          }
+        ]
+      }
+    ]
+  }
+}

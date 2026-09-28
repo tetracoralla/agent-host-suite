@@ -15,6 +15,7 @@
     "src/",
     "web-dist/",
     "examples/",
+    "templates/",
     "README.md"
   ],
   "scripts": {

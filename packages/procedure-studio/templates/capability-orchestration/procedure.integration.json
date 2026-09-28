@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "openadam.agent-host-procedure-integration.v0.2",
+  "displayName": "Capability Orchestration",
+  "summary": "Agent, Direct Capability, and Agent again in one flow.",
+  "procedure": {
+    "id": "org.openadam.studio.capability-orchestration",
+    "version": "0.1.0",
+    "inputSchema": "input.schema.json",
+    "outputSchema": "output.schema.json",
+    "permissions": [
+      "model.invoke",
+      "capability.invoke"
+    ],
+    "resources": [],
+    "lifecycle": {
+      "mode": "stateful",
+      "resumable": true,
+      "interaction": "agent-mediated"
+    }
+  },
+  "execution": {
+    "kind": "agentic-runner",
+    "method": "method.json",
+    "outputArtifacts": [
+      "final"
+    ],
+    "identityFiles": [
+      "method.json"
+    ]
+  },
+  "ownership": {
+    "uninstall": "agent-host-created-only"
+  }
+}

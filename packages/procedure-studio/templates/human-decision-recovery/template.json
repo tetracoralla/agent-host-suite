@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "openadam.procedure-studio-template.v0.1",
+  "id": "human-decision-recovery",
+  "name": "Human Decision",
+  "summary": "A human checkpoint with approve and revise branches."
+}

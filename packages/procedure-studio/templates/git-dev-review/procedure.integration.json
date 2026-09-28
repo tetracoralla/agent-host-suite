@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "openadam.agent-host-procedure-integration.v0.2",
+  "displayName": "Develop and Review",
+  "summary": "A bounded Git-workspace change with an independent reviewer.",
+  "procedure": {
+    "id": "org.openadam.studio.git-dev-review",
+    "version": "0.1.0",
+    "inputSchema": "input.schema.json",
+    "outputSchema": "output.schema.json",
+    "permissions": [
+      "model.invoke",
+      "workspace.read",
+      "workspace.write"
+    ],
+    "resources": [
+      {
+        "id": "workspace",
+        "type": "workspace",
+        "required": true,
+        "adapter": "git"
+      }
+    ],
+    "lifecycle": {
+      "mode": "stateful",
+      "resumable": true,
+      "interaction": "agent-mediated"
+    }
+  },
+  "execution": {
+    "kind": "agentic-runner",
+    "method": "method.json",
+    "outputArtifacts": [
+      "review"
+    ],
+    "identityFiles": [
+      "method.json"
+    ]
+  },
+  "ownership": {
+    "uninstall": "agent-host-created-only"
+  }
+}

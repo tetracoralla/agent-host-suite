@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "openadam.procedure-studio-scenario.v0.1",
+  "id": "default",
+  "name": "Default scenario",
+  "description": "One representative input for this template.",
+  "inputs": {
+    "question": "What changed in the latest release?",
+    "audience": "Maintainers"
+  },
+  "grants": [
+    "model.invoke",
+    "network.read"
+  ],
+  "resources": {},
+  "limits": {
+    "maxDurationMs": 60000,
+    "maxNodeExecutions": 12,
+    "maxAgentTurns": 8,
+    "nodeTimeoutMs": 30000,
+    "maxAttemptsPerNode": 4,
+    "maxOutputBytes": 65536
+  },
+  "bindings": {
+    "researcher": {
+      "provider": "codex"
+    },
+    "fact-checker": {
+      "provider": "grok"
+    },
+    "editor": {
+      "provider": "zcode"
+    }
+  }
+}

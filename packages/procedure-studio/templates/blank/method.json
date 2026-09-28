@@ -1,0 +1,85 @@
+{
+  "schema": "openadam.method-graph.v2",
+  "profile": null,
+  "id": "blank",
+  "revision": 1,
+  "name": "Blank Procedure",
+  "description": "One bounded Agent step that returns the declared result.",
+  "roles": [
+    {
+      "id": "worker",
+      "name": "Worker",
+      "independentFrom": [],
+      "includeReports": false,
+      "defaultBinding": {
+        "provider": "codex"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "task",
+      "name": "Task",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "result",
+      "name": "Result",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "permissions": [
+    {
+      "id": "model.invoke",
+      "name": "Invoke the selected Agent"
+    }
+  ],
+  "resources": [],
+  "graph": {
+    "entry": "work",
+    "extensions": {
+      "parallel": {
+        "version": 1,
+        "supported": false
+      },
+      "wait": {
+        "version": 1,
+        "supported": false
+      }
+    },
+    "nodes": [
+      {
+        "id": "work",
+        "name": "Do the work",
+        "kind": "agent-turn",
+        "role": "worker",
+        "instruction": "Complete the bounded task and return only the declared result.",
+        "access": "none",
+        "consumes": [
+          "task"
+        ],
+        "produces": [
+          "result"
+        ],
+        "permissions": [
+          "model.invoke"
+        ],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "work-complete",
+            "when": {
+              "operator": "always"
+            },
+            "to": null,
+            "label": "Complete"
+          }
+        ]
+      }
+    ]
+  }
+}

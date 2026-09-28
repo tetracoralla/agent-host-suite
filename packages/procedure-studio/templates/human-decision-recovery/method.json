@@ -1,0 +1,185 @@
+{
+  "schema": "openadam.method-graph.v2",
+  "profile": null,
+  "id": "human-decision-recovery",
+  "revision": 1,
+  "name": "Human Decision",
+  "description": "One human decision point with explicit approve and revise branches.",
+  "roles": [
+    {
+      "id": "worker",
+      "name": "Worker",
+      "independentFrom": [],
+      "includeReports": false,
+      "defaultBinding": {
+        "provider": "codex"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "task",
+      "name": "Task",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "proposal",
+      "name": "Proposal",
+      "type": "text",
+      "required": true
+    },
+    {
+      "id": "decision",
+      "name": "Decision",
+      "type": "text",
+      "required": false
+    },
+    {
+      "id": "result",
+      "name": "Result",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "permissions": [
+    {
+      "id": "model.invoke",
+      "name": "Invoke the selected Agent"
+    }
+  ],
+  "resources": [],
+  "graph": {
+    "entry": "assess",
+    "extensions": {
+      "parallel": {
+        "version": 1,
+        "supported": false
+      },
+      "wait": {
+        "version": 1,
+        "supported": false
+      }
+    },
+    "nodes": [
+      {
+        "id": "assess",
+        "name": "Assess and propose",
+        "kind": "agent-turn",
+        "role": "worker",
+        "instruction": "Assess the task and return one concrete proposal for the human to decide on.",
+        "access": "none",
+        "consumes": [
+          "task"
+        ],
+        "produces": [
+          "proposal"
+        ],
+        "permissions": [
+          "model.invoke"
+        ],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "assess-decide",
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": "decide",
+            "label": "Decide"
+          }
+        ]
+      },
+      {
+        "id": "decide",
+        "name": "Human decision",
+        "kind": "human-input",
+        "prompt": "Approve the proposal, or ask for one revision.",
+        "interaction": "checkpoint",
+        "responseArtifact": "decision",
+        "consumes": [
+          "proposal"
+        ],
+        "produces": [
+          "decision"
+        ],
+        "permissions": [],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "decide-branch",
+            "when": {
+              "operator": "always"
+            },
+            "to": "branch",
+            "label": "Branch"
+          }
+        ]
+      },
+      {
+        "id": "branch",
+        "name": "Route the decision",
+        "kind": "condition",
+        "consumes": [
+          "decision"
+        ],
+        "produces": [],
+        "permissions": [],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "branch-approve",
+            "when": {
+              "path": "outputs.decision",
+              "operator": "equals",
+              "value": "approved"
+            },
+            "to": "finish",
+            "label": "Approved"
+          },
+          {
+            "id": "branch-revise",
+            "when": {
+              "operator": "always"
+            },
+            "to": "assess",
+            "label": "Revise"
+          }
+        ]
+      },
+      {
+        "id": "finish",
+        "name": "Finish",
+        "kind": "transform",
+        "consumes": [
+          "proposal",
+          "decision"
+        ],
+        "produces": [
+          "result"
+        ],
+        "permissions": [],
+        "resources": [],
+        "output": {
+          "result": {
+            "path": "outputs.proposal"
+          }
+        },
+        "transitions": [
+          {
+            "id": "finish-complete",
+            "when": {
+              "operator": "always"
+            },
+            "to": null,
+            "label": "Complete"
+          }
+        ]
+      }
+    ]
+  }
+}

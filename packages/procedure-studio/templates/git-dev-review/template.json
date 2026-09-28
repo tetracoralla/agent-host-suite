@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "openadam.procedure-studio-template.v0.1",
+  "id": "git-dev-review",
+  "name": "Develop and Review",
+  "summary": "A bounded Git-workspace change with an independent reviewer."
+}

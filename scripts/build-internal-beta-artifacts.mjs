@@ -54,6 +54,7 @@ const sourceRoots = {
   projective: process.env.AGENT_HOST_PROJECTIVE_SOURCE_ROOT ?? join(workspaceRoot, 'perspective-tool'),
   equatorium: process.env.AGENT_HOST_EQUATORIUM_SOURCE_ROOT ?? join(workspaceRoot, 'standard-expression-interpreter'),
   fileVitals: process.env.AGENT_HOST_FILE_VITALS_SOURCE_ROOT ?? join(workspaceRoot, 'universal-inspector'),
+  stateMachine: process.env.AGENT_HOST_STATE_MACHINE_SOURCE_ROOT ?? join(workspaceRoot, 'state-machine-editor'),
   developerKit: process.env.AGENT_HOST_DEVELOPER_KIT_SOURCE_ROOT ?? join(workspaceRoot, 'agent-tool-development-kit'),
 }
 const componentSourceIds = Object.freeze({
@@ -816,6 +817,48 @@ export async function buildFileVitalsComponent(workRoot, {
           providerOutputSchema: 'capabilities/schemas/file.inspect.output.schema.json',
         }],
       },
+    })
+    return {
+      ...component,
+      artifactPath: join(artifactRoot, basename(component.artifact.url)),
+    }
+  } finally {
+    if (sourceObservation !== undefined) sourceObservations = previousObservations
+  }
+}
+
+export async function buildStateMachineLocalComponent(workRoot, {
+  repositoryRoot = sourceRoots.stateMachine,
+  sourceObservation,
+} = {}) {
+  // The second real Provider rides the generic agent-tool builder unchanged:
+  // plugin location, MCP tool ids, and legal root are the whole spec. Unlike
+  // File Vitals this plugin uses the node-executor MCP command form.
+  const previousObservations = sourceObservations
+  if (sourceObservation !== undefined) {
+    sourceObservations = {
+      ...(sourceObservations ?? {}),
+      'state-machine': sourceObservation,
+    }
+  }
+  try {
+    await mkdir(artifactRoot, { recursive: true })
+    const pluginRoot = join(repositoryRoot, 'plugins/state-machine')
+    const plugin = JSON.parse(await readFile(join(pluginRoot, '.codex-plugin/plugin.json'), 'utf8'))
+    if (plugin.name !== 'state-machine') throw new Error('State Machine plugin manifest names a different plugin')
+    const component = await buildAgentTool(workRoot, {
+      id: 'state-machine',
+      displayName: 'Step Switch',
+      summary: 'Deterministically validate, step, simulate, inspect, diff, and find paths through finite-state Machine Specs.',
+      marketplace: 'state-machine-local',
+      plugin: 'state-machine',
+      sourceId: 'state-machine',
+      repositoryRoot,
+      pluginRoot,
+      expectedTools: ['machine.validate', 'machine.step', 'machine.simulate', 'machine.inspect', 'machine.diff', 'machine.find_path'],
+      workspaceEnvironment: [],
+      timeoutMs: 10_000,
+      legalRoot: pluginRoot,
     })
     return {
       ...component,

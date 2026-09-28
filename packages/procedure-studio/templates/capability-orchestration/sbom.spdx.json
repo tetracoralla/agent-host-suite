@@ -1,0 +1,14 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "capability-orchestration-procedure-0.1.0",
+  "documentNamespace": "https://openadam.dev/spdx/capability-orchestration-procedure/0.1.0/template",
+  "creationInfo": {
+    "created": "2026-09-28T00:00:00Z",
+    "creators": [
+      "Tool: Procedure Studio"
+    ]
+  },
+  "packages": []
+}

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "openadam.procedure-studio-project.v0.1",
+  "componentId": "git-dev-review-procedure",
+  "author": "OpenAdam Studio",
+  "licenseSpdx": "Apache-2.0",
+  "integration": "procedure.integration.json",
+  "scenarios": [
+    "scenarios/default.json"
+  ],
+  "output": "dist"
+}

@@ -11,7 +11,7 @@ function fail(message) {
 }
 
 function usage() {
-  process.stdout.write(`Procedure Studio\n\nUsage:\n  procedure-studio serve --project PATH [--state-root PATH] [--port NUMBER] [--no-open]\n`)
+  process.stdout.write(`Procedure Studio\n\nUsage:\n  procedure-studio serve [--project PATH] [--state-root PATH] [--port NUMBER] [--no-open]\n\nWithout --project the Studio opens on its home surface: create a Procedure\nfrom a template, open a recent project, or type any project directory.\n`)
 }
 
 function options(argv) {
@@ -28,7 +28,6 @@ function options(argv) {
     } else throw new Error(`Unknown argument: ${value}`)
   }
   if (result.command !== 'serve') throw new Error('Expected the serve command')
-  if (!result.project) throw new Error('--project is required')
   if (!Number.isSafeInteger(result.port) || result.port < 0 || result.port > 65535) throw new Error('--port must be an integer from 0 to 65535')
   result.stateRoot ??= resolve(homedir(), '.agent-host', 'procedure-studio')
   return result
@@ -52,9 +51,9 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   }
   if (selected) {
     try {
-      const project = await StudioProject.open(selected.project, selected.stateRoot)
+      const project = selected.project === undefined ? undefined : await StudioProject.open(selected.project, selected.stateRoot)
       const studio = await serveStudio({ project, stateRoot: selected.stateRoot, port: selected.port })
-      process.stdout.write(`${JSON.stringify({ schemaVersion: 'openadam.procedure-studio-server.v0.1', status: 'ready', url: studio.url, project: selected.project, stateRoot: selected.stateRoot })}\n`)
+      process.stdout.write(`${JSON.stringify({ schemaVersion: 'openadam.procedure-studio-server.v0.1', status: 'ready', url: studio.url, project: selected.project ?? null, stateRoot: selected.stateRoot })}\n`)
       if (selected.open) openBrowser(studio.url)
       let closing = false
       const close = async () => {

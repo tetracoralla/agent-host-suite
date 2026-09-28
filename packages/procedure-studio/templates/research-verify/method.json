@@ -1,0 +1,187 @@
+{
+  "schema": "openadam.method-graph.v2",
+  "profile": null,
+  "id": "research-verify",
+  "revision": 1,
+  "name": "Research and Verify",
+  "description": "Collect material, verify it independently, then write the declared answer.",
+  "roles": [
+    {
+      "id": "researcher",
+      "name": "Researcher",
+      "independentFrom": [],
+      "includeReports": false,
+      "defaultBinding": {
+        "provider": "codex"
+      }
+    },
+    {
+      "id": "fact-checker",
+      "name": "Fact checker",
+      "independentFrom": [
+        "researcher"
+      ],
+      "includeReports": false,
+      "defaultBinding": {
+        "provider": "grok"
+      }
+    },
+    {
+      "id": "editor",
+      "name": "Editor",
+      "independentFrom": [],
+      "includeReports": true,
+      "defaultBinding": {
+        "provider": "zcode"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "question",
+      "name": "Question",
+      "type": "text",
+      "required": true
+    },
+    {
+      "id": "audience",
+      "name": "Audience",
+      "type": "string",
+      "required": true
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "notes",
+      "name": "Notes",
+      "type": "json",
+      "required": true
+    },
+    {
+      "id": "answer",
+      "name": "Answer",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "permissions": [
+    {
+      "id": "model.invoke",
+      "name": "Invoke the selected Agent"
+    },
+    {
+      "id": "network.read",
+      "name": "Read declared sources"
+    }
+  ],
+  "resources": [],
+  "graph": {
+    "entry": "collect",
+    "extensions": {
+      "parallel": {
+        "version": 1,
+        "supported": false
+      },
+      "wait": {
+        "version": 1,
+        "supported": false
+      }
+    },
+    "nodes": [
+      {
+        "id": "collect",
+        "name": "Collect material",
+        "kind": "agent-turn",
+        "role": "researcher",
+        "instruction": "Collect traceable material for the question and return the structured notes.",
+        "access": "none",
+        "consumes": [
+          "question",
+          "audience"
+        ],
+        "produces": [
+          "notes"
+        ],
+        "permissions": [
+          "model.invoke",
+          "network.read"
+        ],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "collect-verify",
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": "verify",
+            "label": "Verify"
+          }
+        ]
+      },
+      {
+        "id": "verify",
+        "name": "Verify independently",
+        "kind": "agent-turn",
+        "role": "fact-checker",
+        "instruction": "Independently check the notes against sources and flag uncertainty.",
+        "access": "none",
+        "consumes": [
+          "question",
+          "notes"
+        ],
+        "produces": [],
+        "permissions": [
+          "model.invoke",
+          "network.read"
+        ],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "verify-write",
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": "write",
+            "label": "Write"
+          }
+        ]
+      },
+      {
+        "id": "write",
+        "name": "Write the answer",
+        "kind": "agent-turn",
+        "role": "editor",
+        "instruction": "Write the declared answer for the audience, preserving sources and uncertainty.",
+        "access": "none",
+        "consumes": [
+          "question",
+          "audience",
+          "notes"
+        ],
+        "produces": [
+          "answer"
+        ],
+        "permissions": [
+          "model.invoke"
+        ],
+        "resources": [],
+        "transitions": [
+          {
+            "id": "write-complete",
+            "when": {
+              "path": "outcome",
+              "operator": "equals",
+              "value": "complete"
+            },
+            "to": null,
+            "label": "Complete"
+          }
+        ]
+      }
+    ]
+  }
+}

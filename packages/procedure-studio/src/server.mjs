@@ -4,9 +4,10 @@ import { readFile, stat } from 'node:fs/promises'
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { packageProject } from './packager.mjs'
-import { publicProjectError } from './project.mjs'
+import { StudioProject, publicProjectError } from './project.mjs'
 import { StudioRuntime } from './runtime.mjs'
 import { studioError } from './validation.mjs'
+import { createStudioProjectFromTemplate, listStudioTemplates, readRecentProjects, recordRecentProject } from './home.mjs'
 
 const moduleRoot = dirname(fileURLToPath(import.meta.url))
 const webRoot = resolve(moduleRoot, '../web-dist')
@@ -72,7 +73,35 @@ async function staticResponse(res, pathname, token) {
 
 export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
   const token = randomBytes(32).toString('base64url')
-  const runtime = await StudioRuntime.open(join(stateRoot, 'runs'), project)
+  let session = null
+  const openSession = async (opened, projectRoot) => {
+    const previous = session
+    session = null
+    if (previous !== null) await previous.runtime.close()
+    const runtime = await StudioRuntime.open(join(stateRoot, 'runs'), opened)
+    session = { project: opened, runtime, projectRoot }
+    await recordRecentProject(stateRoot, projectRoot, opened.publicState().document.integration.displayName)
+    return session
+  }
+  if (project !== undefined) await openSession(project, project.publicState().project.root)
+  const activeHome = async () => {
+    const recents = await readRecentProjects(stateRoot)
+    const templates = await listStudioTemplates()
+    const projects = await Promise.all(recents.entries.map(async (entry) => ({
+      ...entry,
+      exists: await stat(entry.path).then((info) => info.isDirectory()).catch(() => false),
+    })))
+    return {
+      schemaVersion: 'openadam.procedure-studio-home.v0.1',
+      templates,
+      projects,
+      active: session === null ? null : { projectRoot: session.projectRoot, displayName: session.project.publicState().document.integration.displayName },
+    }
+  }
+  const requireSession = () => {
+    if (session === null) throw studioError('STUDIO_PROJECT_NOT_OPEN', 'No Procedure Studio project is open; create one from a template or open a recent project first')
+    return session
+  }
   let origin = null
   const server = createServer(async (req, res) => {
     headers(res)
@@ -88,84 +117,129 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
         if (!['GET', 'HEAD'].includes(req.method) && !req.headers['content-type']?.startsWith('application/json')) {
           throw studioError('STUDIO_INVALID_CONTENT_TYPE', 'JSON content type is required')
         }
+        if (req.method === 'GET' && url.pathname === '/api/home') {
+          json(res, 200, await activeHome())
+          return
+        }
+        if (req.method === 'POST' && url.pathname === '/api/home/open') {
+          const input = await body(req)
+          if (typeof input.path !== 'string' || !input.path.startsWith('/') || input.path.includes('..')) {
+            throw studioError('STUDIO_PROJECT_PATH_INVALID', 'Project path must be one absolute directory path')
+          }
+          const opened = await StudioProject.open(input.path, stateRoot)
+          const next = await openSession(opened, input.path)
+          json(res, 200, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list() })
+          return
+        }
+        if (req.method === 'POST' && url.pathname === '/api/home/create') {
+          const input = await body(req)
+          const created = await createStudioProjectFromTemplate(input)
+          const opened = await StudioProject.open(created.projectRoot, stateRoot)
+          const next = await openSession(opened, created.projectRoot)
+          json(res, 201, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list() })
+          return
+        }
+        if (req.method === 'POST' && url.pathname === '/api/home/close') {
+          const previous = session
+          session = null
+          if (previous !== null) await previous.runtime.close()
+          json(res, 200, await activeHome())
+          return
+        }
         if (req.method === 'GET' && url.pathname === '/api/project') {
-          json(res, 200, { state: project.publicState(), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: current.project.publicState(), runs: current.runtime.list() })
           return
         }
         if (req.method === 'PATCH' && url.pathname === '/api/project') {
           const input = await body(req)
-          json(res, 200, { state: await project.update(input), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: await current.project.update(input), runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/save') {
           const input = await body(req)
-          json(res, 200, { state: await project.save(input.expectedRevision), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: await current.project.save(input.expectedRevision), runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/reload') {
           const input = await body(req)
-          json(res, 200, { state: await project.reload(input.expectedRevision), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: await current.project.reload(input.expectedRevision), runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/reconcile') {
           const input = await body(req)
-          json(res, 200, { state: await project.reconcile(input.expectedRevision), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: await current.project.reconcile(input.expectedRevision), runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/proposal') {
           const input = await body(req)
-          json(res, 200, { state: await project.loadProposal(input.expectedRevision, input.candidate), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: await current.project.loadProposal(input.expectedRevision, input.candidate), runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/proposal/decision') {
           const input = await body(req)
-          json(res, 200, { state: await project.decideProposal(input.expectedRevision, input), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: await current.project.decideProposal(input.expectedRevision, input), runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/scenario') {
           const input = await body(req)
-          json(res, 201, { state: await project.saveScenario(input.expectedRevision, input), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 201, { state: await current.project.saveScenario(input.expectedRevision, input), runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/scenarios/reload') {
           const input = await body(req)
-          json(res, 200, { state: await project.reloadScenarios(input.expectedRevision), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: await current.project.reloadScenarios(input.expectedRevision), runs: current.runtime.list() })
           return
         }
         const scenarioMatch = url.pathname.match(/^\/api\/project\/scenario\/([a-z][a-z0-9_.-]{0,79})$/u)
         if (scenarioMatch && req.method === 'PUT') {
           const input = await body(req)
-          json(res, 200, { state: await project.updateScenario(input.expectedRevision, scenarioMatch[1], input.candidate), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { state: await current.project.updateScenario(input.expectedRevision, scenarioMatch[1], input.candidate), runs: current.runtime.list() })
           return
         }
         if (req.method === 'GET' && url.pathname === '/api/runs') {
-          json(res, 200, { runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/runs') {
           const input = await body(req)
-          json(res, 201, { run: await runtime.start(input.scenarioId), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 201, { run: await current.runtime.start(input.scenarioId), runs: current.runtime.list() })
           return
         }
         const runMatch = url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})(?:\/(action|replay))?$/u)
         if (runMatch && req.method === 'GET' && !runMatch[2]) {
-          json(res, 200, { run: runtime.get(runMatch[1]) })
+          const current = requireSession()
+          json(res, 200, { run: current.runtime.get(runMatch[1]) })
           return
         }
         if (runMatch && req.method === 'POST' && runMatch[2] === 'action') {
-          json(res, 200, { run: runtime.action(runMatch[1], await body(req)), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 200, { run: current.runtime.action(runMatch[1], await body(req)), runs: current.runtime.list() })
           return
         }
         if (runMatch && req.method === 'POST' && runMatch[2] === 'replay') {
           const input = await body(req)
-          json(res, 201, { run: await runtime.replay(runMatch[1], input.nodeId), runs: runtime.list() })
+          const current = requireSession()
+          json(res, 201, { run: await current.runtime.replay(runMatch[1], input.nodeId), runs: current.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/package') {
           const input = await body(req)
-          project.assertRevision(input.expectedRevision)
-          if (!project.publicState().source.saved) await project.save(input.expectedRevision)
-          json(res, 201, { package: await packageProject(project), state: project.publicState(), runs: runtime.list() })
+          const current = requireSession()
+          current.project.assertRevision(input.expectedRevision)
+          if (!current.project.publicState().source.saved) await current.project.save(input.expectedRevision)
+          json(res, 201, { package: await packageProject(current.project), state: current.project.publicState(), runs: current.runtime.list() })
           return
         }
         throw studioError('STUDIO_NOT_FOUND', 'Route not found')
@@ -190,7 +264,7 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
     token,
     close: async () => {
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
-      await runtime.close()
+      if (session !== null) await session.runtime.close()
     },
   }
 }

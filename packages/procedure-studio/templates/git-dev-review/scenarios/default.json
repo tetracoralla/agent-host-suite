@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "openadam.procedure-studio-scenario.v0.1",
+  "id": "default",
+  "name": "Default scenario",
+  "description": "One representative input for this template.",
+  "inputs": {
+    "change": "Fix the failing check and keep the change minimal."
+  },
+  "grants": [
+    "model.invoke",
+    "workspace.read",
+    "workspace.write"
+  ],
+  "resources": {
+    "workspace": {
+      "type": "workspace",
+      "adapter": "git",
+      "path": "/tmp/procedure-studio-workspace",
+      "allowExistingPaths": []
+    }
+  },
+  "limits": {
+    "maxDurationMs": 60000,
+    "maxNodeExecutions": 12,
+    "maxAgentTurns": 8,
+    "nodeTimeoutMs": 30000,
+    "maxAttemptsPerNode": 4,
+    "maxOutputBytes": 65536
+  },
+  "bindings": {
+    "author": {
+      "provider": "codex"
+    },
+    "reviewer": {
+      "provider": "grok"
+    }
+  }
+}

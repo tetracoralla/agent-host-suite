@@ -31,8 +31,10 @@ import {
   Copy,
   Download,
   FileJson2,
+  FolderOpen,
   GitBranch,
   GripVertical,
+  House,
   History,
   Keyboard,
   LayoutGrid,
@@ -201,8 +203,22 @@ function AppShell() {
     setNotice({ kind: 'error', title: error.code ?? 'Studio error', message: error.message })
   }, [])
 
+  const [home, setHome] = useState(null)
+  const [busyHome, setBusyHome] = useState(false)
+
   const refresh = useCallback(async () => {
-    const response = await api('/api/project')
+    let response
+    try {
+      response = await api('/api/project')
+    } catch (error) {
+      if (error.code === 'STUDIO_PROJECT_NOT_OPEN') {
+        setStudio(null)
+        stateRef.current = null
+        setHome(await api('/api/home'))
+        return
+      }
+      throw error
+    }
     const firstOpen = stateRef.current === null
     applyState(response.state, response.runs)
     if (firstOpen) {
@@ -212,6 +228,37 @@ function AppShell() {
     }
     setScenarioId((current) => current ?? response.state.scenarios[0]?.id ?? null)
   }, [applyState])
+
+  const closeProject = useCallback(async () => {
+    setBusyHome(true)
+    try {
+      setHome(await api('/api/home/close', json('POST', {})))
+      setStudio(null)
+      stateRef.current = null
+      setSelectedIds([])
+      setSelectedEdge(null)
+      setSelectedRunId(null)
+      setUndoStack([])
+      setRedoStack([])
+    } catch (error) {
+      showError(error)
+    } finally {
+      setBusyHome(false)
+    }
+  }, [showError])
+
+  const openProject = useCallback(async (payload, route) => {
+    setBusyHome(true)
+    try {
+      await api(route, json('POST', payload))
+      setHome(null)
+      await refresh()
+    } catch (error) {
+      showError(error)
+    } finally {
+      setBusyHome(false)
+    }
+  }, [refresh, showError])
 
   useEffect(() => {
     refresh().catch(showError)
@@ -749,7 +796,10 @@ function AppShell() {
     return findTransition(studio.document.method, selectedEdge)
   }, [selectedEdge, studio])
 
-  if (!studio) return <div className="loading-screen"><LoaderCircle className="spin" size={26} /><span>Opening canonical Procedure source…</span>{notice && <p>{notice.message}</p>}</div>
+  if (!studio) {
+    if (home === null) return <div className="loading-screen"><LoaderCircle className="spin" size={26} /><span>Opening Procedure Studio…</span>{notice && <p>{notice.message}</p>}</div>
+    return <HomeScreen home={home} busy={busyHome} openProject={openProject} notice={notice} onDismissNotice={() => setNotice(null)} />
+  }
 
   const invalid = !studio.validation.valid
   const sourceSaved = studio.source.saved
@@ -794,6 +844,7 @@ function AppShell() {
         <button type="button" className={leftOpen && leftTab === 'library' ? 'active' : ''} aria-label="Object library" title="Object library" onClick={() => { setLeftTab('library'); setLeftOpen(leftTab !== 'library' || !leftOpen) }}><Boxes size={18} /></button>
         <button type="button" className={leftOpen && leftTab === 'structure' ? 'active' : ''} aria-label="Procedure structure" title="Procedure structure" onClick={() => { setLeftTab('structure'); setLeftOpen(leftTab !== 'structure' || !leftOpen) }}><Waypoints size={18} /></button>
         <span />
+        <button type="button" aria-label="Studio home" title="Studio home" disabled={busyHome} onClick={closeProject}><House size={18} /></button>
         <button type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={(event) => { modalReturnFocus.current = event.currentTarget; setModal({ kind: 'shortcuts' }) }}><Keyboard size={18} /></button>
       </nav>
 
@@ -946,6 +997,73 @@ function AppShell() {
       {notice && <div className={`toast ${notice.kind}`} role="status"><span>{notice.kind === 'error' ? <XCircle size={17} /> : notice.kind === 'success' ? <CheckCircle2 size={17} /> : <CircleDot size={17} />}</span><div><b>{notice.title}</b><p>{notice.message}</p></div><IconButton label="Dismiss" onClick={() => setNotice(null)}><X size={14} /></IconButton></div>}
       {busy && <div className="busy-indicator"><LoaderCircle className="spin" size={14} />Working…</div>}
       {modal && <Modal onClose={() => setModal(null)} returnFocus={modalReturnFocus.current}>{modal.kind === 'package' && <PackageResult result={modal.result} />}{modal.kind === 'shortcuts' && <ShortcutGuide />}{modal.kind === 'source-conflict' && <SourceConflictRecovery reconcile={reconcileSource} reload={reloadSource} busy={busy} />}</Modal>}
+    </div>
+  )
+}
+
+function HomeScreen({ home, busy, openProject, notice, onDismissNotice }) {
+  const [templateId, setTemplateId] = useState(home.templates[0]?.id ?? '')
+  const [name, setName] = useState('')
+  const [directory, setDirectory] = useState('')
+  const [openPath, setOpenPath] = useState('')
+  const recent = home.projects.filter((item) => item.exists)
+  return (
+    <div className="home-screen">
+      <header className="home-header">
+        <span className="product-mark"><Waypoints size={20} /></span>
+        <div>
+          <span className="eyebrow">Procedure Studio</span>
+          <h1>Start one Procedure</h1>
+        </div>
+      </header>
+      <section className="home-section">
+        <h2>Create from a template</h2>
+        <div className="template-grid">
+          {home.templates.map((template) => (
+            <button
+              key={template.id}
+              type="button"
+              className={`template-card ${template.id === templateId ? 'selected' : ''}`}
+              onClick={() => setTemplateId(template.id)}
+            >
+              <b>{template.name}</b>
+              <small>{template.summary}</small>
+            </button>
+          ))}
+        </div>
+        <div className="home-form">
+          <label className="field"><span>Procedure name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Release Notes Digest" /></label>
+          <label className="field"><span>Project directory</span><input value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="/absolute/path/to/new-project" /></label>
+          <button
+            className="button primary"
+            type="button"
+            disabled={busy || !name.trim() || !directory.trim() || templateId === ''}
+            onClick={() => openProject({ templateId, name: name.trim(), directory: directory.trim() }, '/api/home/create')}
+          >
+            <Plus size={15} />Create and open
+          </button>
+        </div>
+      </section>
+      <section className="home-section">
+        <h2>Open a project</h2>
+        <div className="home-form">
+          <label className="field"><span>Project directory</span><input value={openPath} onChange={(event) => setOpenPath(event.target.value)} placeholder="/absolute/path/to/studio.project.json parent" /></label>
+          <button className="button quiet" type="button" disabled={busy || !openPath.trim()} onClick={() => openProject({ path: openPath.trim() }, '/api/home/open')}>
+            <FolderOpen size={15} />Open project
+          </button>
+        </div>
+        {recent.length > 0 && (
+          <div className="recent-list">
+            {recent.map((item) => (
+              <button key={item.path} type="button" className="recent-row" disabled={busy} onClick={() => openProject({ path: item.path }, '/api/home/open')}>
+                <History size={16} />
+                <span><b>{item.name}</b><small>{item.path}</small></span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+      {notice && <div className={`toast ${notice.kind}`} role="status"><span>{notice.kind === 'error' ? <XCircle size={17} /> : <CheckCircle2 size={17} />}</span><div><b>{notice.title}</b><p>{notice.message}</p></div><IconButton label="Dismiss" onClick={onDismissNotice}><X size={14} /></IconButton></div>}
     </div>
   )
 }

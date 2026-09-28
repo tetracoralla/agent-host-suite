@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "openadam.agent-host-procedure-integration.v0.2",
+  "displayName": "Research and Verify",
+  "summary": "Researcher, independent fact-checker, and editor roles in one flow.",
+  "procedure": {
+    "id": "org.openadam.studio.research-verify",
+    "version": "0.1.0",
+    "inputSchema": "input.schema.json",
+    "outputSchema": "output.schema.json",
+    "permissions": [
+      "model.invoke",
+      "network.read"
+    ],
+    "resources": [],
+    "lifecycle": {
+      "mode": "stateful",
+      "resumable": true,
+      "interaction": "agent-mediated"
+    }
+  },
+  "execution": {
+    "kind": "agentic-runner",
+    "method": "method.json",
+    "outputArtifacts": [
+      "answer"
+    ],
+    "identityFiles": [
+      "method.json"
+    ]
+  },
+  "ownership": {
+    "uninstall": "agent-host-created-only"
+  }
+}
