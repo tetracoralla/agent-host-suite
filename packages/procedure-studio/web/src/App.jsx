@@ -207,39 +207,64 @@ function AppShell() {
   const [busyHome, setBusyHome] = useState(false)
 
   const refresh = useCallback(async () => {
-    let response
-    try {
-      response = await api('/api/project')
-    } catch (error) {
-      if (error.code === 'STUDIO_PROJECT_NOT_OPEN') {
-        setStudio(null)
-        stateRef.current = null
-        setHome(await api('/api/home'))
-        return
-      }
-      throw error
+    const homeState = await api('/api/home')
+    if (homeState.active === null) {
+      setStudio(null)
+      stateRef.current = null
+      setRuns([])
+      setHome(homeState)
+      return
     }
-    const firstOpen = stateRef.current === null
+    const response = await api('/api/project')
+    const previousRoot = stateRef.current?.project.root ?? null
+    const switched = previousRoot !== response.state.project.root
     applyState(response.state, response.runs)
-    if (firstOpen) {
+    if (switched) {
       setSelectedIds(response.state.presentation.selection ?? [])
+      setSelectedEdge(null)
       setInspectorTab(response.state.presentation.inspectorTab ?? 'settings')
       setRunTab(response.state.presentation.runTab ?? 'timeline')
+      setScenarioId(response.state.scenarios[0]?.id ?? null)
+      setScenarioDraft(null)
+      setScenarioDirty(false)
+      setSourceDrafts({})
+      setSelectedRunId(null)
+      setRunDetail(null)
+      setUndoStack([])
+      setRedoStack([])
+      setProposalText('')
+      setProposalSelection(new Set())
+      setModal(null)
+      setRunExpanded(false)
+      setCopied(null)
+      setSearch('')
     }
-    setScenarioId((current) => current ?? response.state.scenarios[0]?.id ?? null)
   }, [applyState])
 
   const closeProject = useCallback(async () => {
     setBusyHome(true)
     try {
-      setHome(await api('/api/home/close', json('POST', {})))
+      const nextHome = await api('/api/home/close', json('POST', {}))
+      setSelectedRunId(null)
+      setRunDetail(null)
       setStudio(null)
       stateRef.current = null
+      setRuns([])
+      setHome(nextHome)
       setSelectedIds([])
       setSelectedEdge(null)
-      setSelectedRunId(null)
+      setScenarioId(null)
+      setScenarioDraft(null)
+      setScenarioDirty(false)
+      setSourceDrafts({})
       setUndoStack([])
       setRedoStack([])
+      setProposalText('')
+      setProposalSelection(new Set())
+      setModal(null)
+      setRunExpanded(false)
+      setCopied(null)
+      setSearch('')
     } catch (error) {
       showError(error)
     } finally {
@@ -251,7 +276,6 @@ function AppShell() {
     setBusyHome(true)
     try {
       await api(route, json('POST', payload))
-      setHome(null)
       await refresh()
     } catch (error) {
       showError(error)
@@ -1006,7 +1030,8 @@ function HomeScreen({ home, busy, openProject, notice, onDismissNotice }) {
   const [name, setName] = useState('')
   const [directory, setDirectory] = useState('')
   const [openPath, setOpenPath] = useState('')
-  const recent = home.projects.filter((item) => item.exists)
+  const createDisabled = busy || !name.trim() || !directory.trim() || templateId === ''
+  const openDisabled = busy || !openPath.trim()
   return (
     <div className="home-screen">
       <header className="home-header">
@@ -1018,11 +1043,12 @@ function HomeScreen({ home, busy, openProject, notice, onDismissNotice }) {
       </header>
       <section className="home-section">
         <h2>Create from a template</h2>
-        <div className="template-grid">
+        <div className="template-grid" role="group" aria-label="Procedure templates">
           {home.templates.map((template) => (
             <button
               key={template.id}
               type="button"
+              aria-pressed={template.id === templateId}
               className={`template-card ${template.id === templateId ? 'selected' : ''}`}
               onClick={() => setTemplateId(template.id)}
             >
@@ -1031,33 +1057,36 @@ function HomeScreen({ home, busy, openProject, notice, onDismissNotice }) {
             </button>
           ))}
         </div>
-        <div className="home-form">
+        <form className="home-form" onSubmit={(event) => {
+          event.preventDefault()
+          if (createDisabled) return
+          openProject({ templateId, name: name.trim(), directory: directory.trim() }, '/api/home/create')
+        }}>
           <label className="field"><span>Procedure name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Release Notes Digest" /></label>
-          <label className="field"><span>Project directory</span><input value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="/absolute/path/to/new-project" /></label>
-          <button
-            className="button primary"
-            type="button"
-            disabled={busy || !name.trim() || !directory.trim() || templateId === ''}
-            onClick={() => openProject({ templateId, name: name.trim(), directory: directory.trim() }, '/api/home/create')}
-          >
+          <label className="field"><span>Project directory</span><input value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="/absolute/path/to/new-project" spellCheck={false} autoCapitalize="off" autoCorrect="off" /></label>
+          <button className="button primary" type="submit" disabled={createDisabled}>
             <Plus size={15} />Create and open
           </button>
-        </div>
+        </form>
       </section>
       <section className="home-section">
         <h2>Open a project</h2>
-        <div className="home-form">
-          <label className="field"><span>Project directory</span><input value={openPath} onChange={(event) => setOpenPath(event.target.value)} placeholder="/absolute/path/to/studio.project.json parent" /></label>
-          <button className="button quiet" type="button" disabled={busy || !openPath.trim()} onClick={() => openProject({ path: openPath.trim() }, '/api/home/open')}>
+        <form className="home-form" onSubmit={(event) => {
+          event.preventDefault()
+          if (openDisabled) return
+          openProject({ path: openPath.trim() }, '/api/home/open')
+        }}>
+          <label className="field"><span>Project directory</span><input value={openPath} onChange={(event) => setOpenPath(event.target.value)} placeholder="/absolute/path/to/project" spellCheck={false} autoCapitalize="off" autoCorrect="off" /></label>
+          <button className="button quiet" type="submit" disabled={openDisabled}>
             <FolderOpen size={15} />Open project
           </button>
-        </div>
-        {recent.length > 0 && (
+        </form>
+        {home.projects.length > 0 && (
           <div className="recent-list">
-            {recent.map((item) => (
-              <button key={item.path} type="button" className="recent-row" disabled={busy} onClick={() => openProject({ path: item.path }, '/api/home/open')}>
+            {home.projects.map((item) => (
+              <button key={item.path} type="button" className="recent-row" disabled={busy || !item.exists} onClick={() => openProject({ path: item.path }, '/api/home/open')}>
                 <History size={16} />
-                <span><b>{item.name}</b><small>{item.path}</small></span>
+                <span><b>{item.name}</b><small>{item.exists ? item.path : `${item.path} · unavailable`}</small></span>
               </button>
             ))}
           </div>

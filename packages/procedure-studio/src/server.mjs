@@ -7,7 +7,7 @@ import { packageProject } from './packager.mjs'
 import { StudioProject, publicProjectError } from './project.mjs'
 import { StudioRuntime } from './runtime.mjs'
 import { studioError } from './validation.mjs'
-import { createStudioProjectFromTemplate, listStudioTemplates, readRecentProjects, recordRecentProject } from './home.mjs'
+import { absoluteDirectoryPath, createStudioProjectFromTemplate, listStudioTemplates, projectDisplayName, readRecentProjects, recordRecentProject } from './home.mjs'
 
 const moduleRoot = dirname(fileURLToPath(import.meta.url))
 const webRoot = resolve(moduleRoot, '../web-dist')
@@ -74,16 +74,31 @@ async function staticResponse(res, pathname, token) {
 export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
   const token = randomBytes(32).toString('base64url')
   let session = null
-  const openSession = async (opened, projectRoot) => {
+  let turn = Promise.resolve()
+  const exclusive = (operation) => {
+    const result = turn.then(operation, operation)
+    turn = result.then(() => undefined, () => undefined)
+    return result
+  }
+  const openSession = async (opened) => {
+    if (session !== null && session.projectRoot === opened.root) {
+      await recordRecentProject(stateRoot, opened.root, projectDisplayName(session.project))
+      return session
+    }
+    const runtime = await StudioRuntime.open(join(opened.stateRoot, 'runs'), opened)
     const previous = session
-    session = null
-    if (previous !== null) await previous.runtime.close()
-    const runtime = await StudioRuntime.open(join(stateRoot, 'runs'), opened)
-    session = { project: opened, runtime, projectRoot }
-    await recordRecentProject(stateRoot, projectRoot, opened.publicState().document.integration.displayName)
+    session = { project: opened, runtime, projectRoot: opened.root }
+    try {
+      await recordRecentProject(stateRoot, opened.root, projectDisplayName(opened))
+    } catch (error) {
+      session = previous
+      await runtime.close().catch(() => {})
+      throw error
+    }
+    if (previous !== null) await previous.runtime.close().catch(() => {})
     return session
   }
-  if (project !== undefined) await openSession(project, project.publicState().project.root)
+  if (project !== undefined) await openSession(project)
   const activeHome = async () => {
     const recents = await readRecentProjects(stateRoot)
     const templates = await listStudioTemplates()
@@ -95,7 +110,7 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
       schemaVersion: 'openadam.procedure-studio-home.v0.1',
       templates,
       projects,
-      active: session === null ? null : { projectRoot: session.projectRoot, displayName: session.project.publicState().document.integration.displayName },
+      active: session === null ? null : { projectRoot: session.projectRoot, displayName: projectDisplayName(session.project) },
     }
   }
   const requireSession = () => {
@@ -109,6 +124,7 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
       if (req.headers.host !== new URL(origin).host) throw studioError('STUDIO_INVALID_ORIGIN', 'Unexpected Host header')
       const url = new URL(req.url, origin)
       if (url.pathname.startsWith('/api/')) {
+        await exclusive(async () => {
         if (!sameToken(req.headers['x-procedure-studio-token'], token)) throw studioError('STUDIO_UNAUTHORIZED', 'A valid private Studio token is required')
         if (req.headers.origin && req.headers.origin !== origin) throw studioError('STUDIO_INVALID_ORIGIN', 'Cross-origin control requests are refused')
         if (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site'])) {
@@ -123,11 +139,12 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
         }
         if (req.method === 'POST' && url.pathname === '/api/home/open') {
           const input = await body(req)
-          if (typeof input.path !== 'string' || !input.path.startsWith('/') || input.path.includes('..')) {
+          const projectPath = absoluteDirectoryPath(input.path)
+          if (projectPath === null) {
             throw studioError('STUDIO_PROJECT_PATH_INVALID', 'Project path must be one absolute directory path')
           }
-          const opened = await StudioProject.open(input.path, stateRoot)
-          const next = await openSession(opened, input.path)
+          const opened = await StudioProject.open(projectPath, stateRoot)
+          const next = await openSession(opened)
           json(res, 200, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list() })
           return
         }
@@ -135,14 +152,17 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
           const input = await body(req)
           const created = await createStudioProjectFromTemplate(input)
           const opened = await StudioProject.open(created.projectRoot, stateRoot)
-          const next = await openSession(opened, created.projectRoot)
+          const next = await openSession(opened)
           json(res, 201, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/home/close') {
           const previous = session
-          session = null
-          if (previous !== null) await previous.runtime.close()
+          if (previous !== null) {
+            await recordRecentProject(stateRoot, previous.projectRoot, projectDisplayName(previous.project))
+            session = null
+            await previous.runtime.close()
+          }
           json(res, 200, await activeHome())
           return
         }
@@ -243,6 +263,8 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
           return
         }
         throw studioError('STUDIO_NOT_FOUND', 'Route not found')
+        })
+        return
       }
       if (!['GET', 'HEAD'].includes(req.method) || !(await staticResponse(res, url.pathname, token))) {
         throw studioError('STUDIO_NOT_FOUND', 'Route not found')
@@ -264,7 +286,11 @@ export async function serveStudio({ project, stateRoot, port = 0 } = {}) {
     token,
     close: async () => {
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
-      if (session !== null) await session.runtime.close()
+      await exclusive(async () => {
+        const current = session
+        session = null
+        if (current !== null) await current.runtime.close()
+      })
     },
   }
 }

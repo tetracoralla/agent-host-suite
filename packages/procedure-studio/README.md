@@ -17,10 +17,11 @@ npm run studio -- serve
 ```
 
 Without `--project` the Studio opens on its home surface: create a Procedure
-from one of the bundled templates (blank, research-and-verify,
-develop-and-review, capability-orchestration, human-decision), open a recent
+from one of the bundled templates (Blank Procedure, Research and Verify,
+Develop and Review, Capability Orchestration, Human Decision), open a recent
 project, or type any project directory. The home button in the activity rail
-returns there, and recent projects are remembered per state root.
+returns there, and recent projects are remembered per state root. Test Runs
+stay with the project that created them.
 
 ```sh
 npm run studio -- serve --project packages/procedure-studio/examples/research-brief
