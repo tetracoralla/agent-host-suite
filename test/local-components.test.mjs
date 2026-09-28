@@ -454,6 +454,7 @@ test('concurrent Direct Procedure retries share one execution and conflicting co
   const [firstResult, retryResult] = await Promise.all([first, retry])
   assert.deepEqual(retryResult, firstResult)
   assert.equal(calls, 1)
+  assert.equal((await toolSetStatus({ stateRoot })).procedures[0].agentAvailable, true)
 })
 
 test('a Direct Procedure completion cannot verify dependencies that changed while the call was running', async (t) => {

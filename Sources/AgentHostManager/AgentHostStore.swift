@@ -439,12 +439,13 @@ final class AgentHostStore: ObservableObject {
             async let codex = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("codex"), as: HostStatusResult.self)
             async let claude = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("claude"), as: HostStatusResult.self)
             async let zcode = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("zcode"), as: HostStatusResult.self)
+            async let grok = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("grok"), as: HostStatusResult.self)
             async let activity = self.cli.run(["activity"], as: ActivityResult.self)
             async let snapshot = self.cli.run(["snapshot"], as: SuiteSnapshot.self)
             async let usage = self.cli.run(["usage"], as: UsageSummary.self)
             async let browse = self.cli.run(["tools", "browse"], as: ToolBrowseCatalog.self)
 
-            let hostValues = try await [zcode, codex, claude]
+            let hostValues = try await [zcode, codex, claude, grok]
             self.hostStatuses = Dictionary(uniqueKeysWithValues: hostValues.map { ($0.host, $0) })
             self.selectDefaultSetupHostIfNeeded()
 
@@ -806,11 +807,12 @@ final class AgentHostStore: ObservableObject {
         async let codex = cli.run(ManagerCheckPolicy.quickHostStatusArguments("codex"), as: HostStatusResult.self)
         async let claude = cli.run(ManagerCheckPolicy.quickHostStatusArguments("claude"), as: HostStatusResult.self)
         async let zcode = cli.run(ManagerCheckPolicy.quickHostStatusArguments("zcode"), as: HostStatusResult.self)
+        async let grok = cli.run(ManagerCheckPolicy.quickHostStatusArguments("grok"), as: HostStatusResult.self)
         async let activity = cli.run(["activity"], as: ActivityResult.self)
         async let snapshot = cli.run(["snapshot"], as: SuiteSnapshot.self)
         async let usage = cli.run(["usage"], as: UsageSummary.self)
         async let browse = cli.run(["tools", "browse"], as: ToolBrowseCatalog.self)
-        let hosts = await [try? zcode, try? codex, try? claude].compactMap { $0 }
+        let hosts = await [try? zcode, try? codex, try? claude, try? grok].compactMap { $0 }
         self.hostStatuses = Dictionary(uniqueKeysWithValues: hosts.map { ($0.host, $0) })
         self.selectDefaultSetupHostIfNeeded()
         self.observations = try? await cli.run(["observability", "status"], as: ObservabilityStatus.self)

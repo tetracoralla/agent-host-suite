@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "openadam.agent-host-procedure-integration.v0.2",
+  "displayName": "Workspace Composition",
+  "summary": "Demonstrate Agent, Capability, exact subprocedure, grant, and workspace-resource composition without defining a Studio-private graph.",
+  "procedure": {
+    "id": "org.openadam.example.workspace-composition",
+    "version": "2.3.0",
+    "inputSchema": "input.schema.json",
+    "outputSchema": "output.schema.json",
+    "permissions": ["model.invoke", "workspace.read", "capability.invoke", "procedure.invoke", "network.read"],
+    "resources": [{ "id": "workspace", "type": "workspace", "required": true, "adapter": "git" }],
+    "lifecycle": { "mode": "stateful", "resumable": true, "interaction": "agent-mediated" }
+  },
+  "execution": {
+    "kind": "agentic-runner",
+    "method": "method.json",
+    "outputArtifacts": ["final"],
+    "identityFiles": ["method.json"]
+  },
+  "ownership": { "uninstall": "agent-host-created-only" }
+}

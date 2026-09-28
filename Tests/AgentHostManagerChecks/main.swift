@@ -642,7 +642,7 @@ do {
     )
 
     expect(
-        ManagerAgentApp.all.map(\.id) == ["zcode", "codex", "claude"],
+        ManagerAgentApp.all.map(\.id) == ["zcode", "codex", "claude", "grok"],
         "trace-only providers must not appear as connectable Agent apps"
     )
     expect(ManagerAgentApp.named("deepseek-harness").name == "DeepSeek Harness", "trace providers still need human-readable names")

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
 import { AgentHostError } from '../errors.mjs'
@@ -45,6 +46,10 @@ export async function withCodexConfiguration(executable, options, callback) {
   const configRoot = options.configRoot
   if (configRoot !== undefined && !absolutePath(configRoot)) throw failure('CODEX_CONFIG_PATH_INVALID', 'Codex configuration requires an absolute root')
   if (options.signal?.aborted === true) throw failure('CODEX_CONFIG_CANCELLED', 'Codex configuration was cancelled')
+  if (configRoot !== undefined) {
+    try { await mkdir(configRoot, { recursive: true, mode: 0o700 }) }
+    catch { throw failure('CODEX_CONFIG_UNAVAILABLE', 'The Codex configuration root could not be prepared') }
+  }
   const timeoutMs = options.timeoutMs ?? 15_000
   const maxMessageBytes = options.maxMessageBytes ?? 4 * 1024 * 1024
   const maxSessionBytes = options.maxSessionBytes ?? 16 * 1024 * 1024

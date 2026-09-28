@@ -1,6 +1,7 @@
 import { inspectClaude } from './hosts/claude.mjs'
 import { inspectCodex } from './hosts/codex.mjs'
 import { inspectZcode } from './hosts/zcode.mjs'
+import { inspectGrok } from './hosts/grok.mjs'
 import { inspectProductSkills, inspectProviderSkills } from './developer-kit-skill.mjs'
 import { runFile } from './process.mjs'
 import { FEATURED_PROFILE_ID, hostFacingManifest, isAgentToolsPaused, loadProfile } from './profile.mjs'
@@ -146,6 +147,7 @@ async function inspectHostReceipt(hostId, state, agentManifest, {
   inspectCodexHost,
   inspectClaudeHost,
   inspectZcodeHost,
+  inspectGrokHost,
   codexConfiguration,
 }) {
   if (hostId === 'codex') {
@@ -165,6 +167,11 @@ async function inspectHostReceipt(hostId, state, agentManifest, {
       workspaceRoot: state.workspaceRoot ?? null,
     })
   }
+  if (hostId === 'grok') {
+    return inspectGrokHost(agentManifest, runner, state.hosts.grok, {
+      workspaceRoot: state.workspaceRoot ?? null,
+    })
+  }
   return null
 }
 
@@ -179,6 +186,7 @@ export async function inspectFeaturedReadiness(state, {
   inspectCodexHost = inspectCodex,
   inspectClaudeHost = inspectClaude,
   inspectZcodeHost = inspectZcode,
+  inspectGrokHost = inspectGrok,
   inspectProviderSkillRecords = inspectProviderSkills,
   inspectProductSkillRecords = inspectProductSkills,
   loadInstalledProfile = loadProfile,
@@ -329,6 +337,7 @@ export async function inspectFeaturedReadiness(state, {
     inspectCodexHost,
     inspectClaudeHost,
     inspectZcodeHost,
+    inspectGrokHost,
     inspectProviderSkillRecords,
     inspectProductSkillRecords,
     codexConfiguration,

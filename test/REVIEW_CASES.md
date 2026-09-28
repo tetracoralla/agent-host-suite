@@ -197,9 +197,10 @@ commands. `tools set --profile` only selects the working set of already
 installed tools. A tracked `draft-unbound` catalog and `--development-root`
 setup still fail closed. Setup `--no-host` installs inventory without
 connecting an Agent app.
-Manager task cards remain owner-authored invitations over that same admitted
-set: they may copy an editable example and open a connected Agent app, but do
-not mutate inventory, record adoption, or define portable Provider metadata.
+Manager rows remain owner-authored invitations over that same admitted set.
+An editable example may stay collapsed on the detail page. Copying it does not
+open an Agent app, mutate inventory, record adoption, or define portable
+Provider metadata.
 An update onto `featured` while local monitoring is already enabled must
 materialize the consented monitoring components together with the featured
 tool set when the bound release contains them. A release that omits those
@@ -236,7 +237,7 @@ Start with [codex-projection.test.mjs](codex-projection.test.mjs), [codex-config
 [provider-grant-probes.test.mjs](provider-grant-probes.test.mjs) starts real
 Providers through catalog admission, health, export, doctor and monitoring;
 missing authority must not become a package-cwd grant. Lifecycle coverage also
-checks that Claude/ZCode on-demand Skills do not retain an active MCP binding
+checks that Claude/ZCode/Grok on-demand Skills do not retain an active MCP binding
 or lose ownership, and that adding an app with a changed shared grant updates
 existing consumers atomically.
 
@@ -255,7 +256,7 @@ up and restore an occupied user Skill; uninstall preserves a later changed targe
 
 ## Host inspection and mutation
 
-Start with [codex-host.test.mjs](codex-host.test.mjs), [claude-host.test.mjs](claude-host.test.mjs), [zcode-host.test.mjs](zcode-host.test.mjs).
+Start with [codex-host.test.mjs](codex-host.test.mjs), [claude-host.test.mjs](claude-host.test.mjs), [zcode-host.test.mjs](zcode-host.test.mjs), and [grok-host.test.mjs](grok-host.test.mjs).
 
 Absence, unverified configuration, and
 failed inspection remain distinct. A missing Host-owned Codex cache is
@@ -423,7 +424,7 @@ live configuration changes, content export or publication.
 - for a workspace-dependent tool, verify the live host entry carries the
   explicit grant and package-backed command, then call it from a nested
   repository without source or shell fallback;
-- report Codex, ZCode, and Claude independently; an intentionally inactive
+- report Codex, ZCode, Claude, and Grok independently; an intentionally inactive
   carrier is not a failure of the active carrier.
 
 ## Direct runtime flow
@@ -446,7 +447,7 @@ live configuration changes, content export or publication.
   previews relevant to the reviewed change;
 - keep the Manager open across one environment change and foreground return;
   verify freshness advances without a duplicate just-completed refresh;
-- verify visible Environment and Tools counts exclude backstage components while
+- verify visible tool and catalog counts exclude backstage components while
   context cost counts only Agent-callable operations;
 - verify default refresh detects a broken direct route rather than promoting
   file or binding presence to overall readiness;
@@ -455,10 +456,10 @@ live configuration changes, content export or publication.
   Agent-app binding;
 - exercise keyboard/accessibility and inspect the rendered surface separately
   from build results;
-- at setup and in Tools, verify task cards remain glanceable at narrow and wide
+- at setup and in Tools, verify rows remain glanceable at narrow and wide
   sizes, expose useful accessibility labels, distinguish installed/paused/
-  missing state, and copy an optional example without presenting a rating or
-  recording adoption;
+  missing state, and keep an optional example collapsed; copying it does not
+  open an Agent app, present a rating, or record adoption;
 - on Windows, distinguish application install/update/restore/uninstall from the
   tool environment's setup/update/rollback/disconnect actions; exercise Start
   menu entry points, loopback authentication, narrow and wide layouts, and both

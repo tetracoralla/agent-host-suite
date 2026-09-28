@@ -4,6 +4,11 @@
 
 ### Added
 
+- Grok CLI is a supported Agent app. The Agents page shows whether it is
+  installed and whether its user MCP configuration and Skills are connected.
+  Host writes only the user `[mcp_servers]` entries and `~/.grok/skills`
+  links it owns.
+
 - Product-first capability discovery in native and browser Managers: compact
   rows use the tools' upstream product marks, one short job label, and
   availability. Environment actions stay install, connect, enable, repair, and

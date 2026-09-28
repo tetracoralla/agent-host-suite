@@ -545,6 +545,7 @@ struct ManagerAgentApp: Identifiable, Equatable, Sendable {
         ManagerAgentApp(id: "zcode", name: "ZCode", systemImage: "z.square.fill"),
         ManagerAgentApp(id: "codex", name: "Codex", systemImage: "bubble.left.and.bubble.right.fill"),
         ManagerAgentApp(id: "claude", name: "Claude Code", systemImage: "terminal.fill"),
+        ManagerAgentApp(id: "grok", name: "Grok", systemImage: "terminal.fill"),
     ]
 
     private static let traceOnly = [
@@ -812,6 +813,7 @@ struct ActivityEntry: Decodable, Equatable, Identifiable, Sendable {
         case "codex": return "Codex"
         case "claude": return "Claude Code"
         case "zcode": return "ZCode"
+        case "grok": return "Grok"
         default: return id.localizedCapitalized
         }
     }

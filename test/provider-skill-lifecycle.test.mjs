@@ -14,7 +14,7 @@ import { compatibleApplicationState, createClaudeRunner, createCodexRunner, heal
 import { runSkillLauncher } from './launcher-helpers.mjs'
 import { createReleaseFixture } from './release-helpers.mjs'
 
-for (const host of ['codex', 'claude', 'zcode']) {
+for (const host of ['codex', 'claude', 'zcode', 'grok']) {
   test(`${host} setup, on-demand, grant recovery, update and rollback preserve MCP and CLI authority`, async (t) => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'agent-host-provider-lifecycle-')))
     t.after(() => rm(root, { recursive: true, force: true }))
@@ -31,7 +31,7 @@ for (const host of ['codex', 'claude', 'zcode']) {
     const fake = host === 'codex'
       ? createCodexRunner({ mathPresent: false, timePresent: false, mathVersion: '0.4.0', mathMarketplace: 'openadam' })
       : host === 'claude' ? createClaudeRunner() : { runner: async (_command, args) => {
-          assert.equal(args[0], 'version')
+          assert.equal(args[0], host === 'grok' ? '--version' : 'version')
           return { status: 0, stdout: '0.16.5\n', stderr: '' }
         } }
     const stateRoot = join(root, 'state')
@@ -41,6 +41,7 @@ for (const host of ['codex', 'claude', 'zcode']) {
         : fake.runner(command, args, options),
       codexConfiguration: fake.configuration,
       hostSkillHome: join(root, 'host-home'), zcodeConfigPath: join(root, 'zcode-config.json'), zcodeExecutable: process.execPath,
+      grokConfigPath: join(root, 'grok-config.toml'), grokExecutable: process.execPath,
       applicationStatePreflight: compatibleApplicationState,
       // Only Armorial in this sealed release fixture is a real MCP server.
       // Exercise it through production catalog admission and cold/warm probes;
@@ -72,6 +73,10 @@ for (const host of ['codex', 'claude', 'zcode']) {
     if (host === 'codex') {
       const entry = inactive.hosts.codex.entries.find((item) => item.component === 'armorial')
       await assert.rejects(readFile(join(entry.pluginRoot, '.mcp.json')), (error) => error.code === 'ENOENT')
+    } else if (host === 'grok') {
+      const config = await readFile(inactive.hosts.grok.configPath, 'utf8')
+      assert.doesNotMatch(config, /\[mcp_servers\.armorial\]/u)
+      assert.equal(inactive.hosts.grok.inactiveEntries.find((entry) => entry.component === 'armorial')?.created, true)
     } else {
       const config = JSON.parse(await readFile(inactive.hosts[host].configPath, 'utf8'))
       const servers = host === 'claude' ? config.mcpServers : config.mcp.servers

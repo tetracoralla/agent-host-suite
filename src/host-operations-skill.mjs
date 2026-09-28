@@ -252,7 +252,7 @@ export async function preflightOperationsSkill(host, paths, runner, options = {}
       replacementRequired: entry.marketplaceNeedsReplacement || entry.migratableDuplicates.length > 0,
     }
   }
-  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Agent Host Skill target: ${host}`)
+  if (!['claude', 'zcode', 'grok'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Agent Host Skill target: ${host}`)
   const exposurePath = options.previous?.exposurePath ?? join(resolveLinkedSkillsRoot(host, options), OPERATIONS_SKILL_ID)
   const info = await existing(exposurePath)
   const managedTarget = await resolvedSymlink(exposurePath, info)
@@ -290,7 +290,7 @@ export async function installOperationsSkill(host, paths, runner, previous = nul
       binding: mergeCodexOwnership(previous?.binding, binding),
     }
   }
-  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Agent Host Skill target: ${host}`)
+  if (!['claude', 'zcode', 'grok'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Agent Host Skill target: ${host}`)
   const projectionRoot = await materializeLinkedSkill(paths, identity, host)
   const exposurePath = previous?.exposurePath ?? join(resolveLinkedSkillsRoot(host, options), OPERATIONS_SKILL_ID)
   await ensureRealDirectory(dirname(exposurePath))

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "openadam.procedure-studio-project.v0.1",
+  "componentId": "workspace-composition-procedure",
+  "author": "OpenAdam Studio",
+  "licenseSpdx": "Apache-2.0",
+  "integration": "procedure.integration.json",
+  "scenarios": ["scenarios/composition.json"],
+  "output": "dist"
+}

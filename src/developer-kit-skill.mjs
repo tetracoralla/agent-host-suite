@@ -234,13 +234,13 @@ async function preflightLinkedComponent(host, component, paths, previous, option
 
 export async function preflightDeveloperKitSkill(host, manifest, paths, options = {}) {
   if (host === 'codex' || componentFrom(manifest) === null) return null
-  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Developer Skill target: ${host}`)
+  if (!['claude', 'zcode', 'grok'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Developer Skill target: ${host}`)
   return preflightLinked(host, manifest, paths, options.previous, options)
 }
 
 export async function installDeveloperKitSkill(host, manifest, paths, previous = null, options = {}) {
   if (host === 'codex') return null
-  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Developer Skill target: ${host}`)
+  if (!['claude', 'zcode', 'grok'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Developer Skill target: ${host}`)
   const component = componentFrom(manifest)
   if (component === null) {
     if (previous !== null && previous !== undefined) await uninstallDeveloperKitSkill(previous)
@@ -290,7 +290,7 @@ async function installLinkedComponent(host, component, paths, previous, options)
 
 export async function preflightProviderSkills(host, manifest, paths, options = {}) {
   if (host === 'codex') return []
-  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Provider Skill target: ${host}`)
+  if (!['claude', 'zcode', 'grok'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Provider Skill target: ${host}`)
   const previous = options.previous ?? []
   const prepared = []
   for (const component of providerComponentsFrom(manifest)) {
@@ -307,7 +307,7 @@ export async function preflightProviderSkills(host, manifest, paths, options = {
 
 export async function installProviderSkills(host, manifest, paths, previous = [], options = {}) {
   if (host === 'codex') return []
-  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Provider Skill target: ${host}`)
+  if (!['claude', 'zcode', 'grok'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Provider Skill target: ${host}`)
   await preflightProviderSkills(host, manifest, paths, { ...options, previous })
   const installed = []
   const desired = providerComponentsFrom(manifest)
@@ -343,7 +343,7 @@ export async function inspectProviderSkills(managed, runner = runFile) {
 
 export async function preflightProductSkills(host, manifest, paths, options = {}) {
   if (host === 'codex') return []
-  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Product Skill target: ${host}`)
+  if (!['claude', 'zcode', 'grok'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Product Skill target: ${host}`)
   const previous = options.previous ?? []
   const prepared = []
   for (const component of productComponentsFrom(manifest)) {
@@ -360,7 +360,7 @@ export async function preflightProductSkills(host, manifest, paths, options = {}
 
 export async function installProductSkills(host, manifest, paths, previous = [], options = {}) {
   if (host === 'codex') return []
-  if (!['claude', 'zcode'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Product Skill target: ${host}`)
+  if (!['claude', 'zcode', 'grok'].includes(host)) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported Product Skill target: ${host}`)
   await preflightProductSkills(host, manifest, paths, { ...options, previous })
   const installed = []
   const desired = productComponentsFrom(manifest)

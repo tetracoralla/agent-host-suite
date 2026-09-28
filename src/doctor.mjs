@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { inspectCodex } from './hosts/codex.mjs'
 import { inspectClaude } from './hosts/claude.mjs'
 import { inspectZcode } from './hosts/zcode.mjs'
+import { inspectGrok } from './hosts/grok.mjs'
 import { runFile } from './process.mjs'
 import { inspectService } from './service.mjs'
 import { inspectDirectProviders } from './provider-diagnostics.mjs'
@@ -203,6 +204,52 @@ export async function doctor(state, {
       }
     } catch (error) {
       checks.push(check('host.zcode', 'error', 'ZCode host inspection failed', error.message))
+    }
+  }
+  if (inspectAgentApps && state.hosts.grok !== undefined) {
+    try {
+      const current = await inspectGrok(agentManifest, runner, state.hosts.grok, { workspaceRoot: state.workspaceRoot ?? null })
+      const missing = current.entries.filter((entry) => !entry.present || !entry.identityMatched)
+      const operationsSkill = await inspectOperationsSkill(state.hosts.grok.operationsSkill, runner)
+      const developerSkill = await inspectDeveloperKitSkill(state.hosts.grok.developerSkill, runner)
+      const developerSkillReady = developerKit === undefined ? developerSkill.status === 'absent' : developerSkill.status === 'ok'
+      const providerSkills = await inspectProviderSkills(state.hosts.grok.providerSkills, runner)
+      const expectedProviderSkills = Object.values(agentManifest.components).filter((component) => component.providerSkill !== undefined).length
+      const providerSkillsReady = providerSkills.status === 'ok' && providerSkills.skills.length === expectedProviderSkills
+      const productSkills = await inspectProductSkills(state.hosts.grok.productSkills, runner)
+      const productSkillsReady = productSkills.status === 'ok' && productSkills.skills.length === expectedProductSkillCount(agentManifest)
+      const ready = missing.length === 0 && operationsSkill.status === 'ok' && developerSkillReady && providerSkillsReady && productSkillsReady
+      checks.push(check('host.grok', ready ? 'ok' : 'error', ready ? 'Grok MCP entries and Agent Host operations Skill are present' : 'Grok integrations need attention', {
+        entries: missing,
+        operationsSkill,
+        developerSkill,
+        providerSkills,
+        productSkills,
+      }))
+      for (const entry of current.entries) {
+        const healthy = entry.present && entry.identityMatched
+        checks.push(check(`host.grok.${entry.component}`, healthy ? 'ok' : 'error', healthy ? `${entry.component} is ready in Grok` : `${entry.component} needs attention in Grok`))
+      }
+      checks.push(check('host.grok.agent-host-operations', operationsSkill.status === 'ok' ? 'ok' : 'error', operationsSkill.status === 'ok' ? 'Agent Host operations Skill is ready in Grok' : 'Agent Host operations Skill needs attention in Grok', operationsSkill))
+      if (developerKit !== undefined) checks.push(check('host.grok.agent-tool-development-kit', developerSkill.status === 'ok' ? 'ok' : 'error', developerSkill.status === 'ok' ? 'Developer Kit Skill and version-locked CLI are ready in Grok' : 'Developer Kit Skill needs attention in Grok', developerSkill))
+      for (const skill of providerSkills.skills) {
+        checks.push(check(
+          `host.grok.provider-skill.${skill.id}`,
+          skill.status === 'ok' ? 'ok' : 'error',
+          skill.status === 'ok' ? `${skill.id} Skill and version-locked CLI are ready in Grok` : `${skill.id} Provider Skill needs attention in Grok`,
+          skill,
+        ))
+      }
+      for (const skill of productSkills.skills) {
+        checks.push(check(
+          `host.grok.product-skill.${skill.id}`,
+          skill.status === 'ok' ? 'ok' : 'error',
+          skill.status === 'ok' ? `${skill.id} product Skill is ready in Grok` : `${skill.id} product Skill needs attention in Grok`,
+          skill,
+        ))
+      }
+    } catch (error) {
+      checks.push(check('host.grok', 'error', 'Grok host inspection failed', error.message))
     }
   }
   const currentPrivateComponents = Object.entries(state.privateComponents ?? {})

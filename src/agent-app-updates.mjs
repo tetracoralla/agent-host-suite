@@ -30,6 +30,14 @@ const APPS = [
     upgradeArguments: ['update'],
     upgrade: 'Update Claude Code with its official installer or package manager. Agent Host does not redistribute Claude Code.',
   },
+  {
+    id: 'grok',
+    name: 'Grok',
+    commands: ['grok'],
+    versionArguments: ['--version'],
+    upgradeCommand: null,
+    upgrade: 'Update Grok with its official installer. Agent Host does not redistribute Grok.',
+  },
 ]
 
 async function commandExists(name, runner) {

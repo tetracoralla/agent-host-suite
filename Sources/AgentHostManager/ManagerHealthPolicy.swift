@@ -169,6 +169,7 @@ enum ManagerHealthPolicy {
         if errors.contains(where: { $0.id == "host.codex" }) && !errors.contains(where: { $0.id.hasPrefix("host.codex.") }) { labels.insert("Codex") }
         if errors.contains(where: { $0.id == "host.claude" }) && !errors.contains(where: { $0.id.hasPrefix("host.claude.") }) { labels.insert("Claude Code") }
         if errors.contains(where: { $0.id == "host.zcode" }) && !errors.contains(where: { $0.id.hasPrefix("host.zcode.") }) { labels.insert("ZCode") }
+        if errors.contains(where: { $0.id == "host.grok" }) && !errors.contains(where: { $0.id.hasPrefix("host.grok.") }) { labels.insert("Grok") }
         if facets.contains(where: { $0.id == "monitoring" && !$0.isHealthy }) { labels.insert("Monitoring") }
         if facets.contains(where: { $0.id == "catalog" && !$0.isHealthy }) { labels.insert("Tool catalog") }
         return labels.sorted()

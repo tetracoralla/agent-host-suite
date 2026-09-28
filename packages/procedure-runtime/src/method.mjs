@@ -303,7 +303,7 @@ function validateResource(resource) {
   }
 }
 
-function validateNode(node, { roles, inputs, artifacts, permissions, resources, workspaceResources, nodes }) {
+function validateNode(node, { roles, inputs, artifacts, permissions, resources, workspaceResources, nodes, transitionIds }) {
   assert(nodeKinds.has(node.kind), 'INVALID_METHOD', `Unsupported graph node kind: ${node.kind}`)
   const baseKeys = ['id', 'name', 'kind', 'consumes', 'produces', 'permissions', 'resources', 'transitions']
   const variantKeys = {
@@ -412,7 +412,13 @@ function validateNode(node, { roles, inputs, artifacts, permissions, resources, 
   assert(Array.isArray(node.transitions) && node.transitions.length >= 1 && node.transitions.length <= 12, 'INVALID_METHOD', 'Each graph node needs 1–12 transitions')
   for (const transition of node.transitions) {
     assert(object(transition), 'INVALID_METHOD', 'Invalid transition')
-    exactKeys(transition, ['when', 'to', 'label'], `Transition from ${node.id}`)
+    exactKeys(transition, ['id', 'when', 'to', 'label'], `Transition from ${node.id}`)
+    if (transition.id !== undefined) {
+      text(transition.id, 'Transition ID', 80)
+      assert(identifier.test(transition.id), 'INVALID_METHOD', 'Invalid transition ID')
+      assert(!transitionIds.has(transition.id), 'INVALID_METHOD', 'Transition IDs must be unique')
+      transitionIds.add(transition.id)
+    }
     validateCondition(transition.when)
     if (transition.when.path?.startsWith('inputs.') || transition.when.path?.startsWith('outputs.'))
       assert(node.consumes.includes(transition.when.path.split('.')[1]), 'INVALID_METHOD', `Transition ${transition.when.path} is not declared in node consumes`)
@@ -473,13 +479,20 @@ export function validateMethod(value) {
         'INVALID_METHOD',
         'Role default binding must name a supported Agent shell',
       )
-      if (role.defaultBinding.model !== undefined)
-        assert(
-          typeof role.defaultBinding.model === 'string' ||
-            object(role.defaultBinding.model),
-          'INVALID_METHOD',
-          'Role default model binding is invalid',
-        )
+      if (role.defaultBinding.model !== undefined) {
+        if (role.defaultBinding.provider === 'zcode') {
+          assert(object(role.defaultBinding.model), 'INVALID_METHOD', 'ZCode default model binding must use native provider and model ids')
+          assert(typeof role.defaultBinding.model.providerId === 'string' && role.defaultBinding.model.providerId.length >= 1 && role.defaultBinding.model.providerId.length <= 200, 'INVALID_METHOD', 'ZCode default provider ID is invalid')
+          assert(typeof role.defaultBinding.model.modelId === 'string' && role.defaultBinding.model.modelId.length >= 1 && role.defaultBinding.model.modelId.length <= 200, 'INVALID_METHOD', 'ZCode default model ID is invalid')
+          if (role.defaultBinding.model.options !== undefined) {
+            assert(object(role.defaultBinding.model.options), 'INVALID_METHOD', 'ZCode default model options are invalid')
+            if (role.defaultBinding.model.options.reasoningLevel !== undefined)
+              assert(typeof role.defaultBinding.model.options.reasoningLevel === 'string' && role.defaultBinding.model.options.reasoningLevel.length >= 1 && role.defaultBinding.model.options.reasoningLevel.length <= 80, 'INVALID_METHOD', 'ZCode default reasoning level is invalid')
+          }
+        } else {
+          assert(typeof role.defaultBinding.model === 'string' && role.defaultBinding.model.length >= 1 && role.defaultBinding.model.length <= 200, 'INVALID_METHOD', 'Role default model binding is invalid')
+        }
+      }
     }
   }
   const inputs = uniqueDefinitions(method.inputs, 'Input', 40)
@@ -532,9 +545,10 @@ export function validateMethod(value) {
     'Methods require 1–80 graph nodes',
   )
   const nodes = uniqueDefinitions(method.graph.nodes, 'Graph node', 80)
+  const transitionIds = new Set()
   assert(nodes.has(method.graph.entry), 'INVALID_METHOD', 'Method graph entry is invalid')
   for (const node of method.graph.nodes)
-    validateNode(node, { roles, inputs, artifacts, permissions, resources, workspaceResources, nodes })
+    validateNode(node, { roles, inputs, artifacts, permissions, resources, workspaceResources, nodes, transitionIds })
   assert(
     method.graph.nodes.some((node) => node.kind === 'agent-turn') || roles.size === 0,
     'INVALID_METHOD',

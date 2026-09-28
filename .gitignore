@@ -2,6 +2,7 @@ node_modules/
 .build/
 dist/
 .verify/
+.review/
 .DS_Store
 *.log
 *.sock

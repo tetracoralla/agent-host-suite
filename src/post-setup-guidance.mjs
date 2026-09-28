@@ -138,7 +138,7 @@ function pack(base) {
   }
 }
 
-const HOST_DISPLAY_NAMES = Object.freeze({ zcode: 'ZCode', codex: 'Codex', claude: 'Claude Code' })
+const HOST_DISPLAY_NAMES = Object.freeze({ zcode: 'ZCode', codex: 'Codex', claude: 'Claude Code', grok: 'Grok' })
 
 function displayHostName(id, fallback) {
   if (typeof fallback === 'string' && fallback.length > 0) return fallback
@@ -423,7 +423,7 @@ export function guidanceFromSetupResult(result, options = {}) {
   const activeToolCount = Array.isArray(result?.agentComponents)
     ? result.agentComponents.length
     : installedToolCount
-  const hostNames = { zcode: 'ZCode', codex: 'Codex', claude: 'Claude Code' }
+  const hostNames = { zcode: 'ZCode', codex: 'Codex', claude: 'Claude Code', grok: 'Grok' }
   const primaryHostId = options.primaryHostId ?? hosts[0] ?? null
   const primaryHostName = options.primaryHostName
     ?? (primaryHostId ? (hostNames[primaryHostId] || primaryHostId) : null)

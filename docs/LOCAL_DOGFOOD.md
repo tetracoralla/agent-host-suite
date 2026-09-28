@@ -20,7 +20,7 @@ stable boundary only. Session discovery vs Host working-set status is in
   runtime inputs.
 - Workspace-aware tools receive only the canonical root explicitly granted at
   setup. A package cannot discover or substitute another development root.
-- ZCode is the primary local Agent app. Codex and optional Claude Code use
+- ZCode is the primary local Agent app. Codex, Claude Code, and Grok use
   separate public carriers. Provider/model credentials remain user-owned and
   are not changed by Agent Host.
 - The installed inventory is distinct from the active Agent-visible set.
@@ -55,8 +55,8 @@ node scripts/check-packaged-trace-plane.mjs --release-manifest /absolute/release
 
 Then install into an explicit temporary state root or through the packaged
 native macOS app. Do not point setup at a development root when validating the
-external-user path. The Developer Kit check uses temporary Codex, ZCode, and
-Claude configuration roots and invokes no model.
+external-user path. The Developer Kit check uses temporary Codex, ZCode,
+Claude, and Grok configuration roots and invokes no model.
 
 ## Runtime verification
 

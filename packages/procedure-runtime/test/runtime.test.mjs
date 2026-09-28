@@ -153,6 +153,18 @@ test('published Method Graph and Run Request schemas accept the runtime referenc
   delete missingNodeField.graph.nodes[0].consumes
   assert.equal(validateMethodSchema(missingNodeField), false)
   assert.throws(() => validateMethod(missingNodeField), { code: 'INVALID_METHOD' })
+  const nativeZcodeModel = structuredClone(researchBriefMethod)
+  nativeZcodeModel.roles[2].defaultBinding.model = { providerId: 'native-provider', modelId: 'native-model', options: { reasoningLevel: 'high' } }
+  assert.equal(validateMethodSchema(nativeZcodeModel), true, JSON.stringify(validateMethodSchema.errors))
+  assert.doesNotThrow(() => validateMethod(nativeZcodeModel))
+  const invalidZcodeModel = structuredClone(researchBriefMethod)
+  invalidZcodeModel.roles[2].defaultBinding.model = 'not-native-coordinates'
+  assert.equal(validateMethodSchema(invalidZcodeModel), false)
+  assert.throws(() => validateMethod(invalidZcodeModel), { code: 'INVALID_METHOD' })
+  const invalidCodexModel = structuredClone(researchBriefMethod)
+  invalidCodexModel.roles[0].defaultBinding.model = { providerId: 'wrong-shape', modelId: 'wrong-shape' }
+  assert.equal(validateMethodSchema(invalidCodexModel), false)
+  assert.throws(() => validateMethod(invalidCodexModel), { code: 'INVALID_METHOD' })
 
   const requestSchema = JSON.parse(
     readFileSync(new URL('../../../schemas/agent-host-procedure-run-request.schema.v0.1.json', import.meta.url), 'utf8'),

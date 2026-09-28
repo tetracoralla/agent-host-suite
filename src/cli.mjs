@@ -44,7 +44,7 @@ const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 
 const PROFILE_CHOICES = 'standard|featured|developer|observability|local-dogfood'
 
 const USAGE = `Usage:
-  agent-host setup [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--host codex|claude|zcode | --no-host] [--workspace-root PATH] [--release-manifest PATH | --development-root PATH] [--enable-observability] [--replace-host-conflicts] [--no-service] [--dry-run] [--state-root PATH] [--json]
+  agent-host setup [--profile ${PROFILE_CHOICES}] [--tool COMPONENT] [--host codex|claude|zcode|grok | --no-host] [--workspace-root PATH] [--release-manifest PATH | --development-root PATH] [--enable-observability] [--replace-host-conflicts] [--no-service] [--dry-run] [--state-root PATH] [--json]
   agent-host status [--state-root PATH] [--json]
   agent-host snapshot [--state-root PATH] [--json]
   agent-host catalog [--state-root PATH] [--json]
@@ -98,9 +98,9 @@ const USAGE = `Usage:
   agent-host observability export-task --provider PROVIDER --session HASH --output PATH [--from-ms N] [--to-ms N] [--max-events N] [--max-output-bytes N] [--state-root PATH] [--json]
   agent-host observability adapters [--state-root PATH] [--json]
   agent-host observability adapter-plan --adapter ID [--state-root PATH] [--json]
-  agent-host host add codex|claude|zcode [--workspace-root PATH] [--replace-host-conflicts] [--state-root PATH] [--json]
-  agent-host host remove codex|claude|zcode [--state-root PATH] [--json]
-  agent-host host status codex|claude|zcode [--quick] [--state-root PATH] [--json]
+  agent-host host add codex|claude|zcode|grok [--workspace-root PATH] [--replace-host-conflicts] [--state-root PATH] [--json]
+  agent-host host remove codex|claude|zcode|grok [--state-root PATH] [--json]
+  agent-host host status codex|claude|zcode|grok [--quick] [--state-root PATH] [--json]
   agent-host service recover --recovery ID --manifest-sha256 SHA256 [--state-root PATH] [--json]
   agent-host uninstall [--purge-data] [--state-root PATH] [--json]`
 
@@ -237,7 +237,7 @@ function parseArgs(argv) {
   ])
   const start = options.command === 'host' ? 3 : options.command === 'component' && options.target !== undefined ? 3 : ACTION_COMMANDS.has(options.command) ? 2 : 1
   if (ACTION_COMMANDS.has(options.command) && options.action === undefined) throw new AgentHostError('CLI_USAGE', `${options.command} requires an action`)
-  if (options.command === 'host' && options.target === undefined) throw new AgentHostError('CLI_USAGE', 'host requires codex, claude, or zcode')
+  if (options.command === 'host' && options.target === undefined) throw new AgentHostError('CLI_USAGE', 'host requires codex, claude, zcode, or grok')
   const route = routeName(options)
   const allowed = new Set(ROUTE_ARGUMENTS[route] ?? ['--json'])
   for (let index = start; index < argv.length; index += 1) {

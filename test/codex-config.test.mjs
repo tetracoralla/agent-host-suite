@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,6 +33,16 @@ test('native configuration client scopes exact-key writes to the observed user l
   const requests = (await readFile(options.env.CODEX_CONFIG_TEST_TRACE, 'utf8')).trim().split('\n').map(JSON.parse)
   assert.equal(requests.some((item) => item.method?.startsWith('thread/') || item.method?.startsWith('turn/')), false)
   assert.equal(requests.filter((item) => item.method === 'config/batchWrite').length, 3)
+})
+
+test('native configuration prepares a missing isolated Codex home before starting the public app server', async (t) => {
+  const options = await optionsFor(t)
+  const configRoot = join(options.configRoot, 'fresh-codex-home')
+  await withCodexConfiguration(process.execPath, { ...options, configRoot }, async (client) => {
+    const state = await client.read()
+    assert.equal(state.filePath, join(configRoot, 'config.toml'))
+  })
+  assert.equal((await lstat(configRoot)).isDirectory(), true)
 })
 
 test('native configuration rejects interactive requests without forwarding them or executing tools', async (t) => {

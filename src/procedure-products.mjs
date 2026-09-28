@@ -27,11 +27,13 @@ import {
   readStatePaths,
   saveState,
 } from './state.mjs'
-import { procedureDependencySnapshot, projectProcedureAvailability, verifiedProcedureAvailability } from './procedure-availability.mjs'
+import { procedureCurrentlyVerified, procedureDependencySnapshot, projectProcedureAvailability, verifiedProcedureAvailability } from './procedure-availability.mjs'
 
 const MAX_CONTRACT_BYTES = 1024 * 1024
 const DIRECT_RESULT_CLAIM_SCHEMA = 'openadam.agent-host-procedure-result-claim.v0.1'
 const DIRECT_RESULT_POLL_MS = 25
+const VERIFICATION_WRITE_RETRIES = 40
+const verificationWrites = new Map()
 const stopped = new Set([
   'complete',
   'failed',
@@ -452,30 +454,63 @@ function sameDependencySnapshot(left, right) {
 }
 
 async function recordVerifiedInvocation(stateRoot, componentId, expectedDependencies, dependencies) {
-  const operation = `procedure.verify-${randomUUID()}`
-  await withLifecycleMutation(
-    await readStatePaths(resolveStateRoot(stateRoot)),
-    operation,
-    { ...dependencies, migrateState: true },
-    async (_inner, paths) => {
-      const state = await loadState(paths)
-      const component = state?.components?.[componentId]
-      if (component === undefined
-        || !sameDependencySnapshot(procedureDependencySnapshot(state, component), expectedDependencies)) return
-      const verifiedAt = new Date().toISOString()
-      component.procedureAvailability = verifiedProcedureAvailability(
-        state,
-        component,
-        verifiedAt,
-      )
-      const privateComponent = state.privateComponents?.[componentId]?.current?.component
-      if (privateComponent?.fingerprint === expectedDependencies.procedureFingerprint) {
-        privateComponent.procedureAvailability = structuredClone(component.procedureAvailability)
+  const root = resolveStateRoot(stateRoot)
+  const key = `${root}\0${componentId}\0${JSON.stringify(expectedDependencies)}`
+  const active = verificationWrites.get(key)
+  if (active !== undefined) return await active
+
+  const write = (async () => {
+    const statePaths = await readStatePaths(root)
+    for (let attempt = 0; attempt < VERIFICATION_WRITE_RETRIES; attempt++) {
+      const currentState = await loadState(statePaths)
+      const currentComponent = currentState?.components?.[componentId]
+      if (currentComponent === undefined
+        || !sameDependencySnapshot(procedureDependencySnapshot(currentState, currentComponent), expectedDependencies)) return
+      if (procedureCurrentlyVerified(currentState, currentComponent)) return
+
+      try {
+        const operation = `procedure.verify-${randomUUID()}`
+        await withLifecycleMutation(
+          statePaths,
+          operation,
+          { ...dependencies, migrateState: true },
+          async (_inner, paths) => {
+            const state = await loadState(paths)
+            const component = state?.components?.[componentId]
+            if (component === undefined
+              || !sameDependencySnapshot(procedureDependencySnapshot(state, component), expectedDependencies)
+              || procedureCurrentlyVerified(state, component)) return
+            const verifiedAt = new Date().toISOString()
+            component.procedureAvailability = verifiedProcedureAvailability(
+              state,
+              component,
+              verifiedAt,
+            )
+            const privateComponent = state.privateComponents?.[componentId]?.current?.component
+            if (privateComponent?.fingerprint === expectedDependencies.procedureFingerprint) {
+              privateComponent.procedureAvailability = structuredClone(component.procedureAvailability)
+            }
+            state.updatedAt = verifiedAt
+            await saveState(paths, state)
+          },
+        )
+        return
+      } catch (error) {
+        if (!(error instanceof AgentHostError
+          && ['LIFECYCLE_BUSY', 'LIFECYCLE_RECOVERY_BUSY'].includes(error.code))) throw error
       }
-      state.updatedAt = verifiedAt
-      await saveState(paths, state)
-    },
-  )
+      await delay(DIRECT_RESULT_POLL_MS)
+    }
+    // Availability is a conservative projection of completed work. A busy
+    // lifecycle must not turn an already completed Procedure result into a
+    // failure; leaving the evidence unverified is the safe fallback.
+  })()
+  verificationWrites.set(key, write)
+  try {
+    return await write
+  } finally {
+    if (verificationWrites.get(key) === write) verificationWrites.delete(key)
+  }
 }
 
 function coordinatorOptions(state, paths, products, dependencies, stack = []) {

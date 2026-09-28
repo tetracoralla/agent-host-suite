@@ -71,7 +71,7 @@ async function expose(host, fixture, workspaceRoot, skillOnly, previous) {
   return (await installProviderSkills(host, manifest, paths, previous ? [previous] : [], options))[0]
 }
 
-for (const host of ['codex', 'claude', 'zcode']) {
+for (const host of ['codex', 'claude', 'zcode', 'grok']) {
   test(`${host} Provider Skill preserves the explicit workspace and caller cwd, including on-demand and rebind`, async (t) => {
     const data = await fixture(t)
     const expected = {

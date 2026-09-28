@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "openadam.procedure-studio-project.v0.1",
+  "componentId": "research-brief-procedure",
+  "author": "OpenAdam Studio",
+  "licenseSpdx": "Apache-2.0",
+  "integration": "procedure.integration.json",
+  "scenarios": [
+    "scenarios/needs-clarification.json",
+    "scenarios/covered-topic.json"
+  ],
+  "output": "dist"
+}

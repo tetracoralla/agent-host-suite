@@ -83,7 +83,7 @@ task from their own ecosystem when it is safe to share with the chosen Agent.
 1. Let the Agent work normally. Do not stop it to complete a protocol form.
 2. Open the delivered page and inspect whether the requested result is visible,
    usable, and still faithful to the brief.
-3. If monitoring was already enabled, the Manager Task activity card or
+3. If monitoring was already enabled, Usage or
    `observability task-sources` can show direct calls, errors, and static
    references. `observability export-task` can export bounded metadata for one
    selected task. Monitoring is optional and must not be enabled merely to make

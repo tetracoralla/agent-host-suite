@@ -5,6 +5,7 @@ import { AgentHostError } from './errors.mjs'
 const HOST_DIRECTORIES = Object.freeze({
   claude: '.claude',
   zcode: '.zcode',
+  grok: '.grok',
 })
 
 function absoluteDirectory(value, label) {
@@ -16,6 +17,9 @@ function absoluteDirectory(value, label) {
 }
 
 export function resolveLinkedSkillsRoot(host, options = {}) {
+  if (host === 'grok' && options.homeRoot === undefined && typeof process.env.GROK_HOME === 'string' && isAbsolute(process.env.GROK_HOME)) {
+    return join(resolve(process.env.GROK_HOME), 'skills')
+  }
   const directory = HOST_DIRECTORIES[host]
   if (directory === undefined) throw new AgentHostError('HOST_UNSUPPORTED', `Unsupported linked Skill host: ${host}`)
   if (options.homeRoot !== undefined) {

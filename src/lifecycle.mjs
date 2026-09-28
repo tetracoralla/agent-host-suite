@@ -9,6 +9,7 @@ import { inspectCodex, installCodex, suspendCodex, uninstallCodex } from './host
 import { materializeCodexProjections, pruneCodexProjections, resolveWorkspaceRoot } from './hosts/codex-projection.mjs'
 import { CLAUDE_USER_CONFIG_ARGUMENTS, inspectClaude, installClaude, suspendClaude, uninstallClaude } from './hosts/claude.mjs'
 import { inspectZcode, installZcode, resolveZcodeExecutable, suspendZcode, uninstallZcode } from './hosts/zcode.mjs'
+import { inspectGrok, installGrok, suspendGrok, uninstallGrok } from './hosts/grok.mjs'
 import { readJson } from './json.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { resolveExecutable, runFile } from './process.mjs'
@@ -61,10 +62,13 @@ function availableAgentComponents(state) {
   return state.availableAgentComponents ?? state.agentComponents ?? Object.keys(state.components)
 }
 
-const SUPPORTED_HOSTS = Object.freeze(['codex', 'claude', 'zcode'])
+const SUPPORTED_HOSTS = Object.freeze(['codex', 'claude', 'zcode', 'grok'])
 
 function hostDisplayName(id) {
-  return id === 'codex' ? 'Codex' : id === 'claude' ? 'Claude Code' : 'ZCode'
+  if (id === 'codex') return 'Codex'
+  if (id === 'claude') return 'Claude Code'
+  if (id === 'grok') return 'Grok'
+  return 'ZCode'
 }
 
 function retainedWorkspaceRoot(value) {
@@ -360,12 +364,20 @@ async function installHost(id, manifest, previous, paths, runner, options, depen
           replaceConflicts: options.replaceHostConflicts,
           workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
         })
-      : await installZcode(manifest, runner, previous, {
-          replaceConflicts: options.replaceHostConflicts,
-          workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
-          configPath: dependencies.zcodeConfigPath,
-          executable: dependencies.zcodeExecutable,
-        })
+      : id === 'zcode'
+        ? await installZcode(manifest, runner, previous, {
+            replaceConflicts: options.replaceHostConflicts,
+            workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
+            configPath: dependencies.zcodeConfigPath,
+            executable: dependencies.zcodeExecutable,
+          })
+        : await installGrok(manifest, runner, previous, {
+            replaceConflicts: options.replaceHostConflicts,
+            workspaceRoot: options.workspaceRoot ?? previous?.workspaceRoot ?? null,
+            configPath: dependencies.grokConfigPath,
+            executable: dependencies.grokExecutable,
+            homeRoot: dependencies.hostSkillHome,
+          })
   const mergedBinding = mergeHostOwnership(previous, binding)
   let operationsSkill = null
   let developerSkill = null
@@ -398,7 +410,8 @@ async function installHost(id, manifest, previous, paths, runner, options, depen
       await uninstallOperationsSkill(operationsSkill, runner).catch(() => {})
       if (id === 'codex') await uninstallCodex(binding, runner).catch(() => {})
       else if (id === 'claude') await uninstallClaude(binding, runner).catch(() => {})
-      else await uninstallZcode(binding).catch(() => {})
+      else if (id === 'zcode') await uninstallZcode(binding).catch(() => {})
+      else await uninstallGrok(binding).catch(() => {})
     }
     throw error
   }
@@ -413,7 +426,9 @@ async function uninstallHost(id, state, runner) {
     ? await uninstallCodex(complete, runner)
     : id === 'claude'
       ? await uninstallClaude(complete, runner)
-      : await uninstallZcode(complete)
+      : id === 'zcode'
+        ? await uninstallZcode(complete)
+        : await uninstallGrok(complete)
   const operationsSkill = await uninstallOperationsSkill(state.operationsSkill, runner)
   return { binding, operationsSkill, developerSkill, providerSkills, productSkills }
 }
@@ -423,7 +438,9 @@ async function suspendHost(id, state, runner) {
     ? await suspendCodex(state, runner)
     : id === 'claude'
       ? await suspendClaude(state, runner)
-      : await suspendZcode(state)
+      : id === 'zcode'
+        ? await suspendZcode(state)
+        : await suspendGrok(state)
 }
 
 function hostEntryKey(id, entry) {
@@ -436,7 +453,7 @@ function hostManifestKeys(id, manifest) {
       .filter((component) => component.plugin !== undefined)
       .map((component) => component.plugin))
   }
-  // A retained on-demand Skill is not an active MCP binding in Claude/ZCode.
+  // A retained on-demand Skill is not an active MCP binding in Claude/ZCode/Grok.
   // Match those adapters' targets so suspension retains ownership for resume.
   return new Set(Object.entries(manifest.components)
     .filter(([, component]) => component.skillOnly !== true && typeof component.command === 'string' && Array.isArray(component.args))
@@ -662,11 +679,18 @@ export async function hostStatus(options, dependencies = {}) {
       : options.target === 'claude'
         ? await inspectClaude(stateManifest(state), runner, managed, { workspaceRoot: state.workspaceRoot ?? null,
             configPath: dependencies.claudeConfigPath, homeRoot: dependencies.hostSkillHome })
-        : await inspectZcode(stateManifest(state), runner, managed, {
-            workspaceRoot: state.workspaceRoot ?? null,
-            configPath: dependencies.zcodeConfigPath,
-            executable: dependencies.zcodeExecutable,
-          })
+        : options.target === 'grok'
+          ? await inspectGrok(stateManifest(state), runner, managed, {
+              workspaceRoot: state.workspaceRoot ?? null,
+              configPath: dependencies.grokConfigPath,
+              executable: dependencies.grokExecutable,
+              homeRoot: dependencies.hostSkillHome,
+            })
+          : await inspectZcode(stateManifest(state), runner, managed, {
+              workspaceRoot: state.workspaceRoot ?? null,
+              configPath: dependencies.zcodeConfigPath,
+              executable: dependencies.zcodeExecutable,
+            })
     const bindingHealthy = options.target === 'codex'
       ? inspection.entries.every((entry) => entry.pluginPresent && entry.pluginEnabled && entry.installedVersion === entry.requestedVersion && entry.installedIdentityMatched)
       : inspection.entries.every((entry) => entry.present && entry.identityMatched)
@@ -802,12 +826,20 @@ async function inspectActivation(previous, manifest, runner, options, workspaceR
               replaceConflicts: options.replaceHostConflicts,
               workspaceRoot,
             })
-          : await inspectZcode(agents, runner, managed, {
-              replaceConflicts: options.replaceHostConflicts,
-              workspaceRoot,
-              configPath: dependencies.zcodeConfigPath,
-              executable: dependencies.zcodeExecutable,
-            })
+          : id === 'zcode'
+            ? await inspectZcode(agents, runner, managed, {
+                replaceConflicts: options.replaceHostConflicts,
+                workspaceRoot,
+                configPath: dependencies.zcodeConfigPath,
+                executable: dependencies.zcodeExecutable,
+              })
+            : await inspectGrok(agents, runner, managed, {
+                replaceConflicts: options.replaceHostConflicts,
+                workspaceRoot,
+                configPath: dependencies.grokConfigPath,
+                executable: dependencies.grokExecutable,
+                homeRoot: dependencies.hostSkillHome,
+              })
       const operationsSkill = await preflightOperationsSkill(id, operationsPaths, runner, {
         homeRoot: dependencies.hostSkillHome,
         previous: managed.operationsSkill,

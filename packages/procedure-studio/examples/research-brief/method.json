@@ -1,0 +1,76 @@
+{
+  "schema": "openadam.method-graph.v2",
+  "profile": null,
+  "id": "research-brief",
+  "revision": 1,
+  "name": "Research brief",
+  "description": "Route complete topics directly and pause incomplete topics for one explicit clarification before producing a declared brief.",
+  "roles": [],
+  "inputs": [
+    { "id": "topic", "name": "Topic", "type": "text", "required": true },
+    { "id": "coverage_complete", "name": "Coverage complete", "type": "boolean", "required": true }
+  ],
+  "artifacts": [
+    { "id": "answer", "name": "Working answer", "type": "text", "required": false },
+    { "id": "brief", "name": "Research brief", "type": "text", "required": true }
+  ],
+  "permissions": [],
+  "resources": [],
+  "graph": {
+    "entry": "check-coverage",
+    "extensions": {
+      "parallel": { "version": 1, "supported": false },
+      "wait": { "version": 1, "supported": false }
+    },
+    "nodes": [
+      {
+        "id": "check-coverage",
+        "name": "Check coverage",
+        "kind": "condition",
+        "consumes": ["coverage_complete"],
+        "produces": [],
+        "permissions": [],
+        "resources": [],
+        "transitions": [
+          { "id": "check-coverage-covered", "when": { "path": "inputs.coverage_complete", "operator": "equals", "value": true }, "to": "use-topic", "label": "Covered" },
+          { "id": "check-coverage-clarify", "when": { "operator": "always" }, "to": "clarify", "label": "Needs clarification" }
+        ]
+      },
+      {
+        "id": "use-topic",
+        "name": "Use scoped topic",
+        "kind": "transform",
+        "consumes": ["topic"],
+        "produces": ["answer"],
+        "permissions": [],
+        "resources": [],
+        "output": { "answer": { "path": "inputs.topic" } },
+        "transitions": [{ "id": "use-topic-compose", "when": { "operator": "always" }, "to": "compose" }]
+      },
+      {
+        "id": "clarify",
+        "name": "Request clarification",
+        "kind": "human-input",
+        "consumes": ["topic"],
+        "produces": ["answer"],
+        "permissions": [],
+        "resources": [],
+        "prompt": "What single constraint or audience detail should the final brief preserve?",
+        "interaction": "input",
+        "responseArtifact": "answer",
+        "transitions": [{ "id": "clarify-compose", "when": { "operator": "always" }, "to": "compose" }]
+      },
+      {
+        "id": "compose",
+        "name": "Compose declared output",
+        "kind": "transform",
+        "consumes": ["answer"],
+        "produces": ["brief"],
+        "permissions": [],
+        "resources": [],
+        "output": { "brief": { "path": "outputs.answer" } },
+        "transitions": [{ "id": "compose-complete", "when": { "operator": "always" }, "to": null, "label": "Complete" }]
+      }
+    ]
+  }
+}

@@ -24,6 +24,12 @@ export const AGENT_APP_SPECS = Object.freeze({
     bundleIds: Object.freeze(['com.anthropic.claudecode', 'com.anthropic.claude']),
     appNames: Object.freeze(['Claude Code', 'Claude']),
   }),
+  grok: Object.freeze({
+    id: 'grok',
+    name: 'Grok',
+    bundleIds: Object.freeze([]),
+    appNames: Object.freeze(['Grok']),
+  }),
 })
 
 const LINUX_TERMINALS = Object.freeze([

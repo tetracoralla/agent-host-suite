@@ -55,9 +55,9 @@ inactive Host entries. For Codex that is the digest folder, so native-bindings
 inside an active digest stay. A previous digest (for example the Skill-only
 generation after Armorial is activated) is eligible for removal.
 
-Claude and ZCode do not use this Codex cache chain. They write public MCP
+Claude, ZCode, and Grok do not use this Codex cache chain. They write public MCP
 config and link Skills to Host-owned projections (`src/hosts/claude.mjs`,
-`src/hosts/zcode.mjs`, `src/developer-kit-skill.mjs`).
+`src/hosts/zcode.mjs`, `src/hosts/grok.mjs`, `src/developer-kit-skill.mjs`).
 
 ## When status says enabled and the session does not
 
@@ -68,7 +68,7 @@ These surfaces are different facts:
 | `agent-host status` | Installed Host state, working set, recorded host entries | Agent-app caches, Skill paths, MCP catalogs, open sessions |
 | `agent-host tools status` | Host working-set membership (`active`) | Agent-app enablement or session uptake |
 | `tools inventory` | Host inventory plus public user-level plugins/MCP entries, including independent installations | Project-scoped configuration, entrypoint health, current-session uptake |
-| Manager refresh / `--quick` host status | App present on PATH; doctor `--deep --skip-agent-apps` | Codex/Claude/ZCode bindings |
+| Manager refresh / `--quick` host status | App present on PATH; doctor `--deep --skip-agent-apps` | Codex/Claude/ZCode/Grok bindings |
 | `host status` without `--quick`, `doctor --deep` without `--skip-agent-apps` | Public `plugin list` plus Host receipt/live cache identity | Whether an **already open** session loaded those bytes |
 | A live Agent task | Whatever that session resolved at start | Host working-set intent |
 
@@ -143,7 +143,7 @@ Skill root, and should expose the live `installedPath` (and, if it has one,
 the session Skill root) on the public plugin listing. Agent Host will not
 write Codex private cache or config files to paper over that.
 
-Claude/ZCode session uptake has the same fresh-task rule: linked Skill and
+Claude/ZCode/Grok session uptake has the same fresh-task rule: linked Skill and
 MCP files can be current while an open task still holds the previous catalog.
 
 ## How to reacquire the current facts

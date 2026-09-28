@@ -37,7 +37,7 @@ export const MANAGER_SETUP_PROFILES = Object.freeze(['featured', 'standard', 'de
 
 const REQUEST_LIMIT = 8 * 1024
 const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000
-const HOSTS = new Set(['zcode', 'codex', 'claude'])
+const HOSTS = new Set(['zcode', 'codex', 'claude', 'grok'])
 const PROFILES = new Set(MANAGER_SETUP_PROFILES)
 const BUNDLED_TOOL_LOGOS = new Map([
   ['fallback-table', { url: new URL('../Sources/AgentHostManager/Resources/ToolLogos/fallback-table.svg', import.meta.url), mediaType: 'image/svg+xml' }],
@@ -192,7 +192,7 @@ export function buildDashboardGuidance(snapshot, tools, hosts, doctor = null, ex
   const configured = snapshot?.configured === true
   const env = snapshot?.environment || {}
   const connectedHosts = Object.keys(env.hosts || {}).filter((id) => env.hosts[id])
-  const hostNames = { zcode: 'ZCode', codex: 'Codex', claude: 'Claude Code' }
+  const hostNames = { zcode: 'ZCode', codex: 'Codex', claude: 'Claude Code', grok: 'Grok' }
   const installedToolCount = Array.isArray(env.availableAgentComponents)
     ? env.availableAgentComponents.length
     : (Array.isArray(tools?.availableAgentComponents) ? tools.availableAgentComponents.length : 0)
@@ -200,7 +200,7 @@ export function buildDashboardGuidance(snapshot, tools, hosts, doctor = null, ex
     ? 0
     : (Array.isArray(tools?.activeAgentComponents) ? tools.activeAgentComponents.length : (Array.isArray(env.agentComponents) ? env.agentComponents.length : 0))
   const byId = Object.fromEntries((Array.isArray(hosts) ? hosts : []).map((row) => [row.host, row]))
-  const hostRecords = ['zcode', 'codex', 'claude'].map((id) => ({
+  const hostRecords = ['zcode', 'codex', 'claude', 'grok'].map((id) => ({
     id,
     name: hostNames[id],
     connected: Boolean(env.hosts?.[id]),
@@ -268,7 +268,7 @@ async function dashboard(stateRoot, extras = {}) {
     inspectSourceStatus({ stateRoot }).catch((error) => ({ status: 'error', error: asPublicError(error) })),
     browseRecommendedTools().catch((error) => ({ status: 'error', error: asPublicError(error) })),
     updatesStatus({ stateRoot, skipScheduledAuto: true }).catch((error) => ({ status: 'error', error: asPublicError(error), items: [] })),
-    ...['zcode', 'codex', 'claude'].map((host) => safeHostStatus(host, stateRoot)),
+    ...['zcode', 'codex', 'claude', 'grok'].map((host) => safeHostStatus(host, stateRoot)),
   ])
   return {
     schemaVersion: 'openadam.agent-host-manager-dashboard.v0.1',
@@ -734,7 +734,7 @@ button.action{border:1px solid var(--line);background:var(--canvas);border-radiu
 <script>
 const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};let data,languageSelection='system',changing=false,lastPreview=null,lastUpdates=null,lastGithubTarget='',lastGithubPreviewed='',githubConflictURL=null,lastDoctor=null;
 const view={page:'tools',queries:{tools:'',updates:''},detail:null,returnPage:'tools',scroll:0,drafts:{},githubOpen:false,managementOpen:false,needsFreshTask:false};
-const names={zcode:'ZCode',codex:'Codex',claude:'Claude Code','deepseek-harness':'DeepSeek Harness','gemini-cli':'Gemini CLI','github-copilot-cli':'GitHub Copilot CLI'};
+const names={zcode:'ZCode',codex:'Codex',claude:'Claude Code',grok:'Grok','deepseek-harness':'DeepSeek Harness','gemini-cli':'Gemini CLI','github-copilot-cli':'GitHub Copilot CLI'};
 const zh={
 'Decision rules':'决策规则','State transitions':'状态流转','Schedule calculation':'日程计算',
 'For a $120 order by a verified customer, apply these rules: verified orders of at least $100 get free shipping; all others pay shipping. Return the decision and the rule that matched.':'对于已验证顾客的 120 美元订单，按规则判断：已验证且金额至少 100 美元的订单免运费，其他订单需付运费。给出结论和命中的规则。',
@@ -1104,7 +1104,7 @@ function renderEnvironment(s,u){
     const r=el('div',undefined,'agent-row'),identity=el('div',undefined,'grow'),mark=el('span',h.error||health===false?'!':connected?(health===true?'✓':'↗'):'○','tool-state');
     mark.title=t(label);mark.setAttribute('aria-label',t(label));identity.append(el('strong',names[h.host]||h.host));
     if(h.error||!installed||health===false)identity.append(el('div',t(label),'muted'));else if(h.version)identity.append(el('div',h.version,'muted'));
-    const icon=el('span',{'codex':'✳','claude':'✺','zcode':'Z'}[h.host]||'◇','agent-symbol');icon.setAttribute('aria-hidden','true');
+    const icon=el('span',{'codex':'✳','claude':'✺','zcode':'Z',grok:'G'}[h.host]||'◇','agent-symbol');icon.setAttribute('aria-hidden','true');
     r.append(icon,identity,mark);
     if(h.error){r.append(button('Copy error report',async()=>{try{await navigator.clipboard.writeText(JSON.stringify({agent:h.host,error:h.error},null,2));notice(t('Error report copied'))}catch{notice(t('Clipboard unavailable'),'error')}}));if(s.configured)r.append(button('Repair',()=>call({action:'repair'},t('Repairing…')),'action primary'))}
     else if(installed&&!s.configured)r.append(button('Set up',()=>call({action:'setup',profile:'featured',host:h.host},t('Setting up tools…')),'action primary'));

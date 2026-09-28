@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "openadam.procedure-studio-scenario.v0.1",
+  "id": "needs-clarification",
+  "name": "Incomplete coverage",
+  "description": "Takes the human-input branch, continues, and returns the supplied constraint as the declared brief.",
+  "inputs": { "topic": "Local-first research workflows", "coverage_complete": false },
+  "grants": [],
+  "resources": {},
+  "limits": {
+    "maxDurationMs": 60000,
+    "maxNodeExecutions": 12,
+    "maxAgentTurns": 0,
+    "nodeTimeoutMs": 10000,
+    "maxAttemptsPerNode": 4,
+    "maxOutputBytes": 65536
+  },
+  "bindings": {}
+}

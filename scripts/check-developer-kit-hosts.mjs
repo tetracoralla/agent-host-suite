@@ -33,6 +33,8 @@ function requiredDoctorChecks(report) {
     'host.claude.agent-tool-development-kit',
     'host.zcode',
     'host.zcode.agent-tool-development-kit',
+    'host.grok',
+    'host.grok.agent-tool-development-kit',
   ]
   return Object.fromEntries(required.map((id) => {
     const value = report.checks.find((item) => item.id === id)
@@ -156,7 +158,7 @@ async function main() {
     ])
     const result = await setup({
       profile: 'developer',
-      hosts: ['codex', 'claude', 'zcode'],
+      hosts: ['codex', 'claude', 'zcode', 'grok'],
       releaseManifest,
       stateRoot,
       workspaceRoot,
@@ -173,9 +175,12 @@ async function main() {
     const report = await doctor(state, { deep: false })
     const checks = requiredDoctorChecks(report)
     const codexEntry = state.hosts.codex.entries.find(
-      (item) => item.selector === 'agent-tool-development-kit@openadam-developer-tools',
+      (item) => item.component === 'agent-tool-development-kit',
     )
     assert.ok(codexEntry, 'Codex did not record the Developer Kit plugin')
+    assert.match(codexEntry.selector, /^agent-tool-development-kit@agent-host-[a-f0-9]{32}$/u)
+    assert.equal(codexEntry.pluginRoot.includes('/tools-dev/'), false)
+    assert.equal(codexEntry.installedPath.includes('/tools-dev/'), false)
     await assert.rejects(readFile(join(codexEntry.pluginRoot, '.mcp.json')), (error) => error.code === 'ENOENT')
     const claudeSkill = state.hosts.claude.developerSkill
     assert.equal((await lstat(claudeSkill.exposurePath)).isSymbolicLink(), true)
@@ -184,8 +189,11 @@ async function main() {
     assert.equal((await lstat(zcodeSkill.exposurePath)).isSymbolicLink(), true)
     assert.equal(zcodeSkill.exposurePath, join(hostHome, '.zcode', 'skills', 'build-openadam-agent-tools'))
     assert.equal(zcodeSkill.projectionRoot.includes('/tools-dev/'), false)
-    const zcodeConfig = JSON.parse(await readFile(zcodeConfigPath, 'utf8'))
-    assert.deepEqual(zcodeConfig.mcp.servers, {})
+    const grokSkill = state.hosts.grok.developerSkill
+    assert.equal((await lstat(grokSkill.exposurePath)).isSymbolicLink(), true)
+    assert.equal(grokSkill.exposurePath, join(hostHome, '.grok', 'skills', 'build-openadam-agent-tools'))
+    assert.equal(grokSkill.projectionRoot.includes('/tools-dev/'), false)
+    await assert.rejects(readFile(zcodeConfigPath, 'utf8'), (error) => error.code === 'ENOENT')
     const externalWorkflow = await exerciseInstalledWorkflow(
       zcodeSkill.launcherPath,
       workspaceRoot,
@@ -195,7 +203,7 @@ async function main() {
     installed = false
     assert.equal(removed.status, 'uninstalled')
     await assert.rejects(lstat(zcodeSkill.exposurePath), (error) => error.code === 'ENOENT')
-    assert.deepEqual(JSON.parse(await readFile(zcodeConfigPath, 'utf8')).mcp.servers, {})
+    await assert.rejects(readFile(zcodeConfigPath, 'utf8'), (error) => error.code === 'ENOENT')
     console.log(JSON.stringify({
       status: 'ok',
       profile: result.profile,
@@ -206,6 +214,7 @@ async function main() {
       agentCatalogCanonicalUtf8Bytes: result.catalogPreflight.canonicalUtf8Bytes,
       claudeSkillLinked: true,
       zcodeSkillLinked: true,
+      grokSkillLinked: true,
       externalWorkflow,
       uninstall: removed.status,
     }))

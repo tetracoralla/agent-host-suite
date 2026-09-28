@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "openadam.procedure-studio-scenario.v0.1",
+  "id": "workspace-composition",
+  "name": "Agent and tool composition",
+  "description": "Requires a real Git workspace, selected Agent binding, Capability provider, and exact child Procedure before it can execute.",
+  "inputs": { "goal": "Inspect the current package and produce a verified compatibility note." },
+  "grants": ["model.invoke", "workspace.read", "capability.invoke", "procedure.invoke", "network.read"],
+  "resources": {
+    "workspace": { "type": "workspace", "adapter": "git", "path": "/tmp/procedure-studio-workspace", "allowExistingPaths": [] }
+  },
+  "limits": {
+    "maxDurationMs": 300000,
+    "maxNodeExecutions": 20,
+    "maxAgentTurns": 4,
+    "nodeTimeoutMs": 120000,
+    "maxAttemptsPerNode": 4,
+    "maxOutputBytes": 262144
+  },
+  "bindings": { "author": { "provider": "codex" } }
+}

@@ -7,6 +7,7 @@ import { inspectCodex, installCodex, uninstallCodex } from './hosts/codex.mjs'
 import { materializeCodexProjections, resolveWorkspaceRoot } from './hosts/codex-projection.mjs'
 import { inspectClaude, installClaude, uninstallClaude } from './hosts/claude.mjs'
 import { inspectZcode, installZcode, uninstallZcode } from './hosts/zcode.mjs'
+import { inspectGrok, installGrok, uninstallGrok } from './hosts/grok.mjs'
 import { resolveStateRoot } from './paths.mjs'
 import { runFile } from './process.mjs'
 import { installService, inspectService, preflightServiceInstallation, uninstallService } from './service.mjs'
@@ -40,7 +41,7 @@ import { hasEnvironmentChange, recoverCurrentEnvironmentChange } from './environ
 import { checkApplicationState } from './state-migration.mjs'
 import { guidanceFromSetupResult } from './post-setup-guidance.mjs'
 
-const HOSTS = new Set(['codex', 'claude', 'zcode'])
+const HOSTS = new Set(['codex', 'claude', 'zcode', 'grok'])
 const ACTIVITY_LOG_WARNING = Object.freeze({
   code: 'ACTIVITY_LOG_WRITE_FAILED',
   message: 'The Agent Host installation succeeded, but its activity entry could not be recorded.',
@@ -67,12 +68,20 @@ async function inspectHost(host, manifest, paths, runner, options, dependencies)
           replaceConflicts: options.replaceHostConflicts,
           workspaceRoot: options.workspaceRoot ?? null,
         })
-      : await inspectZcode(manifest, runner, null, {
-          replaceConflicts: options.replaceHostConflicts,
-          workspaceRoot: options.workspaceRoot ?? null,
-          configPath: dependencies.zcodeConfigPath,
-          executable: dependencies.zcodeExecutable,
-        })
+      : host === 'zcode'
+        ? await inspectZcode(manifest, runner, null, {
+            replaceConflicts: options.replaceHostConflicts,
+            workspaceRoot: options.workspaceRoot ?? null,
+            configPath: dependencies.zcodeConfigPath,
+            executable: dependencies.zcodeExecutable,
+          })
+        : await inspectGrok(manifest, runner, null, {
+            replaceConflicts: options.replaceHostConflicts,
+            workspaceRoot: options.workspaceRoot ?? null,
+            configPath: dependencies.grokConfigPath,
+            executable: dependencies.grokExecutable,
+            homeRoot: dependencies.hostSkillHome,
+          })
   const operationsSkill = await preflightOperationsSkill(host, paths, runner, {
     homeRoot: dependencies.hostSkillHome,
     replaceConflicts: options.replaceHostConflicts,
@@ -120,12 +129,20 @@ async function installHost(host, manifest, paths, runner, options, dependencies)
           replaceConflicts: options.replaceHostConflicts,
           workspaceRoot: options.workspaceRoot ?? null,
         })
-      : await installZcode(manifest, runner, null, {
-          replaceConflicts: options.replaceHostConflicts,
-          workspaceRoot: options.workspaceRoot ?? null,
-          configPath: dependencies.zcodeConfigPath,
-          executable: dependencies.zcodeExecutable,
-        })
+      : host === 'zcode'
+        ? await installZcode(manifest, runner, null, {
+            replaceConflicts: options.replaceHostConflicts,
+            workspaceRoot: options.workspaceRoot ?? null,
+            configPath: dependencies.zcodeConfigPath,
+            executable: dependencies.zcodeExecutable,
+          })
+        : await installGrok(manifest, runner, null, {
+            replaceConflicts: options.replaceHostConflicts,
+            workspaceRoot: options.workspaceRoot ?? null,
+            configPath: dependencies.grokConfigPath,
+            executable: dependencies.grokExecutable,
+            homeRoot: dependencies.hostSkillHome,
+          })
   let operationsSkill = null
   let developerSkill = null
   let providerSkills = []
@@ -156,7 +173,8 @@ async function installHost(host, manifest, paths, runner, options, dependencies)
     await uninstallOperationsSkill(operationsSkill, runner).catch(() => {})
     if (host === 'codex') await uninstallCodex(binding, runner).catch(() => {})
     else if (host === 'claude') await uninstallClaude(binding, runner).catch(() => {})
-    else await uninstallZcode(binding).catch(() => {})
+    else if (host === 'zcode') await uninstallZcode(binding).catch(() => {})
+    else await uninstallGrok(binding).catch(() => {})
     throw error
   }
 }
@@ -169,7 +187,9 @@ async function uninstallHost(host, state, runner) {
     ? await uninstallCodex(state, runner)
     : host === 'claude'
       ? await uninstallClaude(state, runner)
-      : await uninstallZcode(state)
+      : host === 'zcode'
+        ? await uninstallZcode(state)
+        : await uninstallGrok(state)
   const operationsSkill = await uninstallOperationsSkill(state.operationsSkill, runner)
   return { binding, operationsSkill, developerSkill, providerSkills, productSkills }
 }

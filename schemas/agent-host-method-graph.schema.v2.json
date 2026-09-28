@@ -78,7 +78,31 @@
           "properties": {
             "provider": { "enum": ["codex", "grok", "zcode"] },
             "model": { "type": ["string", "object"] }
-          }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "provider": { "const": "zcode" } }, "required": ["provider"] },
+              "then": {
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "required": ["providerId", "modelId"],
+                    "properties": {
+                      "providerId": { "type": "string", "minLength": 1, "maxLength": 200 },
+                      "modelId": { "type": "string", "minLength": 1, "maxLength": 200 },
+                      "options": {
+                        "type": "object",
+                        "properties": {
+                          "reasoningLevel": { "type": "string", "minLength": 1, "maxLength": 80 }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "else": { "properties": { "model": { "type": "string", "minLength": 1, "maxLength": 200 } } }
+            }
+          ]
         }
       }
     },
@@ -207,6 +231,7 @@
       "additionalProperties": false,
       "required": ["when", "to"],
       "properties": {
+        "id": { "$ref": "#/$defs/localId" },
         "when": { "$ref": "#/$defs/condition" },
         "to": { "oneOf": [{ "$ref": "#/$defs/localId" }, { "type": "null" }] },
         "label": { "type": "string", "minLength": 1, "maxLength": 120 }

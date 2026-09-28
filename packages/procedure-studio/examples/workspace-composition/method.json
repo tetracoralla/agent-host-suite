@@ -1,0 +1,102 @@
+{
+  "schema": "openadam.method-graph.v2",
+  "profile": null,
+  "id": "workspace-composition",
+  "revision": 7,
+  "name": "Workspace composition",
+  "description": "Compose an Agent turn, a typed Capability call, and one exact subprocedure version over a bound Git workspace.",
+  "roles": [
+    {
+      "id": "author",
+      "name": "Author",
+      "description": "Reads the workspace and produces the bounded source or final artifact.",
+      "independentFrom": [],
+      "includeReports": false,
+      "defaultBinding": { "provider": "codex" }
+    }
+  ],
+  "inputs": [{ "id": "goal", "name": "Goal", "type": "text", "required": true }],
+  "artifacts": [
+    { "id": "draft", "name": "Draft", "type": "text", "required": false },
+    { "id": "normalized", "name": "Normalized data", "type": "json", "required": false },
+    { "id": "verified", "name": "Verified data", "type": "json", "required": false },
+    { "id": "final", "name": "Final result", "type": "text", "required": true }
+  ],
+  "permissions": [
+    { "id": "model.invoke", "name": "Use selected Agent" },
+    { "id": "workspace.read", "name": "Read workspace" },
+    { "id": "capability.invoke", "name": "Invoke Capability" },
+    { "id": "procedure.invoke", "name": "Invoke exact subprocedure" },
+    { "id": "network.read", "name": "Allow child network read" }
+  ],
+  "resources": [{ "id": "workspace", "name": "Git workspace", "type": "workspace", "required": true, "adapter": "git" }],
+  "graph": {
+    "entry": "draft",
+    "extensions": {
+      "parallel": { "version": 1, "supported": false },
+      "wait": { "version": 1, "supported": false }
+    },
+    "nodes": [
+      {
+        "id": "draft",
+        "name": "Draft from workspace",
+        "kind": "agent-turn",
+        "role": "author",
+        "instruction": "Read only the files relevant to the goal and return one bounded draft artifact.",
+        "access": "read",
+        "consumes": ["goal"],
+        "produces": ["draft"],
+        "permissions": ["model.invoke", "workspace.read"],
+        "resources": ["workspace"],
+        "transitions": [{ "id": "draft-normalize", "when": { "operator": "always" }, "to": "normalize" }]
+      },
+      {
+        "id": "normalize",
+        "name": "Normalize with Capability",
+        "kind": "direct-call",
+        "target": {
+          "kind": "capability",
+          "providerId": "org.openadam.text-integrity",
+          "capabilityId": "text.normalize",
+          "capabilityVersion": "1.0.0",
+          "operationId": "normalize"
+        },
+        "input": { "object": { "text": { "path": "outputs.draft" } } },
+        "output": { "normalized": { "path": "result.outputs.value" } },
+        "consumes": ["draft"],
+        "produces": ["normalized"],
+        "permissions": ["capability.invoke"],
+        "resources": [],
+        "transitions": [{ "id": "normalize-verify", "when": { "operator": "always" }, "to": "verify" }]
+      },
+      {
+        "id": "verify",
+        "name": "Verify with exact Procedure",
+        "kind": "procedure-call",
+        "procedure": { "id": "org.openadam.example.verifier", "version": "1.4.2" },
+        "input": { "object": { "candidate": { "path": "outputs.normalized" } } },
+        "output": { "verified": { "path": "result.outputs.verdict" } },
+        "grants": ["network.read"],
+        "resourceBindings": { "workspace": "workspace" },
+        "consumes": ["normalized"],
+        "produces": ["verified"],
+        "permissions": ["procedure.invoke", "network.read"],
+        "resources": ["workspace"],
+        "transitions": [{ "id": "verify-finalize", "when": { "operator": "always" }, "to": "finalize" }]
+      },
+      {
+        "id": "finalize",
+        "name": "Finalize result",
+        "kind": "agent-turn",
+        "role": "author",
+        "instruction": "Use the verified artifact and return the declared final text without modifying the workspace.",
+        "access": "read",
+        "consumes": ["verified"],
+        "produces": ["final"],
+        "permissions": ["model.invoke", "workspace.read"],
+        "resources": ["workspace"],
+        "transitions": [{ "id": "finalize-complete", "when": { "operator": "always" }, "to": null, "label": "Complete" }]
+      }
+    ]
+  }
+}

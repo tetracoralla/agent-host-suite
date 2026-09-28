@@ -103,6 +103,13 @@ exact displaced user entries for restoration, preserves unrelated config, and
 projects Skills from immutable Host storage. It does not patch ZCode, its plugin
 cache, model provider, credentials, or running sessions.
 
+Grok integrations use its documented user `~/.grok/config.toml`
+`mcp_servers` entries and `~/.grok/skills` location. Agent Host changes only
+the selected user-scoped entries, preserves displaced and unrelated sections,
+and points every managed command at immutable package storage. Grok may also
+discover project-scoped `.grok/config.toml` and `.mcp.json`; those remain
+separate user/project bindings and are not installation evidence.
+
 ## Current invocation routes
 
 The model continues to see provider-specific domain tools, not a generic
@@ -121,7 +128,7 @@ provider's distinct read-only description tool and exact response path; the
 runtime validates that live response and caches it only for the current
 provider session.
 
-This projection occurs after selection. Current Codex, ZCode, and Claude public
+This projection occurs after selection. Current Codex, ZCode, Claude, and Grok public
 extension points do not let the suite replace a tool schema dynamically inside
 an already-open model turn, so their initial Agent catalog still uses each
 Provider's compact advertised schema. Agent Host does not patch the Agent app
@@ -135,7 +142,7 @@ routes do not select an opaque Provider operation or add an MCP server or model
 call by themselves. The default operations report remains
 `agent-host snapshot --json`.
 Codex carries it as a Suite-managed Skill-only plugin so it does not replace a
-user's canonical local Skill source; ZCode and Claude link to separate immutable
+user's canonical local Skill source; ZCode, Claude, and Grok link to separate immutable
 private projections. The snapshot has a 16 KiB serialized budget and excludes private
 paths, raw Observer records, prompts, arguments, results, and source. Its
 assessment boundary is part of the response contract.

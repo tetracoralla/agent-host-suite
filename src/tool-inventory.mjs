@@ -4,6 +4,7 @@ import { loadState, readStatePaths } from './state.mjs'
 import { resolveExecutable, runFile } from './process.mjs'
 import { resolveClaudeConfigPath } from './hosts/claude.mjs'
 import { resolveZcodeConfigPath } from './hosts/zcode.mjs'
+import { inspectGrokServerCatalog } from './hosts/grok.mjs'
 import { toolSetStatus } from './lifecycle.mjs'
 
 const LIMIT = 256
@@ -50,15 +51,35 @@ export async function toolInventory(options = {}, dependencies = {}) {
       }
     } catch { return { status: 'unavailable', errorCode: 'HOST_PLUGIN_INVENTORY_UNAVAILABLE', entries: [] } }
   }
-  const [codexEntries, claude, zcode] = await Promise.all([
+  const grok = async () => {
+    try {
+      const catalog = await inspectGrokServerCatalog({
+        homeRoot: options.homeRoot,
+        configPath: state?.hosts?.grok?.configPath ?? dependencies.grokConfigPath,
+      })
+      const records = state?.hosts?.grok?.entries ?? []
+      return {
+        status: catalog.configured ? 'configured' : 'not-configured',
+        available: catalog.entries.length,
+        returned: Math.min(catalog.entries.length, LIMIT),
+        truncated: catalog.entries.length > LIMIT || catalog.unsupportedSections > 0,
+        entries: catalog.entries.slice(0, LIMIT).map((entry) => ({
+          name: label(entry.name), enabled: entry.enabled,
+          hostComponent: records.find((record) => (record.actualName ?? record.name) === entry.name)?.component ?? null,
+        })),
+      }
+    } catch { return { status: 'unavailable', errorCode: 'HOST_CONFIG_UNREADABLE', entries: [] } }
+  }
+  const [codexEntries, claude, zcode, grokEntries] = await Promise.all([
     codex(),
     configEntries(resolveClaudeConfigPath({ homeRoot: options.homeRoot, configPath: state?.hosts?.claude?.configPath }),
       (config) => config.mcpServers, state?.hosts?.claude?.entries ?? []),
     configEntries(resolveZcodeConfigPath({ homeRoot: options.homeRoot, configPath: state?.hosts?.zcode?.configPath }),
       (config) => config.mcp?.servers, state?.hosts?.zcode?.entries ?? []),
+    grok(),
   ])
   return { schemaVersion: 'openadam.agent-host-tool-inventory.v0.1', managed,
-    agentApps: { codex: codexEntries, claude, zcode },
+    agentApps: { codex: codexEntries, claude, zcode, grok: grokEntries },
     assessmentBoundary: 'Public user-level configuration and plugin inventory only; project-scoped tools, native built-ins, current-session uptake and runtime readiness are not inferred. hostComponent is a saved Host binding match, not a fresh ownership or byte-identity check. No credentials, commands, arguments or source paths are returned.',
   }
 }

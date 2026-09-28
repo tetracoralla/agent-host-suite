@@ -357,8 +357,16 @@ while Agents retain normal access to every authorized `tools-dev` repository.
 Changing source does not change an installed tool until a new immutable
 compatibility set is built and activated.
 
+A Provider repository's root is also an Agent-app discovery surface in clients
+that honor project-scoped `.mcp.json`. Release metadata therefore belongs in a
+non-discovered packaging source and is materialized into the immutable artifact;
+the mutable checkout must not expose that release entrypoint merely because an
+Agent is editing the Provider. An intentionally project-scoped development
+server is a separate, explicit developer binding and is never adopted as an
+installed Host component.
+
 The same profile installs the Agent Tool Development Kit as a backstage
-component. Codex, ZCode, and Claude receive its thin development Skill and exact
+component. Codex, ZCode, Claude, and Grok receive its thin development Skill and exact
 launcher, but the Kit does not enter `agentComponents` or add an MCP schema to
 ordinary task context.
 

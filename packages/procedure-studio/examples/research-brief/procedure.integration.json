@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "openadam.agent-host-procedure-integration.v0.2",
+  "displayName": "Research Brief",
+  "summary": "Turn a scoped topic into a declared brief, pausing for one structured clarification when coverage is incomplete.",
+  "procedure": {
+    "id": "org.openadam.example.research-brief",
+    "version": "1.0.0",
+    "inputSchema": "input.schema.json",
+    "outputSchema": "output.schema.json",
+    "permissions": [],
+    "resources": [],
+    "lifecycle": {
+      "mode": "stateful",
+      "resumable": true,
+      "interaction": "agent-mediated"
+    }
+  },
+  "execution": {
+    "kind": "agentic-runner",
+    "method": "method.json",
+    "outputArtifacts": ["brief"],
+    "identityFiles": ["method.json"]
+  },
+  "ownership": {
+    "uninstall": "agent-host-created-only"
+  }
+}

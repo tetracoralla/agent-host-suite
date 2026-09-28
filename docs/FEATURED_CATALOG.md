@@ -26,10 +26,11 @@ tools; it does not fetch Armorial or other missing inventory.
 - Human copy that names the independently released product (Armorial, Math
   Anchor, and so on) and the Host action that installs or selects it.
 - Compact product rows in setup and Tools that use the upstream product mark,
-  one short job label, current availability, and a direct **Use** action. The
-  editable example is handed off after that action. These are optional
-  invitations, not ratings, requirements, portable provider metadata, or proof
-  of value.
+  one short job label, and current availability. A ready tool does not offer
+  an action that opens a new Agent task. An editable example, when the admitted
+  tool has one, stays collapsed on the detail page; copying it does not open an
+  Agent app or record adoption. These rows are optional invitations, not
+  ratings, requirements, portable provider metadata, or proof of value.
 
 v1 search filters the compatible catalog already known to Host. It is not
 featured-placement scoring, ratings, a universal public registry, or a promise
@@ -94,7 +95,7 @@ not featured.
 | Choose a local or HTTPS catalog | `source set --release-manifest` / `source set --url`, or Manager Settings. Env `AGENT_HOST_FEATURED_CATALOG_URL` still works. Interrupted, offline, and digest errors keep a retry or local-catalog recovery. This does not publish a GitHub Release. |
 | User-level task readiness (tools, connection, projection; not adoption) | `doctor --featured-readiness` overall `status` / `userStatus`. Recipe name is a separate `recipe.consistency` check. `local-dogfood` plus a healthy Armorial projection is not a user-level failure. |
 | Featured recipe consistency | `recipe.consistency` on the same report records the working set as an experimental variable. It is context for an optional exercise, not a scoring gate, and does not require deleting other healthy tools. |
-| Recognize and try an admitted tool | native and browser product rows show its mark and availability, then **Use** can copy one editable example and open a connected Agent app; this records no adoption or quality verdict |
+| Recognize an admitted tool | native and browser rows show its mark, job, and availability. The detail page may keep a collapsed editable example. Copying it does not open an Agent app, record adoption, or certify quality |
 | Observe session discovery | a **new** Agent task after `restartRequired` |
 
 If local monitoring is already enabled, `update --profile featured` keeps the
@@ -106,8 +107,8 @@ Managers present the same featured admission list: choose `featured` at setup,
 or Get featured tools after a Standard install. The default page lists local
 inventory first and recommendations second; **Browse** searches the compatible
 catalog and exposes the compatibility-gated GitHub path. Product rows lead with
-what the tool is, whether it is available, and one action that hands an editable
-example to a new Agent task. This does not add ranking or payment flows.
+what the tool is and whether it is available. This does not add ranking,
+payment, or a handoff into a new Agent task.
 
 Provider and contributor routes are documented in
 [`ECOSYSTEM_PATHS.md`](ECOSYSTEM_PATHS.md). Those routes meet at exact artifact
@@ -123,7 +124,7 @@ Install and Host selection are not session discovery. After a featured tool is
 in the working set:
 
 1. Host materializes the Agent-app projection (Codex: content-addressed plugin
-   plus public `plugin add`; Claude/ZCode: public MCP/Skill links).
+   plus public `plugin add`; Claude/ZCode/Grok: public MCP/Skill links).
 2. The Agent app must start a **fresh** task to load Skill and MCP catalogs.
 3. Natural use on a suitable task (for example Armorial for icon work) remains
    Agent choice. Host status, doctor, and observation counts do not establish
