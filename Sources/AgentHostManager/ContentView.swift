@@ -123,6 +123,9 @@ struct ContentView: View {
         case .tools: ToolsView(store: store)
         case .updates: ToolLibraryView(store: store)
         case .agentApps: AgentAppsView(store: store)
+        case .accounts:
+            if store.suite?.configured == true { AccountsView(store: store) }
+            else { ToolsView(store: store) }
         case .usage:
             if store.suite?.configured == true { UsageReliabilityView(store: store) }
             else { ToolsView(store: store) }

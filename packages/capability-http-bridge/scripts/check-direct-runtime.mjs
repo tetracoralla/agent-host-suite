@@ -2,9 +2,12 @@
 
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
+import { promisify } from 'node:util'
 import {
   DirectExecutionRuntime,
   prepareRuntimeConfig,
@@ -12,6 +15,15 @@ import {
 
 const repositoryRoot = resolve(import.meta.dirname, '..')
 const runtimeFixture = resolve(repositoryRoot, '../direct-execution-runtime/test/fixtures/fake-capability')
+const execFileAsync = promisify(execFile)
+const keychainPilot = process.env.AGENT_HOST_KEYCHAIN_PILOT === '1'
+const credential = keychainPilot
+  ? {
+      service: `org.openadam.agent-host.http-bridge-pilot.${randomUUID()}`,
+      account: `pilot-${randomUUID()}`,
+      token: `temporary-${randomUUID()}`,
+    }
+  : null
 
 const server = createServer(async (request, response) => {
   const chunks = []
@@ -31,6 +43,7 @@ const server = createServer(async (request, response) => {
       operationId: 'echo',
     },
   )
+  assert.equal(request.headers.authorization, credential === null ? undefined : `Bearer ${credential.token}`)
   response.setHeader('content-type', 'application/json')
   response.end(JSON.stringify({
     schemaVersion: 'openadam.remote-capability-response.v0.1',
@@ -59,7 +72,19 @@ async function rmTempTree(target) {
 
 const root = await mkdtemp(resolve(tmpdir(), 'capability-http-direct-pilot-'))
 let runtime
+let keychainEntryCreated = false
 try {
+  if (credential !== null) {
+    if (process.platform !== 'darwin') throw new Error('AGENT_HOST_KEYCHAIN_PILOT requires macOS Keychain')
+    await execFileAsync('/usr/bin/security', [
+      'add-generic-password',
+      '-U',
+      '-s', credential.service,
+      '-a', credential.account,
+      '-w', credential.token,
+    ], { timeout: 5000, maxBuffer: 16 * 1024 })
+    keychainEntryCreated = true
+  }
   await new Promise((resolveListen, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', resolveListen)
@@ -72,7 +97,9 @@ try {
     endpoint: `http://127.0.0.1:${address.port}/capability`,
     capability: { id: 'org.openadam.test.echo', version: '0.1.0' },
     operations: ['echo'],
-    auth: { kind: 'none' },
+    auth: credential === null
+      ? { kind: 'none' }
+      : { kind: 'macos-keychain-bearer', service: credential.service, account: credential.account },
     timeoutMs: 1000,
     maxResponseBytes: 65536,
   }))
@@ -99,10 +126,10 @@ try {
       maxResultBytes: 262144,
       maxProtocolLineBytes: 1048576,
       maxStderrBytes: 4096,
-      // Match the Direct Runtime's Windows integration-fixture budget: its
-      // native ACL snapshot and Job guardian are part of this cold call. The
-      // loopback HTTP deadline remains one second in the instance above.
-      defaultTimeoutMs: process.platform === 'win32' ? 30000 : 10000,
+      // The whole-call budget includes cold Node startup, identity hashing,
+      // and platform process isolation. Keep it tolerant of a loaded builder;
+      // the actual loopback HTTP deadline remains one second above.
+      defaultTimeoutMs: 30000,
       circuitBreakerFailureThreshold: 3,
       circuitBreakerCooldownMs: 50,
     },
@@ -149,10 +176,17 @@ try {
   assert.equal(result.execution.modelCalls, 0)
   assert.equal(runtime.providers.sessionSnapshots()[0].present, false)
   console.log(
-    'PASS Direct Runtime executed one typed Capability through a local JSONL bridge and an observed loopback HTTP provider; modelCalls=0 credential=none providerProcessResident=false',
+    `PASS Direct Runtime executed one typed Capability through a local JSONL bridge and an observed loopback HTTP provider; modelCalls=0 credential=${credential === null ? 'none' : 'macos-keychain-reference'} providerProcessResident=false`,
   )
 } finally {
   if (runtime !== undefined) await runtime.close()
   await new Promise((resolveClose) => server.close(() => resolveClose()))
   await rmTempTree(root)
+  if (keychainEntryCreated) {
+    await execFileAsync('/usr/bin/security', [
+      'delete-generic-password',
+      '-s', credential.service,
+      '-a', credential.account,
+    ], { timeout: 5000, maxBuffer: 16 * 1024 })
+  }
 }

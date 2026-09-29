@@ -40,7 +40,7 @@ import {
 import { isAbsolute, join, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 
-const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'procedure', 'service', 'profiles', 'source', 'updates', 'app'])
+const ACTION_COMMANDS = new Set(['observability', 'host', 'tools', 'component', 'procedure', 'service', 'profiles', 'source', 'updates', 'app', 'account'])
 const PROFILE_CHOICES = 'standard|featured|developer|observability|local-dogfood'
 
 const USAGE = `Usage:
@@ -90,6 +90,12 @@ const USAGE = `Usage:
   agent-host procedure invoke --request PATH|- [--state-root PATH] [--json]
   agent-host procedure status --run TASK_ID [--state-root PATH] [--json]
   agent-host procedure continue --run TASK_ID --input PATH|- [--timeout-ms N] [--state-root PATH] [--json]
+  agent-host account list [--state-root PATH] [--json]
+  agent-host account add --provider PROVIDER --name NAME [--id ID] [--endpoint URL] --keychain-service NAME --keychain-account NAME [--state-root PATH] [--json]
+  agent-host account show ACCOUNT [--state-root PATH] [--json]
+  agent-host account check ACCOUNT [--state-root PATH] [--json]
+  agent-host account update ACCOUNT [--name NAME] [--endpoint URL] [--keychain-service NAME] [--keychain-account NAME] [--state-root PATH] [--json]
+  agent-host account remove ACCOUNT [--state-root PATH] [--json]
   agent-host rollback [--workspace-root PATH] [--replace-host-conflicts] [--dry-run] [--state-root PATH] [--json]
   agent-host observability enable|disable|refresh|status [--state-root PATH] [--json]
   agent-host observability trace-sources --provider PROVIDER [--from-ms N] [--to-ms N] [--limit N] [--state-root PATH] [--json]
@@ -146,6 +152,12 @@ const ROUTE_ARGUMENTS = Object.freeze({
   'procedure invoke': ['--request', '--state-root', '--json'],
   'procedure status': ['--run', '--state-root', '--json'],
   'procedure continue': ['--run', '--input', '--timeout-ms', '--state-root', '--json'],
+  'account list': ['--state-root', '--json'],
+  'account add': ['--provider', '--name', '--id', '--endpoint', '--keychain-service', '--keychain-account', '--state-root', '--json'],
+  'account show': ['--state-root', '--json'],
+  'account check': ['--state-root', '--json'],
+  'account update': ['--name', '--endpoint', '--keychain-service', '--keychain-account', '--state-root', '--json'],
+  'account remove': ['--state-root', '--json'],
   'observability enable': ['--state-root', '--json'],
   'observability disable': ['--state-root', '--json'],
   'observability refresh': ['--state-root', '--json'],
@@ -219,7 +231,8 @@ function parseArgs(argv) {
     timeoutMs: undefined,
   }
   if (options.command === 'component' && ['status', 'remove', 'rollback'].includes(options.action) && argv[2] !== undefined && !argv[2].startsWith('--')) options.target = argv[2]
-  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--budget-bytes', '--query', '--cursor', '--adapter', '--recovery', '--manifest-sha256', '--url', '--plan-id', '--github', '--tag', '--channel', '--id', '--version', '--input', '--request', '--run', '--timeout-ms', '--auto-check', '--auto-download', '--auto-install'])
+  if (options.command === 'account' && ['show', 'check', 'update', 'remove'].includes(options.action) && argv[2] !== undefined && !argv[2].startsWith('--')) options.target = argv[2]
+  const values = new Set(['--profile', '--host', '--tool', '--workspace-root', '--path-grant', '--development-root', '--release-manifest', '--state-root', '--artifact', '--binding', '--license-spdx', '--provider', '--file', '--session', '--output', '--from-ms', '--to-ms', '--limit', '--max-events', '--max-output-bytes', '--budget-bytes', '--query', '--cursor', '--adapter', '--recovery', '--manifest-sha256', '--url', '--plan-id', '--github', '--tag', '--channel', '--id', '--version', '--input', '--request', '--run', '--timeout-ms', '--name', '--endpoint', '--keychain-service', '--keychain-account', '--auto-check', '--auto-download', '--auto-install'])
   const booleans = new Map([
     ['--json', 'json'], ['--deep', 'deep'], ['--dry-run', 'dryRun'], ['--no-service', 'noService'], ['--no-host', 'noHost'],
     ['--enable-observability', 'enableObservability'], ['--purge-data', 'purgeData'],
@@ -235,7 +248,7 @@ function parseArgs(argv) {
     ['--all-tools', 'allTools'],
     ['--include-app', 'includeApp'],
   ])
-  const start = options.command === 'host' ? 3 : options.command === 'component' && options.target !== undefined ? 3 : ACTION_COMMANDS.has(options.command) ? 2 : 1
+  const start = options.command === 'host' ? 3 : (options.command === 'component' || options.command === 'account') && options.target !== undefined ? 3 : ACTION_COMMANDS.has(options.command) ? 2 : 1
   if (ACTION_COMMANDS.has(options.command) && options.action === undefined) throw new AgentHostError('CLI_USAGE', `${options.command} requires an action`)
   if (options.command === 'host' && options.target === undefined) throw new AgentHostError('CLI_USAGE', 'host requires codex, claude, zcode, or grok')
   const route = routeName(options)
@@ -289,6 +302,10 @@ function parseArgs(argv) {
       else if (arg === '--binding') options.bindingPath = value
       else if (arg === '--license-spdx') options.licenseSpdx = value
       else if (arg === '--provider') options.provider = value
+      else if (arg === '--name') options.name = value
+      else if (arg === '--endpoint') options.endpoint = value
+      else if (arg === '--keychain-service') options.keychainService = value
+      else if (arg === '--keychain-account') options.keychainAccount = value
       else if (arg === '--adapter') options.adapter = value
       else if (arg === '--recovery') options.recovery = value
       else if (arg === '--manifest-sha256') options.manifestSha256 = value
@@ -763,6 +780,26 @@ async function run(options, dependencies = {}) {
       return rollbackLocalComponent(options)
     }
     throw new AgentHostError('CLI_USAGE', `Unknown component action: ${options.action}`)
+  }
+  if (options.command === 'account') {
+    const {
+      addAccount, checkAccount, describeAccount, listAccounts, removeAccount, updateAccount,
+    } = await import('./accounts.mjs')
+    if (options.action === 'list') return listAccounts(options)
+    if (options.action === 'add') {
+      if (options.provider === undefined || options.name === undefined || options.keychainService === undefined || options.keychainAccount === undefined) {
+        throw new AgentHostError('CLI_USAGE', 'account add requires --provider, --name, --keychain-service, and --keychain-account')
+      }
+      return addAccount(options, dependencies)
+    }
+    if (['show', 'check', 'update', 'remove'].includes(options.action) && options.target === undefined) {
+      throw new AgentHostError('CLI_USAGE', `account ${options.action} requires an account id`)
+    }
+    if (options.action === 'show') return describeAccount({ ...options, account: options.target })
+    if (options.action === 'check') return checkAccount({ ...options, account: options.target }, dependencies)
+    if (options.action === 'update') return updateAccount({ ...options, account: options.target }, dependencies)
+    if (options.action === 'remove') return removeAccount({ ...options, account: options.target }, dependencies)
+    throw new AgentHostError('CLI_USAGE', `Unknown account action: ${options.action}`)
   }
   if (options.command === 'procedure') {
     if (options.action === 'describe' && (options.id === undefined || options.version === undefined)) {

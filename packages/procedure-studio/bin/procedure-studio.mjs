@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
+import { resolveStateRoot } from '../../../src/paths.mjs'
 import { StudioProject } from '../src/project.mjs'
 import { serveStudio } from '../src/server.mjs'
 
@@ -11,7 +12,7 @@ function fail(message) {
 }
 
 function usage() {
-  process.stdout.write(`Procedure Studio\n\nUsage:\n  procedure-studio serve [--project PATH] [--state-root PATH] [--port NUMBER] [--no-open]\n\nWithout --project the Studio opens on its home surface: create a Procedure\nfrom a template, open a recent project, or choose another project folder.\n`)
+  process.stdout.write(`Procedure Studio\n\nUsage:  procedure-studio serve [--project PATH] [--state-root PATH] [--port NUMBER] [--environment PATH] [--no-open]\n\nWithout --project the Studio opens on its home surface: create a Procedure\nfrom a template, open a recent project, or choose another project folder.\nTest Runs execute Capability and subprocedure calls through the Agent\nenvironment at --environment (default: the installed environment).\n`)
 }
 
 function options(argv) {
@@ -19,17 +20,19 @@ function options(argv) {
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === '--no-open') result.open = false
-    else if (value === '--project' || value === '--state-root' || value === '--port') {
+    else if (value === '--project' || value === '--state-root' || value === '--port' || value === '--environment') {
       const next = argv[++index]
       if (next === undefined) throw new Error(`${value} requires a value`)
       if (value === '--project') result.project = resolve(next)
       else if (value === '--state-root') result.stateRoot = resolve(next)
+      else if (value === '--environment') result.environmentRoot = resolve(next)
       else result.port = Number(next)
     } else throw new Error(`Unknown argument: ${value}`)
   }
   if (result.command !== 'serve') throw new Error('Expected the serve command')
   if (!Number.isSafeInteger(result.port) || result.port < 0 || result.port > 65535) throw new Error('--port must be an integer from 0 to 65535')
   result.stateRoot ??= resolve(homedir(), '.agent-host', 'procedure-studio')
+  result.environmentRoot ??= resolveStateRoot(undefined)
   return result
 }
 
@@ -52,8 +55,8 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   if (selected) {
     try {
       const project = selected.project === undefined ? undefined : await StudioProject.open(selected.project, selected.stateRoot)
-      const studio = await serveStudio({ project, stateRoot: selected.stateRoot, port: selected.port })
-      process.stdout.write(`${JSON.stringify({ schemaVersion: 'openadam.procedure-studio-server.v0.1', status: 'ready', url: studio.url, project: selected.project ?? null, stateRoot: selected.stateRoot })}\n`)
+      const studio = await serveStudio({ project, stateRoot: selected.stateRoot, port: selected.port, environmentRoot: selected.environmentRoot })
+      process.stdout.write(`${JSON.stringify({ schemaVersion: 'openadam.procedure-studio-server.v0.1', status: 'ready', url: studio.url, project: selected.project ?? null, stateRoot: selected.stateRoot, environmentRoot: selected.environmentRoot })}\n`)
       if (selected.open) openBrowser(studio.url)
       let closing = false
       const close = async () => {

@@ -342,6 +342,10 @@ h1, h2, h3, p { margin: 0; }
 .run-status.failed > span { background: var(--danger); }
 .run-status.waiting_user > span { background: var(--waiting); }
 .run-status.running > span, .run-status.ready > span { background: var(--primary); }
+.environment-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 750; white-space: nowrap; }
+.environment-chip::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--quiet); }
+.environment-chip.ready::before { background: var(--success); }
+.environment-chip.missing::before { background: var(--danger); }
 .run-content { min-height: 0; flex: 1; display: grid; grid-template-columns: 145px 1fr; }
 .run-tabs { padding: 11px; border-right: 1px solid var(--border); background: #f8f9fb; }
 .run-tabs button { position: relative; width: 100%; display: flex; align-items: center; min-height: 38px; padding: 0 11px; border-radius: 8px; text-align: left; color: var(--muted); background: transparent; }

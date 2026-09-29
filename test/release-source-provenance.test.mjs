@@ -24,6 +24,39 @@ import {
 
 const execFileAsync = promisify(execFile)
 
+test('legacy Projective source cannot silently fall back to the Worldbend checkout', async () => {
+  const previous = Object.fromEntries([
+    'AGENT_HOST_SUITE_VERSION',
+    'AGENT_HOST_RELEASE_ID',
+    'AGENT_HOST_RELEASE_CREATED_AT',
+  ].map((name) => [name, process.env[name]]))
+  Object.assign(process.env, {
+    AGENT_HOST_SUITE_VERSION: '0.2.0-projective-boundary-test',
+    AGENT_HOST_RELEASE_ID: 'projective-boundary-test',
+    AGENT_HOST_RELEASE_CREATED_AT: '2000-01-01T00:00:00.000Z',
+  })
+  try {
+    const { requireLegacyProjectiveSourceRoot } = await import('../scripts/build-internal-beta-artifacts.mjs')
+    assert.throws(
+      () => requireLegacyProjectiveSourceRoot({ configuredRoot: null, reuseRequested: false }),
+      /Projective no longer defaults to the perspective-tool checkout/u,
+    )
+    assert.equal(
+      requireLegacyProjectiveSourceRoot({ configuredRoot: null, reuseRequested: true }),
+      null,
+    )
+    assert.equal(
+      requireLegacyProjectiveSourceRoot({ configuredRoot: '/explicit/legacy-projective', reuseRequested: false }),
+      '/explicit/legacy-projective',
+    )
+  } finally {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+})
+
 function octalField(value, length) {
   return `${value.toString(8).padStart(length - 1, '0')}\0`
 }

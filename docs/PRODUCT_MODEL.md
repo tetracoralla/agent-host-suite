@@ -176,6 +176,11 @@ compatibility set containing:
   Agent-visible component set;
 - exact installed Procedure products with their common identity, input/output
   schemas, permissions, lifecycle and one explicit execution binding;
+- reusable **account** records: versioned references to one Provider family,
+  one endpoint, and the macOS Keychain item holding the credential. The secret
+  never enters environment state, and Provider Instances resolve accounts by
+  reference so repairing an expired credential updates the Keychain item, not
+  every Procedure;
 - explicit host adapters installed through supported host interfaces;
 - private current-host configuration and service state; and
 - optional, separately consented observation components.

@@ -370,10 +370,13 @@ Start with [provider-binding-runtime.test.mjs](provider-binding-runtime.test.mjs
 Product release, installed package, configured
  Instance, Capability binding, live health, Agent-tool projection and natural
  routing remain separate states. A local bridge command cannot imply absent
- network egress, valid credentials or a healthy remote endpoint. Until a
- concrete remote integration record exists, setup and doctor must not
- present dynamic remote or Agent-runner provisioning as supported. A sealed
- private model-inference Instance pack may be admitted only as exact
+ network egress, valid credentials or a healthy remote endpoint. A concrete
+ sealed read-only GitHub Instance now exercises public network access and an
+ external Keychain-reference route through private import, but setup and doctor
+ must not present dynamic remote or Agent-runner provisioning as supported.
+That would require its own versioned provisioning and recovery record plus a
+separately authorized real-account result. A sealed private model-inference
+Instance pack may be admitted only as exact
  provider-owned bytes with external credential references, explicit privacy
  authority, live typed health, and a product-specific result check kept as
  separate facts.

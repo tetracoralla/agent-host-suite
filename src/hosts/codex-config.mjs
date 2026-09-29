@@ -74,7 +74,11 @@ export async function withCodexConfiguration(executable, options, callback) {
       // Windows tree termination needs its root to remain alive. Sending EOF
       // first lets a fast app-server exit before taskkill can address its tree.
       if (process.platform !== 'win32') child.stdin.end()
-      closing = closeOwnedProcessTree(child, { gracefulWaitMs: 100, termWaitMs: 500 })
+      // Configuration writes run alongside large Host checks and may briefly
+      // compete for scheduler time. Keep cleanup bounded, but leave enough
+      // time to observe EOF, TERM, and a confirmed process-group exit instead
+      // of turning a completed write into a false cleanup failure under load.
+      closing = closeOwnedProcessTree(child, { gracefulWaitMs: 500, termWaitMs: 1_500, killWaitMs: 3_000 })
     }
     return closing
   }

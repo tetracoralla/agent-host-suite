@@ -19,6 +19,7 @@ final class AgentHostStore: ObservableObject {
     @Published private(set) var snapshot: SuiteSnapshot?
     @Published private(set) var hostStatuses: [String: HostStatusResult] = [:]
     @Published private(set) var activity: [ActivityEntry] = []
+    @Published private(set) var accounts: [AccountRecord] = []
     @Published private(set) var setupPlan: SetupPlan?
     @Published private(set) var environmentChangePlan: EnvironmentChangePlan?
     @Published private(set) var toolSetNeedsFreshTask = false
@@ -760,6 +761,36 @@ final class AgentHostStore: ObservableObject {
         }
     }
 
+    func addAccount(name: String, keychainService: String, keychainAccount: String) async {
+        await work("Recording account") {
+            _ = try await self.cli.run([
+                "account", "add", "--provider", "github-readonly",
+                "--name", name, "--keychain-service", keychainService, "--keychain-account", keychainAccount,
+            ], as: AccountMutationResult.self)
+            await self.reloadAccounts()
+        }
+    }
+
+    func checkAccount(id: String) async {
+        await work("Checking account access") {
+            _ = try await self.cli.run(["account", "check", id], as: AccountCheckResult.self)
+            await self.reloadAccounts()
+        }
+    }
+
+    func removeAccount(id: String) async {
+        await work("Removing account record") {
+            _ = try await self.cli.run(["account", "remove", id], as: AccountRemoveResult.self)
+            await self.reloadAccounts()
+        }
+    }
+
+    private func reloadAccounts() async {
+        if let listed = try? await cli.run(["account", "list"], as: AccountListResult.self) {
+            accounts = listed.accounts
+        }
+    }
+
     func dismissError() {
         errorMessage = nil
         recovery = nil
@@ -802,6 +833,7 @@ final class AgentHostStore: ObservableObject {
             doctor = nil
             snapshot = nil
             hostStatuses = [:]
+            accounts = []
             activity = (try? await cli.run(["activity"], as: ActivityResult.self).entries) ?? []
             return
         }
@@ -815,6 +847,9 @@ final class AgentHostStore: ObservableObject {
         async let browse = cli.run(["tools", "browse"], as: ToolBrowseCatalog.self)
         let hosts = await [try? zcode, try? codex, try? claude, try? grok].compactMap { $0 }
         self.hostStatuses = Dictionary(uniqueKeysWithValues: hosts.map { ($0.host, $0) })
+        if let listed = try? await cli.run(["account", "list"], as: AccountListResult.self) {
+            self.accounts = listed.accounts
+        }
         self.selectDefaultSetupHostIfNeeded()
         self.observations = try? await cli.run(["observability", "status"], as: ObservabilityStatus.self)
         if let checkedDoctor {

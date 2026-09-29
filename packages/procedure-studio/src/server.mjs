@@ -4,6 +4,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pickDirectory as pickLocalDirectory } from '../../../src/directory-picker.mjs'
+import { createStudioEnvironment } from './environment.mjs'
 import { packageProject } from './packager.mjs'
 import { StudioProject, publicProjectError } from './project.mjs'
 import { StudioRuntime } from './runtime.mjs'
@@ -72,8 +73,10 @@ async function staticResponse(res, pathname, token) {
   return true
 }
 
-export async function serveStudio({ project, stateRoot, port = 0, directoryPicker = pickLocalDirectory } = {}) {
+export async function serveStudio({ project, stateRoot, port = 0, directoryPicker = pickLocalDirectory, coordinatorOptions = {}, environmentRoot = null } = {}) {
   const token = randomBytes(32).toString('base64url')
+  const environment = environmentRoot === null || environmentRoot === undefined ? null : createStudioEnvironment(environmentRoot)
+  const environmentStatus = async () => (environment === null ? null : await environment.status())
   let session = null
   let turn = Promise.resolve()
   const exclusive = (operation) => {
@@ -86,7 +89,7 @@ export async function serveStudio({ project, stateRoot, port = 0, directoryPicke
       await recordRecentProject(stateRoot, opened.root, projectDisplayName(session.project))
       return session
     }
-    const runtime = await StudioRuntime.open(join(opened.stateRoot, 'runs'), opened)
+    const runtime = await StudioRuntime.open(join(opened.stateRoot, 'runs'), opened, coordinatorOptions, environment)
     const previous = session
     session = { project: opened, runtime, projectRoot: opened.root }
     try {
@@ -111,6 +114,7 @@ export async function serveStudio({ project, stateRoot, port = 0, directoryPicke
       schemaVersion: 'openadam.procedure-studio-home.v0.1',
       templates,
       projects,
+      environment: await environmentStatus(),
       active: session === null ? null : { projectRoot: session.projectRoot, displayName: projectDisplayName(session.project) },
     }
   }
@@ -172,7 +176,7 @@ export async function serveStudio({ project, stateRoot, port = 0, directoryPicke
           }
           const opened = await StudioProject.open(projectPath, stateRoot)
           const next = await openSession(opened)
-          json(res, 200, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list() })
+          json(res, 200, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/home/create') {
@@ -181,7 +185,7 @@ export async function serveStudio({ project, stateRoot, port = 0, directoryPicke
           const created = await createStudioProjectFromTemplate({ ...input, directory })
           const opened = await StudioProject.open(created.projectRoot, stateRoot)
           const next = await openSession(opened)
-          json(res, 201, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list() })
+          json(res, 201, { home: await activeHome(), state: next.project.publicState(), runs: next.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/home/close') {
@@ -196,62 +200,62 @@ export async function serveStudio({ project, stateRoot, port = 0, directoryPicke
         }
         if (req.method === 'GET' && url.pathname === '/api/project') {
           const current = requireSession()
-          json(res, 200, { state: current.project.publicState(), runs: current.runtime.list() })
+          json(res, 200, { state: current.project.publicState(), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'PATCH' && url.pathname === '/api/project') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 200, { state: await current.project.update(input), runs: current.runtime.list() })
+          json(res, 200, { state: await current.project.update(input), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/save') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 200, { state: await current.project.save(input.expectedRevision), runs: current.runtime.list() })
+          json(res, 200, { state: await current.project.save(input.expectedRevision), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/reload') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 200, { state: await current.project.reload(input.expectedRevision), runs: current.runtime.list() })
+          json(res, 200, { state: await current.project.reload(input.expectedRevision), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/reconcile') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 200, { state: await current.project.reconcile(input.expectedRevision), runs: current.runtime.list() })
+          json(res, 200, { state: await current.project.reconcile(input.expectedRevision), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/proposal') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 200, { state: await current.project.loadProposal(input.expectedRevision, input.candidate), runs: current.runtime.list() })
+          json(res, 200, { state: await current.project.loadProposal(input.expectedRevision, input.candidate), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/proposal/decision') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 200, { state: await current.project.decideProposal(input.expectedRevision, input), runs: current.runtime.list() })
+          json(res, 200, { state: await current.project.decideProposal(input.expectedRevision, input), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/scenario') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 201, { state: await current.project.saveScenario(input.expectedRevision, input), runs: current.runtime.list() })
+          json(res, 201, { state: await current.project.saveScenario(input.expectedRevision, input), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'POST' && url.pathname === '/api/project/scenarios/reload') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 200, { state: await current.project.reloadScenarios(input.expectedRevision), runs: current.runtime.list() })
+          json(res, 200, { state: await current.project.reloadScenarios(input.expectedRevision), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         const scenarioMatch = url.pathname.match(/^\/api\/project\/scenario\/([a-z][a-z0-9_.-]{0,79})$/u)
         if (scenarioMatch && req.method === 'PUT') {
           const input = await body(req)
           const current = requireSession()
-          json(res, 200, { state: await current.project.updateScenario(input.expectedRevision, scenarioMatch[1], input.candidate), runs: current.runtime.list() })
+          json(res, 200, { state: await current.project.updateScenario(input.expectedRevision, scenarioMatch[1], input.candidate), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         if (req.method === 'GET' && url.pathname === '/api/runs') {
@@ -287,7 +291,7 @@ export async function serveStudio({ project, stateRoot, port = 0, directoryPicke
           const current = requireSession()
           current.project.assertRevision(input.expectedRevision)
           if (!current.project.publicState().source.saved) await current.project.save(input.expectedRevision)
-          json(res, 201, { package: await packageProject(current.project), state: current.project.publicState(), runs: current.runtime.list() })
+          json(res, 201, { package: await packageProject(current.project), state: current.project.publicState(), runs: current.runtime.list(), environment: await environmentStatus() })
           return
         }
         throw studioError('STUDIO_NOT_FOUND', 'Route not found')

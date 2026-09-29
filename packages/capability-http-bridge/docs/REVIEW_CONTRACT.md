@@ -38,7 +38,11 @@ The adapter tests exercise success/error preservation and negative transport
 boundaries. The Direct Runtime pilot materializes a temporary complete
 Capability Provider, freezes adapter plus instance identities, crosses a real
 loopback HTTP server, validates the result through the current Profile schemas,
-and verifies per-call process cleanup.
+and verifies per-call process cleanup. On macOS, setting
+`AGENT_HOST_KEYCHAIN_PILOT=1` additionally creates one randomly named temporary
+Keychain item, verifies retrieval through `/usr/bin/security`, and removes the
+item in cleanup. That proves the local credential-provider route, not access to
+any production account.
 
 Keep the following claims distinct when relevant to the task:
 

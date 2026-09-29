@@ -51,7 +51,10 @@ const sourceRoots = {
   dataTransformer: process.env.AGENT_HOST_DATA_TRANSFORMER_SOURCE_ROOT ?? join(workspaceRoot, 'data-transformer'),
   armorial: process.env.AGENT_HOST_ARMORIAL_SOURCE_ROOT ?? join(workspaceRoot, 'icon-svg-select'),
   laniakea: process.env.AGENT_HOST_LANIAKEA_SOURCE_ROOT ?? join(workspaceRoot, 'laniakea'),
-  projective: process.env.AGENT_HOST_PROJECTIVE_SOURCE_ROOT ?? join(workspaceRoot, 'perspective-tool'),
+  // Projective and Worldbend are separate product identities. The former
+  // `perspective-tool` checkout now owns Worldbend and must never be treated as
+  // a source-compatible rename of the legacy Projective component.
+  projective: process.env.AGENT_HOST_PROJECTIVE_SOURCE_ROOT ?? null,
   equatorium: process.env.AGENT_HOST_EQUATORIUM_SOURCE_ROOT ?? join(workspaceRoot, 'standard-expression-interpreter'),
   fileVitals: process.env.AGENT_HOST_FILE_VITALS_SOURCE_ROOT ?? join(workspaceRoot, 'universal-inspector'),
   stateMachine: process.env.AGENT_HOST_STATE_MACHINE_SOURCE_ROOT ?? join(workspaceRoot, 'state-machine-editor'),
@@ -97,9 +100,39 @@ function useMaterializedSourceRoots(roots) {
   sourceRoots.dataTransformer = roots['data-transformer']
   sourceRoots.armorial = roots.armorial
   sourceRoots.laniakea = roots.laniakea
-  sourceRoots.projective = roots.projective
+  if (roots.projective !== undefined) sourceRoots.projective = roots.projective
   sourceRoots.equatorium = roots.equatorium
   sourceRoots.fileVitals = roots['file-vitals']
+}
+
+export function requireLegacyProjectiveSourceRoot({
+  configuredRoot = sourceRoots.projective,
+  reuseRequested = reuseComponentIds.has('projective'),
+} = {}) {
+  if (reuseRequested) return configuredRoot
+  if (typeof configuredRoot !== 'string' || configuredRoot.length === 0) {
+    throw new Error(
+      'Projective no longer defaults to the perspective-tool checkout because that repository now owns Worldbend. '
+      + 'Reuse an already bound Projective component with AGENT_HOST_REUSE_CATALOG_ROOT and '
+      + 'AGENT_HOST_REUSE_COMPONENTS=projective, or set AGENT_HOST_PROJECTIVE_SOURCE_ROOT to an explicit legacy Projective source.',
+    )
+  }
+  return configuredRoot
+}
+
+async function assertLegacyProjectiveSource(root) {
+  let workspace
+  let plugin
+  try {
+    workspace = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+    plugin = JSON.parse(await readFile(join(root, 'plugins/projective/.codex-plugin/plugin.json'), 'utf8'))
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+    throw new Error('AGENT_HOST_PROJECTIVE_SOURCE_ROOT does not contain the legacy Projective plugin')
+  }
+  if (plugin.name !== 'projective' || /worldbend/iu.test(String(workspace.name ?? ''))) {
+    throw new Error('AGENT_HOST_PROJECTIVE_SOURCE_ROOT must identify legacy Projective source, not the Worldbend repository')
+  }
 }
 
 async function providerReleaseInput(sourceId, environmentName, fallbackRelativePath, materializedRoots) {
@@ -942,6 +975,8 @@ async function main() {
   if (sourcePolicy === 'remote-tagged' && reuseComponentIds.size > 0) {
     throw new Error('remote-tagged builds cannot reuse a prior local component catalog')
   }
+  sourceRoots.projective = requireLegacyProjectiveSourceRoot()
+  if (!reuseComponentIds.has('projective')) await assertLegacyProjectiveSource(sourceRoots.projective)
   const requiredSourceIds = new Set(['suite'])
   for (const [componentId, sourceIds] of Object.entries(componentSourceIds)) {
     if (!reuseComponentIds.has(componentId)) for (const sourceId of sourceIds) requiredSourceIds.add(sourceId)

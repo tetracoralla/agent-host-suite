@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { resolveAuthorization } from '../src/instance.mjs'
 
 const repositoryRoot = resolve(import.meta.dirname, '..')
 const adapterPath = resolve(repositoryRoot, 'src/adapter.mjs')
@@ -199,4 +200,39 @@ test('never accepts credentials embedded in the endpoint URL', async () => {
   assert.equal(result.exit.code, 1)
   assert.equal(result.stdout, '')
   assert.equal(result.stderr.includes('secret'), false)
+})
+
+test('resolves only a referenced Keychain bearer and keeps lookup failures secret-free', async () => {
+  const calls = []
+  const auth = { kind: 'macos-keychain-bearer', service: 'example-provider', account: 'workspace-account' }
+  const authorization = await resolveAuthorization(auth, {
+    platform: 'darwin',
+    execFile: async (...args) => {
+      calls.push(args)
+      return { stdout: 'temporary-secret\r\n' }
+    },
+  })
+  assert.equal(authorization, 'Bearer temporary-secret')
+  assert.deepEqual(calls, [[
+    '/usr/bin/security',
+    ['find-generic-password', '-w', '-s', 'example-provider', '-a', 'workspace-account'],
+    { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 },
+  ]])
+
+  await assert.rejects(
+    resolveAuthorization(auth, {
+      platform: 'darwin',
+      execFile: async () => { throw new Error('temporary-secret from keychain') },
+    }),
+    (error) => error.message === 'configured Keychain credential is unavailable'
+      && !error.message.includes('temporary-secret'),
+  )
+  await assert.rejects(
+    resolveAuthorization(auth, {
+      platform: 'darwin',
+      execFile: async () => ({ stdout: 'first-line\nsecond-line' }),
+    }),
+    (error) => error.message === 'configured Keychain credential has an invalid shape'
+      && !error.message.includes('first-line'),
+  )
 })

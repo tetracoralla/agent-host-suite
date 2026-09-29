@@ -535,50 +535,151 @@ async function recordVerifiedInvocation(stateRoot, componentId, expectedDependen
   }
 }
 
-function coordinatorOptions(state, paths, products, dependencies, stack = []) {
-  const agentic = products.filter((candidate) => candidate.execution.kind === 'agentic-runner')
-  return {
-    procedures: agentic,
-    ...(dependencies.adapterFactory === undefined ? {} : { adapterFactory: dependencies.adapterFactory }),
-    executeDirectCall: dependencies.executeDirectCall ?? (async (call) => {
-      if (Object.keys(call.resources ?? {}).length > 0)
-        fail('PROCEDURE_RESOURCE_UNSUPPORTED', 'Direct Runtime Capability calls cannot receive resource bindings in the current work-order contract')
-      const { providerId, ...target } = call.target
-      return directTargetInvocation(state, {
-        providerId,
-        target,
-        input: call.input,
-        timeoutMs: call.timeoutMs,
+// Both executors resolve the executing environment through `load` so one
+// implementation serves a Host invocation (snapshot resolved once per Run)
+// and an embedding workspace such as Procedure Studio (fresh per call).
+function directCallExecutor(load, dependencies) {
+  return async (call) => {
+    if (Object.keys(call.resources ?? {}).length > 0)
+      fail('PROCEDURE_RESOURCE_UNSUPPORTED', 'Direct Runtime Capability calls cannot receive resource bindings in the current work-order contract')
+    const { state } = await load()
+    const { providerId, ...target } = call.target
+    return directTargetInvocation(state, {
+      providerId,
+      target,
+      input: call.input,
+      timeoutMs: call.timeoutMs,
+      idempotencyKey: call.idempotencyKey,
+    }, dependencies)
+  }
+}
+
+function procedureCallExecutor(load, stack, dependencies) {
+  return async (call) => {
+    const identity = `${call.procedure.id}@${call.procedure.version}`
+    if (stack.includes(identity))
+      fail('PROCEDURE_RECURSION', `Subprocedure cycle detected at ${identity}`)
+    const { paths, products } = await load()
+    exactProduct(products, call.procedure.id, call.procedure.version)
+    const nested = {
+      ...dependencies,
+      procedureStack: [...stack, identity],
+      workspaceDelegation: call.delegation ?? null,
+    }
+    const prior = call.continuation !== null && call.continuation !== undefined
+      && call.continuation.procedure === identity
+        ? call.continuation
+        : null
+    let result
+    if (prior !== null) {
+      // The child Run is durable: a fresh parent process continues it instead
+      // of restarting the composed work. A child that already completed
+      // (for example after a parent restart) returns its recorded outputs.
+      const existing = await inspectProcedureRun({ stateRoot: paths.root, run: prior.run, runRoot: prior.root }, nested)
+      if (existing.status === 'complete') {
+        result = existing
+      } else if (
+        prior.pendingAnswer !== undefined
+        && existing.status === 'waiting_user'
+        && existing.interaction
+        && existing.interaction.id !== prior.pendingAnswer.questionId
+      ) {
+        // The child's current question is not the one this answer was given
+        // for (its session advanced elsewhere): re-surface the child's
+        // current question as a fresh wait instead of delivering the stale
+        // answer to it.
+        result = existing
+      } else {
+        const answerCurrent = prior.pendingAnswer !== undefined
+          && existing.status === 'waiting_user'
+          && existing.interaction?.id === prior.pendingAnswer.questionId
+        const input = answerCurrent
+          ? { action: 'answer', questionId: prior.pendingAnswer.questionId, value: prior.pendingAnswer.value }
+          : { action: 'resume' }
+        try {
+          result = await continueProcedureRun({
+            stateRoot: paths.root,
+            run: prior.run,
+            runRoot: prior.root,
+            input,
+            timeoutMs: call.limits?.maxDurationMs,
+          }, nested)
+        } catch (error) {
+          // A parent that declined or lost the mirrored answer still owes the
+          // child its answer; re-surface the child question as a fresh wait
+          // instead of failing the composed Run. STALE_ANSWER covers a child
+          // question that changed between the inspect above and this call.
+          if (error.code !== 'ANSWER_REQUIRED' && error.code !== 'STALE_ANSWER') throw error
+          const waiting = await inspectProcedureRun({ stateRoot: paths.root, run: prior.run, runRoot: prior.root }, nested)
+          if (waiting.status === 'waiting_user' && waiting.interaction) result = waiting
+          else throw error
+        }
+      }
+    } else {
+      const request = {
+        schemaVersion: runRequestSchema,
+        procedure: call.procedure,
+        inputs: call.inputs,
+        grants: call.grants,
+        resources: call.resources,
+        limits: call.limits,
         idempotencyKey: call.idempotencyKey,
-      }, dependencies)
-    }),
-    executeProcedureCall: dependencies.executeProcedureCall ?? (async (call) => {
-      const identity = `${call.procedure.id}@${call.procedure.version}`
-      if (stack.includes(identity))
-        fail('PROCEDURE_RECURSION', `Subprocedure cycle detected at ${identity}`)
-      const child = exactProduct(products, call.procedure.id, call.procedure.version)
-      const result = await invokeInstalledProcedure({
-        stateRoot: paths.root,
-        request: {
-          schemaVersion: runRequestSchema,
-          procedure: call.procedure,
-          inputs: call.inputs,
-          grants: call.grants,
-          resources: call.resources,
-          limits: call.limits,
-          idempotencyKey: call.idempotencyKey,
-        },
-      }, {
-        ...dependencies,
-        procedureStack: [...stack, identity],
-        workspaceDelegation: call.delegation ?? null,
+      }
+      result = await invokeInstalledProcedure({ stateRoot: paths.root, request }, nested)
+    }
+    if (result.status !== 'complete') {
+      // Only a child question offers a continuation: answering it through the
+      // parent resumes the same child Run. A child paused on a provider
+      // permission or a run limit would loop if resumed one-shot — its
+      // pending permissions are surfaced for diagnosis instead.
+      const question = result.status === 'waiting_user' ? result.interaction : null
+      const continuable = Boolean(question)
+      fail('SUBPROCEDURE_WAIT_REQUIRED', `Subprocedure ${identity} stopped ${result.status} before completing. ${continuable ? 'Answer the parent Run to continue the same child Run.' : 'The nested Run is not continuable from this embedding; a live Runner session or a new Run is required.'}`, {
+        status: result.status,
+        ...(result.pendingPermissions?.length ? { pendingPermissions: result.pendingPermissions } : {}),
+        ...(continuable ? {
+          continuation: {
+            run: result.taskId,
+            // A continued child keeps the root it was created under: a
+            // re-executed parent attempt has a fresh idempotency key, which
+            // would otherwise derive a directory the child Run does not live
+            // in.
+            root: prior !== null ? prior.root : procedureRunRoot(paths, { idempotencyKey: call.idempotencyKey }, nested),
+            procedure: identity,
+            interaction: question,
+          },
+        } : {}),
       })
-      if (result.status !== 'complete')
-        fail('SUBPROCEDURE_WAIT_REQUIRED', `Subprocedure ${identity} stopped ${result.status} before completing. Resume or retry the parent Run; the nested Run is not continued on its own.`, {
-          status: result.status,
-        })
-      return result.outputs
-    }),
+    }
+    return result.outputs
+  }
+}
+
+function coordinatorOptions(state, paths, products, dependencies, stack = []) {
+  const snapshot = async () => ({ state, paths, products })
+  return {
+    procedures: products.filter((candidate) => candidate.execution.kind === 'agentic-runner'),
+    ...(dependencies.adapterFactory === undefined ? {} : { adapterFactory: dependencies.adapterFactory }),
+    executeDirectCall: dependencies.executeDirectCall ?? directCallExecutor(snapshot, dependencies),
+    executeProcedureCall: dependencies.executeProcedureCall ?? procedureCallExecutor(snapshot, stack, dependencies),
+  }
+}
+
+// Execution wiring for an embedding workspace: Capability calls and
+// subprocedure calls run through the installed Agent environment identified
+// by `environmentRoot`, with its state resolved again on every call so
+// installs, updates and removals take effect without restarting the embedding.
+export function procedureEnvironmentExecutors(environmentRoot, dependencies = {}) {
+  const root = resolveStateRoot(environmentRoot)
+  const load = async () => {
+    const paths = await readStatePaths(root)
+    const state = await loadState(paths)
+    if (state === null) fail('NOT_INSTALLED', 'No Agent environment is installed')
+    return { state, paths, products: await installedProcedureProducts(state) }
+  }
+  return {
+    executeDirectCall: directCallExecutor(load, dependencies),
+    executeProcedureCall: procedureCallExecutor(load, [], dependencies),
   }
 }
 
@@ -661,8 +762,9 @@ export async function inspectProcedureRun(options, dependencies = {}) {
   const procedures = products.filter(
     (procedure) => procedure.execution.kind === 'agentic-runner',
   )
-  const coordinator = new Coordinator(join(paths.runtime, 'procedure-runs'), {
+  const coordinator = new Coordinator(options.runRoot ?? join(paths.runtime, 'procedure-runs'), {
     ...coordinatorOptions(state, paths, products, dependencies),
+    ...(dependencies.workspaceDelegation ? { workspaceDelegation: dependencies.workspaceDelegation } : {}),
   })
   try {
     const task = coordinator.get(options.run)
@@ -689,7 +791,19 @@ function continuation(task, input) {
     const value = input.value ?? input.text
     if (value === undefined || JSON.stringify(value).length > 64000) fail('PROCEDURE_CONTINUATION_INVALID', 'Procedure answer requires a bounded value')
     if (task.question?.id === undefined) fail('PROCEDURE_CONTINUATION_INVALID', 'Procedure Run has no current question')
-    return { ...common, action: 'answer', questionId: task.question.id, value, reject: input.reject === true }
+    if (input.questionId !== undefined && typeof input.questionId !== 'string') {
+      fail('PROCEDURE_CONTINUATION_INVALID', 'Procedure answer questionId must be a string')
+    }
+    // An explicit questionId binds the answer to that question; the
+    // coordinator rejects a mismatch instead of answering whichever question
+    // happens to be current.
+    return {
+      ...common,
+      action: 'answer',
+      questionId: input.questionId ?? task.question.id,
+      value,
+      reject: input.reject === true,
+    }
   }
   if (input.action === 'resume' || input.action === 'cancel') {
     return { ...common, action: input.action }
@@ -721,8 +835,9 @@ export async function continueProcedureRun(options, dependencies = {}) {
   const procedures = products.filter(
     (procedure) => procedure.execution.kind === 'agentic-runner',
   )
-  const coordinator = new Coordinator(join(paths.runtime, 'procedure-runs'), {
+  const coordinator = new Coordinator(options.runRoot ?? join(paths.runtime, 'procedure-runs'), {
     ...coordinatorOptions(state, paths, products, dependencies),
+    ...(dependencies.workspaceDelegation ? { workspaceDelegation: dependencies.workspaceDelegation } : {}),
   })
   try {
     const task = coordinator.get(options.run)

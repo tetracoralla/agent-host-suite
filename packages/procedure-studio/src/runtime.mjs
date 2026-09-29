@@ -89,15 +89,18 @@ function downstream(method, nodeId) {
 }
 
 export class StudioRuntime {
-  static async open(root, project, coordinatorOptions = {}) {
+  static async open(root, project, coordinatorOptions = {}, environment = null) {
     await mkdir(root, { recursive: true, mode: 0o700 })
-    const runtime = new StudioRuntime(root, project, coordinatorOptions)
+    const runtime = new StudioRuntime(root, project, coordinatorOptions, environment)
     const currentDigest = project.publicState().documentDigest
     await runtime.coordinatorFor(currentDigest, project.validation.product)
     for (const entry of await readdir(root, { withFileTypes: true })) {
       if (entry.isDirectory() && /^[a-f0-9]{64}$/u.test(entry.name) && entry.name !== runDirectoryName(currentDigest)) {
         try {
-          runtime.coordinators.set(`sha256:${entry.name}`, new Coordinator(join(root, entry.name), coordinatorOptions))
+          runtime.coordinators.set(`sha256:${entry.name}`, new Coordinator(join(root, entry.name), {
+            ...(environment === null ? {} : environment.coordinatorOptions()),
+            ...coordinatorOptions,
+          }))
         } catch (error) {
           if (error.code !== 'STORE_LOCKED') throw error
         }
@@ -106,10 +109,11 @@ export class StudioRuntime {
     return runtime
   }
 
-  constructor(root, project, coordinatorOptions = {}) {
+  constructor(root, project, coordinatorOptions = {}, environment = null) {
     this.root = root
     this.project = project
     this.coordinatorOptions = coordinatorOptions
+    this.environment = environment
     this.coordinators = new Map()
   }
 
@@ -117,6 +121,7 @@ export class StudioRuntime {
     if (this.coordinators.has(digest)) return this.coordinators.get(digest)
     if (product === null) throw studioError('STUDIO_RUN_SOURCE_INVALID', 'The current source is not valid enough to run')
     const coordinator = new Coordinator(join(this.root, runDirectoryName(digest)), {
+      ...(this.environment === null ? {} : this.environment.coordinatorOptions()),
       ...this.coordinatorOptions,
       procedures: [{ ...product, componentId: this.project.config.componentId }],
     })
@@ -151,6 +156,7 @@ export class StudioRuntime {
     if (!this.project.validation.valid || this.project.validation.product === null) {
       throw studioError('STUDIO_VALIDATION_FAILED', 'Fix validation errors before starting a Test Run', { diagnostics: this.project.validation.diagnostics })
     }
+    if (this.environment !== null) await this.environment.assertReadyFor(this.project.validation.product.method)
     const scenario = this.project.scenarios.find((item) => item.id === scenarioId)
     if (!scenario) throw studioError('STUDIO_SCENARIO_NOT_FOUND', 'Test scenario was not found', { scenarioId })
     const digest = this.project.publicState().documentDigest
@@ -193,6 +199,7 @@ export class StudioRuntime {
     }
     const node = source.task.method.graph.nodes.find((item) => item.id === nodeId)
     if (!node) throw studioError('STUDIO_REPLAY_UNSAFE', 'Replay node is not part of the original Method', { nodeId })
+    if (this.environment !== null) await this.environment.assertReadyFor(source.task.method)
     const current = this.project.publicState()
     if (current.documentDigest !== source.digest) {
       throw studioError('STUDIO_REPLAY_SOURCE_CHANGED', 'Replay requires the exact source snapshot used by the original Run')

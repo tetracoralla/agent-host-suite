@@ -30,6 +30,10 @@ npm run studio -- serve --project packages/procedure-studio/examples/research-br
 The command prints a private loopback URL. It does not install a component,
 change an Agent app, or start the consumer Manager. Use `--state-root PATH` for
 isolated draft and Test Run state and `--no-open` to avoid launching a browser.
+Capability and subprocedure calls inside a Test Run execute through the Agent
+environment at `--environment PATH` (default: the installed Agent environment,
+respecting `AGENT_HOST_STATE_ROOT`); the Test Run tray shows whether that
+environment is available and how many Procedures it has installed.
 
 The source project contains:
 
@@ -76,11 +80,18 @@ private draft into semantic changes so nodes, edges, contracts, permissions,
 schemas, and versions can be accepted or rejected without silently overwriting
 either side.
 
-Test scenarios execute through the existing Procedure Coordinator. The tray
+Test scenarios execute through the existing Procedure Coordinator. Capability
+calls run through the environment's Direct Runtime, subprocedure calls resolve
+the exact child identity through the installed Procedure catalog, and both
+resolve the environment again on every call so installs, updates, and removals
+take effect without restarting Studio. A composition that needs one of them
+does not start when the environment is unavailable; the failure names the
+environment root instead of surfacing a mid-run executor error. The tray
 shows the exact request, binding, node timeline, durable state, artifacts, and
 errors; human-input Runs can continue or cancel, failed Runs can resume, and a
 stopped Run can be replayed from a safe node as a new Run while the original
-evidence remains available. The Input tab edits reusable typed inputs, grants,
+evidence remains available. A subprocedure question surfaces
+on the parent Run, and the answer continues the same installed child Run. The Input tab edits reusable typed inputs, grants,
 resource bindings, Agent bindings (including native ZCode model coordinates and
 optional resumable sessions), and execution limits before a Run. Runnable-input
 problems and intentionally missing authority are distinguished in place; **Save

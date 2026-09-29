@@ -54,3 +54,15 @@ server. The pilot uses no credentials, model, user Host state, or network
 outside the local machine. It proves the current carrier composition only; it
 does not establish a real endpoint's health, credentials, semantic correctness,
 privacy approval, adoption, or installed Agent routing.
+
+On macOS, the optional command below creates one randomly named, temporary
+Keychain item, exercises the same Direct Runtime route through the real
+`/usr/bin/security` retrieval boundary, and removes the item in cleanup:
+
+```sh
+AGENT_HOST_KEYCHAIN_PILOT=1 npm run check:direct-runtime
+```
+
+This verifies OS credential retrieval without using a real account token. It
+still does not establish production account authorization or remote endpoint
+health.

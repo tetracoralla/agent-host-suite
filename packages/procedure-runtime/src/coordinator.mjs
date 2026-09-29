@@ -220,6 +220,7 @@ export class Coordinator extends EventEmitter {
         task.workspaceAdapter ??= workspaceRequirement(task.method)?.adapter ?? 'none'
         task.inputs ??= { goal: task.goal }
         task.outputs ??= {}
+        task.subprocedureContinuations ??= {}
         task.nodeExecutions ??= task.attempts?.length ?? 0
         task.limits = {
           maxDurationMs: task.limits?.maxDurationMs ?? (task.limits?.maxMinutes ?? 30) * 60000,
@@ -609,6 +610,7 @@ export class Coordinator extends EventEmitter {
             task.outputs = {}
             task.phase = task.method.graph.entry
             task.plan = null
+            task.subprocedureContinuations = {}
           }
           task.question = null
           if (task.active) {
@@ -681,6 +683,12 @@ export class Coordinator extends EventEmitter {
               )
             }
           } else {
+            if (task.question.kind === 'subprocedure') {
+              const recorded = task.subprocedureContinuations?.[task.question.node]
+              assert(recorded, 'STALE_ANSWER', 'The waiting subprocedure Run is no longer recorded')
+              if (!payload.reject)
+                recorded.pendingAnswer = { questionId: task.question.childQuestionId, value: answer }
+            }
             task.question = null
             task.status = payload.reject ? 'paused' : 'ready'
             if (!payload.reject)
@@ -1178,6 +1186,7 @@ export class Coordinator extends EventEmitter {
               limits: clone(task.limits),
               idempotencyKey: task.active.requestId,
               delegation: delegated.length > 0 ? { owner: this.store.root, taskId: task.id } : null,
+              continuation: clone(task.subprocedureContinuations?.[node.id] ?? null),
             }),
           }
         } catch (error) {
@@ -1196,10 +1205,43 @@ export class Coordinator extends EventEmitter {
         assert(false, 'METHOD_EXTENSION_UNSUPPORTED', `Method extension ${node.extension.id}@${node.extension.version} is declared but not supported by this Runner`)
       }
     } catch (error) {
-      this.store.update(task.id, 'node-failed', (current) => {
+      // A subprocedure that stopped in a continuable state suspends the parent
+      // Run instead of failing it: the durable continuation record names the
+      // child Run so a later answer, resume, or fresh process continues the
+      // same child instead of restarting the composed work.
+      const wait = error?.code === 'SUBPROCEDURE_WAIT_REQUIRED' && error.details?.continuation
+        ? error.details
+        : null
+      this.store.update(task.id, wait === null ? 'node-failed' : 'subprocedure-wait', (current) => {
         current.elapsedMs += Date.now() - Date.parse(current.active.startedAt)
-        current.attempts.push({ ...current.active, finishedAt: now(), status: 'failed', error: errorValue(error), candidate: before.identity })
+        current.attempts.push({ ...current.active, finishedAt: now(), status: wait === null ? 'failed' : 'waiting', error: errorValue(error), candidate: before.identity })
         current.active = null
+        if (wait !== null) {
+          current.subprocedureContinuations ??= {}
+          current.subprocedureContinuations[node.id] = {
+            run: wait.continuation.run,
+            root: wait.continuation.root,
+            procedure: wait.continuation.procedure,
+            recordedAt: now(),
+          }
+          if (wait.continuation.interaction) {
+            current.status = 'waiting_user'
+            current.question = {
+              id: id(),
+              kind: 'subprocedure',
+              node: node.id,
+              childRun: wait.continuation.run,
+              childQuestionId: wait.continuation.interaction.id,
+              text: wait.continuation.interaction.prompt,
+              options: clone(wait.continuation.interaction.options ?? []),
+            }
+            current.problem = null
+          } else {
+            current.status = 'paused'
+            current.problem = errorValue(error)
+          }
+          return
+        }
         current.status = 'failed'
         current.problem = errorValue(error)
       })
@@ -1213,6 +1255,7 @@ export class Coordinator extends EventEmitter {
       current.elapsedMs += Date.now() - Date.parse(active.startedAt)
       current.attempts.push({ ...active, finishedAt: now(), status: 'complete', candidate: after.identity })
       current.active = null
+      if (current.subprocedureContinuations) delete current.subprocedureContinuations[node.id]
       const delegatedWorkspace = node.kind === 'procedure-call'
         && Object.keys(node.resourceBindings).length > 0
         && isGitTask(current)

@@ -141,6 +141,8 @@ The implemented boundary is:
 - no redirects or retries;
 - exact result/error preservation;
 - a real Direct Runtime loopback HTTP pilot with a frozen instance descriptor;
+- an opt-in macOS pilot that retrieves a randomly generated temporary bearer
+  through the real Keychain command and removes the item afterward;
 - zero model calls and no persistent provider process in the pilot.
 
 Not yet claimed: a production remote endpoint, installed Agent Host lifecycle,

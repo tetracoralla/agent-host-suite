@@ -1998,3 +1998,117 @@ test('a delegated subprocedure may change the workspace and the parent records t
   assert.equal(existsSync(leaseFile(f.workspace)), false)
   assert.equal(done.candidate.paths.includes('child-write.txt'), true)
 })
+
+function waitRequiredError(interaction) {
+  const error = new Error('Subprocedure org.openadam.example.child@1.0.0 stopped waiting_user before completing')
+  error.code = 'SUBPROCEDURE_WAIT_REQUIRED'
+  error.details = {
+    status: 'waiting_user',
+    continuation: {
+      run: '0d1f2c3e-1111-4222-8333-444455556666',
+      root: '/nested/child-root',
+      procedure: 'org.openadam.example.child@1.0.0',
+      interaction,
+    },
+  }
+  return error
+}
+
+test('a subprocedure question suspends the parent Run and the answer continues the same child', async (t) => {
+  const f = fixture(t)
+  const method = delegationMethod()
+  const continuations = []
+  const parent = new Coordinator(f.state, {
+    methods: [method],
+    async executeProcedureCall(call) {
+      continuations.push(call.continuation)
+      if (call.continuation === null) throw waitRequiredError({ id: 'child-q-1', prompt: 'Which constraint should the note preserve?', options: ['speed', 'safety'] })
+      return {}
+    },
+  })
+  f.cleanup.push(() => parent.close())
+  const task = delegationTask(parent, f.workspace, method)
+  command(parent, task, 'start')
+  await waitFor(() => parent.get(task.id).status === 'waiting_user')
+
+  const waiting = parent.get(task.id)
+  assert.equal(waiting.question.kind, 'subprocedure')
+  assert.equal(waiting.question.text, 'Which constraint should the note preserve?')
+  assert.deepEqual(waiting.question.options, ['speed', 'safety'])
+  assert.equal(waiting.question.childRun, '0d1f2c3e-1111-4222-8333-444455556666')
+  assert.equal(waiting.question.childQuestionId, 'child-q-1')
+  assert.equal(waiting.question.node, 'call')
+  assert.deepEqual(waiting.attempts.filter((attempt) => attempt.stage === 'call').map((attempt) => attempt.status), ['waiting'])
+  assert.equal(waiting.subprocedureContinuations.call.run, '0d1f2c3e-1111-4222-8333-444455556666')
+
+  command(parent, task, 'answer', { questionId: waiting.question.id, value: 'safety' })
+  await waitFor(() => parent.get(task.id).status === 'complete')
+  const done = parent.get(task.id)
+  assert.deepEqual(continuations, [
+    null,
+    {
+      run: '0d1f2c3e-1111-4222-8333-444455556666',
+      root: '/nested/child-root',
+      procedure: 'org.openadam.example.child@1.0.0',
+      recordedAt: waiting.subprocedureContinuations.call.recordedAt,
+      pendingAnswer: { questionId: 'child-q-1', value: 'safety' },
+    },
+  ])
+  assert.deepEqual(done.attempts.filter((attempt) => attempt.stage === 'call').map((attempt) => attempt.status), ['waiting', 'complete'])
+  assert.deepEqual(done.subprocedureContinuations, {})
+  assert.equal(parent.store.readArtifact(done.outputs.out.artifact), 'ok')
+})
+
+test('a continuation without a question pauses the parent and a resume continues the child', async (t) => {
+  const f = fixture(t)
+  const method = delegationMethod()
+  const seen = []
+  const parent = new Coordinator(f.state, {
+    methods: [method],
+    async executeProcedureCall(call) {
+      seen.push(call.continuation)
+      if (call.continuation === null) throw waitRequiredError(null)
+      return {}
+    },
+  })
+  f.cleanup.push(() => parent.close())
+  const task = delegationTask(parent, f.workspace, method)
+  command(parent, task, 'start')
+  await waitFor(() => parent.get(task.id).status === 'paused')
+  const paused = parent.get(task.id)
+  assert.equal(paused.problem.code, 'SUBPROCEDURE_WAIT_REQUIRED')
+  assert.equal(Boolean(paused.question), false)
+  assert.equal(paused.subprocedureContinuations.call.run, '0d1f2c3e-1111-4222-8333-444455556666')
+
+  command(parent, task, 'resume')
+  await waitFor(() => parent.get(task.id).status === 'complete')
+  assert.equal(seen[1].run, '0d1f2c3e-1111-4222-8333-444455556666')
+  assert.equal(seen[1].pendingAnswer, undefined)
+  assert.deepEqual(parent.get(task.id).subprocedureContinuations, {})
+})
+
+test('new task input resets recorded subprocedure continuations for a non-development Method', async (t) => {
+  const f = fixture(t)
+  const method = delegationMethod()
+  const seen = []
+  const parent = new Coordinator(f.state, {
+    methods: [method],
+    async executeProcedureCall(call) {
+      seen.push(call.continuation)
+      if (call.continuation === null) throw waitRequiredError({ id: 'child-q-1', prompt: 'Which constraint?' })
+      return {}
+    },
+  })
+  f.cleanup.push(() => parent.close())
+  const task = delegationTask(parent, f.workspace, method)
+  command(parent, task, 'start')
+  await waitFor(() => parent.get(task.id).status === 'waiting_user')
+  command(parent, task, 'input', { text: 'The requirements changed; start the note over with the new constraint.' })
+  const updated = parent.get(task.id)
+  assert.equal(updated.question, null)
+  assert.deepEqual(updated.subprocedureContinuations, {})
+  command(parent, task, 'resume')
+  await waitFor(() => parent.get(task.id).status === 'waiting_user')
+  assert.equal(parent.get(task.id).question.kind, 'subprocedure')
+  assert.deepEqual(seen, [null, null])
+})

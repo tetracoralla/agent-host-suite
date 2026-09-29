@@ -20,6 +20,7 @@ const STATE_ALLOWED_KEYS = new Set([
   'releaseId', 'releaseManifest', 'availableAgentComponents', 'agentComponents',
   'agentToolsPaused', 'resumeAgentComponents',
   'releaseSourceProvenance', 'privateComponents', 'rolledBackFrom', 'componentWarmupVersion',
+  'accounts',
 ])
 
 function plainObject(value) {
@@ -59,7 +60,7 @@ export function validateState(state) {
   }
   if (state.workspaceRoot !== undefined && state.workspaceRoot !== null && (typeof state.workspaceRoot !== 'string' || state.workspaceRoot.length === 0)) invalid.push('workspaceRoot')
   if (state.componentWarmupVersion !== undefined && state.componentWarmupVersion !== 1) invalid.push('componentWarmupVersion')
-  for (const key of ['components', 'hosts', 'runtime', 'observability', 'privateComponents']) {
+  for (const key of ['components', 'hosts', 'runtime', 'observability', 'privateComponents', 'accounts']) {
     if (state[key] !== undefined && !plainObject(state[key])) invalid.push(key)
   }
   const componentIDs = new Set(Object.keys(plainObject(state.components) ? state.components : {}))

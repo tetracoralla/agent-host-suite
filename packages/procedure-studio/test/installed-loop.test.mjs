@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { importLocalComponent, rollbackLocalComponent } from '../../../src/local-components.mjs'
 import { continueProcedureRun, inspectProcedureRun, invokeInstalledProcedure, listInstalledProcedures } from '../../../src/procedure-products.mjs'
@@ -486,4 +487,245 @@ test('a Studio-produced Procedure updates from v1 to v2 and rolls back with invo
   assert.equal(tools.procedures[0].availability.invocationEvidence.valid, true)
   assert.equal((await inspectProcedureRun({ stateRoot: hostStateRoot, run: secondRun.taskId })).outputs.brief, 'Installed v2 brief.')
   assert.equal(projectRoot.includes(hostStateRoot), false)
+})
+
+test('an installed subprocedure question suspends the parent Run and continues the same child after reopen', async (t) => {
+  const { root, projectRoot, project } = await fixture(t, 'workspace-composition')
+  const packaged = await packageProject(project)
+  assert.equal(packaged.preview.health.status, 'ok')
+
+  const verifier = await createAgenticProcedureComponentFixture(join(root, 'verifier-component'), {
+    id: 'verifier-procedure',
+    version: '1.4.2',
+    procedureId: 'org.openadam.example.verifier',
+    method: verifierMethod,
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['candidate'],
+      properties: { candidate: { type: 'object' } },
+    },
+    outputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['verdict'],
+      properties: { verdict: { type: 'object' } },
+    },
+    permissions: ['model.invoke', 'network.read'],
+    resources: [{ id: 'workspace', type: 'workspace', required: false, adapter: 'git' }],
+    outputArtifacts: ['verdict'],
+    displayName: 'Verifier',
+    summary: 'Verify normalized composition output.',
+  })
+  const releaseManifest = await createReleaseFixture(join(root, 'host-release'), {
+    suiteVersion: '0.1.1-continuation-loop',
+    releaseId: 'procedure-continuation-loop',
+    marker: 'continuation-loop',
+  })
+  const hostStateRoot = join(root, 'host-state')
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false, mathMarketplace: 'openadam', mathVersion: '0.4.0' })
+  const dependencies = {
+    runner: fake.runner,
+    codexConfiguration: fake.configuration,
+    hostSkillHome: join(root, 'host-home'),
+    componentWarmup: healthyComponentWarmup,
+    catalogPreflight: healthyCatalogPreflight,
+    applicationStatePreflight: compatibleApplicationState,
+  }
+  await setup({
+    profile: 'standard', hosts: ['codex'], releaseManifest, stateRoot: hostStateRoot,
+    noService: true, dryRun: false, enableObservability: false,
+  }, dependencies)
+  await importLocalComponent({ stateRoot: hostStateRoot, artifact: verifier.artifactPath, binding: verifier.binding, activate: false }, dependencies)
+  await importLocalComponent({ stateRoot: hostStateRoot, artifact: packaged.artifact.path, binding: packaged.preview.binding, activate: false }, dependencies)
+
+  const workspace = await gitWorkspace(root)
+  const request = {
+    schemaVersion: 'openadam.agent-host-procedure-run-request.v0.1',
+    procedure: { id: 'org.openadam.example.workspace-composition', version: '2.3.0' },
+    inputs: { goal: 'Produce one verified note across a subprocedure question wait.' },
+    grants: ['model.invoke', 'workspace.read', 'capability.invoke', 'procedure.invoke', 'network.read'],
+    resources: { workspace: { type: 'workspace', adapter: 'git', path: workspace, allowExistingPaths: [] } },
+    limits: {
+      maxDurationMs: 120_000, maxNodeExecutions: 20, maxAgentTurns: 8,
+      nodeTimeoutMs: 30_000, maxAttemptsPerNode: 4, maxOutputBytes: 262_144,
+    },
+    idempotencyKey: 'subprocedure-continuation-loop',
+  }
+  const adapterFactory = routedAdapter(new Map([
+    ['draft', [{ outputs: { draft: 'draft before the subprocedure question' } }]],
+    ['verifier', [
+      { question: 'Which workspace constraint should the verification preserve?' },
+      { outputs: { verdict: { approved: true, checkedBy: 'continuation-verifier' } } },
+    ]],
+    ['finalize', [{ outputs: { final: 'Composition continued after the subprocedure answer.' } }]],
+  ]), COMPOSITION_ROUTES)
+  const invocation = {
+    adapterFactory,
+    executeDirectCall: async () => ({ value: { normalized: true } }),
+  }
+
+  // First process: the child verifier asks; the one-shot parent Run returns
+  // the mirrored question instead of failing the composed work.
+  const waiting = await invokeInstalledProcedure({ stateRoot: hostStateRoot, request }, invocation)
+  assert.equal(waiting.status, 'waiting_user')
+  assert.equal(waiting.interaction.kind, 'subprocedure')
+  assert.equal(waiting.interaction.prompt, 'Which workspace constraint should the verification preserve?')
+
+  // A separate CLI process observes the same durable wait without adapters.
+  const observed = hostProcedure(hostStateRoot, ['procedure', 'status', '--run', waiting.taskId])
+  assert.equal(observed.status, 'waiting_user')
+  assert.equal(observed.interaction.kind, 'subprocedure')
+
+  // The answering session reopens the parent Run from durable state: the
+  // recorded continuation continues the same child Run (its state directory
+  // persists under procedure-runs/children), not a fresh child.
+  const childRoot = join(hostStateRoot, 'runtime', 'procedure-runs', 'children')
+  const childSegments = await readdir(childRoot, { withFileTypes: true })
+  assert.equal(childSegments.filter((entry) => entry.isDirectory()).length >= 1, true)
+
+  const answered = await continueProcedureRun({
+    stateRoot: hostStateRoot,
+    run: waiting.taskId,
+    input: { action: 'answer', questionId: waiting.interaction.id, value: 'Preserve the fixture constraint.' },
+  }, invocation)
+  assert.equal(answered.status, 'complete')
+  assert.deepEqual(answered.outputs, { final: 'Composition continued after the subprocedure answer.' })
+  assert.equal(answered.outputs.final, 'Composition continued after the subprocedure answer.')
+  assert.equal((await inspectProcedureRun({ stateRoot: hostStateRoot, run: waiting.taskId })).outputs.final, 'Composition continued after the subprocedure answer.')
+})
+
+test('a stale parent answer re-surfaces the child current question instead of delivering it to the wrong one', async (t) => {
+  const { root, projectRoot, project } = await fixture(t, 'workspace-composition')
+  const packaged = await packageProject(project)
+  assert.equal(packaged.preview.health.status, 'ok')
+
+  const verifier = await createAgenticProcedureComponentFixture(join(root, 'verifier-component'), {
+    id: 'verifier-procedure',
+    version: '1.4.2',
+    procedureId: 'org.openadam.example.verifier',
+    method: verifierMethod,
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['candidate'],
+      properties: { candidate: { type: 'object' } },
+    },
+    outputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['verdict'],
+      properties: { verdict: { type: 'object' } },
+    },
+    permissions: ['model.invoke', 'network.read'],
+    resources: [{ id: 'workspace', type: 'workspace', required: false, adapter: 'git' }],
+    outputArtifacts: ['verdict'],
+    displayName: 'Verifier',
+    summary: 'Verify normalized composition output.',
+  })
+  const releaseManifest = await createReleaseFixture(join(root, 'host-release'), {
+    suiteVersion: '0.1.1-stale-answer-drift',
+    releaseId: 'procedure-stale-answer-drift',
+    marker: 'stale-answer-drift',
+  })
+  const hostStateRoot = join(root, 'host-state')
+  const fake = createCodexRunner({ mathPresent: false, timePresent: false, mathMarketplace: 'openadam', mathVersion: '0.4.0' })
+  const dependencies = {
+    runner: fake.runner,
+    codexConfiguration: fake.configuration,
+    hostSkillHome: join(root, 'host-home'),
+    componentWarmup: healthyComponentWarmup,
+    catalogPreflight: healthyCatalogPreflight,
+    applicationStatePreflight: compatibleApplicationState,
+  }
+  await setup({
+    profile: 'standard', hosts: ['codex'], releaseManifest, stateRoot: hostStateRoot,
+    noService: true, dryRun: false, enableObservability: false,
+  }, dependencies)
+  await importLocalComponent({ stateRoot: hostStateRoot, artifact: verifier.artifactPath, binding: verifier.binding, activate: false }, dependencies)
+  await importLocalComponent({ stateRoot: hostStateRoot, artifact: packaged.artifact.path, binding: packaged.preview.binding, activate: false }, dependencies)
+
+  const workspace = await gitWorkspace(root)
+  const request = {
+    schemaVersion: 'openadam.agent-host-procedure-run-request.v0.1',
+    procedure: { id: 'org.openadam.example.workspace-composition', version: '2.3.0' },
+    inputs: { goal: 'Keep each subprocedure answer bound to its own question.' },
+    grants: ['model.invoke', 'workspace.read', 'capability.invoke', 'procedure.invoke', 'network.read'],
+    resources: { workspace: { type: 'workspace', adapter: 'git', path: workspace, allowExistingPaths: [] } },
+    limits: {
+      maxDurationMs: 120_000, maxNodeExecutions: 20, maxAgentTurns: 8,
+      nodeTimeoutMs: 30_000, maxAttemptsPerNode: 4, maxOutputBytes: 262_144,
+    },
+    idempotencyKey: 'stale-answer-drift',
+  }
+  const adapterFactory = routedAdapter(new Map([
+    ['draft', [{ outputs: { draft: 'draft before the drift' } }]],
+    ['verifier', [
+      { question: 'Which constraint applies first?' },
+      { question: 'Which region should the verdict name?' },
+      { outputs: { verdict: { approved: true, checkedBy: 'drift-verifier' } } },
+    ]],
+    ['finalize', [{ outputs: { final: 'Composition survived a stale parent answer.' } }]],
+  ]), COMPOSITION_ROUTES)
+  const invocation = {
+    adapterFactory,
+    executeDirectCall: async () => ({ value: { normalized: true } }),
+  }
+
+  // The parent suspends on the child first question.
+  const waiting = await invokeInstalledProcedure({ stateRoot: hostStateRoot, request }, invocation)
+  assert.equal(waiting.status, 'waiting_user')
+  assert.equal(waiting.interaction.prompt, 'Which constraint applies first?')
+
+  // The durable continuation names the child Run: read it from the parent
+  // store so the child can be continued directly, as its own session.
+  const parentStore = new DatabaseSync(join(hostStateRoot, 'runtime', 'procedure-runs', 'tasks.sqlite'), { readOnly: true })
+  const row = parentStore.prepare('SELECT state FROM tasks WHERE id = ?').get(waiting.taskId)
+  parentStore.close()
+  const recordedContinuations = JSON.parse(row.state).subprocedureContinuations
+  const childReference = recordedContinuations[Object.keys(recordedContinuations)[0]]
+  assert.equal(typeof childReference.run, 'string')
+  const child = { stateRoot: hostStateRoot, run: childReference.run, runRoot: childReference.root }
+
+  const childWaiting = await inspectProcedureRun(child, invocation)
+  assert.equal(childWaiting.status, 'waiting_user')
+  assert.equal(childWaiting.interaction.prompt, 'Which constraint applies first?')
+
+  // An explicit questionId binds the answer: naming a question the child is
+  // not asking is rejected instead of answering whichever question is current.
+  await assert.rejects(
+    continueProcedureRun({
+      ...child,
+      input: { action: 'answer', questionId: 'not-the-current-question', value: 'wrong aim' },
+    }, invocation),
+    (error) => error.code === 'STALE_ANSWER',
+  )
+
+  // The child session answers its first question directly and advances to a
+  // second question while the parent still mirrors the first one.
+  const advanced = await continueProcedureRun({
+    ...child,
+    input: { action: 'answer', questionId: childWaiting.interaction.id, value: 'The fixture constraint.' },
+  }, invocation)
+  assert.equal(advanced.status, 'waiting_user')
+  assert.equal(advanced.interaction.prompt, 'Which region should the verdict name?')
+
+  // The parent answer for the first question must not be delivered to the
+  // child second question: the parent re-surfaces the current child question.
+  const resurfaced = await continueProcedureRun({
+    stateRoot: hostStateRoot,
+    run: waiting.taskId,
+    input: { action: 'answer', questionId: waiting.interaction.id, value: 'An answer intended for the first question.' },
+  }, invocation)
+  assert.equal(resurfaced.status, 'waiting_user')
+  assert.equal(resurfaced.interaction.kind, 'subprocedure')
+  assert.equal(resurfaced.interaction.prompt, 'Which region should the verdict name?')
+
+  const completed = await continueProcedureRun({
+    stateRoot: hostStateRoot,
+    run: waiting.taskId,
+    input: { action: 'answer', questionId: resurfaced.interaction.id, value: 'eu-central' },
+  }, invocation)
+  assert.equal(completed.status, 'complete')
+  assert.deepEqual(completed.outputs, { final: 'Composition survived a stale parent answer.' })
 })

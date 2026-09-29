@@ -175,10 +175,15 @@ the durable paused or completed Run. `procedure continue` does not accept
 The schema is intentionally bounded rather than a universal DSL: conditions use
 `equals`, `not_equals`, `in` or `exists`; deterministic transforms use a bounded
 path/literal/object/array expression tree; the current workspace adapter is
-`git`; subprocedure calls require exact identities. Subprocedures that suspend
-fail with `SUBPROCEDURE_WAIT_REQUIRED` until the declared wait extension is
-implemented. Add another adapter as an explicit state/effect boundary instead
-of treating Git snapshots as every domain's world model.
+`git`; subprocedure calls require exact identities. A subprocedure that stops
+waiting for an answer suspends the parent Run as `waiting_user` with a mirrored
+question and a durable continuation naming the child Run; answering or resuming
+the parent — including from a fresh process — continues that same child instead
+of restarting the composed work. A subprocedure paused on a provider permission
+or a run limit does not offer that continuation: one-shot continue cannot
+deliver a permission, so its pending permissions are surfaced for a live Runner
+session instead. Add another adapter as an explicit state/effect boundary
+instead of treating Git snapshots as every domain's world model.
 
 ## Support and enforcement boundaries
 

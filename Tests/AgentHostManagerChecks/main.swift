@@ -467,8 +467,8 @@ do {
     expect(repairPlan.changed.isEmpty && repairPlan.componentChanges.isEmpty, "repair preview must not propose tool version changes")
     expect(repairPlan.repairs.monitoring && repairPlan.repairs.hosts == ["codex"], "repair preview must name connection and monitoring recovery")
     expect(
-        ManagerSection.primaryCases.map(\.rawValue) == ["tools", "updates", "agentApps"],
-        "primary Manager destinations follow Installed tools → Browse → Agents"
+        ManagerSection.primaryCases.map(\.rawValue) == ["tools", "updates", "agentApps", "accounts"],
+        "primary Manager destinations follow Installed tools → Browse → Agents → Accounts"
     )
 
     let usagePayload = Data(#"""
@@ -978,6 +978,31 @@ do {
     expect(L10n.text("Roll back this Procedure to {version}?") == "把这个 Procedure 回滚到 {version} 吗？", "procedure rollback confirmation must provide Simplified Chinese copy")
     expect(L10n.text("Invocation evidence") == "调用证据", "procedure evidence row must provide Simplified Chinese copy")
     UserDefaults.standard.set(ManagerLanguage.english.rawValue, forKey: ManagerLanguage.storageKey)
+}
+
+
+do {
+    let payload = Data(#"""
+    {
+      "schemaVersion": "openadam.agent-host-accounts.v1",
+      "accounts": [{
+        "schemaVersion": "openadam.agent-host-account.v1",
+        "id": "github-personal",
+        "provider": "github-readonly",
+        "name": "GitHub Personal",
+        "endpoint": "https://api.github.com",
+        "credential": {"kind": "macos-keychain-bearer", "service": "openadam.github-readonly", "account": "personal"},
+        "createdAt": "2026-09-29T08:00:00.000Z",
+        "updatedAt": "2026-09-29T09:00:00.000Z",
+        "lastHealth": {"status": "healthy", "observedAt": "2026-09-29T09:00:00.000Z", "detail": null}
+      }]
+    }
+    """#.utf8)
+    let listed = try JSONDecoder().decode(AccountListResult.self, from: payload)
+    let account = listed.accounts[0]
+    expect(account.id == "github-personal" && account.credential.service == "openadam.github-readonly", "account reference must decode")
+    expect(account.lastHealth?.status == "healthy", "account health must decode")
+    expect(Mirror(reflecting: account).children.count == 9, "account record exposes exactly the reference fields, never a secret")
 }
 
     print("manager model checks passed: activity JSON, bounds, monitoring counts, usage boundaries, localization, freshness, foreground privacy, tool visibility, blocking doctor rollup, featured setup, catalog locator flatten, post-setup start-work")

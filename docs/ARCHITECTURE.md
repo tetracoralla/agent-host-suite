@@ -76,11 +76,14 @@ workspace while calling a Direct node that needs no resource binding.
 
 The authoring client is Procedure Studio in `packages/procedure-studio`: graph
 editing, contract inspection, validation, test execution and packaging share
-one Method Graph v2 source model. Studio project files are a development
-input. After preview admission, Host installs the sealed component into its
-own package directory, and later Runs read that installed Method, schemas and
-contract. They do not read the Studio project, and the consumer Manager is
-not a graph editor.
+one Method Graph v2 source model. Studio Test Runs execute Capability and
+subprocedure nodes through the configured Agent environment — the same Direct
+Runtime work orders and installed Procedure catalog the consumer uses — while
+the Procedure under development itself never needs installing. Studio project
+files are a development input. After preview admission, Host installs the
+sealed component into its own package directory, and later Runs read that
+installed Method, schemas and contract. They do not read the Studio project,
+and the consumer Manager is not a graph editor.
 
 Host adapters call documented Agent-app extension commands and write only state
 owned by those public mechanisms. An Agent-app update may require a fresh
@@ -427,10 +430,15 @@ claim model quality. The user chooses any authoring Agent or harness outside
 Agent Host.
 
 Standard setup/update still has no dynamic endpoint/account/credential
-provisioning record, and no Agent-runner Instance is currently admitted.
-Remote or editable Instance configuration remains outside setup, update and
-doctor until one concrete Provider requires it and the Suite can show network
-scope, credential reference, health and recovery without storing a secret.
+provisioning record, and no Agent-runner Instance is currently admitted. The
+first concrete read-only account candidate is a provider-owned sealed GitHub
+Instance: its public route and Keychain-reference route can enter through
+private preview/import while Host treats the Instance as immutable identity
+data. That proves artifact supply, network scope, external credential retrieval,
+health and recovery without making Manager edit an opaque provider file.
+Promoting account setup into standard setup, update or doctor still requires a
+versioned Host provisioning/recovery record and a separately authorized real
+account result; a private-import pilot does not imply those product claims.
 
 ## Private component import
 

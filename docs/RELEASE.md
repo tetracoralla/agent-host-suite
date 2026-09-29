@@ -99,6 +99,14 @@ npm run build:development-artifacts
 The command also requires every component source named by the selected Local
 profile to be present (or supplied through its documented source-root/reuse
 override); it fails closed rather than silently substituting an older artifact.
+A special migration guard applies to Projective: `perspective-tool` now owns
+Worldbend and is not a compatible Projective source. A local candidate that
+still contains Projective must reuse the exact previously bound Projective
+component or name an explicit retained legacy source. Worldbend remains a
+separately sealed Provider component admitted through the normal private
+preview/import path until its own public release is selected for a compatibility
+catalog. A local Worldbend import is not remote-tagged provenance and cannot be
+promoted into a public Host release by renaming it.
 A
 public or externally distributed candidate must use
 `build:remote-release-artifacts` together with

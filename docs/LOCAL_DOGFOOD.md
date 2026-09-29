@@ -53,6 +53,17 @@ node scripts/check-developer-kit-hosts.mjs --release-manifest /absolute/release-
 node scripts/check-packaged-trace-plane.mjs --release-manifest /absolute/release-catalog/current.json
 ```
 
+Projective and Worldbend are separate product identities during migration.
+The current `perspective-tool` checkout owns Worldbend, so the release builder
+will not reinterpret it as legacy Projective source. Until Projective is
+deliberately retired, either reuse its exact component from a previously bound
+catalog with `AGENT_HOST_REUSE_CATALOG_ROOT` plus
+`AGENT_HOST_REUSE_COMPONENTS=projective`, or provide an explicit retained
+legacy checkout through `AGENT_HOST_PROJECTIVE_SOURCE_ROOT`. Worldbend enters
+dogfood through its provider-owned sealed Agent Host archive and private
+component preview/import; it may coexist with Projective and does not read or
+execute the development checkout after import.
+
 Then install into an explicit temporary state root or through the packaged
 native macOS app. Do not point setup at a development root when validating the
 external-user path. The Developer Kit check uses temporary Codex, ZCode,

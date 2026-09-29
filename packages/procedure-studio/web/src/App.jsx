@@ -164,6 +164,7 @@ function IconButton({ label, children, ...props }) {
 function AppShell() {
   const [studio, setStudio] = useState(null)
   const [runs, setRuns] = useState([])
+  const [environment, setEnvironment] = useState(null)
   const [selectedIds, setSelectedIds] = useState([])
   const [selectedEdge, setSelectedEdge] = useState(null)
   const [selectedRunId, setSelectedRunId] = useState(null)
@@ -212,6 +213,7 @@ function AppShell() {
       setStudio(null)
       stateRef.current = null
       setRuns([])
+      setEnvironment(homeState.environment ?? null)
       setHome(homeState)
       return
     }
@@ -219,6 +221,7 @@ function AppShell() {
     const previousRoot = stateRef.current?.project.root ?? null
     const switched = previousRoot !== response.state.project.root
     applyState(response.state, response.runs)
+    setEnvironment(response.environment ?? null)
     if (switched) {
       setSelectedIds(response.state.presentation.selection ?? [])
       setSelectedEdge(null)
@@ -250,6 +253,7 @@ function AppShell() {
       setStudio(null)
       stateRef.current = null
       setRuns([])
+      setEnvironment(nextHome.environment ?? null)
       setHome(nextHome)
       setSelectedIds([])
       setSelectedEdge(null)
@@ -1002,6 +1006,7 @@ function AppShell() {
         <RunPanel
           studio={studio}
           runs={runs}
+          environment={environment}
           selectedRunId={selectedRunId}
           setSelectedRunId={setSelectedRunId}
           run={runDetail}
@@ -1457,7 +1462,7 @@ function Validation({ diagnostics, reveal }) {
   return <div className="diagnostic-list">{diagnostics.map((item) => <button type="button" key={item.id} onClick={() => reveal(item)}><CircleAlert size={15} /><span><b>{item.code}</b><small>{item.message}</small></span>{item.target?.id ? <em>{item.target.id}</em> : <em>{item.source}</em>}</button>)}</div>
 }
 
-function RunPanel({ studio, runs, selectedRunId, setSelectedRunId, run, tab, setTab, scenarioId, setScenarioId, scenarioDraft, setScenarioDraft, scenarioDirty, saveScenarioDraft, scenarioName, setScenarioName, saveScenario, duplicateScenario, startRun, action, replay, selectedNodeId, selectNode, close, expanded, setExpanded }) {
+function RunPanel({ studio, runs, environment, selectedRunId, setSelectedRunId, run, tab, setTab, scenarioId, setScenarioId, scenarioDraft, setScenarioDraft, scenarioDirty, saveScenarioDraft, scenarioName, setScenarioName, saveScenario, duplicateScenario, startRun, action, replay, selectedNodeId, selectNode, close, expanded, setExpanded }) {
   const [answer, setAnswer] = useState('')
   const [input, setInput] = useState('')
   const active = run && ['running', 'ready'].includes(run.status)
@@ -1467,7 +1472,7 @@ function RunPanel({ studio, runs, selectedRunId, setSelectedRunId, run, tab, set
   return <section className={`run-panel ${expanded ? 'expanded' : ''}`}>
     <header className="run-header">
       <div className="run-title"><Play size={15} /><b>Test Run</b><select aria-label="Test scenario" value={scenarioId ?? ''} onChange={(event) => setScenarioId(event.target.value)}>{studio.scenarios.map((scenario) => <option value={scenario.id} key={scenario.id}>{scenario.name}</option>)}</select><button className="button primary small" type="button" onClick={startRun}><Play size={13} />{scenarioDirty ? 'Save & Run' : 'Run'}</button></div>
-      <div className="run-picker">{runs.length > 0 && <select aria-label="Run history" value={selectedRunId ?? ''} onChange={(event) => setSelectedRunId(event.target.value)}><option value="">Select Run…</option>{runs.map((item) => <option value={item.id} key={item.id}>{runLabel(item)}</option>)}</select>}{run && <span className={`run-status ${run.status}`}><span />{STATUS_LABEL[run.status] ?? run.status}</span>}<IconButton label={expanded ? 'Restore Test Run panel' : 'Expand Test Run workspace'} onClick={() => setExpanded(!expanded)}>{expanded ? <PanelBottomOpen size={16} /> : <Maximize2 size={16} />}</IconButton><IconButton label="Close Test Run panel" onClick={close}><PanelBottomClose size={16} /></IconButton></div>
+      <div className="run-picker">{runs.length > 0 && <select aria-label="Run history" value={selectedRunId ?? ''} onChange={(event) => setSelectedRunId(event.target.value)}><option value="">Select Run…</option>{runs.map((item) => <option value={item.id} key={item.id}>{runLabel(item)}</option>)}</select>}{run && <span className={`run-status ${run.status}`}><span />{STATUS_LABEL[run.status] ?? run.status}</span>}{environment && <span className={`environment-chip ${environment.available ? 'ready' : 'missing'}`} title={environment.available ? `${environment.root} · ${environment.procedures} installed procedures` : `${environment.root}${environment.problem ? ` · ${environment.problem}` : ''}`}>{environment.available ? `Environment · ${environment.procedures} procedures` : 'Environment unavailable'}</span>}<IconButton label={expanded ? 'Restore Test Run panel' : 'Expand Test Run workspace'} onClick={() => setExpanded(!expanded)}>{expanded ? <PanelBottomOpen size={16} /> : <Maximize2 size={16} />}</IconButton><IconButton label="Close Test Run panel" onClick={close}><PanelBottomClose size={16} /></IconButton></div>
     </header>
     <div className="run-content">
       <nav className="run-tabs" role="tablist" aria-label="Test Run sections">{['input', 'timeline', 'state', 'artifacts', 'errors'].map((value) => <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}>{value[0].toUpperCase() + value.slice(1)}{value === 'errors' && hasErrors ? <span className="tab-alert" /> : null}</button>)}</nav>

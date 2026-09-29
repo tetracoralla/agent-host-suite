@@ -1551,13 +1551,14 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     case tools
     case updates
     case agentApps
+    case accounts
     case activity
     case usage
 
     var id: String { rawValue }
 
     /// Primary sidebar follows the user's objects: installed → discover → Agent apps.
-    static var primaryCases: [ManagerSection] { [.tools, .updates, .agentApps] }
+    static var primaryCases: [ManagerSection] { [.tools, .updates, .agentApps, .accounts] }
 
     var title: String {
         switch self {
@@ -1565,6 +1566,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
         case .tools: "Library"
         case .updates: "Browse"
         case .agentApps: "Agents"
+        case .accounts: "Accounts"
         case .activity: "History"
         case .usage: "Usage"
         }
@@ -1576,6 +1578,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
         case .tools: "square.grid.2x2"
         case .updates: "shippingbox"
         case .agentApps: "macwindow.on.rectangle"
+        case .accounts: "person.crop.circle"
         case .activity: "clock"
         case .usage: "chart.bar.xaxis"
         }
@@ -1628,4 +1631,52 @@ enum ManagedItemState: Equatable {
         case .inactive: "Installed"
         }
     }
+}
+
+
+/// One reusable credential reference recorded in the installed environment.
+/// `credential` names the macOS Keychain item; the secret itself never
+/// appears in Host state.
+struct AccountRecord: Identifiable, Equatable, Codable {
+    struct CredentialReference: Equatable, Codable {
+        let kind: String
+        let service: String
+        let account: String
+    }
+
+    struct Health: Equatable, Codable {
+        let status: String
+        let observedAt: String
+        let detail: String?
+    }
+
+    let schemaVersion: String
+    let id: String
+    let provider: String
+    let name: String
+    let endpoint: String
+    let credential: CredentialReference
+    let createdAt: String
+    let updatedAt: String
+    let lastHealth: Health?
+}
+
+struct AccountListResult: Codable {
+    let accounts: [AccountRecord]
+}
+
+struct AccountMutationResult: Codable {
+    let status: String
+    let account: AccountRecord?
+}
+
+struct AccountCheckResult: Codable {
+    let status: String
+    let health: AccountRecord.Health
+    let account: AccountRecord
+}
+
+struct AccountRemoveResult: Codable {
+    let status: String
+    let removed: String
 }

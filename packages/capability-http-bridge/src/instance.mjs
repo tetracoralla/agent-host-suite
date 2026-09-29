@@ -118,14 +118,16 @@ export async function loadInstance(argv, environment = process.env) {
   return validateInstance(parseStrictJson(body.toString('utf8'), 'instance file'))
 }
 
-export async function resolveAuthorization(auth) {
+export async function resolveAuthorization(auth, dependencies = {}) {
   if (auth.kind === 'none') return undefined
-  if (process.platform !== 'darwin') {
+  const platform = dependencies.platform ?? process.platform
+  const runSecurity = dependencies.execFile ?? execFileAsync
+  if (platform !== 'darwin') {
     throw new Error('configured credential provider is unavailable on this platform')
   }
   let stdout
   try {
-    const result = await execFileAsync(
+    const result = await runSecurity(
       '/usr/bin/security',
       ['find-generic-password', '-w', '-s', auth.service, '-a', auth.account],
       { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 },
