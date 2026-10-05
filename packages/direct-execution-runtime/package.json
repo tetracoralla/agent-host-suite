@@ -56,7 +56,7 @@
     "check:structured-data-procedure": "node scripts/check-structured-data-procedure.mjs",
     "check:local-substitution": "node scripts/check-local-substitution.mjs",
     "demo:math-anchor": "node examples/demo-math-anchor.mjs",
-    "audit:production": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org"
+    "audit:production": "npm audit --workspaces=false --omit=dev --audit-level=high --registry=https://registry.npmjs.org"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
