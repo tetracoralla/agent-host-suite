@@ -39,7 +39,7 @@ license. This inventory is generated from the committed package lock; run
 | [express](https://www.npmjs.com/package/express/v/5.2.1) | 5.2.1 | MIT |
 | [express-rate-limit](https://www.npmjs.com/package/express-rate-limit/v/8.6.2) | 8.6.2 | MIT |
 | [fast-deep-equal](https://www.npmjs.com/package/fast-deep-equal/v/3.1.3) | 3.1.3 | MIT |
-| [fast-uri](https://www.npmjs.com/package/fast-uri/v/3.1.6) | 3.1.6 | BSD-3-Clause |
+| [fast-uri](https://www.npmjs.com/package/fast-uri/v/3.1.8) | 3.1.8 | BSD-3-Clause |
 | [finalhandler](https://www.npmjs.com/package/finalhandler/v/2.1.1) | 2.1.1 | MIT |
 | [forwarded](https://www.npmjs.com/package/forwarded/v/0.2.0) | 0.2.0 | MIT |
 | [fresh](https://www.npmjs.com/package/fresh/v/2.0.0) | 2.0.0 | MIT |
@@ -49,11 +49,11 @@ license. This inventory is generated from the committed package lock; run
 | [gopd](https://www.npmjs.com/package/gopd/v/1.2.0) | 1.2.0 | MIT |
 | [has-symbols](https://www.npmjs.com/package/has-symbols/v/1.1.0) | 1.1.0 | MIT |
 | [hasown](https://www.npmjs.com/package/hasown/v/2.0.4) | 2.0.4 | MIT |
-| [hono](https://www.npmjs.com/package/hono/v/4.13.3) | 4.13.3 | MIT |
+| [hono](https://www.npmjs.com/package/hono/v/4.13.13) | 4.13.13 | MIT |
 | [http-errors](https://www.npmjs.com/package/http-errors/v/2.0.1) | 2.0.1 | MIT |
 | [iconv-lite](https://www.npmjs.com/package/iconv-lite/v/0.7.3) | 0.7.3 | MIT |
 | [inherits](https://www.npmjs.com/package/inherits/v/2.0.4) | 2.0.4 | ISC |
-| [ip-address](https://www.npmjs.com/package/ip-address/v/10.5.0) | 10.5.0 | MIT |
+| [ip-address](https://www.npmjs.com/package/ip-address/v/10.7.3) | 10.7.3 | MIT |
 | [ipaddr.js](https://www.npmjs.com/package/ipaddr.js/v/1.9.1) | 1.9.1 | MIT |
 | [is-promise](https://www.npmjs.com/package/is-promise/v/4.0.0) | 4.0.0 | MIT |
 | [isexe](https://www.npmjs.com/package/isexe/v/2.0.0) | 2.0.0 | ISC |
