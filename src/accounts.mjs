@@ -13,9 +13,9 @@ export const ACCOUNT_LIST_SCHEMA = 'openadam.agent-host-accounts.v1'
 
 // An Account record is a reusable reference, never a secret store: it names
 // the Provider family, the API endpoint, and the macOS Keychain item that
-// holds the credential. Connected Procedures and Providers resolve the same
-// record by id, so repairing an expired credential means updating the
-// Keychain item, not editing every Procedure.
+// holds the credential. Execution adapters can resolve a record by id; the
+// current implementation records and checks accounts, but does not yet bind
+// these records into Procedure or Provider execution.
 const SUPPORTED_PROVIDERS = new Set(['github-readonly'])
 const DEFAULT_ENDPOINTS = new Map([
   ['github-readonly', 'https://api.github.com'],
@@ -36,10 +36,8 @@ function accountSlug(name) {
   const slug = name.trim().toLocaleLowerCase('en-US')
     .replace(/[^a-z0-9]+/gu, '-')
     .replace(/^-+|-+$/gu, '')
-  if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(slug)) {
-    fail('ACCOUNT_INVALID', 'The account name cannot form a stable account id; use letters, digits, or dashes')
-  }
-  return slug
+  if (/^[a-z0-9][a-z0-9-]{0,63}$/u.test(slug)) return slug
+  return `account-${createHash('sha256').update(name.trim()).digest('hex').slice(0, 16)}`
 }
 
 function validateEndpoint(endpoint) {
@@ -117,7 +115,7 @@ async function mutateAccounts(options, operation, dependencies) {
 }
 
 export async function addAccount(options, dependencies = {}) {
-  const name = label(options.name, 'Account name', 80)
+  const name = label(typeof options.name === 'string' ? options.name.trim() : options.name, 'Account name', 80)
   const provider = label(options.provider, 'Account provider', 64)
   if (!SUPPORTED_PROVIDERS.has(provider)) {
     fail('ACCOUNT_PROVIDER_UNSUPPORTED', `Account provider ${provider} is not supported; supported providers: ${[...SUPPORTED_PROVIDERS].join(', ')}`)
@@ -153,7 +151,7 @@ export async function updateAccount(options, dependencies = {}) {
     const account = mustAccount(accounts, id)
     const changes = []
     if (options.name !== undefined) {
-      account.name = label(options.name, 'Account name', 80)
+      account.name = label(typeof options.name === 'string' ? options.name.trim() : options.name, 'Account name', 80)
       changes.push('name')
     }
     if (options.endpoint !== undefined) {

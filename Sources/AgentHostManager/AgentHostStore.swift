@@ -437,6 +437,12 @@ final class AgentHostStore: ObservableObject {
             self.taskSourceCatalog = nil
             let status = try await cli.run(["status"], as: SuiteStatus.self)
             self.suite = status
+            if status.configured {
+                let listed = try await self.cli.run(["account", "list"], as: AccountListResult.self)
+                self.accounts = listed.accounts
+            } else {
+                self.accounts = []
+            }
 
             async let codex = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("codex"), as: HostStatusResult.self)
             async let claude = self.cli.run(ManagerCheckPolicy.quickHostStatusArguments("claude"), as: HostStatusResult.self)

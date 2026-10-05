@@ -114,7 +114,10 @@ test('a concurrent user edit after intent publication rejects the stale native w
     await dependencies.codexConfiguration(process.execPath, { configRoot: join(root, 'codex') }, async (client) => {
       await writeEnvironmentCodex(client, await client.read(), [{ keys: ['plugins', 'fixture@local'], value: { enabled: false } }])
     })
-  }), { code: 'CODEX_CONFIG_CHANGED' })
+  }), (error) => {
+    assert.equal(error.code, 'CODEX_CONFIG_CHANGED', JSON.stringify(error.details))
+    return true
+  })
   assert.deepEqual(await read(configPath), { ...original, preference: 'concurrent user edit' })
   assert.equal(await loadState(await readStatePaths(join(root, 'state'))), null)
 })

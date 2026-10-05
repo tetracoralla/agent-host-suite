@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Account records are reusable credential references. The Manager never
 /// asks for or displays the secret itself: the credential stays in the
-/// macOS Keychain item the owner created, and every connected account user
-/// resolves the same record by id.
+/// macOS Keychain item the owner created. This page records and checks the
+/// reference; execution bindings are managed separately.
 struct AccountsView: View {
     @ObservedObject var store: AgentHostStore
     @State private var showingAddAccount = false
@@ -33,24 +33,28 @@ struct AccountsView: View {
     }
 
     private var content: some View {
-        List {
-            if store.accounts.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.text("No accounts connected"))
-                        .font(.headline)
-                    Text(L10n.text("Connect an account once so authorized Procedures can reuse it. The credential itself stays in your Keychain; Agent Host only records the reference."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                if store.accounts.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.text("No accounts connected"))
+                            .font(.headline)
+                        Text(L10n.text("Record a GitHub account reference and check its connection. The credential stays in your Keychain."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
                 }
-                .padding(.vertical, 8)
-            }
-            ForEach(store.accounts) { account in
-                AccountRow(account: account, busy: store.isBusy) {
-                    Task { await store.checkAccount(id: account.id) }
-                } onRemove: {
-                    accountPendingRemoval = account
+                ForEach(store.accounts) { account in
+                    AccountRow(account: account, busy: store.isBusy) {
+                        Task { await store.checkAccount(id: account.id) }
+                    } onRemove: {
+                        accountPendingRemoval = account
+                    }
+                    Divider()
                 }
             }
+            .padding(16)
         }
         .overlay(alignment: .bottom) {
             if store.isBusy { ProgressView(store.currentAction ?? L10n.text("Working")).padding(8) }
@@ -156,9 +160,11 @@ private struct AccountRow: View {
                 Button(L10n.text("Remove…"), role: .destructive) { onRemove() }
                     .disabled(busy)
             }
+            .buttonStyle(.bordered)
             .controlSize(.small)
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
     }
 
     private var healthBadge: some View {

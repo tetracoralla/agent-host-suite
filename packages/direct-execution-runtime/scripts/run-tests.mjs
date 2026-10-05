@@ -10,7 +10,7 @@ const tests = readdirSync(new URL('../test/', import.meta.url))
 // while asserting transport errors inside a bounded request deadline.
 const result = spawnSync(process.execPath, [
   '--test', '--test-reporter=spec', '--test-timeout=180000',
-  `--test-concurrency=${process.platform === 'win32' ? 1 : 2}`, ...tests,
+  '--test-concurrency=1', ...tests,
 ], { stdio: 'inherit' })
 if (result.error) throw result.error
 process.exitCode = result.status ?? 1

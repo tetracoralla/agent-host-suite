@@ -96,9 +96,10 @@ export function validateRunRequest(value, procedure) {
   return normalized
 }
 
-export function runRequestTaskId(request) {
+export function runRequestTaskId(request, executionDependencies = null) {
   const bytes = createHash('sha256')
     .update(`${request.procedure.id}\0${request.procedure.version}\0${request.idempotencyKey}`)
+    .update(executionDependencies === null ? '' : `\0${JSON.stringify(executionDependencies)}`)
     .digest('hex')
   return `${bytes.slice(0, 8)}-${bytes.slice(8, 12)}-5${bytes.slice(13, 16)}-a${bytes.slice(17, 20)}-${bytes.slice(20, 32)}`
 }

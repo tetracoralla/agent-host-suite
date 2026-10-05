@@ -459,6 +459,14 @@ function storageSummary(result) {
 }
 
 export function human(result) {
+  const accountLine = (account) => `${account.name} (${account.id}) · ${account.provider} · ${account.lastHealth?.status ?? 'not-checked'}`
+  if (result.schemaVersion === 'openadam.agent-host-accounts.v1') {
+    return result.accounts.length === 0 ? 'No account records.' : result.accounts.map(accountLine).join('\n')
+  }
+  if (result.account?.schemaVersion === 'openadam.agent-host-account.v1') return accountLine(result.account)
+  if (result.removed !== undefined && result.keychainUntouched === true) {
+    return `Account record removed · ${result.removed} · Keychain item retained`
+  }
   if (result.schemaVersion === SOURCE_STATUS_SCHEMA) {
     const application = result.application
     const environment = result.environment

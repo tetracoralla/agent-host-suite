@@ -301,6 +301,7 @@ export class Coordinator extends EventEmitter {
       ...input,
       taskId,
       method,
+      procedureFingerprint: registeredProcedure?.fingerprint,
       start: undefined,
       startRequestId: undefined,
     })
@@ -421,6 +422,7 @@ export class Coordinator extends EventEmitter {
         : {
             componentId: registeredProcedure.componentId,
             fingerprint: registeredProcedure.fingerprint,
+            executionDependencies: clone(input.executionDependencies ?? null),
             name: registeredProcedure.name,
             execution: registeredProcedure.execution.kind,
             outputArtifacts: [...registeredProcedure.outputArtifacts],

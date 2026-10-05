@@ -189,6 +189,10 @@ The compatibility set states which bytes are intended to work together. It
 does not establish Provider value, universal compatibility, live availability,
 or business acceptance.
 
+Account recording and connection checks currently support GitHub read-only
+endpoints. Resolving these records into Provider or Procedure execution is
+still pending; recording an account alone does not connect a Run to it.
+
 Within an environment, Agent Host manages **Provider Instances**, not
 Capability meaning. A Provider implementation may be an independently released
 product, a Host-owned package, or an explicitly bounded service. Its Instance

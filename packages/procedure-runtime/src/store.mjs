@@ -9,6 +9,7 @@ import {
 import { join, resolve } from 'node:path'
 import { assert, hash, id, now } from './value.mjs'
 import { claimCheckout, reclaimDelegatedCheckout, releaseCheckout } from './workspace.mjs'
+import { tryAcquireFileLease } from './file-lease.mjs'
 
 export class Store {
   constructor(root) {
@@ -17,42 +18,49 @@ export class Store {
     chmodSync(this.root, 0o700)
     this.lock = join(this.root, 'coordinator.lock')
     this.owner = id()
+    this.lease = tryAcquireFileLease(join(this.root, 'coordinator-lease.sqlite'))
+    assert(this.lease !== null, 'STORE_LOCKED', 'Another coordinator owns this state directory')
     try {
-      writeFileSync(
-        this.lock,
-        JSON.stringify({ pid: process.pid, owner: this.owner }),
-        { flag: 'wx', mode: 0o600 },
-      )
+      try {
+        writeFileSync(
+          this.lock,
+          JSON.stringify({ pid: process.pid, owner: this.owner }),
+          { flag: 'wx', mode: 0o600 },
+        )
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error
+        let previous
+        try {
+          previous = JSON.parse(readFileSync(this.lock, 'utf8'))
+        } catch {
+          assert(false, 'STORE_LOCKED', 'The coordinator lock needs inspection')
+        }
+        assert(
+          Number.isInteger(previous.pid) && previous.pid > 0,
+          'STORE_LOCKED',
+          'Invalid coordinator lock',
+        )
+        let alive = true
+        try {
+          process.kill(previous.pid, 0)
+        } catch (e) {
+          if (e.code === 'ESRCH') alive = false
+        }
+        assert(
+          !alive,
+          'STORE_LOCKED',
+          'Another coordinator owns this state directory',
+        )
+        unlinkSync(this.lock)
+        writeFileSync(
+          this.lock,
+          JSON.stringify({ pid: process.pid, owner: this.owner }),
+          { flag: 'wx', mode: 0o600 },
+        )
+      }
     } catch (error) {
-      if (error.code !== 'EEXIST') throw error
-      let previous
-      try {
-        previous = JSON.parse(readFileSync(this.lock, 'utf8'))
-      } catch {
-        assert(false, 'STORE_LOCKED', 'The coordinator lock needs inspection')
-      }
-      assert(
-        Number.isInteger(previous.pid) && previous.pid > 0,
-        'STORE_LOCKED',
-        'Invalid coordinator lock',
-      )
-      let alive = true
-      try {
-        process.kill(previous.pid, 0)
-      } catch (e) {
-        if (e.code === 'ESRCH') alive = false
-      }
-      assert(
-        !alive,
-        'STORE_LOCKED',
-        'Another coordinator owns this state directory',
-      )
-      unlinkSync(this.lock)
-      writeFileSync(
-        this.lock,
-        JSON.stringify({ pid: process.pid, owner: this.owner }),
-        { flag: 'wx', mode: 0o600 },
-      )
+      this.lease.close()
+      throw error
     }
     try {
       this.db = new DatabaseSync(join(this.root, 'tasks.sqlite'))
@@ -69,7 +77,12 @@ export class Store {
         CREATE TABLE IF NOT EXISTS workspace_leases(workspace TEXT PRIMARY KEY, task TEXT NOT NULL);`)
       chmodSync(join(this.root, 'tasks.sqlite'), 0o600)
     } catch (error) {
-      unlinkSync(this.lock)
+      try {
+        this.db?.close()
+        unlinkSync(this.lock)
+      } finally {
+        this.lease.close()
+      }
       throw error
     }
   }
@@ -327,7 +340,11 @@ export class Store {
     if (!this.db) return
     this.db.close()
     this.db = null
-    if (JSON.parse(readFileSync(this.lock, 'utf8')).owner === this.owner)
-      unlinkSync(this.lock)
+    try {
+      if (JSON.parse(readFileSync(this.lock, 'utf8')).owner === this.owner)
+        unlinkSync(this.lock)
+    } finally {
+      this.lease.close()
+    }
   }
 }

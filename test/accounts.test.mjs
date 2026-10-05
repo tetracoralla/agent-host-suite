@@ -136,18 +136,33 @@ test('account records hold references only, and the lifecycle stays honest', asy
 test('the account CLI lifecycle records references without ever reading the real Keychain secret', async (t) => {
   const root = await stateRoot(t)
   const cli = (args) => JSON.parse(execFileSync(process.execPath, [join('bin', 'agent-host.mjs'), ...args, '--state-root', root, '--json'], { encoding: 'utf8' }))
+  const cliText = (args) => execFileSync(process.execPath, [join('bin', 'agent-host.mjs'), ...args, '--state-root', root], { encoding: 'utf8' }).trim()
 
   const added = cli(['account', 'add', '--provider', 'github-readonly', '--name', 'CLI Fixture', '--keychain-service', 'openadam.test.absent', '--keychain-account', randomUUID()])
   assert.equal(added.account.id, 'cli-fixture')
   assert.deepEqual(cli(['account', 'list']).accounts.map((account) => account.id), ['cli-fixture'])
   assert.equal(cli(['account', 'show', 'cli-fixture']).account.name, 'CLI Fixture')
+  assert.equal(cliText(['account', 'list']), 'CLI Fixture (cli-fixture) · github-readonly · not-checked')
+  assert.equal(cliText(['account', 'show', 'cli-fixture']), cliText(['account', 'list']))
 
   // The referenced Keychain item does not exist, so the honest health result
   // is credential-missing — and no secret or network access is involved.
   const checked = cli(['account', 'check', 'cli-fixture'])
   assert.equal(checked.health.status, 'credential-missing')
+  assert.match(cliText(['account', 'show', 'cli-fixture']), /credential-missing$/u)
 
   assert.equal(cli(['account', 'remove', 'cli-fixture']).removed, 'cli-fixture')
   assert.deepEqual(cli(['account', 'list']).accounts, [])
+  assert.equal(cliText(['account', 'list']), 'No account records.')
 })
-
+test('account display names support non-Latin text and reject whitespace-only names', async (t) => {
+  const root = await stateRoot(t)
+  const options = { stateRoot: root, name: ' 工作账户 ', provider: 'github-readonly', keychainService: 'fixture', keychainAccount: 'fixture' }
+  const added = await addAccount(options)
+  assert.match(added.account.id, /^account-[a-f0-9]{16}$/u)
+  assert.equal(added.account.name, '工作账户')
+  await assert.rejects(addAccount({ ...options, name: '工作账户' }), { code: 'ACCOUNT_EXISTS' })
+  await assert.rejects(addAccount({ ...options, name: '   ' }), { code: 'ACCOUNT_INVALID' })
+  await assert.rejects(updateAccount({ stateRoot: root, account: added.account.id, name: '   ' }), { code: 'ACCOUNT_INVALID' })
+  assert.equal((await describeAccount({ stateRoot: root, account: added.account.id })).account.name, '工作账户')
+})

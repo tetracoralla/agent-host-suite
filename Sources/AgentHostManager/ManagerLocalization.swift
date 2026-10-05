@@ -497,7 +497,7 @@ enum L10n {
         "Agents": "Agent",
         "Accounts": "账户",
         "No accounts connected": "尚未连接账户",
-        "Connect an account once so authorized Procedures can reuse it. The credential itself stays in your Keychain; Agent Host only records the reference.": "连接一次账户，获授权的 Procedure 即可复用。凭据本身保留在你的钥匙串中；Agent Host 只记录引用。",
+        "Record a GitHub account reference and check its connection. The credential stays in your Keychain.": "记录 GitHub 账户引用并检查连接。凭据保留在你的钥匙串中。",
         "Connect Account": "连接账户",
         "Remove account {name}?": "移除账户 {name}？",
         "Remove Record": "移除记录",

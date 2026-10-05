@@ -731,8 +731,59 @@ test('an installed non-development Procedure is discovered, invoked, read after 
   assert.equal(available.procedures[0].availability.invocationEvidence.valid, true)
   assert.equal(available.procedures[0].agentAvailable, true)
 
+  // The same request must execute again after the environment changes: an
+  // old completed Run is history, not proof that the new binding works.
+  const changedRuntimeState = await loadState(await prepareStatePaths(stateRoot))
+  changedRuntimeState.suiteVersion = '0.1.2-private-test'
+  await saveState(await prepareStatePaths(stateRoot), changedRuntimeState)
+  assert.equal((await toolSetStatus({ stateRoot })).procedures[0].agentAvailable, false)
+  reports.push(
+    JSON.stringify({ outcome: 'complete', summary: 'new sources', outputs: { 'source-notes': { sources: ['new-environment'] } } }),
+    JSON.stringify({ outcome: 'complete', summary: 'checked', facts: { coverage: 'sufficient' } }),
+    JSON.stringify({ outcome: 'complete', summary: 'written', outputs: { brief: 'Brief from the changed environment' } }),
+  )
+  const reinvoked = await invokeInstalledProcedure({ stateRoot, request }, { adapterFactory })
+  assert.equal(reinvoked.status, 'complete')
+  assert.notEqual(reinvoked.taskId, completed.taskId)
+  assert.deepEqual(reinvoked.outputs, { brief: 'Brief from the changed environment' })
+  assert.deepEqual((await inspectProcedureRun({ stateRoot, run: completed.taskId })).outputs, completed.outputs)
+
+  const pausedRequest = { ...request, idempotencyKey: 'paused-across-binding-change' }
+  reports.push(JSON.stringify({ outcome: 'needs_user', summary: 'confirm', question: 'Keep the original brief?' }))
+  const paused = await invokeInstalledProcedure({ stateRoot, request: pausedRequest }, { adapterFactory })
+  assert.equal(paused.status, 'waiting_user')
+  const changedBindingState = await loadState(await prepareStatePaths(stateRoot))
+  changedBindingState.bindingsActivatedAt = '2026-10-05T00:00:00.000Z'
+  await saveState(await prepareStatePaths(stateRoot), changedBindingState)
+  reports.push(
+    JSON.stringify({ outcome: 'complete', summary: 'sources', outputs: { 'source-notes': { sources: ['original-binding'] } } }),
+    JSON.stringify({ outcome: 'complete', summary: 'checked', facts: { coverage: 'sufficient' } }),
+    JSON.stringify({ outcome: 'complete', summary: 'written', outputs: { brief: 'Continued historical Run' } }),
+  )
+  const continued = await continueProcedureRun({
+    stateRoot, run: paused.taskId, input: { action: 'answer', text: 'Yes' },
+  }, { adapterFactory })
+  assert.equal(continued.status, 'complete')
+  assert.deepEqual(continued.outputs, { brief: 'Continued historical Run' })
+  assert.equal((await toolSetStatus({ stateRoot })).procedures[0].agentAvailable, false)
+
+  // Replacing exact bytes at the same public version also scopes idempotency.
+  const replacedBytes = await createAgenticProcedureComponentFixture(join(root, 'same-version'), { summary: 'Changed package bytes at the same version' })
+  await importLocalComponent({ stateRoot, artifact: replacedBytes.artifactPath, binding: replacedBytes.binding, replace: true, activate: false }, dependencies)
+  reports.push(
+    JSON.stringify({ outcome: 'complete', summary: 'sources', outputs: { 'source-notes': { sources: ['new-package'] } } }),
+    JSON.stringify({ outcome: 'complete', summary: 'checked', facts: { coverage: 'sufficient' } }),
+    JSON.stringify({ outcome: 'complete', summary: 'written', outputs: { brief: 'Current package and binding' } }),
+  )
+  const currentRun = await invokeInstalledProcedure({ stateRoot, request }, { adapterFactory })
+  assert.equal(currentRun.status, 'complete')
+  assert.notEqual(currentRun.taskId, reinvoked.taskId)
+  assert.deepEqual(currentRun.outputs, { brief: 'Current package and binding' })
+  assert.equal((await toolSetStatus({ stateRoot })).procedures[0].agentAvailable, true)
+  assert.equal((await invokeInstalledProcedure({ stateRoot, request }, { adapterFactory })).taskId, currentRun.taskId)
+
   const beforeReplace = await toolSetStatus({ stateRoot })
-  assert.equal(beforeReplace.procedures[0].rollbackVersion, null)
+  assert.equal(beforeReplace.procedures[0].rollbackVersion, '1.0.0')
 
   const second = await createAgenticProcedureComponentFixture(join(root, 'second'), { version: '1.1.0' })
   await importLocalComponent({

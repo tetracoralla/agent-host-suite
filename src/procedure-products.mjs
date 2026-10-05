@@ -3,6 +3,7 @@ import { link, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Coordinator } from '../packages/procedure-runtime/src/coordinator.mjs'
+import { tryAcquireFileLease } from '../packages/procedure-runtime/src/file-lease.mjs'
 import {
   declaredOutputs,
   declaredTaskOutputs,
@@ -352,59 +353,77 @@ async function acquireDirectResultClaim(path, requestDigest, waitMs) {
   const claimPath = `${path}.inflight`
   const deadline = Date.now() + waitMs
   while (true) {
-    const token = randomUUID()
-    try {
-      await mkdir(claimPath, { mode: 0o700 })
-      const claim = {
-        schemaVersion: DIRECT_RESULT_CLAIM_SCHEMA,
-        token,
-        pid: process.pid,
-        requestDigest,
-      }
-      try {
-        await writeFile(join(claimPath, 'owner.json'), `${JSON.stringify(claim)}\n`, { mode: 0o600, flag: 'wx' })
-      } catch (error) {
-        await rm(claimPath, { recursive: true, force: true }).catch(() => {})
-        throw error
-      }
-      return { claimPath, token, cached: null }
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error
-    }
-
-    const cached = await readDirectResult(path, requestDigest)
-    if (cached.found) return { claimPath: null, token: null, cached: cached.result }
-
-    let owner
-    try {
-      owner = JSON.parse(await readFile(join(claimPath, 'owner.json'), 'utf8'))
-    } catch (error) {
-      if (error.code === 'ENOENT' && Date.now() < deadline) {
-        await delay(DIRECT_RESULT_POLL_MS)
-        continue
-      }
-      fail('PROCEDURE_RESULT_CLAIM_INVALID', 'The Direct Procedure result claim is incomplete or invalid')
-    }
-    if (!validDirectClaim(owner))
-      fail('PROCEDURE_RESULT_CLAIM_INVALID', 'The Direct Procedure result claim is incomplete or invalid')
-    if (owner.requestDigest !== requestDigest)
-      fail('PROCEDURE_IDEMPOTENCY_CONFLICT', 'The idempotency key belongs to a different Run Request')
-
-    if (!processIsAlive(owner.pid)) {
-      const stalePath = `${claimPath}.stale-${token}`
-      try {
-        await rename(claimPath, stalePath)
-      } catch (error) {
-        if (error.code === 'ENOENT') continue
-        throw error
-      }
-      await rm(stalePath, { recursive: true, force: false })
+    const lease = tryAcquireFileLease(`${path}.claim-lease.sqlite`)
+    if (lease === null) {
+      if (Date.now() >= deadline)
+        fail('PROCEDURE_INVOCATION_IN_PROGRESS', 'The same Direct Procedure request is still running')
+      await delay(Math.min(DIRECT_RESULT_POLL_MS, deadline - Date.now()))
       continue
     }
-    if (Date.now() >= deadline)
-      fail('PROCEDURE_INVOCATION_IN_PROGRESS', 'The same Direct Procedure request is still running')
-    await delay(Math.min(DIRECT_RESULT_POLL_MS, deadline - Date.now()))
+    try {
+      const attempt = await tryDirectResultClaim(path, claimPath, requestDigest, deadline)
+      if (attempt !== null) return attempt
+    } finally {
+      lease.close()
+    }
+    // Waiting must release the recovery lease so conflicting requests can
+    // inspect the active owner's digest promptly rather than starving.
+    await delay(Math.min(DIRECT_RESULT_POLL_MS, Math.max(0, deadline - Date.now())))
   }
+}
+
+async function tryDirectResultClaim(path, claimPath, requestDigest, deadline) {
+  const token = randomUUID()
+  try {
+    await mkdir(claimPath, { mode: 0o700 })
+    const claim = {
+      schemaVersion: DIRECT_RESULT_CLAIM_SCHEMA,
+      token,
+      pid: process.pid,
+      requestDigest,
+    }
+    try {
+      await writeFile(join(claimPath, 'owner.json'), `${JSON.stringify(claim)}\n`, { mode: 0o600, flag: 'wx' })
+    } catch (error) {
+      await rm(claimPath, { recursive: true, force: true }).catch(() => {})
+      throw error
+    }
+    return { claimPath, token, cached: null }
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error
+  }
+
+  const cached = await readDirectResult(path, requestDigest)
+  if (cached.found) return { claimPath: null, token: null, cached: cached.result }
+
+  let owner
+  try {
+    owner = JSON.parse(await readFile(join(claimPath, 'owner.json'), 'utf8'))
+  } catch (error) {
+    if (error.code === 'ENOENT' && Date.now() < deadline) {
+      return null
+    }
+    fail('PROCEDURE_RESULT_CLAIM_INVALID', 'The Direct Procedure result claim is incomplete or invalid')
+  }
+  if (!validDirectClaim(owner))
+    fail('PROCEDURE_RESULT_CLAIM_INVALID', 'The Direct Procedure result claim is incomplete or invalid')
+  if (owner.requestDigest !== requestDigest)
+    fail('PROCEDURE_IDEMPOTENCY_CONFLICT', 'The idempotency key belongs to a different Run Request')
+
+  if (!processIsAlive(owner.pid)) {
+    const stalePath = `${claimPath}.stale-${token}`
+    try {
+      await rename(claimPath, stalePath)
+    } catch (error) {
+      if (error.code === 'ENOENT') return null
+      throw error
+    }
+    await rm(stalePath, { recursive: true, force: false })
+    return null
+  }
+  if (Date.now() >= deadline)
+    fail('PROCEDURE_INVOCATION_IN_PROGRESS', 'The same Direct Procedure request is still running')
+  return null
 }
 
 async function releaseDirectResultClaim(claimPath, token) {
@@ -714,7 +733,8 @@ export async function invokeInstalledProcedure(options, dependencies = {}) {
       let task
       try {
         task = coordinator.create({
-          taskId: runRequestTaskId(request),
+          taskId: runRequestTaskId(request, expectedDependencies),
+          executionDependencies: expectedDependencies,
           procedureRef: { id: procedure.id, version: procedure.version },
           inputs: request.inputs,
           grants: request.grants,
@@ -843,9 +863,14 @@ export async function continueProcedureRun(options, dependencies = {}) {
     const task = coordinator.get(options.run)
     const procedure = taskProcedure(task, procedures)
     const currentComponent = state.components?.[procedure.componentId]
-    const expectedDependencies = currentComponent?.fingerprint === procedure.fingerprint
-      ? procedureDependencySnapshot(state, currentComponent)
-      : null
+    // A continued Run keeps its original environment evidence. Completing
+    // historical work must not certify a binding or runtime installed later.
+    const executionDependencies = task.procedureProduct?.executionDependencies
+    const currentDependencies = currentComponent?.fingerprint === procedure.fingerprint
+      ? procedureDependencySnapshot(state, currentComponent) : null
+    const expectedDependencies = executionDependencies && currentDependencies &&
+      JSON.stringify(executionDependencies) === JSON.stringify(currentDependencies)
+      ? executionDependencies : null
     coordinator.command(task.id, continuation(task, options.input))
     await waitForStop(coordinator, task.id, options.timeoutMs ?? 30 * 60 * 1000)
     await coordinator.finishSession()

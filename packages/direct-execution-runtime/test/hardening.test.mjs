@@ -332,17 +332,20 @@ test('identity arguments referenced through a symlink stay frozen and drifted re
     runtime = new DirectExecutionRuntime(await prepareRuntimeConfig(fakeConfig({
       rootPath: providerRoot,
       identityFiles: identityFiles(),
+      // Use the Host's current allowance for repeated cold executable snapshots.
+      // Dedicated deadline/cancellation cases supply their own shorter bounds.
+      limits: { defaultTimeoutMs: 30_000 },
     })))
     const read = () => fakeCall('read', { value: 'read' })
     const first = await runtime.runWorkOrder(workOrder('symlink-identity', [read()]))
-    assert.equal(first.calls[0].status, 'ok')
+    assert.equal(first.calls[0].status, 'ok', JSON.stringify(first.calls[0]))
     assert.equal(first.calls[0].result.value, 'ORIGINAL-BYTES')
 
     await rm(resolve(providerRoot, 'identity-link.json'))
     await symlink('identity-other.txt', resolve(providerRoot, 'identity-link.json'))
 
     const warm = await runtime.runWorkOrder(workOrder('symlink-warm', [read()]))
-    assert.equal(warm.calls[0].status, 'ok')
+    assert.equal(warm.calls[0].status, 'ok', JSON.stringify(warm.calls[0]))
     assert.equal(warm.calls[0].result.value, 'ORIGINAL-BYTES')
     assert.equal(warm.calls[0].session, 'warm')
 
@@ -354,7 +357,7 @@ test('identity arguments referenced through a symlink stay frozen and drifted re
     await rm(resolve(providerRoot, 'identity-link.json'))
     await symlink('identity-real.txt', resolve(providerRoot, 'identity-link.json'))
     const recovered = await runtime.runWorkOrder(workOrder('symlink-recovered', [read()]))
-    assert.equal(recovered.calls[0].status, 'ok')
+    assert.equal(recovered.calls[0].status, 'ok', JSON.stringify(recovered.calls[0]))
     assert.equal(recovered.calls[0].result.value, 'ORIGINAL-BYTES')
     assert.equal(recovered.calls[0].session, 'cold')
   } finally {
@@ -506,6 +509,7 @@ test('work-order dispatch and returned values are isolated from caller mutation 
     order.calls[1].input.value = 'mutated-queued'
     sourceTarget.operationId = 'mutated-operation'
     const result = await running
+    assert.ok(result.calls.every((call) => call.status === 'ok'), JSON.stringify(result.calls))
     assert.equal(result.calls[0].result.value, 'captured')
     assert.equal(result.calls[1].result.value, 'queued')
     assert.equal(result.calls[0].target.operationId, 'echo')
