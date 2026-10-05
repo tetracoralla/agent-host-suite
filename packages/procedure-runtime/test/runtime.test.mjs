@@ -1291,13 +1291,27 @@ test(
     const f = fixture(t)
     const outside = mkdtempSync(join(homedir(), '.procedure-sandbox-fixture-'))
     t.after(() => rmSync(outside, { recursive: true, force: true }))
+    const home = mkdtempSync(join(homedir(), '.procedure-provider-fixture-'))
+    t.after(() => rmSync(home, { recursive: true, force: true }))
+    // Exercise the enclosing policy without requiring or granting writes to
+    // an ambient Codex installation on the developer machine or CI runner.
+    const sandbox = (writable) => {
+      const previous = process.env.CODEX_HOME
+      process.env.CODEX_HOME = home
+      try {
+        return workerSandbox(f.workspace, {
+          writable,
+          stateRoot: f.state,
+          protectedPaths: ['protected.txt'],
+          runtime: 'codex',
+        })
+      } finally {
+        if (previous === undefined) delete process.env.CODEX_HOME
+        else process.env.CODEX_HOME = previous
+      }
+    }
     writeFileSync(join(f.workspace, 'protected.txt'), 'keep')
-    const [cmd, args] = workerSandbox(f.workspace, {
-      writable: true,
-      stateRoot: f.state,
-      protectedPaths: ['protected.txt'],
-      runtime: 'codex',
-    })
+    const [cmd, args] = sandbox(true)
     const exec = (source) =>
       execFileSync(cmd, [...args, process.execPath, '-e', source], {
         cwd: f.workspace,
@@ -1319,11 +1333,7 @@ test(
       readFileSync(join(f.workspace, 'protected.txt'), 'utf8'),
       'keep',
     )
-    const [ro, flags] = workerSandbox(f.workspace, {
-      writable: false,
-      stateRoot: f.state,
-      runtime: 'codex',
-    })
+    const [ro, flags] = sandbox(false)
     assert.throws(() =>
       execFileSync(
         ro,
