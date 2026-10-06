@@ -27,7 +27,7 @@
   "dependencies": {
     "@openadam/graph-view-compiler": "0.5.1",
     "@xyflow/react": "^12.12.0",
-    "lucide-react": "^1.48.0",
+    "lucide-react": "^1.50.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
