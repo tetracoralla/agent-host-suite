@@ -82,7 +82,7 @@
     "studio": "node packages/procedure-studio/bin/procedure-studio.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "ajv": "^8.20.0",
     "ajv-formats": "3.0.1",
     "undici": "7.29.1"
